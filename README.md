@@ -11,7 +11,7 @@ ATS и job-боардов, фильтрует мусор, скорит кажд�
 - готов потратить полчаса на настройку профиля и SQL-схемы;
 - хочет, чтобы LLM сам отсеивал мусор и подсвечивал интересное.
 
-Английский язык в скрипте нужен только для базы Supabase и API Anthropic
+Английский язык в скрипте нужен только для базы Supabase
 — весь дашборд и все ваши настройки на русском (или на любом языке, на
 котором вы напишете профиль).
 
@@ -52,8 +52,9 @@ flowchart LR
 
 ## Быстрый старт
 
-Нужны: Python 3.11+, Node.js 18+, аккаунт Supabase, ключ Anthropic API
-(опционально Firecrawl).
+Нужны: Python 3.11+, Node.js 18+, аккаунт Supabase, подписка Claude Code
+(Max / Team / Enterprise — для скоринга через subagent'ов). Firecrawl
+платный, но необязательный — без него работает без обогащения.
 
 ### 1. Клонировать репозиторий и поставить зависимости
 
@@ -77,9 +78,10 @@ cd api && npm install && cd ..
 cp .env.example .env
 ```
 
-Прописать `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`,
-`ANTHROPIC_API_KEY`. Источник URL подключения к Postgres — Settings →
-Database → Session Pooler.
+Прописать `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`.
+Источник URL подключения к Postgres — Settings → Database → Session
+Pooler. Ключ Anthropic API НЕ нужен — скоринг работает через
+subagent'ов в Claude Code (по подписке).
 
 ### 4. Создать профиль пользователя
 
