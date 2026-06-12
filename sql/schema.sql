@@ -48,7 +48,12 @@ CREATE TABLE IF NOT EXISTS company (
 
     -- Enrichment data (filled by scripts/fetch_companies.py).
     description       TEXT,
+    product           TEXT,
     notes             TEXT,
+    user_comments     TEXT,
+    offices           TEXT,
+    experience_match  INTEGER,
+    personal_interest INTEGER,
     about             JSONB,
     mission_fit       JSONB,
     alignment_score   INTEGER,
@@ -110,7 +115,8 @@ CREATE TABLE IF NOT EXISTS vacancy (
     -- Telegram digest, so it is never sent twice.
     digest_sent_at        TIMESTAMPTZ,
 
-    created_at            TIMESTAMPTZ DEFAULT NOW()
+    created_at            TIMESTAMPTZ DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_vacancy_company    ON vacancy (company_id);

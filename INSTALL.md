@@ -1,6 +1,6 @@
 # Install Guide
 
-Step-by-step setup. Written so a coding agent (Claude Code or similar) can
+Step-by-step setup. Written so a coding agent (Claude Code, Codex, or similar) can
 execute it for you — paste the setup prompt from the
 [onboarding page](https://ncalavera.github.io/llm-job-pipeline/) into your
 agent, or follow the steps manually.
@@ -12,8 +12,8 @@ Steps marked **[human]** need you; everything else an agent can do.
 - A Supabase (Postgres) database with your companies and vacancies
 - Scripts that fetch vacancies from company career pages (Greenhouse, Lever,
   Ashby, Workable, Workday and more — no scraping subscriptions needed for most)
-- LLM scoring of every vacancy against *your* profile via Claude Code
-  subagents (uses your existing Claude subscription, no API key)
+- LLM scoring of every vacancy against *your* profile by your coding agent
+  (uses the subscription you already have, no API key; see AGENTS.md)
 - A dashboard to triage results (optional, deploys to Vercel)
 - A daily Telegram digest with 👍/👎 buttons (optional)
 
@@ -22,7 +22,8 @@ Time: ~15 minutes of human attention, mostly account signups.
 ## 1. Prerequisites
 
 - **Python 3.11+** with `pip`
-- **[Claude Code](https://claude.com/claude-code)** — used both for setup and
+- **A coding agent** — [Claude Code](https://claude.com/claude-code) recommended,
+  Codex and others work too (see AGENTS.md) — used both for setup and
   as the scoring engine
 - **[human]** A free [Supabase](https://supabase.com) account (free tier is plenty)
 - Optional: a [Firecrawl](https://firecrawl.dev) API key — only needed to
@@ -76,7 +77,8 @@ paste the generated profile here instead.
 
 ## 6. Add your first companies
 
-Open Claude Code in the repo and use the slash command:
+Open your agent in the repo and use the command (non-Claude agents: follow
+`.claude/commands/add-source.md`):
 
 ```
 /add-source Stripe
@@ -88,7 +90,7 @@ about. You can also bulk-import from a CSV — see `examples/companies.example.c
 
 ## 7. Run the pipeline
 
-In Claude Code:
+In your agent:
 
 ```
 /fetch     # fetch vacancies from all your companies
@@ -96,7 +98,7 @@ In Claude Code:
 /score     # LLM-score each vacancy against your profile (1 subagent per vacancy)
 ```
 
-Scoring runs on Claude Code subagents — one vacancy per subagent, scored
+Scoring runs inside your agent — one vacancy per request (see AGENTS.md), scored
 0–100 against your profile, with reasoning, tags and a summary saved to the
 database.
 

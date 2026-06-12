@@ -263,6 +263,63 @@
       .pair > * + * {
         margin-top: 14px;
       }
+      .modecards {
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+      .modecard {
+        flex: 1 1 240px;
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+        background: var(--paper);
+        padding: 18px 20px;
+        cursor: pointer;
+        transition:
+          border-color 0.12s,
+          box-shadow 0.12s;
+      }
+      .modecard:hover {
+        border-color: var(--fg3);
+      }
+      .modecard.sel {
+        border-color: var(--navy);
+        box-shadow: 0 0 0 1px var(--navy);
+      }
+      .modecard h4 {
+        font: 600 17px/1.3 var(--disp);
+        margin-bottom: 2px;
+      }
+      .modecard .tagline {
+        font: 600 10.5px/1 var(--mono);
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--navy);
+        display: block;
+        margin-bottom: 10px;
+      }
+      .modecard ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      .modecard li {
+        font-size: 13.5px;
+        color: var(--soft);
+        padding: 3px 0 3px 18px;
+        position: relative;
+      }
+      .modecard li::before {
+        content: "+";
+        position: absolute;
+        left: 0;
+        color: var(--ok);
+        font-weight: 700;
+      }
+      .modecard li.minus::before {
+        content: "−";
+        color: #7c3a36;
+      }
       .sublabel {
         font: 600 10.5px/1 var(--mono);
         letter-spacing: 0.1em;
@@ -541,8 +598,8 @@
           s2t: "Copy your setup prompt",
           s2d: "Your answers become a profile and one install prompt.",
           s3t: "Paste it into your agent",
-          s3d: "Claude Code clones the repo and sets everything up.",
-          start: "Start — 10 questions",
+          s3d: "Claude Code, Codex or similar — it clones the repo and sets everything up.",
+          start: "Start — 11 questions",
           back: "← Back",
           skip: "Skip",
           next: "Next",
@@ -576,8 +633,8 @@
           s2t: "Скопируй промпт установки",
           s2d: "Ответы превращаются в профиль и один промпт.",
           s3t: "Вставь в своего агента",
-          s3d: "Claude Code сам клонирует код и всё настроит.",
-          start: "Начать — 10 вопросов",
+          s3d: "Claude Code, Codex или похожий — он сам клонирует код и всё настроит.",
+          start: "Начать — 11 вопросов",
           back: "← Назад",
           skip: "Пропустить",
           next: "Дальше",
@@ -600,6 +657,69 @@
 
       // ---------------------------------------------------------------- questions
       const QUESTIONS = [
+        {
+          id: "mode",
+          type: "mode",
+          req: false,
+          en: {
+            t: "How do you want to run it?",
+            h: "Same fetching, same Claude scoring quality either way. You can switch any time later.",
+            easy: {
+              name: "Simple",
+              tag: "recommended",
+              items: [
+                "Zero accounts to create — the database is a file on your computer",
+                "Setup ~5 minutes",
+                "All data stays on your machine",
+                ["minus", "Dashboard works only on this computer"],
+                ["minus", "No Telegram digest, no phone access"],
+              ],
+            },
+            full: {
+              name: "Full",
+              tag: "for the committed",
+              items: [
+                "Dashboard always online, password-protected, works from your phone",
+                "Daily Telegram digest with like/pass buttons",
+                "Syncs across devices",
+                [
+                  "minus",
+                  "Two free accounts to create (Supabase, Vercel) — setup ~15 min",
+                ],
+                ["minus", "Your data lives in a cloud database"],
+              ],
+            },
+          },
+          ru: {
+            t: "Как хочешь это запускать?",
+            h: "Сбор и качество оценки Claude одинаковые в обоих вариантах. Переключиться можно в любой момент.",
+            easy: {
+              name: "Простой",
+              tag: "рекомендуем",
+              items: [
+                "Ноль регистраций — база данных это файл на твоём компьютере",
+                "Установка ~5 минут",
+                "Все данные остаются у тебя",
+                ["minus", "Панель работает только на этом компьютере"],
+                ["minus", "Без Телеграм-дайджеста и доступа с телефона"],
+              ],
+            },
+            full: {
+              name: "Полный",
+              tag: "для увлечённых",
+              items: [
+                "Панель всегда в сети, под паролем, открывается с телефона",
+                "Ежедневный Телеграм-дайджест с кнопками нравится/мимо",
+                "Работает с любого устройства",
+                [
+                  "minus",
+                  "Две бесплатные регистрации (Supabase, Vercel) — установка ~15 мин",
+                ],
+                ["minus", "Данные живут в облачной базе"],
+              ],
+            },
+          },
+        },
         {
           id: "name",
           type: "text",
@@ -836,11 +956,20 @@
 
       function saveCurrent() {
         const q = QUESTIONS[cur];
-        if (q.type === "pair" || q.type === "selects") {
+        if (q.type === "mode") {
+          // saved on click; default to easy
+          answers.mode = answers.mode || "easy";
+        } else if (q.type === "pair" || q.type === "selects") {
           answers[q.id] = { a: val("w_a"), b: val("w_b") };
         } else {
           answers[q.id] = val("w_main");
         }
+      }
+      function pickMode(m) {
+        answers.mode = m;
+        document
+          .querySelectorAll(".modecard")
+          .forEach((el) => el.classList.toggle("sel", el.dataset.mode === m));
       }
       function val(id) {
         const el = document.getElementById(id);
@@ -898,6 +1027,19 @@
       <div><div class="sublabel">${esc(L.a)}</div><select id="w_a">${opts(L.aopts, saved && saved.a)}</select></div>
       <div><div class="sublabel">${esc(L.b)}</div><select id="w_b">${opts(L.bopts, saved && saved.b)}</select></div>
     </div>`;
+        } else if (q.type === "mode") {
+          const card = (key, m) => {
+            const items = m.items
+              .map((it) =>
+                Array.isArray(it)
+                  ? `<li class="minus">${esc(it[1])}</li>`
+                  : `<li>${esc(it)}</li>`,
+              )
+              .join("");
+            return `<div class="modecard${(answers.mode || "easy") === key ? " sel" : ""}" data-mode="${key}" onclick="pickMode('${key}')">
+        <h4>${esc(m.name)}</h4><span class="tagline">${esc(m.tag)}</span><ul>${items}</ul></div>`;
+          };
+          body.innerHTML = `<div class="modecards">${card("easy", L.easy)}${card("full", L.full)}</div>`;
         }
 
         document.getElementById("backBtn").style.visibility =
@@ -1079,26 +1221,54 @@ career_narrative_boost
       }
 
       function buildPrompt() {
-        const intro =
-          lang === "ru"
-            ? `Я хочу развернуть себе ИИ-конвейер поиска работы из открытого репозитория https://github.com/ncalavera/llm-job-pipeline
+        const easy = (answers.mode || "easy") === "easy";
+        const introRu = easy
+          ? `Я хочу развернуть себе ИИ-конвейер поиска работы из открытого репозитория https://github.com/ncalavera/llm-job-pipeline — в ПРОСТОМ режиме: без регистраций, база данных — локальный файл SQLite.
 
 Сделай, пожалуйста:
 1. Склонируй репозиторий в текущую папку.
-2. Прочитай INSTALL.md в корне и пройди по нему шаг за шагом, спрашивая меня только о том, что не можешь сделать сам (создание бесплатного аккаунта Supabase, вставка ключей).
+2. Прочитай INSTALL-EASY.md в корне и пройди по нему шаг за шагом. Никаких аккаунтов создавать не нужно: НЕ задавай SUPABASE_DB_URL — тогда база сама создастся локальным файлом.
+3. Сохрани профиль ниже дословно в config/user_profile.md — это мой профиль кандидата, его используют промпты оценки.
+4. Затем запусти /start — он подберёт первые компании под мой профиль, соберёт и оценит вакансии и поднимет локальную панель результатов. Дальше моя ежедневная команда — /jobs.
+
+Если ты не Claude Code и слэш-команды не поддерживаешь — те же сценарии лежат в .claude/commands/*.md, начни с AGENTS.md.
+
+Вот мой профиль:`
+          : `Я хочу развернуть себе ИИ-конвейер поиска работы из открытого репозитория https://github.com/ncalavera/llm-job-pipeline — в ПОЛНОМ режиме: облачная база Supabase, панель на Vercel, Телеграм-дайджест.
+
+Сделай, пожалуйста:
+1. Склонируй репозиторий в текущую папку.
+2. Прочитай INSTALL.md в корне и пройди по нему шаг за шагом, спрашивая меня только о том, что не можешь сделать сам (создание бесплатных аккаунтов Supabase и Vercel, вставка ключей).
 3. Сохрани профиль ниже дословно в config/user_profile.md — это мой профиль кандидата, его используют промпты оценки.
 4. Когда установка готова — помоги добавить первые 5–10 интересных мне компаний через /add-source, затем запусти /fetch, /filter и /score и покажи результат.
 
-Вот мой профиль:`
-            : `I want to set up my own AI-powered job search pipeline using the open-source repo https://github.com/ncalavera/llm-job-pipeline
+Если ты не Claude Code и слэш-команды не поддерживаешь — те же сценарии лежат в .claude/commands/*.md, начни с AGENTS.md.
+
+Вот мой профиль:`;
+        const introEn = easy
+          ? `I want to set up my own AI-powered job search pipeline using the open-source repo https://github.com/ncalavera/llm-job-pipeline — in SIMPLE mode: zero signups, the database is a local SQLite file.
 
 Please:
 1. Clone the repo into the current folder.
-2. Read INSTALL.md in the repo root and follow it step by step, asking me only for things you cannot do yourself (creating a free Supabase account, pasting API keys).
+2. Read INSTALL-EASY.md in the repo root and follow it step by step. No accounts needed: do NOT set SUPABASE_DB_URL — the database then auto-creates as a local file.
+3. Save the profile below verbatim as config/user_profile.md — this is my candidate profile that the scoring prompts use.
+4. Then run /start — it discovers starter companies matching my profile, fetches and scores vacancies, and launches the local dashboard. My daily command after that is /jobs.
+
+If you are not Claude Code and don't support slash commands, the same workflows live in .claude/commands/*.md — start with AGENTS.md.
+
+Here is my profile:`
+          : `I want to set up my own AI-powered job search pipeline using the open-source repo https://github.com/ncalavera/llm-job-pipeline — in FULL mode: hosted Supabase database, Vercel dashboard, Telegram digest.
+
+Please:
+1. Clone the repo into the current folder.
+2. Read INSTALL.md in the repo root and follow it step by step, asking me only for things you cannot do yourself (creating free Supabase and Vercel accounts, pasting API keys).
 3. Save the profile below verbatim as config/user_profile.md — this is my candidate profile that the scoring prompts use.
 4. When setup is done, help me add the first 5–10 companies I care about with /add-source, then run /fetch, /filter and /score, and show me the results.
 
+If you are not Claude Code and don't support slash commands, the same workflows live in .claude/commands/*.md — start with AGENTS.md.
+
 Here is my profile:`;
+        const intro = lang === "ru" ? introRu : introEn;
 
         return `${intro}
 

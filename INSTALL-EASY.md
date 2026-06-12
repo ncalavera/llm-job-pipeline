@@ -13,7 +13,7 @@ upgrade from easy to hardcore later without losing anything.
   database account, no schema to run by hand.
 - Scripts that fetch vacancies from company career pages (Greenhouse, Lever,
   Ashby, Workable, Workday and more).
-- LLM scoring of every vacancy against *your* profile via Claude Code
+- LLM scoring of every vacancy against *your* profile by your coding agent
   subagents (uses your existing Claude subscription — no API key).
 - A dashboard you open on **`localhost`** — no Vercel, no password wall.
 
@@ -36,7 +36,8 @@ identical.
 ## 1. Prerequisites
 
 - **Python 3.11+** with `pip`
-- **[Claude Code](https://claude.com/claude-code)** — used both for setup and as
+- **A coding agent** — [Claude Code](https://claude.com/claude-code) recommended,
+  Codex and others work too (see AGENTS.md) — used both for setup and as
   the scoring engine
 
 That's it. No database account, no API keys required to start.
@@ -58,7 +59,8 @@ pipeline creates `data/jobsearch.db` and its tables for you.
 
 ## 3. One command: `/start`
 
-Open Claude Code in the repo and run:
+Open your agent in the repo and run (non-Claude agents: follow
+`.claude/commands/start.md`):
 
 ```
 /start

@@ -12,16 +12,25 @@ your profile — instead of doom-scrolling job boards. The pipeline automates
 exactly that loop for 50+ companies without you reading a single irrelevant
 posting.
 
-## Two ways to start
+## Two modes
 
-1. **Easy way — let your agent do it.** Fill in the
-   [onboarding questionnaire](https://ncalavera.github.io/llm-job-pipeline/)
-   (5 minutes, EN/RU). It generates your candidate profile and a single setup
-   prompt. Paste that prompt into [Claude Code](https://claude.com/claude-code)
-   and the agent installs everything, following [INSTALL.md](INSTALL.md), and
-   asks you only for the things it can't do itself.
-2. **Manual way — full replication.** Follow the quick start below if you
-   want to understand and control every step.
+1. **Simple mode — zero signups.** The database is a local SQLite file that
+   creates itself; the dashboard runs on localhost; `/start` discovers your
+   first companies from your profile and `/jobs` is your one daily command.
+   No Supabase, no Vercel, ~5 minutes. Runbook: [INSTALL-EASY.md](INSTALL-EASY.md).
+2. **Full mode — cloud setup.** Hosted Supabase database, password-protected
+   Vercel dashboard you can open from your phone, daily Telegram digest with
+   like/pass buttons. Two free accounts, ~15 minutes. Runbook: [INSTALL.md](INSTALL.md).
+
+Fetching, filtering and scoring quality are identical in both. Simple mode
+upgrades to full at any time: set `SUPABASE_DB_URL` and the same scripts
+switch to Postgres, no code changes.
+
+Easiest entry either way: fill in the
+[onboarding questionnaire](https://ncalavera.github.io/llm-job-pipeline/)
+(5 minutes, EN/RU) — it generates your candidate profile and one setup prompt
+for your coding agent — Claude Code, Codex, or similar — which installs everything
+and asks you only for the things it can't do itself.
 
 ## What's inside
 
@@ -68,11 +77,12 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## What it costs (honestly)
 
-- **Required: a Claude subscription** (Pro/Max) with
-  [Claude Code](https://claude.com/claude-code). Scoring runs on Claude Code
-  subagents inside your subscription — no Anthropic API key, no per-token
-  bills. Scoring ~50 vacancies is a normal daily session within plan limits.
-- **Supabase** — free tier covers ~5,000 vacancies comfortably.
+- **Required: a coding-agent subscription you likely already have** —
+  [Claude Code](https://claude.com/claude-code) (recommended; scoring
+  benchmarked with Claude) or Codex and others, see [AGENTS.md](AGENTS.md).
+  Scoring runs inside that subscription — no API keys, no per-token bills. Scoring ~50 vacancies is a normal daily session within plan limits.
+- **Supabase** — only in full mode; free tier covers ~5,000 vacancies
+  comfortably. Simple mode uses a local SQLite file: $0, no account.
 - **Firecrawl** — optional and off by default. The local fetcher covers most
   ATS for free; Firecrawl ($20+/mo, free tier 500 scrapes) only adds
   enrichment for stubborn JS-heavy pages.
@@ -88,10 +98,11 @@ Typical setup: **subscription you already have + $0/month.**
   (~10 minutes a day, one `/fetch → /filter → /score` cycle).
 - It doesn't apply for you. It gets you a short, scored list worth your time.
 
-## Quick start (manual way)
+## Quick start (full mode, manual)
 
-Requirements: Python 3.11+, Node.js 18+ (dashboard only), a Supabase account,
-Claude Code subscription.
+Simple mode needs none of this — see [INSTALL-EASY.md](INSTALL-EASY.md).
+Full mode requirements: Python 3.11+, Node.js 18+ (dashboard only), a
+Supabase account, a coding-agent subscription (Claude Code recommended).
 
 ### 1. Clone and install
 
@@ -132,7 +143,7 @@ The file feeds the scoring prompts via placeholders (`{{USER_PROFILE}}`,
 
 ### 5. Add companies to monitor
 
-In Claude Code: `/add-source CompanyName` — auto-detects the ATS, adds the
+In your agent: `/add-source CompanyName` (non-Claude agents: follow `.claude/commands/add-source.md`) — auto-detects the ATS, adds the
 company, runs a test fetch. Or bulk-import `examples/companies.example.csv`
 via the Supabase SQL Editor.
 
@@ -141,7 +152,7 @@ via the Supabase SQL Editor.
 ```bash
 python3 scripts/fetch_vacancies.py                  # fetch (TTL-aware)
 python3 scripts/filter_vacancies.py                 # junk filter + dedup
-python3 scripts/score_vacancies.py --local --limit 20   # score via Claude Code
+python3 scripts/score_vacancies.py --local --limit 20   # score via your agent
 python3 scripts/fetch_vacancies.py --report-only    # regenerate dashboard data
 ```
 
@@ -161,13 +172,16 @@ private job search, keep a password on it.
 Daily top-5 unseen vacancies with 👍/👎 buttons. See
 [INSTALL.md](INSTALL.md#9-telegram-digest-optional).
 
-## Claude Code commands
+## Agent commands
 
-Slash commands ship in `.claude/commands/` and load automatically when you
-open Claude Code in the repo root:
+Workflow runbooks ship in `.claude/commands/` — they load as slash commands
+in Claude Code and work as plain-markdown runbooks for any other agent
+(Codex etc. — see [AGENTS.md](AGENTS.md)):
 
 | Command | What it does |
 | --- | --- |
+| `/start` | First run: discover starter companies from your profile, fetch, score, launch local dashboard |
+| `/jobs` | Daily loop: fetch → filter → score → top new matches in chat with verdicts |
 | `/fetch` | Interactive vacancy fetching with source selection |
 | `/filter` | Quality gate: junk removal, dedup, geography buckets |
 | `/score` | LLM scoring (1 vacancy = 1 parallel subagent) |
@@ -187,12 +201,6 @@ Full reference: [docs/SKILLS.md](docs/SKILLS.md).
 - [docs/SKILLS.md](docs/SKILLS.md) — all slash commands
 - [docs/PROMPTS.md](docs/PROMPTS.md) — scoring prompt templates and placeholders
 - [docs/DATABASE.md](docs/DATABASE.md) — tables, indexes, access policies
-
-## Roadmap
-
-A radically simpler mode is planned: SQLite instead of Supabase (zero
-signups), agent-discovered starter companies from your profile, a single
-`/jobs` daily command, and a local dashboard. Track progress in issues.
 
 ## License
 
