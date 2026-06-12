@@ -10,6 +10,12 @@ vacancies/
 public/data.js
 !public/data.js.example
 
+# Local SQLite database (easy mode) — never commit personal data
+data/
+*.db
+*.db-wal
+*.db-shm
+
 # OS / editor
 .DS_Store
 *.swp
