@@ -10,9 +10,7 @@ import re
 from datetime import date, datetime
 from pathlib import Path
 
-import psycopg2  # noqa: F401 — used by callers via db_conn
 from dateutil import parser as dateutil_parser
-from psycopg2.extras import Json, RealDictCursor
 
 from company_registry import (
     COMPANIES,
@@ -25,6 +23,9 @@ from config import (
     REGION_EUROPE, REGION_REMOTE, REGION_US,
     VACANCIES_DIR,
 )
+# Json / RealDictCursor come from db_backend so they work under both the
+# Supabase (psycopg2) and the local SQLite backend without importing psycopg2.
+from db_backend import Json, RealDictCursor
 from db_conn import get_conn, close_conn
 from quality import clean_description
 
