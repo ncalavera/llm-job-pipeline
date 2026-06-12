@@ -2441,6 +2441,426 @@ def fetch_impactpool_board(board_cfg: dict) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Arbeitnow board (free JSON API, European tech, visa/remote flags)
+# ---------------------------------------------------------------------------
+
+def _html_to_multiline(html_text: str) -> str:
+    """Strip HTML but keep paragraph/list structure as newlines.
+
+    Unlike _html_to_text (which collapses everything to one line), this keeps
+    descriptions readable for LLM scoring: <br>, </p>, </div> become newlines,
+    <li> becomes a bullet.
+    """
+    if not html_text:
+        return ""
+    t = html_module.unescape(html_text)
+    # Both opening and closing block tags break the line (HN comments often
+    # start the body with an opening <p> right after the header line).
+    t = re.sub(r'(?i)<\s*/?\s*(?:br|p|div|h[1-6]|ul|ol)(?:\s[^>]*)?\s*/?\s*>', '\n', t)
+    t = re.sub(r'(?i)<\s*li\b[^>]*>', '\n- ', t)
+    t = re.sub(r'<[^>]+>', ' ', t)
+    t = re.sub(r'[ \t]+', ' ', t)
+    t = re.sub(r' ?\n ?', '\n', t)
+    t = re.sub(r'\n{3,}', '\n\n', t)
+    return t.strip()
+
+
+def fetch_arbeitnow_board(board_cfg: dict) -> list[dict]:
+    """Fetch jobs from the Arbeitnow job board API (free, no key).
+
+    GET https://www.arbeitnow.com/api/job-board-api — JSON, paginated via
+    ?page=N. European tech focus; jobs carry ``remote`` and (when provided)
+    ``visa_sponsorship`` booleans. Set ARBEITNOW_VISA_ONLY=1 to keep only
+    postings that explicitly offer visa sponsorship.
+    """
+    import os
+
+    board_name = board_cfg["name"]
+    base = "https://www.arbeitnow.com/api/job-board-api"
+    pages = int(board_cfg.get("pages", 3))
+    visa_only = os.environ.get("ARBEITNOW_VISA_ONLY", "").strip() == "1"
+
+    raw: list[dict] = []
+    for page in range(1, pages + 1):
+        try:
+            resp = requests.get(base, params={"page": page}, timeout=20)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            print(f"  [{board_name}] Arbeitnow ERROR page {page}: {e}")
+            break
+        batch = data.get("data") or []
+        raw.extend(batch)
+        if not batch or not (data.get("links") or {}).get("next"):
+            break
+
+    total = len(raw)
+    if visa_only:
+        raw = [j for j in raw if j.get("visa_sponsorship") is True]
+        print(f"  [{board_name}] visa-only filter: {len(raw)} of {total} offer sponsorship")
+
+    board_blacklist = board_cfg.get("board_blacklist", [])
+    filtered = _blacklist_filter(
+        raw, GLOBAL_BLACKLIST + board_blacklist,
+        title_fields=["title"], substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
+    )
+
+    jobs = []
+    for j in filtered:
+        title = (j.get("title") or "").strip()
+        org = (j.get("company_name") or "").strip()
+        if not title or not org or _is_generic_pipeline_title(title):
+            continue
+
+        loc = (j.get("location") or "").strip()
+        if j.get("remote"):
+            loc = f"Remote, {loc}" if loc else "Remote"
+
+        desc_html = j.get("description") or ""
+        full_description = _html_to_multiline(desc_html)
+        meta = []
+        if j.get("visa_sponsorship") is True:
+            meta.append("Visa sponsorship: yes")
+        tags = ", ".join(j.get("tags") or [])
+        if tags:
+            meta.append(f"Tags: {tags}")
+        job_types = ", ".join(j.get("job_types") or [])
+        if job_types:
+            meta.append(f"Type: {job_types}")
+        if meta:
+            full_description = full_description + "\n\n" + " | ".join(meta)
+
+        jobs.append({
+            "title": title,
+            "location": loc,
+            "department": "",
+            "url": j.get("url") or "",
+            "external_id": j.get("slug") or hashlib.md5(
+                f"{org}:{title}".encode()).hexdigest()[:12],
+            "snippet": _html_to_snippet(desc_html),
+            "full_description": full_description,
+            "compensation": "",
+            "org_override": org,
+            "org_url": board_cfg["url"],
+        })
+
+    print(f"  [{board_name}] Arbeitnow: {len(jobs)} relevant from {total} total")
+    return jobs
+
+
+# ---------------------------------------------------------------------------
+# Remotive board (free JSON API, remote-only jobs)
+# ---------------------------------------------------------------------------
+
+def fetch_remotive_board(board_cfg: dict) -> list[dict]:
+    """Fetch jobs from the Remotive remote-jobs API (free, no key).
+
+    GET https://remotive.com/api/remote-jobs — Remotive asks for at most a few
+    requests per day, so this makes a SINGLE request per run — or, when
+    REMOTIVE_CATEGORIES is set (comma list of their category slugs, e.g.
+    ``product,marketing``), one request per category.
+    """
+    import os
+
+    board_name = board_cfg["name"]
+    base = "https://remotive.com/api/remote-jobs"
+
+    cats_env = os.environ.get("REMOTIVE_CATEGORIES", "").strip()
+    categories = [c.strip() for c in cats_env.split(",") if c.strip()] or [None]
+
+    raw: list[dict] = []
+    seen_ids: set = set()
+    for cat in categories:
+        params = {"category": cat} if cat else {}
+        try:
+            resp = requests.get(base, params=params, timeout=20)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            print(f"  [{board_name}] Remotive ERROR (category={cat or 'all'}): {e}")
+            continue
+        for j in data.get("jobs") or []:
+            jid = j.get("id")
+            if jid in seen_ids:
+                continue
+            seen_ids.add(jid)
+            raw.append(j)
+
+    total = len(raw)
+    board_blacklist = board_cfg.get("board_blacklist", [])
+    filtered = _blacklist_filter(
+        raw, GLOBAL_BLACKLIST + board_blacklist,
+        title_fields=["title"], substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
+    )
+
+    jobs = []
+    for j in filtered:
+        title = (j.get("title") or "").strip()
+        org = (j.get("company_name") or "").strip()
+        if not title or not org or _is_generic_pipeline_title(title):
+            continue
+
+        # All Remotive jobs are remote; candidate_required_location narrows it
+        # ("Europe", "Worldwide", "USA"). Prefix "Remote" so parse_location
+        # sets work_mode=remote.
+        req_loc = (j.get("candidate_required_location") or "").strip()
+        loc = f"Remote, {req_loc}" if req_loc else "Remote"
+
+        desc_html = j.get("description") or ""
+        full_description = _html_to_multiline(desc_html)
+        meta = []
+        if req_loc:
+            meta.append(f"Candidate location: {req_loc}")
+        if j.get("category"):
+            meta.append(f"Category: {j['category']}")
+        if j.get("job_type"):
+            meta.append(f"Type: {j['job_type']}")
+        if meta:
+            full_description = full_description + "\n\n" + " | ".join(meta)
+
+        jobs.append({
+            "title": title,
+            "location": loc,
+            "department": j.get("category") or "",
+            "url": j.get("url") or "",
+            "external_id": str(j.get("id") or hashlib.md5(
+                f"{org}:{title}".encode()).hexdigest()[:12]),
+            "snippet": _html_to_snippet(desc_html),
+            "full_description": full_description,
+            "compensation": j.get("salary") or "",
+            "org_override": org,
+            "org_url": board_cfg["url"],
+        })
+
+    print(f"  [{board_name}] Remotive: {len(jobs)} relevant from {total} total")
+    return jobs
+
+
+# ---------------------------------------------------------------------------
+# We Work Remotely board (public RSS per category)
+# ---------------------------------------------------------------------------
+
+def fetch_wwr_board(board_cfg: dict) -> list[dict]:
+    """Fetch jobs from We Work Remotely category RSS feeds (free, no key).
+
+    RSS per category: https://weworkremotely.com/categories/remote-{cat}-jobs.rss
+    Categories come from WWR_CATEGORIES (comma list) or the board config
+    default. Item titles are "Company: Role"; <region> narrows the remote zone.
+    Parsed with stdlib xml.etree — no feedparser dependency.
+    """
+    import os
+    import xml.etree.ElementTree as ET
+
+    board_name = board_cfg["name"]
+    cats_env = os.environ.get("WWR_CATEGORIES", "").strip()
+    categories = (
+        [c.strip() for c in cats_env.split(",") if c.strip()]
+        or board_cfg.get("default_categories")
+        or ["product", "management-and-finance"]
+    )
+
+    headers = {"User-Agent": "Mozilla/5.0 (job-pipeline RSS reader)"}
+    raw_items = []
+    for cat in categories:
+        url = f"https://weworkremotely.com/categories/remote-{cat}-jobs.rss"
+        try:
+            resp = requests.get(url, headers=headers, timeout=20)
+            resp.raise_for_status()
+            root = ET.fromstring(resp.content)
+            raw_items.extend(root.findall(".//item"))
+        except Exception as e:
+            print(f"  [{board_name}] WWR RSS ERROR ({cat}): {e}")
+            continue
+
+    def _field(item, tag):
+        el = item.find(tag)
+        return (el.text or "").strip() if el is not None and el.text else ""
+
+    total = len(raw_items)
+    board_blacklist = [kw.lower() for kw in board_cfg.get("board_blacklist", [])]
+
+    jobs = []
+    seen_links: set = set()
+    for item in raw_items:
+        raw_title = _field(item, "title")
+        link = _field(item, "link") or _field(item, "guid")
+        if not raw_title or link in seen_links:
+            continue
+        seen_links.add(link)
+
+        # "Company: Role" — split on the first colon.
+        if ":" in raw_title:
+            org, title = (s.strip() for s in raw_title.split(":", 1))
+        else:
+            org, title = f"[via {board_name}]", raw_title.strip()
+        if not title or _is_generic_pipeline_title(title):
+            continue
+
+        t_lower = title.lower()
+        if any(kw in t_lower for kw in GLOBAL_BLACKLIST_SUBSTR):
+            continue
+        if any(re.search(r'\b' + re.escape(bl.lower()) + r'\b', t_lower)
+               for bl in GLOBAL_BLACKLIST):
+            continue
+        if any(kw in t_lower for kw in board_blacklist):
+            continue
+
+        # WWR is remote-only; <region> narrows the zone
+        # ("Anywhere in the World", "Europe Only" ...).
+        region = _field(item, "region")
+        loc = f"Remote, {region}" if region else "Remote"
+
+        desc_html = _field(item, "description")
+        full_description = _html_to_multiline(desc_html)
+        category = _field(item, "category")
+
+        jobs.append({
+            "title": title,
+            "location": loc,
+            "department": category,
+            "url": link,
+            "external_id": hashlib.md5(link.encode()).hexdigest()[:12],
+            "snippet": _html_to_snippet(desc_html),
+            "full_description": full_description,
+            "compensation": "",
+            "deadline": _field(item, "expires_at"),
+            "org_override": org,
+            "org_url": board_cfg["url"],
+        })
+
+    print(f"  [{board_name}] WWR: {len(jobs)} relevant from {total} total "
+          f"(categories: {', '.join(categories)})")
+    return jobs
+
+
+# ---------------------------------------------------------------------------
+# HN "Who is hiring?" board (Algolia API, monthly thread)
+# ---------------------------------------------------------------------------
+
+_HN_SEPARATOR_RE = re.compile(r'\s*[|—]\s*')  # pipe or em dash
+
+
+def _parse_hn_comment(comment: dict) -> dict | None:
+    """Parse one top-level HN comment into a job dict, or None to skip.
+
+    Convention: first line is "Company | Role | Location | ...". org = text
+    before the first | or em dash; title = best-effort second segment.
+    """
+    text = comment.get("text") or ""
+    if not text.strip():
+        return None
+
+    plain = _html_to_multiline(text)
+    first_line = next((l.strip() for l in plain.splitlines() if l.strip()), "")
+    if not first_line:
+        return None
+
+    segments = [s.strip() for s in _HN_SEPARATOR_RE.split(first_line) if s.strip()]
+    if len(segments) >= 2:
+        org = segments[0]
+        title = segments[1]
+    else:
+        # No separator — not the standard posting format; keep the whole line
+        # as a best-effort title under the board pseudo-org.
+        org = ""
+        title = first_line
+
+    # Sanity caps: org names longer than ~80 chars are prose, not a company.
+    if len(org) > 80:
+        return None
+    if len(title) < 4 or len(title) > 200:
+        return None
+
+    # Location best-effort: first segment after the title mentioning a work
+    # mode; otherwise a "Location: ..." line in the body.
+    loc = next(
+        (s for s in segments[2:]
+         if re.search(r'(?i)\bremote\b|\bon-?site\b|\bhybrid\b', s)),
+        "",
+    )
+    if not loc:
+        m = re.search(r'(?im)^location[:\s]+(.{3,80})$', plain)
+        if m:
+            loc = m.group(1).strip()
+
+    cid = comment.get("id")
+    return {
+        "title": title,
+        "location": loc[:120],
+        "department": "",
+        "url": f"https://news.ycombinator.com/item?id={cid}",
+        "external_id": str(cid),
+        "snippet": first_line[:400],
+        "full_description": plain,
+        "compensation": "",
+        "org_override": org,
+    }
+
+
+def fetch_hn_whoishiring_board(board_cfg: dict) -> list[dict]:
+    """Fetch postings from the latest HN "Ask HN: Who is hiring?" thread.
+
+    Finds the newest thread via the Algolia search API, then parses TOP-LEVEL
+    comments only (each = one posting). The thread is monthly — the board's
+    ttl_days should be ~30 so it is not refetched on every run.
+    """
+    board_name = board_cfg["name"]
+    search_url = "https://hn.algolia.com/api/v1/search_by_date"
+
+    try:
+        resp = requests.get(search_url, params={
+            "query": '"who is hiring"',
+            "tags": "story,author_whoishiring",
+            "hitsPerPage": 10,
+        }, timeout=20)
+        resp.raise_for_status()
+        hits = resp.json().get("hits", [])
+    except Exception as e:
+        print(f"  [{board_name}] HN search ERROR: {e}")
+        return []
+
+    story = next(
+        (h for h in hits if re.search(r'(?i)who is hiring', h.get("title") or "")),
+        None,
+    )
+    if not story:
+        print(f"  [{board_name}] No 'Who is hiring?' thread found")
+        return []
+
+    story_id = story["objectID"]
+    print(f"  [{board_name}] Thread: {story.get('title')} (id={story_id})")
+
+    try:
+        resp = requests.get(
+            f"https://hn.algolia.com/api/v1/items/{story_id}", timeout=30)
+        resp.raise_for_status()
+        children = resp.json().get("children") or []
+    except Exception as e:
+        print(f"  [{board_name}] HN items ERROR: {e}")
+        return []
+
+    total = len(children)
+    parsed = [p for p in (_parse_hn_comment(c) for c in children) if p]
+
+    board_blacklist = board_cfg.get("board_blacklist", [])
+    filtered = _blacklist_filter(
+        parsed, GLOBAL_BLACKLIST + board_blacklist,
+        title_fields=["title"], substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
+    )
+
+    jobs = []
+    for p in filtered:
+        if _is_generic_pipeline_title(p["title"]):
+            continue
+        p["org_override"] = p["org_override"] or f"[via {board_name}]"
+        p["org_url"] = board_cfg["url"]
+        jobs.append(p)
+
+    print(f"  [{board_name}] HN: {len(jobs)} postings from {total} top-level comments")
+    return jobs
+
+
+# ---------------------------------------------------------------------------
 # Devex cookie-authenticated API
 # ---------------------------------------------------------------------------
 

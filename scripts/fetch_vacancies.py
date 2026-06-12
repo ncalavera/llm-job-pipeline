@@ -38,6 +38,8 @@ from fetchers import (
     fetch_workday_api, fetch_algolia_board, fetch_firecrawl_board,
     fetch_lever, fetch_ashby, fetch_workable, fetch_reliefweb_board,
     fetch_impactpool_board,
+    fetch_arbeitnow_board, fetch_remotive_board, fetch_wwr_board,
+    fetch_hn_whoishiring_board,
     fetch_devex_cookie_api, fetch_unops_widget,
     fetch_recruitee, fetch_teamtailor_rss, fetch_bamboohr,
     fetch_amazon_jobs,
@@ -437,6 +439,14 @@ def main():
                         jobs = fetch_reliefweb_board(board_cfg)
                     elif strategy == "impactpool_html":
                         jobs = fetch_impactpool_board(board_cfg)
+                    elif strategy == "arbeitnow_api":
+                        jobs = fetch_arbeitnow_board(board_cfg)
+                    elif strategy == "remotive_api":
+                        jobs = fetch_remotive_board(board_cfg)
+                    elif strategy == "wwr_rss":
+                        jobs = fetch_wwr_board(board_cfg)
+                    elif strategy == "hn_whoishiring":
+                        jobs = fetch_hn_whoishiring_board(board_cfg)
                     elif strategy == "devex_cookie_api":
                         jobs = fetch_devex_cookie_api(board_cfg)
                 except Exception as exc:

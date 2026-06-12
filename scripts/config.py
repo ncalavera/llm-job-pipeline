@@ -242,21 +242,32 @@ GLOBAL_BLACKLIST_DESC_SUBSTR = [
 
 # ---------------------------------------------------------------------------
 # Job board aggregators — fetched on a freshness schedule (TTL days).
-# Each board needs a strategy implemented in fetchers.py. The two examples
-# below use free APIs (80,000 Hours via Algolia, ReliefWeb via REST) that work
-# out of the box.
+# Each board needs a strategy implemented in fetchers.py. All six below use
+# free APIs / feeds (no key) and work out of the box.
 #
-# Boards are OPT-IN. They are niche (effective-altruism / AI-safety roles on
-# 80,000 Hours, humanitarian roles on ReliefWeb) and flood a general search
-# with hundreds of irrelevant vacancies + candidate companies. So by default
-# NO boards are fetched. Enable the ones you want via the JOB_BOARDS env var:
+# Boards are OPT-IN. Each is niche and floods a general search when it does
+# not match your sectors. By default NO boards are fetched. Enable the ones
+# you want via the JOB_BOARDS env var:
 #
-#     JOB_BOARDS=80k_hours,reliefweb   # both
-#     JOB_BOARDS=reliefweb             # just humanitarian
-#     JOB_BOARDS=all                   # every defined board
+#     JOB_BOARDS=remotive,weworkremotely   # remote product/marketing roles
+#     JOB_BOARDS=arbeitnow                 # Europe / visa-sponsorship tech
+#     JOB_BOARDS=hn_whoishiring            # startups, monthly HN thread
+#     JOB_BOARDS=80k_hours,reliefweb       # EA/AI-safety + humanitarian
+#     JOB_BOARDS=all                       # every defined board
 #
-# Relevant if you search in EA / AI-safety / humanitarian sectors; otherwise
-# leave it unset. The fetcher code stays intact either way.
+# Which board fits which search:
+#   80k_hours      — effective altruism / AI safety / policy
+#   reliefweb      — humanitarian / development NGOs
+#   arbeitnow      — European tech; remote + (when listed) visa-sponsorship
+#                    flags; ARBEITNOW_VISA_ONLY=1 keeps sponsorship-only jobs
+#   remotive       — remote-first jobs; REMOTIVE_CATEGORIES=product,marketing
+#                    narrows by their category slugs (one request per category)
+#   weworkremotely — remote jobs via category RSS; WWR_CATEGORIES overrides
+#                    the default product,management-and-finance
+#   hn_whoishiring — monthly Hacker News "Who is hiring?" thread (startup /
+#                    engineering heavy; 30-day TTL matches the cadence)
+#
+# Leave JOB_BOARDS unset to fetch only your tracked companies.
 # ---------------------------------------------------------------------------
 
 _ALL_JOB_BOARDS = {
@@ -290,6 +301,49 @@ _ALL_JOB_BOARDS = {
         ],
         "ttl_days": 3,
         "tier": "B",
+        "free": True,
+    },
+    "arbeitnow": {
+        "strategy": "arbeitnow_api",
+        "name": "Arbeitnow",
+        "url": "https://www.arbeitnow.com",
+        # How many API pages to pull per run (100 jobs/page).
+        "pages": 3,
+        "board_blacklist": [],
+        "ttl_days": 3,
+        "tier": "B",
+        "free": True,
+    },
+    "remotive": {
+        "strategy": "remotive_api",
+        "name": "Remotive",
+        "url": "https://remotive.com",
+        # Remotive asks for very few API calls (max ~4/day): one request per
+        # run, or one per category when REMOTIVE_CATEGORIES is set.
+        "board_blacklist": [],
+        "ttl_days": 3,
+        "tier": "B",
+        "free": True,
+    },
+    "weworkremotely": {
+        "strategy": "wwr_rss",
+        "name": "We Work Remotely",
+        "url": "https://weworkremotely.com",
+        # Category slugs for the RSS feeds; override with WWR_CATEGORIES.
+        "default_categories": ["product", "management-and-finance"],
+        "board_blacklist": [],
+        "ttl_days": 3,
+        "tier": "B",
+        "free": True,
+    },
+    "hn_whoishiring": {
+        "strategy": "hn_whoishiring",
+        "name": "HN Who is hiring",
+        "url": "https://news.ycombinator.com/submitted?id=whoishiring",
+        "board_blacklist": [],
+        # The thread is monthly — a 30-day TTL stops daily refetches.
+        "ttl_days": 30,
+        "tier": "C",
         "free": True,
     },
 }
