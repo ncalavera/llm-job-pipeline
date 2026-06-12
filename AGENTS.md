@@ -58,5 +58,11 @@ benchmarked with Claude models; other models work but calibration may differ.
 - Without `SUPABASE_DB_URL` set, the pipeline runs on a local SQLite file
   that auto-creates on first use (simple mode). With it set, Postgres
   (Supabase). Same scripts either way.
+- DAL writes are not auto-committed. `merge_vacancies()` and the other write
+  functions in `database_supabase.py` stage their changes on the shared
+  connection but leave the commit to the caller, so a direct caller that forgets
+  `get_conn().commit()` silently loses its data. The fetch/score/filter scripts
+  already commit at their logical checkpoints; if you call the DAL yourself
+  (e.g. in a one-off script), commit before exit.
 - Run `python3 -m pytest tests/ -q` after changing pipeline code — the suite
   runs offline.

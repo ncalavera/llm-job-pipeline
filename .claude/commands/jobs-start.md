@@ -58,19 +58,39 @@ Goal: 10-15 real organisations that (a) match the user's field and geography and
 (b) are likely to be hiring. Use web search. Prefer mission-aligned employers
 the user would actually want, not staffing agencies or aggregators.
 
-For each candidate, you need a **careers page URL**. Then validate the ATS with
-the existing discovery probe so only fetchable sources get added:
+For each candidate you need a **careers page URL** and a guess at its **ATS
+slug** (the company's handle in the ATS URL — usually a lowercased, no-spaces
+form of the name). Validate by probing the public ATS APIs **directly** — this
+needs nothing in the database yet and no Firecrawl, just `curl`. Try the slug
+against each ATS until one returns jobs:
 
 ```bash
-source ~/.zshrc 2>/dev/null && python3 scripts/discover_ats.py --html-scan --company "{COMPANY_NAME}" --dry-run
+SLUG="acmefoundation"   # your guess; try a couple of variants if the first misses
+
+# Greenhouse (also try the EU host: boards-api.eu.greenhouse.io)
+curl -s "https://boards-api.greenhouse.io/v1/boards/$SLUG/jobs" | head -c 300
+
+# Lever
+curl -s "https://api.lever.co/v0/postings/$SLUG?mode=json" | head -c 300
+
+# Ashby
+curl -s "https://api.ashbyhq.com/posting-api/job-board/$SLUG?includeCompensation=true" | head -c 300
+
+# Workable
+curl -s "https://apply.workable.com/api/v1/widget/accounts/$SLUG" | head -c 300
 ```
 
-Keep companies where discovery finds a supported ATS (Greenhouse, Lever, Ashby,
-Workable, Workday, Recruitee, Teamtailor, BambooHR). Drop the rest for now (the
-user can add them later with `/jobs-add`).
+A hit returns a JSON array/object of jobs (Greenhouse: `{"jobs":[...]}`, Lever: a
+JSON array, Ashby: `{"jobs":[...]}`, Workable: `{"jobs":[...]}`). A miss returns
+`404`, `{}`, an empty array, or an HTML error page. Record the ATS that hit and
+the slug that worked. (Workday and other tenant-based ATSs are fiddlier — skip
+them here; the user can add them later with `/jobs-add`.)
 
-Show the user the proposed shortlist (name, careers URL, detected ATS) and wait
-for a yes before inserting anything. This is the only confirmation gate.
+Keep companies where a probe returns real jobs. Drop the rest for now (the user
+can add them later with `/jobs-add`, which does deeper detection).
+
+Show the user the proposed shortlist (name, careers URL, detected ATS + slug)
+and wait for a yes before inserting anything. This is the only confirmation gate.
 
 ## Step 3: Insert the approved companies
 

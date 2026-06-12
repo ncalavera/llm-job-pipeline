@@ -38,12 +38,37 @@ The scoring prompt evaluates **role fit only** — skills, seniority, domain, re
    - User message: `VACANCY_SCORING_USER_TEMPLATE` with substitution.
    - Subagent returns JSON with fields: `score`, `reasoning`, `tags`, `hard_requirements`, `short_summary`.
 
-8. Collect responses into an array `[{id, score, reasoning, ...}]`.
-
-9. Save:
-   ```bash
-   echo '<JSON array>' | source ~/.zshrc 2>/dev/null && python3 scripts/score_vacancies.py --save
+8. Collect responses into a JSON array. Each item is the subagent's flat result
+   plus the `member_ids` from step 6 — this is the shape `--save` expects:
+   ```json
+   [
+     {
+       "member_ids": ["<uuid>", "..."],
+       "org": "Acme",
+       "title": "Head of Community",
+       "score": 78,
+       "reasoning": "...",
+       "tags": ["community", "operations"],
+       "hard_requirements": ["5y community leadership"],
+       "short_summary": "4-6 sentences ..."
+     }
+   ]
    ```
+   `--save` builds the DB record from these flat fields, so you do **not** need a
+   nested `score_data`. (`payload_kind` defaults to `vacancy`; the older shape
+   with a pre-built `score_data` still works if you already have it.)
+
+9. Save by writing the array to a temp file and feeding it on **stdin** — never
+   pipe the JSON into `source` (that sends the JSON to `source`, not the script):
+   ```bash
+   cat > /tmp/scores.json <<'EOF'
+   <JSON array from step 8>
+   EOF
+   source ~/.zshrc 2>/dev/null
+   python3 scripts/score_vacancies.py --save < /tmp/scores.json
+   ```
+   Add `--archive` to auto-archive unseen vacancies scoring below the threshold
+   right after saving (see "Auto-archive after scoring" below).
 
 10. Show distribution: how many scored 75+, 55–74, 35–54, below 35.
 
@@ -55,7 +80,15 @@ The scoring prompt evaluates **role fit only** — skills, seniority, domain, re
 
 ## Auto-archive after scoring
 
-After scoring, vacancies with `llm_score < LLM_SCORE_THRESHOLD` (default 20) and `status = unseen` can be auto-archived. **This is currently paused under pure-fit scoring** — a high score from a role in an excluded geography would be incorrectly archived. Auto-archive is opt-in only: confirm with the user before running `archive_vacancies()`.
+After scoring, vacancies with `llm_score < LLM_SCORE_THRESHOLD` (default 20) and
+`status = unseen` can be auto-archived. The `--save` path runs this same step:
+
+- Without `--archive`, archival is **paused** (it prints a one-line notice and
+  does nothing). This is deliberate under pure-fit scoring — a high score from a
+  role in an excluded geography would otherwise be wrongly archived.
+- With `--save --archive`, low-scoring unseen vacancies are archived right after
+  saving (`archive_vacancies(force=True)`). Confirm with the user before using
+  it until thresholds are recalibrated for the pure-fit scale.
 
 ## Two scoring modes
 

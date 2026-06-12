@@ -50,12 +50,36 @@ cd llm-job-pipeline
 pip install requests beautifulsoup4 python-dateutil
 ```
 
+If that errors with **`externally-managed-environment`** (PEP 668, common on
+recent macOS/Linux Python), use a virtual environment instead:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install requests beautifulsoup4 python-dateutil
+```
+
+(Or, if you prefer not to use a venv, `pip install --user requests beautifulsoup4 python-dateutil`.)
+With the venv active, run every later `python3 ...` command from the same shell.
+
 Those three packages cover fetching and the local database. (You do **not** need
 `psycopg2-binary` — that is only for the Supabase path. Installing the full
 `requirements.txt` also works and does no harm.)
 
 You do not create or configure a database. The first time anything connects, the
 pipeline creates `data/jobsearch.db` and its tables for you.
+
+> **⚠️ Already have `SUPABASE_DB_URL` set for another project?**
+> Simple mode picks SQLite *only when `SUPABASE_DB_URL` is unset*. If your shell
+> exports it (from another project, a `.zshrc` line, etc.), this repo will
+> silently write into that other Postgres instead of the local file. Unset it
+> for this repo's shell:
+> ```bash
+> unset SUPABASE_DB_URL SUPABASE_DIRECT_URL
+> ```
+> Every fetch/score/filter run prints which backend it used —
+> `Backend: local SQLite (...)` is what you want here. If you see
+> `Backend: Postgres (Supabase)`, stop and unset the variable.
 
 ## 3. One command: `/jobs-start`
 
@@ -106,6 +130,20 @@ open while you review; press Ctrl+C to stop.
 ```
 
 Auto-detects the ATS, adds it, runs a test fetch — same as hardcore mode.
+
+## Optional: job boards
+
+The pipeline can also pull from two job boards — 80,000 Hours and ReliefWeb.
+They are **off by default** because they are niche: relevant if you search in
+effective-altruism / AI-safety (80,000 Hours) or humanitarian (ReliefWeb)
+sectors, and noisy otherwise. Turn them on for a run by setting `JOB_BOARDS`:
+
+```bash
+JOB_BOARDS=80k_hours,reliefweb python3 scripts/fetch_vacancies.py
+# or JOB_BOARDS=all to enable every defined board
+```
+
+Leave `JOB_BOARDS` unset and only your tracked companies are fetched.
 
 ## Upgrading to hardcore later
 

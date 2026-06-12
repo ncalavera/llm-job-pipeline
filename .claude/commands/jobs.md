@@ -14,11 +14,15 @@ For a visual review instead of chat, run `python3 scripts/dashboard_local.py`.
 ## Step 1: Fetch new vacancies
 
 Fetch from all monitored companies (TTL cooldown applies, so this is cheap to
-run daily) plus the free job boards:
+run daily):
 
 ```bash
 source ~/.zshrc 2>/dev/null && python3 -u scripts/fetch_vacancies.py 2>&1
 ```
+
+Job boards are off by default and stay off here. If the user searches in
+EA / AI-safety or humanitarian sectors and wants them, prefix the command with
+`JOB_BOARDS=80k_hours,reliefweb` (or `JOB_BOARDS=all`).
 
 Note the "FETCH COMPLETE: N new vacancies" line. If N is 0, tell the user there
 is nothing new today and skip to Step 5 (still refresh the dashboard).

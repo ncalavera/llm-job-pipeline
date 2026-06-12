@@ -6,6 +6,14 @@ description: Fetch new vacancies from configured sources (ATS + job boards). Int
 
 Runs `scripts/fetch_vacancies.py` with the right flags after a short interactive dialog.
 
+> **Job boards are opt-in.** By default no boards are fetched — only your tracked
+> companies. The two built-in boards (80,000 Hours, ReliefWeb) are niche:
+> relevant if you search in EA / AI-safety or humanitarian sectors, noisy
+> otherwise. Enable them for a run by setting `JOB_BOARDS`, e.g.
+> `JOB_BOARDS=80k_hours,reliefweb python3 scripts/fetch_vacancies.py` (or
+> `JOB_BOARDS=all`). The board phases / `--boards-only` flag below only do
+> anything when `JOB_BOARDS` opts the boards in.
+
 ## Step 0: Source Status Dashboard
 
 Before fetching, display a live source status dashboard showing each company, when it was last fetched, vacancy count, and whether it is stale or due:
