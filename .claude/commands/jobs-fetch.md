@@ -7,12 +7,24 @@ description: Fetch new vacancies from configured sources (ATS + job boards). Int
 Runs `scripts/fetch_vacancies.py` with the right flags after a short interactive dialog.
 
 > **Job boards are opt-in.** By default no boards are fetched — only your tracked
-> companies. The two built-in boards (80,000 Hours, ReliefWeb) are niche:
-> relevant if you search in EA / AI-safety or humanitarian sectors, noisy
-> otherwise. Enable them for a run by setting `JOB_BOARDS`, e.g.
-> `JOB_BOARDS=80k_hours,reliefweb python3 scripts/fetch_vacancies.py` (or
+> companies. Six free boards are built in; pick the ones matching the user's
+> sectors and enable per run with `JOB_BOARDS`, e.g.
+> `JOB_BOARDS=arbeitnow,remotive python3 scripts/fetch_vacancies.py` (or
 > `JOB_BOARDS=all`). The board phases / `--boards-only` flag below only do
 > anything when `JOB_BOARDS` opts the boards in.
+>
+> | Board id | Sector fit | Extra env |
+> | --- | --- | --- |
+> | `80k_hours` | EA / AI safety / policy | — |
+> | `reliefweb` | humanitarian / development | — |
+> | `arbeitnow` | European tech, visa sponsorship | `ARBEITNOW_VISA_ONLY=1` |
+> | `remotive` | remote-first roles | `REMOTIVE_CATEGORIES=product,marketing` |
+> | `weworkremotely` | remote product / business | `WWR_CATEGORIES=product,marketing` |
+> | `hn_whoishiring` | startups (monthly HN thread, 30-day TTL) | — |
+>
+> Remotive asks API users for very few calls (max ~4/day) — the fetcher already
+> makes one request per run (or one per category); do not loop it. The HN
+> thread is monthly; its 30-day TTL stops daily refetches automatically.
 
 ## Step 0: Source Status Dashboard
 

@@ -133,17 +133,30 @@ Auto-detects the ATS, adds it, runs a test fetch — same as hardcore mode.
 
 ## Optional: job boards
 
-The pipeline can also pull from two job boards — 80,000 Hours and ReliefWeb.
-They are **off by default** because they are niche: relevant if you search in
-effective-altruism / AI-safety (80,000 Hours) or humanitarian (ReliefWeb)
-sectors, and noisy otherwise. Turn them on for a run by setting `JOB_BOARDS`:
+The pipeline can also pull from six free job boards. They are **off by
+default** because each is niche and noisy outside its sector. Pick the ones
+that match your search and turn them on per run with `JOB_BOARDS`:
+
+| Board | Relevant if you search in | Extra env |
+| --- | --- | --- |
+| `80k_hours` | effective altruism / AI safety / policy | — |
+| `reliefweb` | humanitarian / development NGOs | — |
+| `arbeitnow` | European tech, visa sponsorship | `ARBEITNOW_VISA_ONLY=1` keeps only sponsorship jobs |
+| `remotive` | remote-first roles | `REMOTIVE_CATEGORIES=product,marketing` narrows by category |
+| `weworkremotely` | remote product / business roles | `WWR_CATEGORIES=product,marketing` picks the RSS feeds |
+| `hn_whoishiring` | startups (monthly Hacker News thread) | — |
 
 ```bash
-JOB_BOARDS=80k_hours,reliefweb python3 scripts/fetch_vacancies.py
+JOB_BOARDS=arbeitnow,remotive python3 scripts/fetch_vacancies.py
 # or JOB_BOARDS=all to enable every defined board
 ```
 
 Leave `JOB_BOARDS` unset and only your tracked companies are fetched.
+
+**Boards behind logins (LinkedIn, Devex, …):** the pipeline deliberately ships
+no importers for them; if you accept the terms-of-service risk, ask your agent
+to write a personal importer that feeds `merge_vacancies()` — keep it out of
+public forks.
 
 ## Upgrading to hardcore later
 

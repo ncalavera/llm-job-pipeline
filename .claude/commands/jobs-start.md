@@ -117,6 +117,24 @@ print('added', '{COMPANY_NAME}', cid)
 `ats_config` is an empty string for most ATS types — see `/jobs-add` Step 3
 for the per-strategy JSON (Greenhouse EU, Workday tenant/board, Firecrawl url).
 
+## Step 3.5: Suggest matching job boards (optional)
+
+Six free job boards are built in but OFF by default (opt-in via the `JOB_BOARDS`
+env var). Based on the field and geography extracted in Step 1, suggest only the
+boards that fit — and skip this step entirely if none do:
+
+| Profile signal | Suggest | Env to use |
+| --- | --- | --- |
+| product / marketing / remote-friendly | `remotive` + `weworkremotely` | `JOB_BOARDS=remotive,weworkremotely REMOTIVE_CATEGORIES=product,marketing WWR_CATEGORIES=product,marketing` |
+| Europe target / needs visa sponsorship | `arbeitnow` | `JOB_BOARDS=arbeitnow` (add `ARBEITNOW_VISA_ONLY=1` if sponsorship is required) |
+| startups / engineering-adjacent | `hn_whoishiring` | `JOB_BOARDS=hn_whoishiring` (monthly thread, 30-day TTL) |
+| EA / AI safety / policy | `80k_hours` | `JOB_BOARDS=80k_hours` |
+| humanitarian / development | `reliefweb` | `JOB_BOARDS=reliefweb` |
+
+Ask the user before enabling any: boards add many candidate companies to review.
+If they opt in, prefix the Step 4 fetch with the chosen env vars and drop
+`--no-boards`. If they decline, keep Step 4 as is — companies only.
+
 ## Step 4: First fetch -> filter -> score
 
 Fetch only the companies just added (skip job boards on the first run to keep it

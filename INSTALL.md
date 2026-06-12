@@ -110,6 +110,30 @@ Then triage from the terminal:
 /jobs-vac mark <id> liked
 ```
 
+### Optional: job boards
+
+Besides your tracked companies, six free job boards are built in — all
+**off by default** (they are niche and noisy outside their sectors). Enable the
+ones that match your search with the `JOB_BOARDS` env var:
+
+| Board | Fits | Extra env |
+| --- | --- | --- |
+| `80k_hours` | EA / AI safety / policy | — |
+| `reliefweb` | humanitarian / development | — |
+| `arbeitnow` | European tech, visa sponsorship | `ARBEITNOW_VISA_ONLY=1` |
+| `remotive` | remote-first roles | `REMOTIVE_CATEGORIES=product,marketing` |
+| `weworkremotely` | remote product / business roles | `WWR_CATEGORIES=product,marketing` |
+| `hn_whoishiring` | startups (monthly HN thread) | — |
+
+```bash
+JOB_BOARDS=arbeitnow,remotive python3 scripts/fetch_vacancies.py
+```
+
+**Boards behind logins (LinkedIn, Devex, …):** the pipeline deliberately ships
+no importers for them; if you accept the terms-of-service risk, ask your agent
+to write a personal importer that feeds `merge_vacancies()` — keep it out of
+public forks.
+
 ## 8. Dashboard (optional)
 
 The `public/` folder is a static dashboard (vanilla JS) reading data baked

@@ -20,9 +20,12 @@ run daily):
 source ~/.zshrc 2>/dev/null && python3 -u scripts/fetch_vacancies.py 2>&1
 ```
 
-Job boards are off by default and stay off here. If the user searches in
-EA / AI-safety or humanitarian sectors and wants them, prefix the command with
-`JOB_BOARDS=80k_hours,reliefweb` (or `JOB_BOARDS=all`).
+Job boards are off by default and stay off here. If the user has opted into
+boards that match their sectors (see the table in `/jobs-fetch` — e.g.
+`remotive`/`weworkremotely` for remote product/marketing roles, `arbeitnow` for
+European tech, `hn_whoishiring` for startups, `80k_hours`/`reliefweb` for EA /
+humanitarian), prefix the command with their `JOB_BOARDS=...` selection. Board
+TTLs (3-30 days) keep daily runs cheap either way.
 
 Note the "FETCH COMPLETE: N new vacancies" line. If N is 0, tell the user there
 is nothing new today and skip to Step 5 (still refresh the dashboard).
