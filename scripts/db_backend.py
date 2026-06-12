@@ -38,6 +38,22 @@ def _supabase_url() -> str | None:
 IS_SQLITE = _supabase_url() is None
 
 
+def print_backend_banner(stream=None) -> None:
+    """Print one clear line naming the active backend.
+
+    Surfaces which database the run is actually talking to, so a stray
+    ``SUPABASE_DB_URL`` inherited from another project (which silently flips
+    simple mode into someone else's Postgres) is immediately visible. Called at
+    the start of fetch / score / filter.
+    """
+    import sys
+    out = stream or sys.stderr
+    if IS_SQLITE:
+        print(f"Backend: local SQLite ({sqlite_db_path()})", file=out, flush=True)
+    else:
+        print("Backend: Postgres (Supabase)", file=out, flush=True)
+
+
 def sqlite_db_path() -> Path:
     """Resolve the local SQLite database file path.
 

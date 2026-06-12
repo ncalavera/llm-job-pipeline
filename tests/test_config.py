@@ -76,3 +76,34 @@ def test_CN09_backward_compat_all_csv_names():
     """_ALL_CSV_NAMES re-export should work."""
     from config import _ALL_CSV_NAMES
     assert len(_ALL_CSV_NAMES) >= len(COMPANIES)
+
+
+# ---------------------------------------------------------------------------
+# Job boards are opt-in (finding #3)
+# ---------------------------------------------------------------------------
+
+def test_boards_disabled_by_default(monkeypatch):
+    monkeypatch.delenv("JOB_BOARDS", raising=False)
+    import config as cfg
+    assert cfg._select_enabled_boards() == {}
+
+
+def test_boards_enable_subset_via_env(monkeypatch):
+    monkeypatch.setenv("JOB_BOARDS", "reliefweb")
+    import config as cfg
+    enabled = cfg._select_enabled_boards()
+    assert set(enabled) == {"reliefweb"}
+
+
+def test_boards_enable_all_via_env(monkeypatch):
+    monkeypatch.setenv("JOB_BOARDS", "all")
+    import config as cfg
+    enabled = cfg._select_enabled_boards()
+    assert set(enabled) == set(cfg._ALL_JOB_BOARDS)
+
+
+def test_boards_unknown_id_ignored(monkeypatch):
+    monkeypatch.setenv("JOB_BOARDS", "80k_hours,does_not_exist")
+    import config as cfg
+    enabled = cfg._select_enabled_boards()
+    assert set(enabled) == {"80k_hours"}

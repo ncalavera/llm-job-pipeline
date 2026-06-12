@@ -1181,6 +1181,9 @@ def main():
     parser.add_argument("--dedup", action="store_true", help="Run dedup pre-step: clean exact hash dupes + find fuzzy dupes")
     args = parser.parse_args()
 
+    from db_backend import print_backend_banner
+    print_backend_banner()
+
     if args.suggest_blacklist:
         result = suggest_blacklist()
         print("\n" + json.dumps(result, indent=2, ensure_ascii=False))

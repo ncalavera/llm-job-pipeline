@@ -274,6 +274,9 @@ def main():
     print("  VACANCY MONITOR — Mission-Driven Job Search")
     print("=" * 60)
 
+    from db_backend import print_backend_banner
+    print_backend_banner()
+
     # --list-manual: show manual-check companies and exit
     if args.list_manual:
         manual = [(name, cfg) for name, cfg in COMPANIES.items()

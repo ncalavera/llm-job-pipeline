@@ -242,12 +242,24 @@ GLOBAL_BLACKLIST_DESC_SUBSTR = [
 
 # ---------------------------------------------------------------------------
 # Job board aggregators — fetched on a freshness schedule (TTL days).
-# Each board needs a strategy implemented in fetchers.py. The example below
-# uses two free APIs (80,000 Hours via Algolia, ReliefWeb via REST) that work
-# out of the box. Add or disable boards as you see fit.
+# Each board needs a strategy implemented in fetchers.py. The two examples
+# below use free APIs (80,000 Hours via Algolia, ReliefWeb via REST) that work
+# out of the box.
+#
+# Boards are OPT-IN. They are niche (effective-altruism / AI-safety roles on
+# 80,000 Hours, humanitarian roles on ReliefWeb) and flood a general search
+# with hundreds of irrelevant vacancies + candidate companies. So by default
+# NO boards are fetched. Enable the ones you want via the JOB_BOARDS env var:
+#
+#     JOB_BOARDS=80k_hours,reliefweb   # both
+#     JOB_BOARDS=reliefweb             # just humanitarian
+#     JOB_BOARDS=all                   # every defined board
+#
+# Relevant if you search in EA / AI-safety / humanitarian sectors; otherwise
+# leave it unset. The fetcher code stays intact either way.
 # ---------------------------------------------------------------------------
 
-JOB_BOARDS = {
+_ALL_JOB_BOARDS = {
     "80k_hours": {
         "strategy": "algolia_api",
         "name": "80,000 Hours",
@@ -281,3 +293,32 @@ JOB_BOARDS = {
         "free": True,
     },
 }
+
+
+def _select_enabled_boards() -> dict:
+    """Return the boards enabled via the JOB_BOARDS env var.
+
+    Default (unset/empty) → no boards. ``JOB_BOARDS=all`` → every defined
+    board. Otherwise a comma-separated list of board ids (e.g.
+    ``80k_hours,reliefweb``). Unknown ids are ignored with a warning.
+    """
+    raw = os.environ.get("JOB_BOARDS", "").strip()
+    if not raw:
+        return {}
+    if raw.lower() == "all":
+        return dict(_ALL_JOB_BOARDS)
+    enabled = {}
+    for board_id in (s.strip() for s in raw.split(",") if s.strip()):
+        if board_id in _ALL_JOB_BOARDS:
+            enabled[board_id] = _ALL_JOB_BOARDS[board_id]
+        else:
+            print(
+                f"  WARNING: JOB_BOARDS lists unknown board '{board_id}' "
+                f"(known: {', '.join(_ALL_JOB_BOARDS)})",
+                file=sys.stderr,
+            )
+    return enabled
+
+
+#: Boards actually fetched this run. Empty unless JOB_BOARDS opts in.
+JOB_BOARDS = _select_enabled_boards()
