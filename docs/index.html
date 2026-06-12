@@ -11,54 +11,25 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Commissioner:wght@400;600;700;800;900&family=Onest:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Caveat:wght@500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
     <style>
       :root {
-        --paper: #f8f6f1;
-        --card: #fdfcf9;
-        --ink: #1a1816;
-        --soft: #6b6560;
-        --fg3: #767069;
-        --line: #e8e3d8;
-        --rule: #d8d6d2;
-        --clay: #b4532a;
-        --clay-deep: #8a3d1e;
-        --clay-tint: #f0ddd0;
-        --coral: #f26b3a;
-        --teal: #1f5c5a;
-        --teal-tint: #d7e5e2;
-        --ok: #4c7a52;
-        --disp: "Commissioner", system-ui, sans-serif;
-        --body: "Onest", system-ui, sans-serif;
-        --mono: "JetBrains Mono", ui-monospace, monospace;
-        --hand: "Caveat", "Onest", cursive;
-        --shadow-md: 0 2px 16px rgba(42, 31, 20, 0.06);
-        --shadow-lg: 0 8px 30px rgba(42, 31, 20, 0.12);
-      }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --paper: #1a1816;
-          --card: #221e19;
-          --ink: #ece7dd;
-          --soft: #a39c8e;
-          --fg3: #9a9286;
-          --line: #2c2820;
-          --rule: #3a352c;
-          --clay: #e08a5c;
-          --clay-deep: #e8a079;
-          --clay-tint: #2e211a;
-          --coral: #f08456;
-          --teal: #5fa8a2;
-          --teal-tint: #16302e;
-          --ok: #7fb07f;
-          --shadow-md: 0 2px 16px rgba(0, 0, 0, 0.3);
-          --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.45);
-        }
-        .illus {
-          filter: brightness(0.92) saturate(0.95);
-        }
+        --paper: #ffffff;
+        --card: #f5f6f7;
+        --ink: #16181d;
+        --soft: #4d525a;
+        --fg3: #697078;
+        --line: #e3e5e8;
+        --rule: #c4c8cd;
+        --navy: #1b2a4a;
+        --navy-deep: #13203a;
+        --navy-tint: #eceff5;
+        --ok: #3d614d;
+        --disp: "Source Serif 4", Georgia, serif;
+        --body: "Source Sans 3", system-ui, sans-serif;
+        --mono: "IBM Plex Mono", ui-monospace, monospace;
       }
       * {
         box-sizing: border-box;
@@ -72,31 +43,18 @@
       body {
         background: var(--paper);
         color: var(--ink);
-        font: 400 15px/1.56 var(--body);
+        font: 400 16px/1.6 var(--body);
         -webkit-font-smoothing: antialiased;
         text-rendering: optimizeLegibility;
-        position: relative;
-      }
-      body::after {
-        content: "";
-        position: fixed;
-        inset: 0;
-        opacity: 0.07;
-        pointer-events: none;
-        z-index: 0;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
-        background-size: 200px 200px;
       }
       ::selection {
-        background: var(--ink);
-        color: var(--paper);
+        background: var(--navy);
+        color: #fff;
       }
       .wrap {
-        max-width: 760px;
+        max-width: 720px;
         margin: 0 auto;
-        padding: clamp(28px, 5vw, 52px) 24px 90px;
-        position: relative;
-        z-index: 1;
+        padding: clamp(28px, 5vw, 56px) 24px 90px;
       }
 
       /* ---- top bar ---- */
@@ -104,216 +62,175 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 44px;
+        margin-bottom: 48px;
       }
       .brand {
         font: 600 11px/1 var(--mono);
         letter-spacing: 0.12em;
         text-transform: uppercase;
-        color: var(--soft);
+        color: var(--fg3);
       }
       .brand a {
-        color: var(--clay);
+        color: var(--navy);
         text-decoration: none;
       }
       .brand a:hover {
-        color: var(--clay-deep);
+        color: var(--navy-deep);
       }
       .lang {
         display: flex;
-        gap: 3px;
+        gap: 2px;
         border: 1px solid var(--line);
-        border-radius: 999px;
-        padding: 3px;
-        background: var(--card);
+        border-radius: 4px;
+        padding: 2px;
+        background: var(--paper);
       }
       .lang button {
         border: none;
         background: transparent;
-        padding: 5px 13px;
-        border-radius: 999px;
+        padding: 5px 12px;
+        border-radius: 3px;
         font: 600 11px/1 var(--mono);
         letter-spacing: 0.08em;
         cursor: pointer;
-        color: var(--soft);
+        color: var(--fg3);
       }
       .lang button.on {
-        background: var(--ink);
-        color: var(--paper);
+        background: var(--navy);
+        color: #fff;
       }
 
       /* ---- masthead ---- */
       .kicker {
         font: 600 11px/1 var(--mono);
-        letter-spacing: 0.12em;
+        letter-spacing: 0.14em;
         text-transform: uppercase;
-        color: var(--soft);
-        margin: 0 0 18px;
-      }
-      .kicker em {
-        font-style: normal;
-        color: var(--clay);
+        color: var(--fg3);
+        margin: 0 0 22px;
       }
       h1 {
-        font: 800 clamp(30px, 7vw, 46px)/0.98 var(--disp);
-        letter-spacing: -0.035em;
-        margin: 0 0 16px;
-        max-width: 16ch;
+        font: 600 clamp(30px, 5.6vw, 44px)/1.12 var(--disp);
+        letter-spacing: -0.015em;
+        margin: 0 0 18px;
+        max-width: 18ch;
       }
       .dek {
-        font: 400 18px/1.4 var(--body);
+        font: 400 18px/1.5 var(--body);
         color: var(--soft);
         margin: 0;
-        max-width: 52ch;
-        letter-spacing: -0.01em;
-      }
-      .handnote {
-        font: 600 21px/1.2 var(--hand);
-        color: var(--clay);
-        transform: rotate(-1.6deg);
-        display: inline-block;
-        margin: 14px 0 0;
+        max-width: 56ch;
       }
       .byline {
-        font: 500 11px/1.5 var(--mono);
+        font: 500 11px/1.6 var(--mono);
         letter-spacing: 0.05em;
         text-transform: uppercase;
-        color: var(--soft);
+        color: var(--fg3);
         border-top: 1px solid var(--rule);
         border-bottom: 1px solid var(--rule);
-        padding: 13px 0;
-        margin: 30px 0 0;
+        padding: 14px 0;
+        margin: 34px 0 0;
         display: flex;
         flex-wrap: wrap;
-        gap: 6px 32px;
+        gap: 6px 36px;
       }
       .byline b {
         color: var(--ink);
         font-weight: 600;
-        font-size: 13px;
       }
 
       /* ---- three steps ---- */
       .steps {
+        margin: 40px 0 8px;
+        border-top: 1px solid var(--line);
+      }
+      .steprow {
         display: flex;
-        gap: 14px;
-        margin: 36px 0 10px;
-        flex-wrap: wrap;
-      }
-      .stepcard {
-        flex: 1 1 200px;
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        padding: 0 0 16px;
-        font-size: 0.88rem;
-        color: var(--soft);
-        box-shadow: var(--shadow-md);
-        overflow: hidden;
-      }
-      .stepcard .illus {
-        width: 100%;
-        height: 108px;
-        object-fit: cover;
-        display: block;
+        gap: 22px;
+        align-items: baseline;
+        padding: 18px 0;
         border-bottom: 1px solid var(--line);
       }
-      .stepcard .inner {
-        padding: 13px 16px 0;
-      }
-      .stepcard b {
-        display: block;
-        margin-bottom: 4px;
-        color: var(--ink);
-        font: 700 15px/1.3 var(--disp);
-      }
-      .stepcard .n {
-        font: 600 11px/1 var(--mono);
-        color: var(--clay);
+      .steprow .n {
+        font: 600 11.5px/1 var(--mono);
+        color: var(--navy);
         letter-spacing: 0.1em;
+        min-width: 54px;
+        flex: none;
+      }
+      .steprow b {
+        font: 600 16px/1.35 var(--body);
+        color: var(--ink);
         display: block;
-        margin-bottom: 7px;
+        margin-bottom: 2px;
+      }
+      .steprow span.d {
+        color: var(--soft);
+        font-size: 14.5px;
       }
 
       .startrow {
-        margin: 30px 0 6px;
-        display: flex;
-        align-items: center;
-        gap: 18px;
-        flex-wrap: wrap;
+        margin: 34px 0 6px;
       }
       button.big {
-        font: 700 16px/1 var(--disp);
+        font: 600 15px/1 var(--body);
         border: none;
-        border-radius: 12px;
-        padding: 16px 30px;
+        border-radius: 6px;
+        padding: 15px 30px;
         cursor: pointer;
-        background: var(--clay);
+        background: var(--navy);
         color: #fff;
-        box-shadow: var(--shadow-md);
-        transition:
-          transform 0.12s,
-          background 0.12s;
+        transition: background 0.12s;
+        letter-spacing: 0.01em;
       }
       button.big:hover {
-        background: var(--clay-deep);
-        transform: translateY(-1px);
-      }
-      .start-hand {
-        font: 600 19px/1.15 var(--hand);
-        color: var(--soft);
-        transform: rotate(-1.2deg);
-        max-width: 22ch;
+        background: var(--navy-deep);
       }
 
       /* ---- wizard ---- */
       #wizard {
         display: none;
-        margin-top: 34px;
+        margin-top: 36px;
       }
       #wizard.show {
         display: block;
       }
       .progress {
-        height: 5px;
+        height: 3px;
         background: var(--line);
-        border-radius: 3px;
-        margin-bottom: 24px;
+        margin-bottom: 26px;
         overflow: hidden;
       }
       .progress i {
         display: block;
         height: 100%;
-        background: linear-gradient(90deg, var(--clay), var(--coral));
-        border-radius: 3px;
+        background: var(--navy);
         transition: width 0.25s;
       }
       .qcard {
         background: var(--card);
         border: 1px solid var(--line);
-        border-radius: 16px;
-        padding: 30px 30px 24px;
+        border-radius: 8px;
+        padding: 30px 32px 24px;
         min-height: 240px;
         display: flex;
         flex-direction: column;
-        box-shadow: var(--shadow-lg);
       }
       .qnum {
         font: 600 11px/1 var(--mono);
         letter-spacing: 0.12em;
         text-transform: uppercase;
-        color: var(--clay);
-        margin-bottom: 10px;
+        color: var(--navy);
+        margin-bottom: 12px;
       }
       .qtitle {
-        font: 800 22px/1.15 var(--disp);
-        letter-spacing: -0.02em;
-        margin-bottom: 7px;
+        font: 600 clamp(21px, 3.4vw, 26px)/1.15 var(--disp);
+        letter-spacing: -0.01em;
+        margin-bottom: 8px;
       }
       .qhint {
         color: var(--soft);
-        font-size: 0.9rem;
-        margin-bottom: 16px;
+        font-size: 14.5px;
+        margin-bottom: 18px;
         max-width: 58ch;
       }
       .qbody {
@@ -324,10 +241,10 @@
       select {
         width: 100%;
         padding: 12px 14px;
-        border: 1px solid var(--line);
-        border-radius: 10px;
+        border: 1px solid var(--rule);
+        border-radius: 6px;
         font: inherit;
-        font-size: 0.95rem;
+        font-size: 15px;
         background: var(--paper);
         color: var(--ink);
       }
@@ -339,19 +256,19 @@
       input:focus,
       textarea:focus,
       select:focus {
-        outline: 2px solid var(--clay);
+        outline: 2px solid var(--navy);
         outline-offset: -1px;
         border-color: transparent;
       }
       .pair > * + * {
-        margin-top: 12px;
+        margin-top: 14px;
       }
       .sublabel {
-        font: 600 11px/1 var(--mono);
+        font: 600 10.5px/1 var(--mono);
         letter-spacing: 0.1em;
         text-transform: uppercase;
-        margin-bottom: 6px;
-        color: var(--soft);
+        margin-bottom: 7px;
+        color: var(--fg3);
       }
       .nav {
         display: flex;
@@ -361,30 +278,30 @@
       }
       .nav .right {
         display: flex;
-        gap: 10px;
+        gap: 12px;
         align-items: center;
       }
       button.next {
-        font: 700 14px/1 var(--disp);
+        font: 600 14px/1 var(--body);
         border: none;
-        border-radius: 10px;
+        border-radius: 6px;
         padding: 13px 26px;
         cursor: pointer;
-        background: var(--clay);
+        background: var(--navy);
         color: #fff;
         transition: background 0.12s;
       }
       button.next:hover {
-        background: var(--clay-deep);
+        background: var(--navy-deep);
       }
       button.back,
       button.skip {
         font: 500 13px/1 var(--body);
         border: none;
         background: transparent;
-        color: var(--soft);
+        color: var(--fg3);
         cursor: pointer;
-        padding: 13px 8px;
+        padding: 13px 6px;
       }
       button.back:hover,
       button.skip:hover {
@@ -397,8 +314,8 @@
         color: var(--fg3);
       }
       .req-warn {
-        color: var(--clay);
-        font-size: 0.87rem;
+        color: #7c3a36;
+        font-size: 14px;
         margin-top: 10px;
         display: none;
         font-weight: 600;
@@ -407,7 +324,7 @@
       /* ---- result ---- */
       #result {
         display: none;
-        margin-top: 38px;
+        margin-top: 40px;
       }
       #result.show {
         display: block;
@@ -415,72 +332,72 @@
       .result-card {
         background: var(--card);
         border: 1px solid var(--line);
-        border-radius: 16px;
-        padding: 24px 26px;
+        border-radius: 8px;
+        padding: 26px 28px;
         margin-bottom: 18px;
-        box-shadow: var(--shadow-md);
       }
       .result-card h3 {
-        font: 800 19px/1.2 var(--disp);
-        letter-spacing: -0.015em;
-        margin-bottom: 7px;
+        font: 600 21px/1.2 var(--disp);
+        letter-spacing: -0.01em;
+        margin-bottom: 8px;
       }
       .result-card p {
         color: var(--soft);
-        font-size: 0.9rem;
-        margin-bottom: 14px;
+        font-size: 14.5px;
+        margin-bottom: 16px;
         max-width: 62ch;
       }
       .result-card a {
-        color: var(--clay);
+        color: var(--navy);
       }
       pre {
         background: var(--paper);
         border: 1px solid var(--line);
-        border-radius: 10px;
-        padding: 15px;
-        font: 400 11.5px/1.5 var(--mono);
+        border-radius: 6px;
+        padding: 16px;
+        font: 400 11.5px/1.55 var(--mono);
         max-height: 260px;
         overflow: auto;
         white-space: pre-wrap;
         word-break: break-word;
         margin-bottom: 16px;
+        color: var(--soft);
       }
       .copied {
         color: var(--ok);
-        font-size: 0.88rem;
+        font-size: 14px;
         margin-left: 10px;
         font-weight: 600;
       }
       button.ghost {
-        font: 700 14px/1 var(--disp);
-        border-radius: 10px;
+        font: 600 14px/1 var(--body);
+        border-radius: 6px;
         padding: 13px 24px;
         cursor: pointer;
-        background: var(--card);
-        border: 1px solid var(--line);
+        background: var(--paper);
+        border: 1px solid var(--rule);
         color: var(--ink);
       }
       button.ghost:hover {
-        border-color: var(--soft);
+        border-color: var(--fg3);
       }
       button.primary {
-        font: 700 14px/1 var(--disp);
+        font: 600 14px/1 var(--body);
         border: none;
-        border-radius: 10px;
+        border-radius: 6px;
         padding: 13px 24px;
         cursor: pointer;
-        background: var(--teal);
+        background: var(--navy);
         color: #fff;
       }
       button.primary:hover {
-        filter: brightness(1.1);
+        background: var(--navy-deep);
       }
 
       footer {
-        margin-top: 64px;
-        color: var(--soft);
-        font-size: 0.85rem;
+        margin-top: 70px;
+        color: var(--fg3);
+        font-size: 14px;
         border-top: 1px solid var(--rule);
         padding-top: 18px;
         display: flex;
@@ -489,13 +406,12 @@
         gap: 10px;
       }
       footer a {
-        color: var(--clay);
+        color: var(--navy);
       }
       footer .mono {
-        font: 500 10px/1.6 var(--mono);
+        font: 500 10px/1.8 var(--mono);
         letter-spacing: 0.06em;
         text-transform: uppercase;
-        color: var(--fg3);
       }
     </style>
   </head>
@@ -517,7 +433,6 @@
         <p class="kicker" data-i18n="kicker"></p>
         <h1 data-i18n="title"></h1>
         <p class="dek" data-i18n="lead"></p>
-        <span class="handnote" data-i18n="handnote"></span>
         <div class="byline">
           <span data-i18n="by1"></span>
           <span data-i18n="by2"></span>
@@ -526,25 +441,22 @@
       </header>
 
       <div class="steps">
-        <div class="stepcard">
-          <img class="illus" src="assets/illus-companies.png" alt="" />
-          <div class="inner">
-            <span class="n" data-i18n="n1"></span><b data-i18n="s1t"></b
-            ><span data-i18n="s1d"></span>
+        <div class="steprow">
+          <span class="n" data-i18n="n1"></span>
+          <div>
+            <b data-i18n="s1t"></b><span class="d" data-i18n="s1d"></span>
           </div>
         </div>
-        <div class="stepcard">
-          <img class="illus" src="assets/illus-pipeline.png" alt="" />
-          <div class="inner">
-            <span class="n" data-i18n="n2"></span><b data-i18n="s2t"></b
-            ><span data-i18n="s2d"></span>
+        <div class="steprow">
+          <span class="n" data-i18n="n2"></span>
+          <div>
+            <b data-i18n="s2t"></b><span class="d" data-i18n="s2d"></span>
           </div>
         </div>
-        <div class="stepcard">
-          <img class="illus" src="assets/illus-catalog.png" alt="" />
-          <div class="inner">
-            <span class="n" data-i18n="n3"></span><b data-i18n="s3t"></b
-            ><span data-i18n="s3d"></span>
+        <div class="steprow">
+          <span class="n" data-i18n="n3"></span>
+          <div>
+            <b data-i18n="s3t"></b><span class="d" data-i18n="s3d"></span>
           </div>
         </div>
       </div>
@@ -556,7 +468,6 @@
           data-i18n="start"
           onclick="startWizard()"
         ></button>
-        <span class="start-hand" data-i18n="starthand"></span>
       </div>
 
       <div id="wizard">
@@ -616,10 +527,9 @@
       // ---------------------------------------------------------------- i18n
       const I18N = {
         en: {
-          kicker: "Open source · self-hosted · <em>any field</em>",
+          kicker: "Open source · self-hosted · any field",
           title: "Run your own AI job-search pipeline",
           lead: "It fetches vacancies from the career pages of companies you pick, scores each one against your profile with Claude, and hands you a short list worth your time. Free beyond the Claude subscription you already have.",
-          handnote: "companies first, not job boards →",
           by1: "Setup ~15 min",
           by2: "Claude subscription · $0 extra",
           by3: "Your data stays yours",
@@ -629,11 +539,10 @@
           s1t: "Answer the questions",
           s1d: "About 5 minutes. Plain text, no signup.",
           s2t: "Copy your setup prompt",
-          s2d: "Your answers become a profile + one install prompt.",
+          s2d: "Your answers become a profile and one install prompt.",
           s3t: "Paste it into your agent",
           s3d: "Claude Code clones the repo and sets everything up.",
           start: "Start — 10 questions",
-          starthand: "honest beats impressive, the AI scores against this",
           back: "← Back",
           skip: "Skip",
           next: "Next",
@@ -653,10 +562,9 @@
           footer: "Built by a person who ran his own job search with it.",
         },
         ru: {
-          kicker: "Открытый код · на своих аккаунтах · <em>любая сфера</em>",
+          kicker: "Открытый код · на своих аккаунтах · любая сфера",
           title: "Собери свой ИИ-конвейер поиска работы",
           lead: "Он сам собирает вакансии со страниц выбранных тобой компаний, оценивает каждую под твой профиль через Claude и отдаёт короткий список, на который не жалко времени. Бесплатно сверх подписки Claude, которая у тебя уже есть.",
-          handnote: "сначала компании, а не джоб-борды →",
           by1: "Установка ~15 мин",
           by2: "Подписка Claude · $0 сверху",
           by3: "Данные остаются у тебя",
@@ -666,11 +574,10 @@
           s1t: "Ответь на вопросы",
           s1d: "Около 5 минут. Без регистрации.",
           s2t: "Скопируй промпт установки",
-          s2d: "Ответы превращаются в профиль + один промпт.",
+          s2d: "Ответы превращаются в профиль и один промпт.",
           s3t: "Вставь в своего агента",
           s3d: "Claude Code сам клонирует код и всё настроит.",
           start: "Начать — 10 вопросов",
-          starthand: "честно лучше, чем красиво — ИИ оценивает по этому",
           back: "← Назад",
           skip: "Пропустить",
           next: "Дальше",
@@ -714,12 +621,12 @@
           req: true,
           en: {
             t: "Your last 2–4 roles",
-            h: "One per line: years, title, company — and one line on what you actually achieved. Honest beats impressive.",
+            h: "One per line: years, title, company — and one line on what you actually achieved. Honest beats impressive — the AI scores against this.",
             ph: "2022–2026, Senior Programme Manager at Example Foundation — built a €2M/year grants programme, team of 6.\n2019–2022, Operations Manager at Example Startup — scaled ops from 30 to 120 people.",
           },
           ru: {
             t: "Твои последние 2–4 роли",
-            h: "По одной на строку: годы, должность, компания — и одна строка о том, чего реально добился. Честно лучше, чем красиво.",
+            h: "По одной на строку: годы, должность, компания — и одна строка о том, чего реально добился. Честно лучше, чем красиво — ИИ оценивает по этому.",
             ph: "2022–2026, старший менеджер программ в Example Foundation — построила грантовую программу €2M в год, команда 6 человек.\n2019–2022, операционный менеджер в Example Startup — вырастила операции с 30 до 120 человек.",
           },
         },
