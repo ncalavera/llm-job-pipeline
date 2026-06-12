@@ -26,6 +26,13 @@
         --navy: #1b2a4a;
         --navy-deep: #13203a;
         --navy-tint: #eceff5;
+        --coral: #e2552e;
+        --coral-deep: #c24420;
+        --coral-tint: #fdeee8;
+        --teal: #15756f;
+        --teal-tint: #e2f0ee;
+        --amber: #d98e04;
+        --amber-tint: #fdf3dd;
         --ok: #3d614d;
         --disp: "Source Serif 4", Georgia, serif;
         --body: "Source Sans 3", system-ui, sans-serif;
@@ -71,11 +78,11 @@
         color: var(--fg3);
       }
       .brand a {
-        color: var(--navy);
+        color: var(--coral);
         text-decoration: none;
       }
       .brand a:hover {
-        color: var(--navy-deep);
+        color: var(--coral-deep);
       }
       .lang {
         display: flex;
@@ -101,6 +108,29 @@
       }
 
       /* ---- masthead ---- */
+      .hero {
+        display: flex;
+        gap: 28px;
+        align-items: flex-start;
+      }
+      .hero-text {
+        flex: 1;
+      }
+      .hero-illus {
+        width: 210px;
+        flex: none;
+        margin-top: 8px;
+      }
+      @media (max-width: 640px) {
+        .hero {
+          flex-direction: column;
+        }
+        .hero-illus {
+          width: 170px;
+          align-self: center;
+          margin-top: 0;
+        }
+      }
       .kicker {
         font: 600 11px/1 var(--mono);
         letter-spacing: 0.14em;
@@ -113,6 +143,14 @@
         letter-spacing: -0.015em;
         margin: 0 0 18px;
         max-width: 18ch;
+      }
+      h1 em {
+        font-style: normal;
+        color: var(--coral);
+      }
+      .kicker em {
+        font-style: normal;
+        color: var(--amber);
       }
       .dek {
         font: 400 18px/1.5 var(--body);
@@ -137,6 +175,26 @@
         color: var(--ink);
         font-weight: 600;
       }
+      .byline span {
+        position: relative;
+        padding-left: 16px;
+      }
+      .byline span::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 4px;
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
+        background: var(--coral);
+      }
+      .byline span:nth-child(2)::before {
+        background: var(--teal);
+      }
+      .byline span:nth-child(3)::before {
+        background: var(--amber);
+      }
 
       /* ---- three steps ---- */
       .steps {
@@ -152,10 +210,22 @@
       }
       .steprow .n {
         font: 600 11.5px/1 var(--mono);
-        color: var(--navy);
+        color: var(--coral);
+        background: var(--coral-tint);
+        padding: 5px 8px;
+        border-radius: 4px;
         letter-spacing: 0.1em;
         min-width: 54px;
+        text-align: center;
         flex: none;
+      }
+      .steprow:nth-child(2) .n {
+        color: var(--teal);
+        background: var(--teal-tint);
+      }
+      .steprow:nth-child(3) .n {
+        color: var(--amber);
+        background: var(--amber-tint);
       }
       .steprow b {
         font: 600 16px/1.35 var(--body);
@@ -170,6 +240,14 @@
 
       .startrow {
         margin: 34px 0 6px;
+        display: flex;
+        align-items: center;
+        gap: 26px;
+        flex-wrap: wrap;
+      }
+      .start-illus {
+        width: 150px;
+        flex: none;
       }
       button.big {
         font: 600 15px/1 var(--body);
@@ -177,13 +255,13 @@
         border-radius: 6px;
         padding: 15px 30px;
         cursor: pointer;
-        background: var(--navy);
+        background: var(--coral);
         color: #fff;
         transition: background 0.12s;
         letter-spacing: 0.01em;
       }
       button.big:hover {
-        background: var(--navy-deep);
+        background: var(--coral-deep);
       }
 
       /* ---- wizard ---- */
@@ -203,7 +281,7 @@
       .progress i {
         display: block;
         height: 100%;
-        background: var(--navy);
+        background: linear-gradient(90deg, var(--coral), var(--amber));
         transition: width 0.25s;
       }
       .qcard {
@@ -219,7 +297,7 @@
         font: 600 11px/1 var(--mono);
         letter-spacing: 0.12em;
         text-transform: uppercase;
-        color: var(--navy);
+        color: var(--coral);
         margin-bottom: 12px;
       }
       .qtitle {
@@ -256,7 +334,7 @@
       input:focus,
       textarea:focus,
       select:focus {
-        outline: 2px solid var(--navy);
+        outline: 2px solid var(--teal);
         outline-offset: -1px;
         border-color: transparent;
       }
@@ -283,8 +361,9 @@
         border-color: var(--fg3);
       }
       .modecard.sel {
-        border-color: var(--navy);
-        box-shadow: 0 0 0 1px var(--navy);
+        border-color: var(--teal);
+        box-shadow: 0 0 0 1px var(--teal);
+        background: var(--teal-tint);
       }
       .modecard h4 {
         font: 600 17px/1.3 var(--disp);
@@ -294,9 +373,12 @@
         font: 600 10.5px/1 var(--mono);
         letter-spacing: 0.1em;
         text-transform: uppercase;
-        color: var(--navy);
+        color: var(--teal);
         display: block;
         margin-bottom: 10px;
+      }
+      .modecard[data-mode="full"] .tagline {
+        color: var(--amber);
       }
       .modecard ul {
         list-style: none;
@@ -344,12 +426,12 @@
         border-radius: 6px;
         padding: 13px 26px;
         cursor: pointer;
-        background: var(--navy);
+        background: var(--coral);
         color: #fff;
         transition: background 0.12s;
       }
       button.next:hover {
-        background: var(--navy-deep);
+        background: var(--coral-deep);
       }
       button.back,
       button.skip {
@@ -389,9 +471,13 @@
       .result-card {
         background: var(--card);
         border: 1px solid var(--line);
+        border-top: 3px solid var(--coral);
         border-radius: 8px;
         padding: 26px 28px;
         margin-bottom: 18px;
+      }
+      .result-card + .result-card {
+        border-top-color: var(--teal);
       }
       .result-card h3 {
         font: 600 21px/1.2 var(--disp);
@@ -444,11 +530,11 @@
         border-radius: 6px;
         padding: 13px 24px;
         cursor: pointer;
-        background: var(--navy);
+        background: var(--teal);
         color: #fff;
       }
       button.primary:hover {
-        background: var(--navy-deep);
+        filter: brightness(1.12);
       }
 
       footer {
@@ -463,7 +549,7 @@
         gap: 10px;
       }
       footer a {
-        color: var(--navy);
+        color: var(--coral);
       }
       footer .mono {
         font: 500 10px/1.8 var(--mono);
@@ -487,9 +573,14 @@
       </div>
 
       <header>
-        <p class="kicker" data-i18n="kicker"></p>
-        <h1 data-i18n="title"></h1>
-        <p class="dek" data-i18n="lead"></p>
+        <div class="hero">
+          <div class="hero-text">
+            <p class="kicker" data-i18n="kicker"></p>
+            <h1 data-i18n="title"></h1>
+            <p class="dek" data-i18n="lead"></p>
+          </div>
+          <img class="hero-illus" src="assets/honest-mirror.jpg" alt="" />
+        </div>
         <div class="byline">
           <span data-i18n="by1"></span>
           <span data-i18n="by2"></span>
@@ -525,6 +616,7 @@
           data-i18n="start"
           onclick="startWizard()"
         ></button>
+        <img class="start-illus" src="assets/robot-courier.jpg" alt="" />
       </div>
 
       <div id="wizard">
@@ -584,11 +676,11 @@
       // ---------------------------------------------------------------- i18n
       const I18N = {
         en: {
-          kicker: "Open source · self-hosted · any field",
-          title: "Run your own AI job-search pipeline",
-          lead: "It fetches vacancies from the career pages of companies you pick, scores each one against your profile with Claude, and hands you a short list worth your time. Free beyond the Claude subscription you already have.",
+          kicker: "Open source · self-hosted · <em>any field</em>",
+          title: "Run your own <em>AI job-search</em> pipeline",
+          lead: "It fetches vacancies from the career pages of companies you pick, scores each one against your profile with your AI agent — Claude or Codex — and hands you a short list worth your time. Free beyond the AI subscription you already have.",
           by1: "Setup ~15 min",
-          by2: "Claude subscription · $0 extra",
+          by2: "Claude / Codex subscription · $0 extra",
           by3: "Your data stays yours",
           n1: "Step 01",
           n2: "Step 02",
@@ -619,11 +711,11 @@
           footer: "Built by a person who ran his own job search with it.",
         },
         ru: {
-          kicker: "Открытый код · на своих аккаунтах · любая сфера",
-          title: "Собери свой ИИ-конвейер поиска работы",
-          lead: "Он сам собирает вакансии со страниц выбранных тобой компаний, оценивает каждую под твой профиль через Claude и отдаёт короткий список, на который не жалко времени. Бесплатно сверх подписки Claude, которая у тебя уже есть.",
+          kicker: "Открытый код · на своих аккаунтах · <em>любая сфера</em>",
+          title: "Собери свой <em>ИИ-конвейер</em> поиска работы",
+          lead: "Он сам собирает вакансии со страниц выбранных тобой компаний, оценивает каждую под твой профиль через твоего ИИ-агента — Claude или Codex — и отдаёт короткий список, на который не жалко времени. Бесплатно сверх подписки на ИИ, которая у тебя уже есть.",
           by1: "Установка ~15 мин",
-          by2: "Подписка Claude · $0 сверху",
+          by2: "Подписка Claude / Codex · $0 сверху",
           by3: "Данные остаются у тебя",
           n1: "Шаг 01",
           n2: "Шаг 02",
