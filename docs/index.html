@@ -1,0 +1,1035 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LLM Job Pipeline — Get Started</title>
+    <meta
+      name="description"
+      content="Set up your own AI-powered job search pipeline in 15 minutes. Answer a few questions, copy one prompt, paste it into your coding agent."
+    />
+    <style>
+      :root {
+        --ink: #1f2937;
+        --muted: #6b7280;
+        --line: #e5e7eb;
+        --accent: #2563eb;
+        --accent-dark: #1d4ed8;
+        --bg: #f9fafb;
+        --card: #ffffff;
+        --ok: #059669;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+          Arial, sans-serif;
+        color: var(--ink);
+        background: var(--bg);
+        line-height: 1.55;
+      }
+      .wrap {
+        max-width: 680px;
+        margin: 0 auto;
+        padding: 40px 20px 96px;
+      }
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 36px;
+      }
+      .brand {
+        font-weight: 700;
+        font-size: 0.95rem;
+        color: var(--muted);
+      }
+      .brand a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .lang {
+        display: flex;
+        gap: 4px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 3px;
+        background: var(--card);
+      }
+      .lang button {
+        border: none;
+        background: transparent;
+        padding: 5px 12px;
+        border-radius: 6px;
+        font: inherit;
+        font-size: 0.85rem;
+        font-weight: 600;
+        cursor: pointer;
+        color: var(--muted);
+      }
+      .lang button.on {
+        background: var(--accent);
+        color: #fff;
+      }
+      header h1 {
+        font-size: 1.85rem;
+        letter-spacing: -0.02em;
+        margin-bottom: 10px;
+      }
+      header p.lead {
+        color: var(--muted);
+        font-size: 1.05rem;
+        max-width: 58ch;
+      }
+      .steps {
+        display: flex;
+        gap: 12px;
+        margin: 26px 0 8px;
+        flex-wrap: wrap;
+      }
+      .stepcard {
+        flex: 1 1 180px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 13px 15px;
+        font-size: 0.88rem;
+      }
+      .stepcard b {
+        display: block;
+        margin-bottom: 3px;
+      }
+      .stepcard .n {
+        display: inline-block;
+        width: 21px;
+        height: 21px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #fff;
+        text-align: center;
+        line-height: 21px;
+        font-size: 0.78rem;
+        margin-bottom: 7px;
+      }
+      .startrow {
+        margin: 28px 0 8px;
+      }
+      button.big {
+        font: inherit;
+        font-weight: 600;
+        border: none;
+        border-radius: 10px;
+        padding: 14px 28px;
+        cursor: pointer;
+        font-size: 1rem;
+        background: var(--accent);
+        color: #fff;
+      }
+      button.big:hover {
+        background: var(--accent-dark);
+      }
+
+      /* Wizard */
+      #wizard {
+        display: none;
+        margin-top: 30px;
+      }
+      #wizard.show {
+        display: block;
+      }
+      .progress {
+        height: 6px;
+        background: var(--line);
+        border-radius: 3px;
+        margin-bottom: 26px;
+        overflow: hidden;
+      }
+      .progress i {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+        border-radius: 3px;
+        transition: width 0.25s;
+      }
+      .qcard {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 28px 28px 24px;
+        min-height: 230px;
+        display: flex;
+        flex-direction: column;
+      }
+      .qnum {
+        color: var(--muted);
+        font-size: 0.8rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 8px;
+      }
+      .qtitle {
+        font-size: 1.2rem;
+        font-weight: 700;
+        margin-bottom: 6px;
+        letter-spacing: -0.01em;
+      }
+      .qhint {
+        color: var(--muted);
+        font-size: 0.9rem;
+        margin-bottom: 16px;
+      }
+      .qbody {
+        flex: 1;
+      }
+      input[type="text"],
+      textarea,
+      select {
+        width: 100%;
+        padding: 11px 13px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font: inherit;
+        font-size: 0.95rem;
+        background: var(--bg);
+        color: var(--ink);
+      }
+      textarea {
+        min-height: 110px;
+        resize: vertical;
+      }
+      input:focus,
+      textarea:focus,
+      select:focus {
+        outline: 2px solid var(--accent);
+        outline-offset: -1px;
+        border-color: transparent;
+      }
+      .pair > * + * {
+        margin-top: 12px;
+      }
+      .sublabel {
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-bottom: 4px;
+        color: var(--ink);
+      }
+      .nav {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 20px;
+      }
+      .nav .right {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      button.next {
+        font: inherit;
+        font-weight: 600;
+        border: none;
+        border-radius: 8px;
+        padding: 11px 24px;
+        cursor: pointer;
+        background: var(--accent);
+        color: #fff;
+      }
+      button.next:hover {
+        background: var(--accent-dark);
+      }
+      button.back,
+      button.skip {
+        font: inherit;
+        border: none;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        padding: 11px 8px;
+        font-size: 0.9rem;
+      }
+      button.back:hover,
+      button.skip:hover {
+        color: var(--ink);
+      }
+      .enterhint {
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+      .req-warn {
+        color: #dc2626;
+        font-size: 0.85rem;
+        margin-top: 8px;
+        display: none;
+      }
+
+      /* Result */
+      #result {
+        display: none;
+        margin-top: 36px;
+      }
+      #result.show {
+        display: block;
+      }
+      .result-card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 22px 24px;
+        margin-bottom: 18px;
+      }
+      .result-card h3 {
+        font-size: 1.05rem;
+        margin-bottom: 6px;
+      }
+      .result-card p {
+        color: var(--muted);
+        font-size: 0.9rem;
+        margin-bottom: 14px;
+      }
+      pre {
+        background: #f3f4f6;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px;
+        font-size: 0.78rem;
+        max-height: 260px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        margin-bottom: 14px;
+      }
+      .copied {
+        color: var(--ok);
+        font-size: 0.88rem;
+        margin-left: 10px;
+      }
+      button.ghost {
+        font: inherit;
+        font-weight: 600;
+        border-radius: 8px;
+        padding: 11px 22px;
+        cursor: pointer;
+        background: var(--card);
+        border: 1px solid var(--line);
+        color: var(--ink);
+      }
+      button.ghost:hover {
+        border-color: var(--muted);
+      }
+      button.primary {
+        font: inherit;
+        font-weight: 600;
+        border: none;
+        border-radius: 8px;
+        padding: 11px 22px;
+        cursor: pointer;
+        background: var(--accent);
+        color: #fff;
+      }
+      button.primary:hover {
+        background: var(--accent-dark);
+      }
+      footer {
+        margin-top: 60px;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      footer a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="topbar">
+        <div class="brand">
+          <a href="https://github.com/ncalavera/llm-job-pipeline"
+            >llm-job-pipeline</a
+          >
+        </div>
+        <div class="lang">
+          <button id="lang-en" class="on" onclick="setLang('en')">EN</button>
+          <button id="lang-ru" onclick="setLang('ru')">RU</button>
+        </div>
+      </div>
+
+      <header>
+        <h1 data-i18n="title"></h1>
+        <p class="lead" data-i18n="lead"></p>
+      </header>
+
+      <div class="steps">
+        <div class="stepcard">
+          <span class="n">1</span><b data-i18n="s1t"></b
+          ><span data-i18n="s1d"></span>
+        </div>
+        <div class="stepcard">
+          <span class="n">2</span><b data-i18n="s2t"></b
+          ><span data-i18n="s2d"></span>
+        </div>
+        <div class="stepcard">
+          <span class="n">3</span><b data-i18n="s3t"></b
+          ><span data-i18n="s3d"></span>
+        </div>
+      </div>
+
+      <div class="startrow">
+        <button
+          class="big"
+          id="startBtn"
+          data-i18n="start"
+          onclick="startWizard()"
+        ></button>
+      </div>
+
+      <div id="wizard">
+        <div class="progress"><i id="bar" style="width: 0%"></i></div>
+        <div class="qcard">
+          <div class="qnum" id="qnum"></div>
+          <div class="qtitle" id="qtitle"></div>
+          <div class="qhint" id="qhint"></div>
+          <div class="qbody" id="qbody"></div>
+          <div class="req-warn" id="reqwarn" data-i18n="required"></div>
+          <div class="nav">
+            <button
+              class="back"
+              id="backBtn"
+              data-i18n="back"
+              onclick="prevQ()"
+            ></button>
+            <div class="right">
+              <span class="enterhint" id="enterhint"></span>
+              <button
+                class="skip"
+                id="skipBtn"
+                data-i18n="skip"
+                onclick="nextQ(true)"
+              ></button>
+              <button class="next" id="nextBtn" onclick="nextQ()"></button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="result">
+        <div class="result-card">
+          <h3 data-i18n="r1t"></h3>
+          <p data-i18n="r1d"></p>
+          <pre id="promptOut"></pre>
+          <button class="primary" id="copyPrompt" data-i18n="copy"></button>
+          <button class="ghost" id="dlPrompt" data-i18n="download"></button>
+          <span class="copied" id="copiedMark"></span>
+        </div>
+        <div class="result-card">
+          <h3 data-i18n="r2t"></h3>
+          <p id="r2body"></p>
+        </div>
+      </div>
+
+      <footer>
+        <span data-i18n="footer"></span>
+        <a href="https://github.com/ncalavera/llm-job-pipeline">GitHub</a> · MIT
+      </footer>
+    </div>
+
+    <script>
+      // ---------------------------------------------------------------- i18n
+      const I18N = {
+        en: {
+          title: "Run your own AI job-search pipeline",
+          lead: "An open-source pipeline that fetches vacancies from company career pages, scores each one against your profile with Claude, and shows the results in a personal dashboard. Free, self-hosted, works for any field.",
+          s1t: "Answer the questions",
+          s1d: "About 5 minutes. Plain text, no signup.",
+          s2t: "Copy your setup prompt",
+          s2d: "Your answers become a profile + one install prompt.",
+          s3t: "Paste it into your agent",
+          s3d: "Claude Code clones the repo and sets everything up.",
+          start: "Start — 10 questions",
+          back: "← Back",
+          skip: "Skip",
+          next: "Next",
+          finish: "Build my setup prompt",
+          required: "This one matters for scoring quality — please fill it in.",
+          enterhint: "Enter ↵",
+          qof: (i, n) => `Question ${i} of ${n}`,
+          r1t: "Your setup prompt",
+          r1d: "Copy this and paste it into Claude Code (or any coding agent) in an empty folder. It contains your profile and step-by-step install instructions for the agent.",
+          copy: "Copy prompt",
+          download: "Download as file",
+          copied: "Copied ✓",
+          r2t: "No coding agent yet?",
+          r2body:
+            'Install <a href="https://claude.com/claude-code">Claude Code</a> first (it does all the setup for you), then paste the prompt above. Manual setup instructions live in the repo\'s <a href="https://github.com/ncalavera/llm-job-pipeline/blob/main/INSTALL.md">INSTALL.md</a>.',
+          footer: "Built by a person who ran his own job search with it.",
+        },
+        ru: {
+          title: "Собери свой ИИ-конвейер поиска работы",
+          lead: "Открытый код: конвейер сам собирает вакансии со страниц компаний, оценивает каждую под твой профиль через Claude и показывает результат в личном дашборде. Бесплатно, на своих аккаунтах, подходит для любой сферы.",
+          s1t: "Ответь на вопросы",
+          s1d: "Около 5 минут. Без регистрации.",
+          s2t: "Скопируй промпт установки",
+          s2d: "Ответы превращаются в профиль + один промпт.",
+          s3t: "Вставь в своего агента",
+          s3d: "Claude Code сам клонирует код и всё настроит.",
+          start: "Начать — 10 вопросов",
+          back: "← Назад",
+          skip: "Пропустить",
+          next: "Дальше",
+          finish: "Собрать мой промпт",
+          required: "Это важно для качества оценки — заполни, пожалуйста.",
+          enterhint: "Enter ↵",
+          qof: (i, n) => `Вопрос ${i} из ${n}`,
+          r1t: "Твой промпт установки",
+          r1d: "Скопируй и вставь в Claude Code (или другого кодящего агента) в пустой папке. Внутри — твой профиль и пошаговая инструкция установки для агента.",
+          copy: "Скопировать",
+          download: "Скачать файлом",
+          copied: "Скопировано ✓",
+          r2t: "Ещё нет кодящего агента?",
+          r2body:
+            'Сначала поставь <a href="https://claude.com/claude-code">Claude Code</a> (он сделает всю настройку за тебя), потом вставь промпт выше. Ручная инструкция — в <a href="https://github.com/ncalavera/llm-job-pipeline/blob/main/INSTALL.md">INSTALL.md</a> репозитория.',
+          footer: "Сделал человек, который сам искал работу этим конвейером.",
+        },
+      };
+
+      // ---------------------------------------------------------------- questions
+      const QUESTIONS = [
+        {
+          id: "name",
+          type: "text",
+          req: false,
+          en: {
+            t: "What's your name?",
+            h: "Used only inside your own files — nothing is sent anywhere.",
+            ph: "Jane Doe",
+          },
+          ru: {
+            t: "Как тебя зовут?",
+            h: "Имя остаётся только в твоих файлах — никуда не отправляется.",
+            ph: "Мария Иванова",
+          },
+        },
+        {
+          id: "exp",
+          type: "textarea",
+          req: true,
+          en: {
+            t: "Your last 2–4 roles",
+            h: "One per line: years, title, company — and one line on what you actually achieved. Honest beats impressive.",
+            ph: "2022–2026, Senior Programme Manager at Example Foundation — built a €2M/year grants programme, team of 6.\n2019–2022, Operations Manager at Example Startup — scaled ops from 30 to 120 people.",
+          },
+          ru: {
+            t: "Твои последние 2–4 роли",
+            h: "По одной на строку: годы, должность, компания — и одна строка о том, чего реально добился. Честно лучше, чем красиво.",
+            ph: "2022–2026, старший менеджер программ в Example Foundation — построила грантовую программу €2M в год, команда 6 человек.\n2019–2022, операционный менеджер в Example Startup — вырастила операции с 30 до 120 человек.",
+          },
+        },
+        {
+          id: "skills",
+          type: "textarea",
+          req: true,
+          en: {
+            t: "Core skills, strongest first",
+            h: "One per line. Include languages you speak with levels.",
+            ph: "Project management at scale\nProcess design and automation\nLanguages: English (C1), Spanish (native)",
+          },
+          ru: {
+            t: "Ключевые навыки, сильнейшие сверху",
+            h: "По одному на строку. Укажи языки с уровнями.",
+            ph: "Управление проектами\nПостроение процессов и автоматизация\nЯзыки: английский (B2), русский (родной)",
+          },
+        },
+        {
+          id: "energy",
+          type: "textarea",
+          req: false,
+          en: {
+            t: "What kind of work energises you?",
+            h: "Optional, but helps the AI tell a great match from a merely okay one.",
+            ph: "Building things from zero, roles with budget ownership, international teams…",
+          },
+          ru: {
+            t: "Какая работа тебя заряжает?",
+            h: "Необязательно, но помогает ИИ отличать отличное совпадение от просто нормального.",
+            ph: "Строить с нуля, владеть бюджетом, международные команды…",
+          },
+        },
+        {
+          id: "roles",
+          type: "textarea",
+          req: true,
+          en: {
+            t: "Target role titles",
+            h: "The job titles you want to see. One per line or comma-separated.",
+            ph: "Product Manager, Senior Product Manager\nHead of Operations, Chief of Staff",
+          },
+          ru: {
+            t: "Целевые должности",
+            h: "Названия ролей, которые хочешь видеть. По одной на строку или через запятую.",
+            ph: "Продакт-менеджер, старший продакт-менеджер\nРуководитель операций, Chief of Staff",
+          },
+        },
+        {
+          id: "domains",
+          type: "textarea",
+          req: false,
+          en: {
+            t: "Industries / domains you want",
+            h: "Any field works — the pipeline doesn't care if it's tech, NGOs or manufacturing.",
+            ph: "climate, fintech, developer tools, public health…",
+          },
+          ru: {
+            t: "Желаемые отрасли и сферы",
+            h: "Подойдёт любая сфера — конвейеру всё равно: технологии, НКО, производство.",
+            ph: "климат, финтех, инструменты для разработчиков, здравоохранение…",
+          },
+        },
+        {
+          id: "antiroles",
+          type: "textarea",
+          req: true,
+          en: {
+            t: "What you do NOT want",
+            h: "Roles, industries, red flags. These get hard score penalties — the strongest lever against junk in your feed.",
+            ph: "sales roles, gambling, crypto, anything requiring fluent German…",
+          },
+          ru: {
+            t: "Чего точно НЕ хочешь",
+            h: "Роли, отрасли, красные флаги. За это идут жёсткие штрафы к оценке — главный рычаг против мусора в выдаче.",
+            ph: "продажи, гэмблинг, крипта, всё где нужен свободный немецкий…",
+          },
+        },
+        {
+          id: "locs",
+          type: "pair",
+          req: true,
+          en: {
+            t: "Where are you, and where would you work?",
+            h: "Cities, countries, or “remote-EU” style answers.",
+            a: "Where you live now",
+            aph: "Lisbon, Portugal",
+            b: "Locations you'd work in",
+            bph: "Berlin, London, remote-EU",
+          },
+          ru: {
+            t: "Где ты сейчас и где готов работать?",
+            h: "Города, страны или варианты вроде «удалённо из ЕС».",
+            a: "Где живёшь сейчас",
+            aph: "Тбилиси, Грузия",
+            b: "Где готов работать",
+            bph: "Берлин, Лондон, удалённо",
+          },
+        },
+        {
+          id: "visa_when",
+          type: "selects",
+          req: false,
+          en: {
+            t: "Visa and timing",
+            h: "",
+            a: "Visa situation",
+            aopts: [
+              [
+                "No sponsorship needed in my target locations.",
+                "No sponsorship needed",
+              ],
+              [
+                "Needs visa sponsorship in target locations — weight visa-friendly employers higher.",
+                "I need sponsorship",
+              ],
+              [
+                "Mixed — depends on the country; clarified per-location in the profile.",
+                "Mixed / it's complicated",
+              ],
+            ],
+            b: "When do you want to start?",
+            bopts: [
+              ["as soon as possible", "as soon as possible"],
+              ["within 3–6 months", "within 3–6 months"],
+              ["within a year / exploring", "within a year / exploring"],
+            ],
+          },
+          ru: {
+            t: "Виза и сроки",
+            h: "",
+            a: "Визовая ситуация",
+            aopts: [
+              [
+                "No sponsorship needed in my target locations.",
+                "Спонсорство не нужно",
+              ],
+              [
+                "Needs visa sponsorship in target locations — weight visa-friendly employers higher.",
+                "Нужно спонсорство визы",
+              ],
+              [
+                "Mixed — depends on the country; clarified per-location in the profile.",
+                "По-разному / сложно",
+              ],
+            ],
+            b: "Когда хочешь выйти?",
+            bopts: [
+              ["as soon as possible", "как можно скорее"],
+              ["within 3–6 months", "в течение 3–6 месяцев"],
+              ["within a year / exploring", "в течение года / присматриваюсь"],
+            ],
+          },
+        },
+        {
+          id: "salary",
+          type: "text",
+          req: false,
+          en: {
+            t: "Salary expectations",
+            h: "Optional — helps the scoring filter lowball offers.",
+            ph: "target ~€5,500/month gross, hard floor €4,000",
+          },
+          ru: {
+            t: "Зарплатные ожидания",
+            h: "Необязательно — помогает отсечь заниженные предложения.",
+            ph: "цель ~€5,500/мес гросс, минимум €4,000",
+          },
+        },
+      ];
+
+      // ---------------------------------------------------------------- state
+      let lang = "en";
+      let cur = 0;
+      const answers = {};
+
+      function t(key) {
+        return I18N[lang][key];
+      }
+
+      function setLang(l) {
+        lang = l;
+        document.documentElement.lang = l;
+        document.getElementById("lang-en").classList.toggle("on", l === "en");
+        document.getElementById("lang-ru").classList.toggle("on", l === "ru");
+        document.querySelectorAll("[data-i18n]").forEach((el) => {
+          const val = I18N[l][el.dataset.i18n];
+          if (typeof val === "string") el.innerHTML = val;
+        });
+        document.getElementById("r2body").innerHTML = I18N[l].r2body;
+        document.getElementById("enterhint").textContent = I18N[l].enterhint;
+        if (document.getElementById("wizard").classList.contains("show"))
+          renderQ();
+        if (document.getElementById("result").classList.contains("show")) {
+          document.getElementById("promptOut").textContent = buildPrompt();
+        }
+      }
+
+      function startWizard() {
+        document.getElementById("wizard").classList.add("show");
+        document.getElementById("startBtn").style.display = "none";
+        renderQ();
+        document
+          .getElementById("wizard")
+          .scrollIntoView({ behavior: "smooth" });
+      }
+
+      function saveCurrent() {
+        const q = QUESTIONS[cur];
+        if (q.type === "pair") {
+          answers[q.id] = { a: val("w_a"), b: val("w_b") };
+        } else if (q.type === "selects") {
+          answers[q.id] = { a: val("w_a"), b: val("w_b") };
+        } else {
+          answers[q.id] = val("w_main");
+        }
+      }
+      function val(id) {
+        const el = document.getElementById(id);
+        return el ? el.value.trim() : "";
+      }
+
+      function isAnswered(q) {
+        const a = answers[q.id];
+        if (a == null) return false;
+        if (typeof a === "string") return a !== "";
+        return (a.a || "") !== "" || (a.b || "") !== "";
+      }
+
+      function renderQ() {
+        const q = QUESTIONS[cur];
+        const L = q[lang];
+        document.getElementById("bar").style.width =
+          Math.round((cur / QUESTIONS.length) * 100) + "%";
+        document.getElementById("qnum").textContent = I18N[lang].qof(
+          cur + 1,
+          QUESTIONS.length,
+        );
+        document.getElementById("qtitle").textContent = L.t;
+        document.getElementById("qhint").textContent = L.h;
+        document.getElementById("reqwarn").style.display = "none";
+        const body = document.getElementById("qbody");
+        const saved = answers[q.id];
+
+        if (q.type === "text") {
+          body.innerHTML = `<input type="text" id="w_main" placeholder="${esc(L.ph)}">`;
+          document.getElementById("w_main").value =
+            typeof saved === "string" ? saved : "";
+        } else if (q.type === "textarea") {
+          body.innerHTML = `<textarea id="w_main" placeholder="${esc(L.ph)}"></textarea>`;
+          document.getElementById("w_main").value =
+            typeof saved === "string" ? saved : "";
+        } else if (q.type === "pair") {
+          body.innerHTML = `<div class="pair">
+      <div><div class="sublabel">${esc(L.a)}</div><input type="text" id="w_a" placeholder="${esc(L.aph)}"></div>
+      <div><div class="sublabel">${esc(L.b)}</div><input type="text" id="w_b" placeholder="${esc(L.bph)}"></div>
+    </div>`;
+          if (saved) {
+            document.getElementById("w_a").value = saved.a || "";
+            document.getElementById("w_b").value = saved.b || "";
+          }
+        } else if (q.type === "selects") {
+          const opts = (arr, sel) =>
+            arr
+              .map(
+                ([v, lab]) =>
+                  `<option value="${esc(v)}"${v === sel ? " selected" : ""}>${esc(lab)}</option>`,
+              )
+              .join("");
+          body.innerHTML = `<div class="pair">
+      <div><div class="sublabel">${esc(L.a)}</div><select id="w_a">${opts(L.aopts, saved && saved.a)}</select></div>
+      <div><div class="sublabel">${esc(L.b)}</div><select id="w_b">${opts(L.bopts, saved && saved.b)}</select></div>
+    </div>`;
+        }
+
+        document.getElementById("backBtn").style.visibility =
+          cur === 0 ? "hidden" : "visible";
+        document.getElementById("skipBtn").style.display = q.req
+          ? "none"
+          : "inline-block";
+        document.getElementById("nextBtn").textContent =
+          cur === QUESTIONS.length - 1 ? t("finish") : t("next");
+        document.getElementById("enterhint").textContent = t("enterhint");
+
+        const first = body.querySelector("input, textarea, select");
+        if (first) first.focus();
+        body.querySelectorAll("input").forEach((el) =>
+          el.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              nextQ();
+            }
+          }),
+        );
+        body.querySelectorAll("textarea").forEach((el) =>
+          el.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              nextQ();
+            }
+          }),
+        );
+      }
+
+      function esc(s) {
+        return (s || "")
+          .replace(/&/g, "&amp;")
+          .replace(/"/g, "&quot;")
+          .replace(/</g, "&lt;");
+      }
+
+      function nextQ(skipping) {
+        const q = QUESTIONS[cur];
+        saveCurrent();
+        if (q.req && !skipping && !isAnswered(q)) {
+          document.getElementById("reqwarn").style.display = "block";
+          return;
+        }
+        if (cur === QUESTIONS.length - 1) {
+          finish();
+          return;
+        }
+        cur++;
+        renderQ();
+      }
+
+      function prevQ() {
+        saveCurrent();
+        if (cur > 0) {
+          cur--;
+          renderQ();
+        }
+      }
+
+      function finish() {
+        document.getElementById("bar").style.width = "100%";
+        document.getElementById("wizard").classList.remove("show");
+        document.getElementById("startBtn").style.display = "inline-block";
+        document.getElementById("startBtn").textContent =
+          lang === "ru" ? "Изменить ответы" : "Edit answers";
+        const r = document.getElementById("result");
+        document.getElementById("promptOut").textContent = buildPrompt();
+        r.classList.add("show");
+        r.scrollIntoView({ behavior: "smooth" });
+      }
+
+      // ---------------------------------------------------------------- output
+      function asLines(s) {
+        return (s || "")
+          .split(/\n|,(?![^()]*\))/)
+          .map((x) => x.trim())
+          .filter(Boolean);
+      }
+
+      function buildProfile() {
+        const name = answers.name || "Anonymous Candidate";
+        const exp =
+          asLines(answers.exp)
+            .map((s) => "- " + s)
+            .join("\n") || "- (fill in your experience)";
+        const skills =
+          asLines(answers.skills)
+            .map((s) => "- " + s)
+            .join("\n") || "- (fill in your skills)";
+        const energy = (answers.energy || "").trim();
+        const roles =
+          asLines(answers.roles)
+            .map((s) => "- " + s)
+            .join("\n") || "- (fill in target roles)";
+        const domains = (answers.domains || "").trim() || "(any)";
+        const anti =
+          asLines(answers.antiroles)
+            .map((s) => "- " + s)
+            .join("\n") || "- (none)";
+        const locs = answers.locs || {};
+        const vw = answers.visa_when || {};
+        const outLang = lang === "ru" ? "Russian" : "English";
+
+        return `# User profile
+
+## USER_PROFILE
+
+**Name:** ${name}
+**Current location:** ${locs.a || "(not specified)"}
+**Target locations:** ${locs.b || "(not specified)"}
+**Target start:** ${vw.b || "within 3–6 months"}
+**Salary benchmark:** ${answers.salary || "(not specified)"}
+**Visa status:** ${vw.a || "No sponsorship needed in my target locations."}
+
+### Professional experience
+
+${exp}
+
+### Core skills (in priority order)
+
+${skills}
+${
+  energy
+    ? `
+### What energises you
+
+${energy}
+`
+    : ""
+}
+### Domain preferences
+
+**Want to work in:** ${domains}
+
+## TARGET_ROLES
+
+${roles}
+
+**Not a target:** see exclude patterns below.
+
+## EXCLUDE_PATTERNS
+
+These reduce the score by -15 to -25 even when the title superficially matches:
+
+${anti}
+
+## SHORT_SUMMARY_INSTRUCTION
+
+A 4–6 sentence factual summary in **${outLang}** for the dashboard card.
+Include: gist of the role and key responsibilities, required experience
+and skills, seniority level, location and work mode, salary if mentioned,
+and team/department if disclosed. Write factually, no candidate-fit
+opinions.
+
+## OUTPUT_LANGUAGE
+
+${outLang}
+
+## ABOUT_INSTRUCTION
+
+5–8 sentences describing the company: mission, main lines of work, scale
+and reach.
+
+## CUSTOM_CRITERION_LABEL
+
+Career narrative value
+
+## CUSTOM_CRITERION_DESCRIPTION
+
+How does this org look on your CV in 2 years? Reputable brand, growing
+field, story you can tell at the next interview?
+
+## CUSTOM_BOOST_FIELD
+
+career_narrative_boost
+`;
+      }
+
+      function buildPrompt() {
+        const intro =
+          lang === "ru"
+            ? `Я хочу развернуть себе ИИ-конвейер поиска работы из открытого репозитория https://github.com/ncalavera/llm-job-pipeline
+
+Сделай, пожалуйста:
+1. Склонируй репозиторий в текущую папку.
+2. Прочитай INSTALL.md в корне и пройди по нему шаг за шагом, спрашивая меня только о том, что не можешь сделать сам (создание бесплатного аккаунта Supabase, вставка ключей).
+3. Сохрани профиль ниже дословно в config/user_profile.md — это мой профиль кандидата, его используют промпты оценки.
+4. Когда установка готова — помоги добавить первые 5–10 интересных мне компаний через /add-source, затем запусти /fetch, /filter и /score и покажи результат.
+
+Вот мой профиль:`
+            : `I want to set up my own AI-powered job search pipeline using the open-source repo https://github.com/ncalavera/llm-job-pipeline
+
+Please:
+1. Clone the repo into the current folder.
+2. Read INSTALL.md in the repo root and follow it step by step, asking me only for things you cannot do yourself (creating a free Supabase account, pasting API keys).
+3. Save the profile below verbatim as config/user_profile.md — this is my candidate profile that the scoring prompts use.
+4. When setup is done, help me add the first 5–10 companies I care about with /add-source, then run /fetch, /filter and /score, and show me the results.
+
+Here is my profile:`;
+
+        return `${intro}
+
+--- BEGIN config/user_profile.md ---
+${buildProfile()}
+--- END config/user_profile.md ---
+`;
+      }
+
+      document
+        .getElementById("copyPrompt")
+        .addEventListener("click", async () => {
+          await navigator.clipboard.writeText(buildPrompt());
+          document.getElementById("copiedMark").textContent = I18N[lang].copied;
+          setTimeout(
+            () => (document.getElementById("copiedMark").textContent = ""),
+            2500,
+          );
+        });
+
+      document.getElementById("dlPrompt").addEventListener("click", () => {
+        const blob = new Blob([buildPrompt()], { type: "text/markdown" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "job-pipeline-setup-prompt.md";
+        a.click();
+        URL.revokeObjectURL(a.href);
+      });
+
+      // Browser language auto-detect
+      setLang(/^ru/i.test(navigator.language || "") ? "ru" : "en");
+    </script>
+  </body>
+</html>
