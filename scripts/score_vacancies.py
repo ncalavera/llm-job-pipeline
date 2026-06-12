@@ -389,9 +389,12 @@ def cmd_save(_args):
     errors = 0
 
     for entry in data:
-        if entry.get("payload_kind") != "vacancy":
+        # payload_kind defaults to "vacancy" when omitted (the docs only ever
+        # describe vacancy scoring), but reject any *other* explicit kind.
+        kind = entry.get("payload_kind", "vacancy")
+        if kind != "vacancy":
             print(
-                f"ERROR: wrong payload_kind={entry.get('payload_kind')!r}, "
+                f"ERROR: wrong payload_kind={kind!r}, "
                 f"expected 'vacancy'. Skipping {entry.get('org', '?')} — "
                 f"{entry.get('title', '?')}",
                 file=sys.stderr,
@@ -399,15 +402,30 @@ def cmd_save(_args):
             errors += 1
             continue
 
+        # Two accepted shapes:
+        #   1. Strict: a pre-built nested ``score_data`` with DB column names.
+        #   2. Flat (what AGENTS.md + /jobs-score tell agents to produce):
+        #      top-level ``score`` / ``reasoning`` / ``short_summary`` /
+        #      ``hard_requirements`` / ``tags``. Build score_data from it.
         score_data = entry.get("score_data")
         if not score_data:
-            print(
-                f"ERROR: missing score_data for {entry.get('org', '?')} — "
-                f"{entry.get('title', '?')}",
-                file=sys.stderr,
-            )
-            errors += 1
-            continue
+            if "score" in entry:
+                result = {
+                    "score": entry["score"],
+                    "reasoning": entry.get("reasoning", ""),
+                    "short_summary": entry.get("short_summary", ""),
+                    "hard_requirements": entry.get("hard_requirements", []),
+                    "deadline": entry.get("deadline"),
+                }
+                score_data = _make_score_data(result, entry)
+            else:
+                print(
+                    f"ERROR: missing both score_data and a top-level score for "
+                    f"{entry.get('org', '?')} — {entry.get('title', '?')}",
+                    file=sys.stderr,
+                )
+                errors += 1
+                continue
 
         # Geography is enforced in the pre-score filter — no score cap here.
 
@@ -435,44 +453,60 @@ def cmd_save(_args):
     conn.commit()
     print(f"Saved {len(data) - errors} scores ({total_records} records). Errors: {errors}")
 
-    # Self-healing: normalize locations[] for any vacancy that has dirty city/country.
-    # Idempotent — returns 0 changes on already-clean rows.
+    # Self-healing: normalize locations[] for any vacancy that has dirty
+    # city/country. The optional cleanup_locations module is not part of the
+    # public repo; when it is absent we simply skip this step silently (no
+    # noisy "No module named 'cleanup_locations'" line on every --save).
     try:
-        from cleanup_locations import normalize_location
-        scored_ids = [m for entry in data for m in entry.get("member_ids", [])]
-        if scored_ids:
-            heal_cur = conn.cursor()
-            heal_cur.execute(
-                "SELECT id, locations, full_description, snippet "
-                "FROM vacancy WHERE id = ANY(%s::uuid[]) AND locations IS NOT NULL",
-                ([str(i) for i in scored_ids],),
-            )
-            healed = 0
-            for vid, locs, desc, snip in heal_cur.fetchall():
-                full_text = (desc or "") + "\n" + (snip or "")
-                new_locs = []
-                changed = False
-                for loc in locs:
-                    cleaned, changes = normalize_location(loc, full_text)
-                    if changes:
-                        changed = True
-                    new_locs.append(cleaned)
-                if changed:
-                    from psycopg2.extras import Json
-                    heal_cur.execute(
-                        "UPDATE vacancy SET locations = %s WHERE id = %s",
-                        (Json(new_locs), vid),
-                    )
-                    healed += 1
-            heal_cur.close()
-            if healed:
-                conn.commit()
-                print(f"Self-healed {healed} vacancies with dirty locations.")
+        import importlib.util
+        if importlib.util.find_spec("cleanup_locations") is not None:
+            from cleanup_locations import normalize_location
+            scored_ids = [m for entry in data for m in entry.get("member_ids", [])]
+            if scored_ids:
+                heal_cur = conn.cursor()
+                heal_cur.execute(
+                    "SELECT id, locations, full_description, snippet "
+                    "FROM vacancy WHERE id = ANY(%s::uuid[]) AND locations IS NOT NULL",
+                    ([str(i) for i in scored_ids],),
+                )
+                healed = 0
+                for vid, locs, desc, snip in heal_cur.fetchall():
+                    full_text = (desc or "") + "\n" + (snip or "")
+                    new_locs = []
+                    changed = False
+                    for loc in locs:
+                        cleaned, changes = normalize_location(loc, full_text)
+                        if changes:
+                            changed = True
+                        new_locs.append(cleaned)
+                    if changed:
+                        from db_backend import Json
+                        heal_cur.execute(
+                            "UPDATE vacancy SET locations = %s WHERE id = %s",
+                            (Json(new_locs), vid),
+                        )
+                        healed += 1
+                heal_cur.close()
+                if healed:
+                    conn.commit()
+                    print(f"Self-healed {healed} vacancies with dirty locations.")
     except Exception as e:
         # A failed statement poisons the shared connection — roll back so the
-        # dashboard regeneration below still works.
+        # auto-archive + dashboard steps below still work.
         conn.rollback()
         print(f"Self-healing skipped: {e}", file=sys.stderr)
+
+    # Auto-archive low-scoring unseen vacancies (finding #10). The DAL pauses
+    # score-threshold archival by default under pure-fit scoring (a high score
+    # in an excluded geography would be wrongly deleted), so it only fires when
+    # the caller passes --archive. Without the flag we print one line so the
+    # documented step is visibly run, not silently missing.
+    from database_supabase import archive_vacancies
+    if getattr(_args, "archive", False):
+        archived = archive_vacancies(force=True)
+        print(f"Auto-archived {len(archived)} low-scoring unseen vacancies.")
+    else:
+        archive_vacancies()  # prints the "paused" notice; no-op without --archive
 
     # Regenerate dashboard so ticker and stats reflect new scores
     from report import generate_dashboard
@@ -622,8 +656,18 @@ def main():
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-workers", type=int, default=MAX_CONCURRENT)
+    parser.add_argument(
+        "--archive", action="store_true",
+        help="With --save: auto-archive unseen vacancies scoring below "
+             "LLM_SCORE_THRESHOLD after saving (default: archival stays paused)",
+    )
 
     args = parser.parse_args()
+
+    # Always announce the backend on stderr (safe even in --local mode where
+    # stdout carries pure JSON for the subagents).
+    from db_backend import print_backend_banner
+    print_backend_banner(sys.stderr)
 
     if args.openclaw:
         cmd_openclaw(args)
