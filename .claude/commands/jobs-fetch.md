@@ -2,7 +2,7 @@
 description: Fetch new vacancies from configured sources (ATS + job boards). Interactive mode — source selection, TTL cache, tier filtering, and optional auto-score pipeline.
 ---
 
-# /fetch
+# /jobs-fetch
 
 Runs `scripts/fetch_vacancies.py` with the right flags after a short interactive dialog.
 
@@ -150,7 +150,7 @@ If the user confirms, open each careers page in the browser for manual inspectio
 
 If new vacancies are few or zero — that is normal. The default TTL is 3–7 days. Use `--force-all` or `--companies "Name1,Name2"` to bypass the cooldown.
 
-If a company's `fetch_error` keeps increasing, its careers page likely changed structure. Re-run `/add-source` for that company to re-detect the ATS.
+If a company's `fetch_error` keeps increasing, its careers page likely changed structure. Re-run `/jobs-add` for that company to re-detect the ATS.
 
 **Does NOT auto-archive. Does NOT regenerate the dashboard.** Those are separate steps.
 

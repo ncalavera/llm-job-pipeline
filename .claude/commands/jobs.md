@@ -34,7 +34,7 @@ source ~/.zshrc 2>/dev/null && python3 scripts/filter_vacancies.py 2>&1
 
 ## Step 3: Score the new vacancies
 
-Score the unscored vacancies. Use the standard scoring flow (`/score`): one Opus
+Score the unscored vacancies. Use the standard scoring flow (`/jobs-score`): one Opus
 subagent per vacancy, save results via `score_vacancies.py --save`. Keep the
 batch bounded (e.g. the newest 20-30) so a daily run stays fast.
 
@@ -91,4 +91,4 @@ browser. Otherwise mention they can launch it with
 ## Done
 
 Summarize: N new fetched, M scored, the verdicts captured (liked/passed counts),
-and how many liked vacancies are now waiting for a deeper look (`/triage`).
+and how many liked vacancies are now waiting for a deeper look (`/jobs-apply`).

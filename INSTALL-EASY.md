@@ -57,13 +57,13 @@ Those three packages cover fetching and the local database. (You do **not** need
 You do not create or configure a database. The first time anything connects, the
 pipeline creates `data/jobsearch.db` and its tables for you.
 
-## 3. One command: `/start`
+## 3. One command: `/jobs-start`
 
 Open your agent in the repo and run (non-Claude agents: follow
-`.claude/commands/start.md`):
+`.claude/commands/jobs-start.md`):
 
 ```
-/start
+/jobs-start
 ```
 
 It will:
@@ -102,7 +102,7 @@ open while you review; press Ctrl+C to stop.
 ## Adding more companies later
 
 ```
-/add-source Khan Academy
+/jobs-add Khan Academy
 ```
 
 Auto-detects the ATS, adds it, runs a test fetch — same as hardcore mode.
@@ -112,7 +112,7 @@ Auto-detects the ATS, adds it, runs a test fetch — same as hardcore mode.
 Set `SUPABASE_DB_URL` (and the dashboard env vars) and the exact same scripts
 talk to Supabase instead of SQLite — no code changes. Follow
 [INSTALL.md](INSTALL.md) from step 3, then re-add your companies (or migrate the
-SQLite rows). Your commands (`/fetch`, `/score`, `/triage`, …) keep working.
+SQLite rows). Your commands (`/jobs-fetch`, `/jobs-score`, `/jobs-apply`, …) keep working.
 
 ## Troubleshooting
 

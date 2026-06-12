@@ -1,8 +1,8 @@
 ---
-description: Quality gate between /fetch and /score — classifies unscored vacancies, deletes junk by title/location/geo bucket, optionally deduplicates cross-board. Suggests blacklist improvements.
+description: Quality gate between /jobs-fetch and /jobs-score — classifies unscored vacancies, deletes junk by title/location/geo bucket, optionally deduplicates cross-board. Suggests blacklist improvements.
 ---
 
-# /filter
+# /jobs-filter
 
 Quality gate. Runs `scripts/filter_vacancies.py` and interprets the output.
 
@@ -169,9 +169,9 @@ FILTER COMPLETE
   Enriched:  {count} vacancies
   Blacklist: {count} new patterns
   LLM review:{reviewed} reviewed, {junk} junk, {new_filters} filters
-  Ready:     {ready_count} vacancies for /score
+  Ready:     {ready_count} vacancies for /jobs-score
 ═══════════════════════════════════════
-  Next: /score --limit {ready_count}
+  Next: /jobs-score --limit {ready_count}
 ```
 
 ## If the filter removes something important
@@ -181,7 +181,7 @@ Each `delete_blacklist` entry shows which pattern matched. If a pattern is a fal
 1. Open `scripts/config.py`.
 2. Find the pattern in `GLOBAL_BLACKLIST`.
 3. Replace it with a narrower expression (e.g. `software engineer`, `senior engineer` instead of just `engineer`).
-4. Re-run `/filter`.
+4. Re-run `/jobs-filter`.
 
 ## If relevant vacancies keep slipping through
 
@@ -191,6 +191,6 @@ If vacancies you then mark `passed` keep appearing in `ready`, add a pattern to 
 
 - **Never auto-delete** — always show preview and wait for explicit confirmation.
 - **HTML report** — tell user the path, never open automatically.
-- **Archive format** — `vacancies/archive/filter_YYYYMMDD_HHMM.json`.
+- **Archive format** — `vacancies/jobs-archive/filter_YYYYMMDD_HHMM.json`.
 - **Blacklist edits need confirmation** — show exact changes before editing `config.py`.
-- **After filtering, suggest /score** — the natural next step in the pipeline.
+- **After filtering, suggest /jobs-score** — the natural next step in the pipeline.

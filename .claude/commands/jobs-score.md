@@ -1,14 +1,14 @@
 ---
-description: Run LLM scoring via Claude Opus subagents. One subagent per vacancy (no batching). Saves score, reasoning, tags, hard_requirements, summary. Pure-fit scoring — geography handled by /filter, not by the scoring prompt.
+description: Run LLM scoring via Claude Opus subagents. One subagent per vacancy (no batching). Saves score, reasoning, tags, hard_requirements, summary. Pure-fit scoring — geography handled by /jobs-filter, not by the scoring prompt.
 ---
 
-# /score
+# /jobs-score
 
 Scores vacancies in parallel via subagents in Claude Code (within the subscription's token limits), without calling the Anthropic API directly. Default batch: 20 vacancies, 5 in parallel.
 
 ## Pure-fit scoring model
 
-The scoring prompt evaluates **role fit only** — skills, seniority, domain, responsibilities. Geography and visa restrictions are **not** part of the LLM score; they are handled earlier in the `/filter` step via geo buckets. This means a great role in the wrong location still gets a high score so you can make an informed decision, rather than being silently downgraded.
+The scoring prompt evaluates **role fit only** — skills, seniority, domain, responsibilities. Geography and visa restrictions are **not** part of the LLM score; they are handled earlier in the `/jobs-filter` step via geo buckets. This means a great role in the wrong location still gets a high score so you can make an informed decision, rather than being silently downgraded.
 
 ## Steps
 
@@ -51,7 +51,7 @@ The scoring prompt evaluates **role fit only** — skills, seniority, domain, re
     - Score distribution for this session
     - Top candidates (score ≥ 50)
     - Scraping quality issues found during scoring (not-a-vacancy artifacts, broken pages, incomplete descriptions)
-    - Recommendations for `/filter` and `/fetch` pipeline improvements
+    - Recommendations for `/jobs-filter` and `/jobs-fetch` pipeline improvements
 
 ## Auto-archive after scoring
 
@@ -82,4 +82,4 @@ Uses SSH to a remote host configured via `OPENCLAW_SSH_*` environment variables.
 
 - `Empty profile`: `config/user_profile.md` not created or empty. Copy from `user_profile.example.md`.
 - `Subagent timeout`: one subagent hung. Reduce parallelism in the orchestrator or re-run (scoring is idempotent).
-- **High blind rate**: more than 20% of vacancies have no description. Run `/fetch` with enrichment before scoring for better accuracy.
+- **High blind rate**: more than 20% of vacancies have no description. Run `/jobs-fetch` with enrichment before scoring for better accuracy.

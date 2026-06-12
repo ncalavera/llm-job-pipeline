@@ -2,9 +2,9 @@
 description: Deep review of liked vacancies. Structured interview per vacancy, apply/research/network/skip verdicts, issue tracking integration, and pipeline calibration feedback.
 ---
 
-# /triage
+# /jobs-apply
 
-When LLM scoring has surfaced liked vacancies — `/triage` walks through them one by one and helps make an informed decision.
+When LLM scoring has surfaced liked vacancies — `/jobs-apply` walks through them one by one and helps make an informed decision.
 
 ## Steps
 
@@ -77,19 +77,19 @@ If the user provides feedback:
 
 ## When to run
 
-- After each `/score` session — to review newly liked vacancies.
-- Before `/finish-session` — to clean up the liked list.
+- After each `/jobs-score` session — to review newly liked vacancies.
+- Before `/jobs-finish` — to clean up the liked list.
 
 ## Files
 
 - `scripts/triage.py` — helpers (load, group, persist).
 - `vacancy.triage` JSONB column — stores notes and decision metadata.
-- `triage/triage.json` — session history (metadata only; Supabase `vacancy.status` is the source of truth).
+- `triage/jobs-apply.json` — session history (metadata only; Supabase `vacancy.status` is the source of truth).
 - `triage/session-notes-{date}.md` — running Markdown notes for the session.
 
 ## Auto-archive note
 
-The auto-archive by score threshold is currently paused under pure-fit scoring — do not archive automatically from within `/triage`. Use `/archive` explicitly after reviewing.
+The auto-archive by score threshold is currently paused under pure-fit scoring — do not archive automatically from within `/jobs-apply`. Use `/jobs-archive` explicitly after reviewing.
 
 ## Important rules
 

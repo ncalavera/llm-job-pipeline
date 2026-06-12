@@ -78,10 +78,10 @@ paste the generated profile here instead.
 ## 6. Add your first companies
 
 Open your agent in the repo and use the command (non-Claude agents: follow
-`.claude/commands/add-source.md`):
+`.claude/commands/jobs-add.md`):
 
 ```
-/add-source Stripe
+/jobs-add Stripe
 ```
 
 It auto-detects the company's ATS (Greenhouse, Lever, Ashby, …), adds it to
@@ -93,9 +93,9 @@ about. You can also bulk-import from a CSV — see `examples/companies.example.c
 In your agent:
 
 ```
-/fetch     # fetch vacancies from all your companies
-/filter    # quality gate: junk removal, dedup, geography buckets
-/score     # LLM-score each vacancy against your profile (1 subagent per vacancy)
+/jobs-fetch     # fetch vacancies from all your companies
+/jobs-filter    # quality gate: junk removal, dedup, geography buckets
+/jobs-score     # LLM-score each vacancy against your profile (1 subagent per vacancy)
 ```
 
 Scoring runs inside your agent — one vacancy per request (see AGENTS.md), scored
@@ -105,9 +105,9 @@ database.
 Then triage from the terminal:
 
 ```
-/vac list           # top unseen vacancies by score
-/vac show <id>      # full description + scoring reasoning
-/vac mark <id> liked
+/jobs-vac list           # top unseen vacancies by score
+/jobs-vac show <id>      # full description + scoring reasoning
+/jobs-vac mark <id> liked
 ```
 
 ## 8. Dashboard (optional)
@@ -148,9 +148,9 @@ A daily push of your top unscored vacancies with 👍/👎 inline buttons.
 Once set up, the loop is:
 
 ```
-/fetch → /filter → /score        # morning, ~5 min, mostly automated
-/vac list → like/pass            # over coffee, or via Telegram buttons
-/triage                          # weekly: decide what to actually apply to
+/jobs-fetch → /jobs-filter → /jobs-score        # morning, ~5 min, mostly automated
+/jobs-vac list → like/pass            # over coffee, or via Telegram buttons
+/jobs-apply                          # weekly: decide what to actually apply to
 ```
 
 ## Troubleshooting

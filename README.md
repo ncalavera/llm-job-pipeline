@@ -15,7 +15,7 @@ posting.
 ## Two modes
 
 1. **Simple mode — zero signups.** The database is a local SQLite file that
-   creates itself; the dashboard runs on localhost; `/start` discovers your
+   creates itself; the dashboard runs on localhost; `/jobs-start` discovers your
    first companies from your profile and `/jobs` is your one daily command.
    No Supabase, no Vercel, ~5 minutes. Runbook: [INSTALL-EASY.md](INSTALL-EASY.md).
 2. **Full mode — cloud setup.** Hosted Supabase database, password-protected
@@ -52,7 +52,7 @@ and asks you only for the things it can't do itself.
   vacancies at not-yet-reviewed companies get rescued and flagged hot, so you
   approve companies with evidence in front of you.
 - **Triage:** dashboard (companies / catalog / pipeline / archive views),
-  `/vac` terminal CLI, or a daily Telegram digest with 👍/👎 buttons that
+  `/jobs-vac` terminal CLI, or a daily Telegram digest with 👍/👎 buttons that
   write statuses straight back to the database.
 
 ## Flow
@@ -95,7 +95,7 @@ Typical setup: **subscription you already have + $0/month.**
 - It won't find unpublished roles — a big share of good positions never get
   posted. Networking, referrals and communities stay on you.
 - It's not a hosted service. You run it, you own the data, you babysit it
-  (~10 minutes a day, one `/fetch → /filter → /score` cycle).
+  (~10 minutes a day, one `/jobs-fetch → /jobs-filter → /jobs-score` cycle).
 - It doesn't apply for you. It gets you a short, scored list worth your time.
 
 ## Quick start (full mode, manual)
@@ -143,7 +143,7 @@ The file feeds the scoring prompts via placeholders (`{{USER_PROFILE}}`,
 
 ### 5. Add companies to monitor
 
-In your agent: `/add-source CompanyName` (non-Claude agents: follow `.claude/commands/add-source.md`) — auto-detects the ATS, adds the
+In your agent: `/jobs-add CompanyName` (non-Claude agents: follow `.claude/commands/jobs-add.md`) — auto-detects the ATS, adds the
 company, runs a test fetch. Or bulk-import `examples/companies.example.csv`
 via the Supabase SQL Editor.
 
@@ -178,27 +178,27 @@ You only need three:
 
 | Command | When | What it does |
 | --- | --- | --- |
-| `/start` | once | Discovers starter companies from your profile, fetches, scores, opens the dashboard |
+| `/jobs-start` | once | Discovers starter companies from your profile, fetches, scores, opens the dashboard |
 | `/jobs` | daily | Fetch → filter → score → top new matches in chat, like/pass verdicts saved |
-| `/triage` | weekly | Deep review of liked vacancies — decide what to actually apply to |
+| `/jobs-apply` | weekly | Deep review of liked vacancies — decide what to actually apply to |
 
 `/jobs` runs the whole machinery (fetching, junk filtering, scoring,
 archiving), so you never think about the stages. To add a company, just ask
-the agent ("add Stripe") — it uses `/add-source` itself.
+the agent ("add Stripe") — it uses `/jobs-add` itself.
 
 <details>
 <summary><b>Advanced commands</b> — individual stages, for fine control</summary>
 
 | Command | What it does |
 | --- | --- |
-| `/add-source` | Add a company: ATS auto-detection, test fetch |
-| `/fetch` | Vacancy fetching alone, with source selection |
-| `/filter` | Quality gate alone: junk removal, dedup, geography buckets |
-| `/score` | LLM scoring alone (1 vacancy = 1 request) |
-| `/archive` | Preview + confirm archiving of low scores |
-| `/vac` | Terminal triage CLI, no dashboard needed |
-| `/digest` | Send/poll the Telegram digest (full mode) |
-| `/finish-session` | Regenerate dashboard, commit, push (full mode) |
+| `/jobs-add` | Add a company: ATS auto-detection, test fetch |
+| `/jobs-fetch` | Vacancy fetching alone, with source selection |
+| `/jobs-filter` | Quality gate alone: junk removal, dedup, geography buckets |
+| `/jobs-score` | LLM scoring alone (1 vacancy = 1 request) |
+| `/jobs-archive` | Preview + confirm archiving of low scores |
+| `/jobs-vac` | Terminal triage CLI, no dashboard needed |
+| `/jobs-digest` | Send/poll the Telegram digest (full mode) |
+| `/jobs-finish` | Regenerate dashboard, commit, push (full mode) |
 
 </details>
 

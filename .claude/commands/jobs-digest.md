@@ -2,7 +2,7 @@
 description: Send a daily Telegram digest of top unseen vacancies and poll button responses back into Supabase.
 ---
 
-# /digest
+# /jobs-digest
 
 Sends the top unseen vacancies to a Telegram chat with inline Like/Pass buttons, then polls button presses back into `vacancy.status`.
 

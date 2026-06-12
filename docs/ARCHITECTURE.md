@@ -176,7 +176,7 @@ long-polling listener writes the taps back to `vacancy.status` as
 `liked`/`passed` (`poll` mode). Strong vacancies at unreviewed candidate
 companies go into a separate buttons-free section so deadlines aren't
 missed while the company waits for review. Run `poll --loop` as a daemon
-and `send` from cron; see `.claude/commands/digest.md`.
+and `send` from cron; see `.claude/commands/jobs-digest.md`.
 
 ## Architecture decisions
 

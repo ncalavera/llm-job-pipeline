@@ -2,7 +2,7 @@
 description: Interactive archival of low-scoring unseen vacancies. Shows score brackets, flags blind-scored borderlines, requires explicit confirmation, and supports restore.
 ---
 
-# /archive
+# /jobs-archive
 
 Helps clean the dashboard of vacancies that scored low but were not touched by auto-archive (or where scoring was unreliable in either direction).
 
@@ -113,7 +113,7 @@ python3 -c "
 import json
 from pathlib import Path
 
-archive_dir = Path('vacancies/archive')
+archive_dir = Path('vacancies/jobs-archive')
 archives = sorted(archive_dir.glob('archived_*.json'), reverse=True)
 
 if not archives:
@@ -135,9 +135,9 @@ To restore specific vacancies, update their `status` back to `unseen` in Supabas
 
 ## When to run
 
-- After each `/score` — check what landed in the lower brackets.
+- After each `/jobs-score` — check what landed in the lower brackets.
 - Weekly — clean up accumulated noise.
-- Before `/triage` — keep the liked list clean.
+- Before `/jobs-apply` — keep the liked list clean.
 
 ## Important rules
 

@@ -2,7 +2,7 @@
 description: KISS-CLI for daily vacancy triage from the terminal — list / show / mark / open / companies over Supabase, without opening the dashboard.
 ---
 
-# /vac
+# /jobs-vac
 
 Thin CLI on top of Supabase for everyday triage. Use it when you do not want to open the dashboard or are on a server without a browser.
 
@@ -32,7 +32,7 @@ If a `vac` alias is configured in your shell — you can write `vac <command>` d
 
 - `--limit N` — number of rows to show (default 20 for `list`).
 - `--status liked,unseen` — comma-separated list of statuses.
-- `--no-website` — companies without a `careers_url` (useful for `/add-source`).
+- `--no-website` — companies without a `careers_url` (useful for `/jobs-add`).
 - `--geo {bucket}` — filter by geographic bucket. Accepted values: `uk`, `germany`, `europe`, `us`, `cis`, `other`, `unknown`. Buckets are assigned by `geo.py` based on vacancy location data.
 
 ## Supported statuses
@@ -69,11 +69,11 @@ python3 scripts/vac.py list --geo uk
 ## When NOT to use
 
 - Bulk operations (>10 vacancies) — use the dashboard.
-- Triage with long notes — use `/triage`, which writes to `vacancy.triage` JSONB.
+- Triage with long notes — use `/jobs-apply`, which writes to `vacancy.triage` JSONB.
 - Full-text search in descriptions — no full-text search here; use the Supabase SQL Editor.
 
 ## Architecture
 
 - Code: `scripts/vac.py` (no dependencies beyond psycopg2 and stdlib).
-- Database: Supabase (shared with `/fetch`, `/score`, `/triage`). No local caches.
+- Database: Supabase (shared with `/jobs-fetch`, `/jobs-score`, `/jobs-apply`). No local caches.
 - DAL: `database_supabase.py` — `load_vacancies()`, `update_vacancy_status()`.

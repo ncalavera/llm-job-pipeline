@@ -9,12 +9,12 @@ The list, briefly:
 
 ## The three you actually use
 
-Day to day you need only `/start` (once), `/jobs` (daily) and `/triage`
+Day to day you need only `/jobs-start` (once), `/jobs` (daily) and `/jobs-apply`
 (weekly). `/jobs` chains fetch → filter → score → verdict capture, so the
 stage commands below are for fine control and debugging, not the daily
 routine.
 
-## `/fetch` — fetch vacancies
+## `/jobs-fetch` — fetch vacancies
 
 Interactive fetching:
 
@@ -36,7 +36,7 @@ Options:
 - `--tier S` — companies with tier S.
 - `--auto-score` — run filter + score right after the fetch.
 
-## `/filter` — clean out junk
+## `/jobs-filter` — clean out junk
 
 The quality gate between fetching and scoring:
 
@@ -55,7 +55,7 @@ Options:
 - `--dedup` — enable fuzzy title comparison (0.85 threshold).
 - `--dry-run` — show what would be deleted without touching anything.
 
-## `/score` — score with Claude
+## `/jobs-score` — score with Claude
 
 Launches an Opus subagent per vacancy (1 vacancy = 1 request). Default
 parallelism is 5 concurrent subagents.
@@ -69,11 +69,11 @@ parallelism is 5 concurrent subagents.
 4. Prints a session report with score distribution and junk flags.
 
 Scoring is **pure fit** (prompt v4.0): geography and visa considerations
-are excluded — they're handled by `/filter`. Score-threshold auto-archive
+are excluded — they're handled by `/jobs-filter`. Score-threshold auto-archive
 is currently paused under pure-fit scoring (opt-in only via
 `archive_vacancies(force=True)`).
 
-## `/archive` — clean out old postings
+## `/jobs-archive` — clean out old postings
 
 Interactive archival of low-scoring unreviewed vacancies:
 
@@ -88,7 +88,7 @@ Interactive archival of low-scoring unreviewed vacancies:
 Previously archived vacancies can be restored with
 `vac mark <id> unseen`.
 
-## `/triage` — deep review of liked vacancies
+## `/jobs-apply` — deep review of liked vacancies
 
 A structured interview over every liked vacancy:
 
@@ -102,7 +102,7 @@ A structured interview over every liked vacancy:
 5. At the end of the session compares decisions against `llm_score` — if
    they diverge, suggests a prompt update.
 
-## `/vac` — terminal triage
+## `/jobs-vac` — terminal triage
 
 A KISS CLI for day-to-day work from the terminal, no browser:
 
@@ -120,7 +120,7 @@ python3 scripts/vac.py companies             # company summary
 `cis`, `other`, `unknown`. Use it when you don't feel like opening the
 dashboard.
 
-## `/digest` — Telegram digest
+## `/jobs-digest` — Telegram digest
 
 Drives `scripts/telegram_digest.py`:
 
@@ -135,7 +135,7 @@ Drives `scripts/telegram_digest.py`:
 Configuration is env-driven: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
 `SUPABASE_DB_URL` (see `.env.example`).
 
-## `/add-source` — a new company
+## `/jobs-add` — a new company
 
 Adds a company to monitoring:
 
@@ -146,7 +146,7 @@ Adds a company to monitoring:
 4. If the result looks right, adds it to `company`; otherwise shows what
    went wrong.
 
-## `/finish-session` — close the session
+## `/jobs-finish` — close the session
 
 Finalizes the work:
 

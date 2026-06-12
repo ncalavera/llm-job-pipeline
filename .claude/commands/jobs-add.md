@@ -2,7 +2,7 @@
 description: Add a new company to the vacancy monitoring pipeline. Auto-detects the ATS (Greenhouse, Lever, Ashby, Workable, Workday), runs a test fetch, and adds the record to Supabase.
 ---
 
-# /add-source
+# /jobs-add
 
 Adds a new company to the pipeline.
 
@@ -38,7 +38,7 @@ If the careers URL itself is an ATS URL, extract the slug directly:
 - `https://boards.greenhouse.io/{SLUG}/` → slug = `{SLUG}`
 - `https://jobs.lever.co/{SLUG}/` → slug = `{SLUG}`
 - `https://jobs.ashby.io/{SLUG}/` → slug = `{SLUG}`
-- `https://apply.workable.com/{SLUG}/` → slug = `{SLUG}`
+- `https://jobs-apply.workable.com/{SLUG}/` → slug = `{SLUG}`
 - `https://{TENANT}.myworkdayjobs.com/{BOARD}/` → tenant = `{TENANT}`, board = `{BOARD}`
 
 ### 1c. Probe known API endpoints
@@ -63,7 +63,7 @@ curl -s --max-time 8 \
   -w "\n%{http_code}" | tail -1
 
 # Workable probe
-curl -s --max-time 8 "https://apply.workable.com/api/v3/accounts/${SLUG_GUESS}/jobs" \
+curl -s --max-time 8 "https://jobs-apply.workable.com/api/v3/accounts/${SLUG_GUESS}/jobs" \
   -w "\n%{http_code}" | tail -1
 ```
 
@@ -235,7 +235,7 @@ Test fetch results:
    No description:          Z  (blind scoring risk)
 
 {If all good:}
-Ready for scoring! Run /score to evaluate {COMPANY_NAME} roles.
+Ready for scoring! Run /jobs-score to evaluate {COMPANY_NAME} roles.
 ```
 
 ## If ATS is not detected

@@ -2,7 +2,7 @@
 description: End-of-session finalization — regenerate public/data.js, commit changes, push to Vercel.
 ---
 
-# /finish-session
+# /jobs-finish
 
 Run at the end of any meaningful session (added a company, scored a batch, reconfigured a prompt).
 

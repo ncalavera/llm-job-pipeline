@@ -1,8 +1,8 @@
 ---
-description: First-run setup for the easy (no-Supabase) install path. Checks the user profile, discovers 10-15 starter companies matching the user's field and geography, validates each ATS, inserts them, runs the first fetch/filter/score, and launches the local dashboard.
+description: First-run setup for the easy (no-Supabase) install path. Checks the user profile, discovers 10-15 starter companies matching the user's field and geography, validates each ATS, inserts them, runs the first fetch/jobs-filter/jobs-score, and launches the local dashboard.
 ---
 
-# /start
+# /jobs-start
 
 One-time onboarding for a fresh clone. Gets a non-technical user from empty
 database to a working dashboard with real, scored vacancies — no Supabase, no
@@ -29,7 +29,7 @@ get_conn(); print('Connection OK')
 "
 ```
 
-If this is Supabase mode, tell the user `/start` still works but they likely
+If this is Supabase mode, tell the user `/jobs-start` still works but they likely
 want the hardcore path; otherwise continue.
 
 ## Step 1: Check the user profile
@@ -67,7 +67,7 @@ source ~/.zshrc 2>/dev/null && python3 scripts/discover_ats.py --html-scan --com
 
 Keep companies where discovery finds a supported ATS (Greenhouse, Lever, Ashby,
 Workable, Workday, Recruitee, Teamtailor, BambooHR). Drop the rest for now (the
-user can add them later with `/add-source`).
+user can add them later with `/jobs-add`).
 
 Show the user the proposed shortlist (name, careers URL, detected ATS) and wait
 for a yes before inserting anything. This is the only confirmation gate.
@@ -94,7 +94,7 @@ print('added', '{COMPANY_NAME}', cid)
 "
 ```
 
-`ats_config` is an empty string for most ATS types — see `/add-source` Step 3
+`ats_config` is an empty string for most ATS types — see `/jobs-add` Step 3
 for the per-strategy JSON (Greenhouse EU, Workday tenant/board, Firecrawl url).
 
 ## Step 4: First fetch -> filter -> score
@@ -107,7 +107,7 @@ source ~/.zshrc 2>/dev/null && python3 -u scripts/fetch_vacancies.py --companies
 source ~/.zshrc 2>/dev/null && python3 scripts/filter_vacancies.py 2>&1
 ```
 
-Scoring runs one Opus subagent per vacancy (see `/score`). For the first run,
+Scoring runs one Opus subagent per vacancy (see `/jobs-score`). For the first run,
 score the unscored vacancies and save the results. Then regenerate the
 dashboard data:
 

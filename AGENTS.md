@@ -12,16 +12,16 @@ follow it verbatim when the user asks for that workflow:
 
 | User asks for | Runbook |
 | --- | --- |
-| first-time setup | `.claude/commands/start.md` |
+| first-time setup | `.claude/commands/jobs-start.md` |
 | daily check ("/jobs") | `.claude/commands/jobs.md` |
-| fetch vacancies | `.claude/commands/fetch.md` |
-| filter junk | `.claude/commands/filter.md` |
-| score vacancies | `.claude/commands/score.md` |
-| add a company | `.claude/commands/add-source.md` |
-| triage liked vacancies | `.claude/commands/triage.md` |
-| archive low scores | `.claude/commands/archive.md` |
-| terminal triage | `.claude/commands/vac.md` |
-| Telegram digest | `.claude/commands/digest.md` |
+| fetch vacancies | `.claude/commands/jobs-fetch.md` |
+| filter junk | `.claude/commands/jobs-filter.md` |
+| score vacancies | `.claude/commands/jobs-score.md` |
+| add a company | `.claude/commands/jobs-add.md` |
+| triage liked vacancies | `.claude/commands/jobs-apply.md` |
+| archive low scores | `.claude/commands/jobs-archive.md` |
+| terminal triage | `.claude/commands/jobs-vac.md` |
+| Telegram digest | `.claude/commands/jobs-digest.md` |
 
 Install guides: `INSTALL-EASY.md` (simple mode, zero signups) and
 `INSTALL.md` (full mode, Supabase + Vercel).
