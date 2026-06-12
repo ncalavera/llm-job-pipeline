@@ -83,6 +83,49 @@ def test_resolve_unknown_company_is_none(dal):
     assert dal.resolve_company_id("Nonexistent Co") is None
 
 
+def test_registry_loads_company_in_sqlite_mode(dal, monkeypatch):
+    """Regression (finding #1): the company registry must populate on the
+    SQLite backend, with no SUPABASE_DB_URL set.
+
+    Before the fix, company_registry hard-gated on SUPABASE_DB_URL and returned
+    an empty COMPANIES dict in simple mode, so fetch_vacancies reported every
+    company as unknown. Here we add an active company with a fetch_strategy,
+    reload the registry against the same temp SQLite DB, and assert it shows up
+    both in COMPANIES and through fetch's resolution path.
+    """
+    import importlib
+    import sys
+
+    # Insert an active company with a real fetch strategy + slug.
+    cid = dal.ensure_company("Acme Robotics", status="active")
+    conn = dal.get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE company SET fetch_strategy = %s, ats_slug = %s, careers_url = %s "
+        "WHERE id = %s",
+        ("greenhouse", "acmerobotics", "https://acme.example/careers", cid),
+    )
+    conn.commit()
+    cur.close()
+
+    # Reload the registry so module-level COMPANIES is rebuilt from this DB.
+    # db_backend/db_conn stay loaded so the SQLite singleton/env persists.
+    sys.modules.pop("config", None)
+    import company_registry
+    importlib.reload(company_registry)
+
+    assert "Acme Robotics" in company_registry.COMPANIES, \
+        "registry must contain the active company in SQLite mode"
+    assert company_registry.COMPANIES["Acme Robotics"]["strategy"] == "greenhouse"
+
+    # fetch's resolution path: resolve_canonical_name + COMPANIES membership.
+    assert company_registry.resolve_canonical_name("acme robotics") == "Acme Robotics"
+
+    import config
+    importlib.reload(config)
+    assert "Acme Robotics" in config.COMPANIES
+
+
 # ---------------------------------------------------------------------------
 # Merge + load
 # ---------------------------------------------------------------------------

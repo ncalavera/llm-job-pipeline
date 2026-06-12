@@ -25,33 +25,36 @@ _STRATEGY_REQUIRES_URL = {"firecrawl_scrape", "unops_widget"}
 
 
 def _build_companies_from_db() -> dict:
-    """Build COMPANIES dict from Supabase company table.
+    """Build COMPANIES dict from the active backend's company table.
 
-    Only rows with a non-empty fetch_strategy and status != 'inactive'
-    become monitored companies. ats_config JSONB is merged into the config
-    dict for complex fields (Workday tenant/board, Firecrawl url overrides).
+    Only rows with a non-empty fetch_strategy and status = 'active' become
+    monitored companies. ats_config JSONB is merged into the config dict for
+    complex fields (Workday tenant/board, Firecrawl url overrides).
 
-    Degrades gracefully when no database is configured (e.g. offline unit
-    tests): returns an empty registry instead of exiting, so importing this
-    module never requires a live connection.
+    Works identically on both backends — SQLite (simple mode) and Postgres
+    (Supabase) — because it talks to ``get_conn()`` (the db_backend
+    abstraction), not to an env var. Degrades gracefully to an empty registry
+    ONLY on a genuine connection/query failure (e.g. fully offline unit tests),
+    so importing this module never crashes.
     """
-    import os
-    if not (os.environ.get("SUPABASE_DB_URL") or os.environ.get("SUPABASE_DIRECT_URL")):
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT canonical_name, fetch_strategy, status, tier, careers_url,
+                   ats_slug, ats_config, category
+            FROM company
+            WHERE status = 'active'
+              AND fetch_strategy IS NOT NULL
+              AND fetch_strategy != ''
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.commit()
+    except Exception as exc:  # noqa: BLE001 — registry must never crash import
+        print(f"⚠ Company registry: backend unavailable, empty registry ({exc})",
+              file=sys.stderr)
         return {}
-
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT canonical_name, fetch_strategy, status, tier, careers_url,
-               ats_slug, ats_config, category
-        FROM company
-        WHERE status = 'active'
-          AND fetch_strategy IS NOT NULL
-          AND fetch_strategy != ''
-    """)
-    rows = cur.fetchall()
-    cur.close()
-    conn.commit()
 
     companies: dict[str, dict] = {}
     for (name, strategy, status, tier, careers_url,
@@ -93,22 +96,22 @@ def _build_alias_index() -> dict[str, str]:
     """Build alias→canonical_name index from DB.
 
     All aliases are lowercased on read to prevent case-sensitivity bugs.
-    Returns an empty index when no database is configured (offline tests).
+    Works on both backends; returns an empty index only on a genuine backend
+    failure (offline tests).
     """
-    import os
-    if not (os.environ.get("SUPABASE_DB_URL") or os.environ.get("SUPABASE_DIRECT_URL")):
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT canonical_name, aliases
+            FROM company
+            WHERE aliases IS NOT NULL AND array_length(aliases, 1) > 0
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.commit()
+    except Exception:  # noqa: BLE001
         return {}
-
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT canonical_name, aliases
-        FROM company
-        WHERE aliases IS NOT NULL AND array_length(aliases, 1) > 0
-    """)
-    rows = cur.fetchall()
-    cur.close()
-    conn.commit()
 
     index: dict[str, str] = {}
     for canonical, aliases in rows:
@@ -137,19 +140,19 @@ _COMPANIES_LOWER: dict[str, str] = {k.lower(): k for k in COMPANIES}
 def _load_all_known_names() -> set[str]:
     """Return ALL canonical names from DB (including inactive/candidate).
 
-    Returns an empty set when no database is configured (offline tests).
+    Works on both backends; returns an empty set only on a genuine backend
+    failure (offline tests).
     """
-    import os
-    if not (os.environ.get("SUPABASE_DB_URL") or os.environ.get("SUPABASE_DIRECT_URL")):
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT canonical_name FROM company")
+        names = {r[0] for r in cur.fetchall()}
+        cur.close()
+        conn.commit()
+        return names
+    except Exception:  # noqa: BLE001
         return set()
-
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT canonical_name FROM company")
-    names = {r[0] for r in cur.fetchall()}
-    cur.close()
-    conn.commit()
-    return names
 
 
 _ALL_KNOWN_NAMES = _load_all_known_names()
