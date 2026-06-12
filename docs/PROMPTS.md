@@ -1,76 +1,87 @@
-# Шаблоны промптов
+# Prompt templates
 
-Скоринг полагается на два шаблона:
+Scoring relies on two templates:
 
-- `scripts/prompts/vacancy-scoring.md` — оценивает вакансию против
-  профиля.
-- `scripts/prompts/company-scoring.md` — оценивает компанию.
+- `scripts/prompts/vacancy-scoring.md` — scores a vacancy against your
+  profile.
+- `scripts/prompts/company-scoring.md` — scores a company.
 
-Оба содержат плейсхолдеры в формате `{{NAME}}`, которые подменяются на
-секции из `config/user_profile.md`. Загрузчик — `scripts/prompts.py`.
+Both contain `{{NAME}}`-style placeholders, substituted with sections from
+`config/user_profile.md`. The loader is `scripts/prompts.py`.
 
-## Какие плейсхолдеры доступны
+## Pure-fit scoring (v4.0)
 
-| Плейсхолдер | Откуда берётся | Что туда положить |
+The vacancy prompt deliberately contains **no location scoring**.
+Geography, relocation, remote policy, and visa / work-authorisation
+considerations are excluded from the score and from the
+`hard_requirements` field — the score reflects only role fit, mission fit,
+and seniority fit. Geography is enforced earlier by the pre-score filter
+(`filter_vacancies.py` + `geo.py` buckets), which deletes USA-only,
+CIS-in-person, and rest-of-world postings before they ever reach the LLM.
+
+If you add location rules back into the prompt, remember the filter will
+double-penalize — pick one layer.
+
+## Available placeholders
+
+| Placeholder | Comes from | What to put there |
 | --- | --- | --- |
-| `{{USER_PROFILE}}` | секция `## USER_PROFILE` | Кто вы, опыт, навыки, языки |
-| `{{TARGET_ROLES}}` | секция `## TARGET_ROLES` | Какие роли вам нужны |
-| `{{EXCLUDE_PATTERNS}}` | секция `## EXCLUDE_PATTERNS` | Что исключить |
-| `{{SHORT_SUMMARY_INSTRUCTION}}` | секция `## SHORT_SUMMARY_INSTRUCTION` | Как писать саммари для карточки |
-| `{{OUTPUT_LANGUAGE}}` | секция `## OUTPUT_LANGUAGE` | Язык вывода (Russian / English) |
-| `{{ABOUT_INSTRUCTION}}` | секция `## ABOUT_INSTRUCTION` | Как описывать компанию |
-| `{{CUSTOM_CRITERION_LABEL}}` | секция `## CUSTOM_CRITERION_LABEL` | Имя дополнительного критерия |
-| `{{CUSTOM_CRITERION_DESCRIPTION}}` | секция `## CUSTOM_CRITERION_DESCRIPTION` | Описание этого критерия |
-| `{{CUSTOM_BOOST_FIELD}}` | секция `## CUSTOM_BOOST_FIELD` | Имя поля в ответе LLM |
+| `{{USER_PROFILE}}` | `## USER_PROFILE` section | Who you are, experience, skills, languages |
+| `{{TARGET_ROLES}}` | `## TARGET_ROLES` section | Which roles you want |
+| `{{EXCLUDE_PATTERNS}}` | `## EXCLUDE_PATTERNS` section | What to exclude |
+| `{{SHORT_SUMMARY_INSTRUCTION}}` | `## SHORT_SUMMARY_INSTRUCTION` section | How to write the dashboard-card summary |
+| `{{OUTPUT_LANGUAGE}}` | `## OUTPUT_LANGUAGE` section | Output language (English / anything) |
+| `{{ABOUT_INSTRUCTION}}` | `## ABOUT_INSTRUCTION` section | How to describe a company |
+| `{{CUSTOM_CRITERION_LABEL}}` | `## CUSTOM_CRITERION_LABEL` section | Name of your extra criterion |
+| `{{CUSTOM_CRITERION_DESCRIPTION}}` | `## CUSTOM_CRITERION_DESCRIPTION` section | Description of that criterion |
+| `{{CUSTOM_BOOST_FIELD}}` | `## CUSTOM_BOOST_FIELD` section | Field name in the LLM response |
 
-## Как добавить свой плейсхолдер
+## Adding your own placeholder
 
-1. Добавьте секцию в `config/user_profile.md`:
+1. Add a section to `config/user_profile.md`:
    ```markdown
    ## MY_NEW_FIELD
 
-   Сюда любой текст.
+   Any text here.
    ```
-2. Используйте в промпт-шаблоне: `{{MY_NEW_FIELD}}`.
-3. `prompts.py` подхватит автоматически — ничего перекомпилировать не
-   нужно.
+2. Use it in a prompt template: `{{MY_NEW_FIELD}}`.
+3. `prompts.py` picks it up automatically — nothing to recompile.
 
-Если плейсхолдер не найдётся в `user_profile.md`, он останется в тексте
-как есть (так что лучше не оставлять «дыр»).
+If a placeholder isn't found in `user_profile.md`, it stays in the text
+as-is (so don't leave holes).
 
-## Как часто перезапускать скоринг при изменении промпта
+## Re-scoring after a prompt change
 
-Когда вы меняете `user_profile.md` или сам промпт, прошлые скоры остаются
-в БД старыми. Чтобы прогнать всё заново:
+When you change `user_profile.md` or the prompt itself, old scores stay in
+the DB. To re-run everything:
 
 ```sql
--- Сбросить скоры, чтобы /score прошёлся ещё раз
+-- Reset scores so /score runs again
 UPDATE vacancy SET llm_score = NULL, llm_scored_at = NULL
 WHERE status = 'unseen';
 ```
 
-Потом `python3 scripts/score_vacancies.py --local --limit 200`.
+Then `python3 scripts/score_vacancies.py --local --limit 200`.
 
-## Хорошие практики
+## Good practices
 
-- **Не пишите профиль в негативе**: «не хочу X» хуже работает, чем
-  «хочу Y». Используйте `EXCLUDE_PATTERNS` для негативов, `USER_PROFILE`
-  для позитивов.
-- **Конкретика бьёт абстракции**: «8 лет операционных ролей, последние 3
-  — на 100+ человек» работает лучше, чем «senior operations leader».
-- **Перечисляйте языки с уровнями**: «Russian native, English C1,
-  Spanish B2». Без этого LLM не понимает, можно ли вам в роль с
-  «working language: Spanish».
-- **Раз в неделю просматривайте 10 случайных скоров**: если что-то
-  систематически переоценено или недооценено — добавьте правило в
-  `EXCLUDE_PATTERNS` или поправьте профиль.
+- **Don't write the profile in negatives**: "I don't want X" works worse
+  than "I want Y". Use `EXCLUDE_PATTERNS` for negatives, `USER_PROFILE`
+  for positives.
+- **Specifics beat abstractions**: "8 years in operations roles, the last
+  3 at 100+ headcount" works better than "senior operations leader".
+- **List languages with levels**: "English native, German B1, Spanish B2".
+  Without this the LLM can't tell whether a "working language: Spanish"
+  role is viable for you.
+- **Review 10 random scores once a week**: if something is systematically
+  over- or under-scored, add a rule to `EXCLUDE_PATTERNS` or fix the
+  profile.
 
-## Совсем другой язык
+## A different output language
 
-В `OUTPUT_LANGUAGE` может быть `Russian`, `English`, `Spanish`, что
-угодно — LLM подстроится. На дашборде кириллица и латиница рендерятся
-одинаково.
+`OUTPUT_LANGUAGE` can be `English`, `Spanish`, anything — the LLM adapts.
+The dashboard renders any script equally well.
 
-Если хотите английский intake, но русский вывод (или наоборот) — пишите
-profile на любом языке, главное чтобы `OUTPUT_LANGUAGE` совпадал с тем,
-что вы хотите видеть в карточках.
+If you want intake in one language but output in another, write the
+profile in whatever language you like — just make sure `OUTPUT_LANGUAGE`
+matches what you want to see on the cards.

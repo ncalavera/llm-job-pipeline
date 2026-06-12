@@ -1,16 +1,16 @@
-# Архитектура
+# Architecture
 
-## Поток данных
+## Data flow
 
 ```
 ATS / job boards ─┐
                   ├─► fetch_vacancies.py ─► Supabase (vacancy / company)
-Firecrawl scrape ─┘            │
+Firecrawl scrape ─┘            │   └─ quality.py gate on every description write
                                ▼
-                       filter_vacancies.py (mark junk, dedup)
+                       filter_vacancies.py (mark junk, dedup, geo buckets)
                                │
                                ▼
-                       score_vacancies.py  (Claude Opus subagents)
+                       score_vacancies.py  (Claude Opus subagents, pure fit)
                                │
                                ▼
                        fetch_vacancies.py --report-only  ─► public/data.js
@@ -19,128 +19,180 @@ Firecrawl scrape ─┘            │
                                                        Vercel + Supabase API
                                                                 │
                                                                 ▼
-                                                           Дашборд
+                                                           Dashboard
 ```
 
-Все данные живут в Supabase — это единственный источник истины. Локально
-ничего не хранится: на машине только код плюс кэш Firecrawl
+All data lives in Supabase — the single source of truth. Nothing is stored
+locally: the machine holds only the code plus the Firecrawl cache
 (`.firecrawl/`, gitignored).
 
-## Модули
+## Modules
 
 ```
-db_conn.py              # singleton подключения к Postgres
+db_conn.py              # Postgres connection singleton
         │
         ▼
-company_registry.py     # реестр компаний, разрешение алиасов
+company_registry.py     # company registry, alias resolution
         │
         ▼
 database_supabase.py    # DAL: merge / load / score / archive
         │
         ▼
-fetch_vacancies.py      # оркестратор сбора (читает fetchers.py)
-filter_vacancies.py     # чистка после сбора
-score_vacancies.py      # LLM-скоринг
-fetch_companies.py      # Firecrawl-сбор данных о компаниях
-score_companies.py      # LLM-скоринг компаний
+fetch_vacancies.py      # fetch orchestrator (reads fetchers.py)
+filter_vacancies.py     # post-fetch cleanup (blacklist, USA/geo deletion)
+score_vacancies.py      # LLM vacancy scoring
+fetch_companies.py      # Firecrawl company data fetching
+score_companies.py      # LLM company scoring
+
+quality.py              # quality gate for every full_description write
+geo.py                  # geography buckets (uk/germany/europe/us/cis/other)
+telegram_digest.py      # daily Telegram digest with 👍/👎 buttons
 ```
 
-`config.py` импортирует символы из `company_registry.py` для обратной
-совместимости — старый код, который привык брать всё из конфига,
-продолжает работать.
+`config.py` re-exports symbols from `company_registry.py` for backward
+compatibility — older code that takes everything from the config keeps
+working.
 
-## Таблицы
+`quality.py` is dependency-free (stdlib only) and is called by every path
+that persists a job description (ATS merge, board merge, blind
+re-enrichment): it strips leading cookie/consent banners and rejects pages
+that are pure boilerplate (cookie wall, HTTP-error page, navigation chrome)
+so they never overwrite a real description.
 
-Описаны в [sql/schema.sql](../sql/schema.sql). Кратко:
+## Tables
 
-**`company`** — одна строка на каноническое название. Альтернативные
-имена живут в массиве `aliases TEXT[]` с GIN-индексом. Колонки:
+Described in [sql/schema.sql](../sql/schema.sql). In short:
 
-- Идентификация: `id`, `canonical_name`, `aliases`.
+**`company`** — one row per canonical name. Alternative spellings live in
+the `aliases TEXT[]` array with a GIN index. Columns:
+
+- Identity: `id`, `canonical_name`, `aliases`.
 - Pipeline gate: `status` (`active` / `candidate` / `inactive`),
-  `status_reason`. Только `active` подаются в скоринг и дашборд.
-- Источник: `fetch_strategy`, `ats_slug`, `careers_url`, `ats_config`.
-- Метаданные сбора: `last_fetched`, `vacancy_count`, `fetch_status`.
+  `status_reason`. Only `active` companies feed scoring and the dashboard.
+- Source: `fetch_strategy`, `ats_slug`, `careers_url`, `website`,
+  `ats_config`.
+- Fetch metadata: `last_fetched`, `vacancy_count`, `fetch_status`.
 - Enrichment: `about`, `mission_fit`, `alignment_score`, `enriched_at`.
 
-**`vacancy`** — одна строка на вакансию. Дедупликация через
-`dedup_hash` = `md5(lower(canonical_name|title))`. Колонки:
+**`vacancy`** — one row per posting. Deduplication via
+`dedup_hash` = `md5(lower(canonical_name|title))`. Columns:
 
-- Идентификация: `id`, `dedup_hash`, `company_id` (FK).
-- Контент: `title`, `snippet`, `full_description`, `compensation`,
-  `deadline`, `department`, `locations` (JSONB-массив).
-- Триаж: `status` (`unseen` / `liked` / `passed` / `to_apply` /
-  `to_research` / `to_network` / `skipped` / `applied`),
+- Identity: `id`, `dedup_hash`, `company_id` (FK).
+- Content: `title`, `snippet`, `full_description`, `compensation`,
+  `deadline`, `department`, `locations` (JSONB array).
+- Triage: `status` (`unseen` / `liked` / `passed` / `to_apply` /
+  `to_research` / `to_network` / `skipped` / `applied` / `archived`),
   `status_updated_at`.
 - LLM: `llm_score`, `llm_reasoning`, `llm_summary`, `llm_tags`,
   `llm_hard_requirements`, `llm_scored_at`.
-- Заметки: `triage` (JSONB) — куда сохраняются решения и комментарии.
+- Digest: `digest_sent_at` — set by `telegram_digest.py` so a vacancy is
+  never pushed to Telegram twice.
+- Notes: `triage` (JSONB) — where decisions and comments are saved.
 
-## Стратегии сбора
+**`archived_hash`** — tombstones for archived/removed vacancies. Stops a
+lagging job board from re-importing a dead posting for a cooldown window.
+The `reason` column distinguishes a source-side close (`gone_from_source`)
+from other archival reasons: a direct ATS re-listing can resurrect a
+`gone_from_source` hash; lagging boards cannot.
 
-`fetchers.py` поддерживает следующие источники:
+## Fetch strategies
 
-- **API через slug:** Greenhouse, Lever, Ashby, Workable, Recruitee,
-  Personio. В `company` достаточно прописать `fetch_strategy = '<ats>'`
-  и `ats_slug = '<slug>'`.
-- **Workday:** требует `ats_config` с полями `tenant` и `board`.
-- **BambooHR:** аналогично, нужен slug компании.
-- **Алгольный поиск 80,000 Hours:** настроен в `config.py`.
-- **REST API ReliefWeb:** настроен в `config.py`.
-- **HTML scrape через Firecrawl:** `fetch_strategy =
-  'firecrawl_scrape'`, нужен `careers_url`.
-- **RSS Teamtailor:** `fetch_strategy = 'teamtailor_rss'` + `ats_slug`.
+`fetchers.py` supports the following sources:
 
-Добавить новый ATS — это новая ветка в `route()` функции внутри
-`fetchers.py`. Все парсеры возвращают одинаковый dict-формат, который
-потом мержится `merge_vacancies()` или `merge_board_vacancies()` в DAL.
+- **Slug-based APIs:** Greenhouse, Lever, Ashby, Workable, Recruitee,
+  Personio. Set `fetch_strategy = '<ats>'` and `ats_slug = '<slug>'` on the
+  `company` row.
+- **Workday:** needs `ats_config` with `tenant` and `board`.
+- **BambooHR:** likewise, needs the company slug.
+- **80,000 Hours Algolia search:** configured in `config.py`.
+- **ReliefWeb REST API:** configured in `config.py`.
+- **HTML scrape via Firecrawl:** `fetch_strategy = 'firecrawl_scrape'`,
+  needs `careers_url`.
+- **Teamtailor RSS:** `fetch_strategy = 'teamtailor_rss'` + `ats_slug`.
 
-## Скоринг
+Adding a new ATS = a new branch in the `route()` function inside
+`fetchers.py`. All parsers return the same dict shape, which is then merged
+by `merge_vacancies()` or `merge_board_vacancies()` in the DAL.
 
-Для одной вакансии скоринг устроен так:
+**Gone-from-source detection:** for strategies that return the company's
+complete current listing (Greenhouse, Lever, Ashby, Workable, Recruitee,
+Teamtailor, BambooHR, Workday, UNOPS), an `unseen` vacancy absent from a
+fresh successful fetch is automatically archived with the
+`gone_from_source` reason — the company's own ATS is ground truth. Decided
+statuses (`liked`, `to_apply`, `applied`, …) are never touched.
 
-1. `score_vacancies.py --local --limit N` — выгружает первые `N`
-   несочёрных вакансий из Supabase и печатает их в stdout как JSON.
-2. Claude Code orchestrator получает JSON, запускает по одному subagent
-   на вакансию (1 vacancy = 1 Opus). Внутри subagent читает тот же
-   prompt template, что и API-режим (через `scripts/prompts.py`).
-3. Каждый subagent возвращает `{score, reasoning, tags,
-   hard_requirements, short_summary, deadline}`.
-4. `score_vacancies.py --save` принимает результат на stdin и пишет в
-   `vacancy.llm_*` колонки.
+## Scoring
 
-Один промпт на скоринг = `vacancy-scoring.md` + подставленный
-пользовательский профиль. Это значит, что разные бэкенды (локальные
-subagents, API, удалённый CLI) видят идентичный вход — никакого drift'а.
+For one vacancy, scoring works like this:
 
-## Дашборд
+1. `score_vacancies.py --local --limit N` — pulls the first `N` unscored
+   vacancies from Supabase and prints them to stdout as JSON. By default it
+   also rescues a capped batch of strong vacancies from *candidate*
+   (not-yet-reviewed) companies, so a forgotten company's good role still
+   gets scored (`--no-candidates` disables this).
+2. The Claude Code orchestrator receives the JSON and launches one subagent
+   per vacancy (1 vacancy = 1 Opus). Each subagent reads the same prompt
+   template as every other backend (via `scripts/prompts.py`).
+3. Each subagent returns `{score, reasoning, tags, hard_requirements,
+   short_summary, deadline}`.
+4. `score_vacancies.py --save` takes the results on stdin and writes the
+   `vacancy.llm_*` columns.
 
-Фронтенд — статика на Vercel:
+One scoring prompt = `vacancy-scoring.md` + the substituted user profile.
+Different backends (local subagents, remote CLI) see identical input — no
+drift.
 
-- `public/index.html` — четыре режима (`companies`, `catalog`,
-  `pipeline`, `stats`).
-- `public/modules/*.js` — модули UI (catalog, companies, pipeline,
-  stats, helpers, api, state).
-- `public/data.js` — снапшот всех вакансий и компаний, генерируется
-  скриптом из Supabase.
-- `api/*.js` — Vercel serverless endpoints для обновления статусов в
-  реальном времени.
+**Pure-fit scoring (prompt v4.0):** geography, relocation, and
+visa/work-authorisation considerations are excluded from the LLM score
+entirely. The score reflects only role fit, mission fit, and seniority fit.
+Geography is enforced earlier, by the pre-score filter
+(`filter_vacancies.py` deletes USA-only / CIS-in-person / rest-of-world
+postings using the `geo.py` buckets).
 
-При запуске дашборд читает `data.js` (быстрый рендеринг), потом
-подгружает свежие статусы через `/api/statuses` и
-`/api/company-statuses` и обновляет UI.
+## Dashboard
 
-## Архитектурные решения
+The frontend is static files on Vercel:
 
-- **Зачем `db_conn.py` отдельно от `database_supabase.py`?** Чтобы
-  разорвать цикл импортов: `company_registry.py` использует `db_conn`,
-  а `database_supabase.py` использует и тот, и другой.
-- **Зачем `dedup_hash` md5, а не uuid?** Стабильность. Один и тот же
-  заголовок у той же компании из разных источников схлопывается в одну
-  запись без участия пользователя.
-- **Почему именно Opus для скоринга?** Бенчмарк показал, что Sonnet
-  даёт большую дисперсию по одной и той же вакансии. Opus стабильнее на
-  ±2 балла, а не ±10.
-- **Почему 1 вакансия = 1 subagent?** Batch-скоринг систематически
-  завышает оценку на 20–50 баллов. Изоляция контекста — единственный
-  способ получить честные числа.
+- `public/index.html` — five modes (`companies`, `catalog`, `pipeline`,
+  `stats`, `archive`).
+- `public/modules/*.js` — UI modules (catalog, companies, pipeline, stats,
+  archive, helpers, api, state).
+- `public/data.js` — a snapshot of all vacancies and companies, generated
+  from Supabase (including `archived_groups` for the read-only Archive
+  tab).
+- `api/*.js` — Vercel serverless endpoints for real-time status updates.
+
+On load the dashboard reads `data.js` (fast render), then fetches fresh
+statuses via `/api/statuses` and `/api/company-statuses` and updates the
+UI. Companies pending review that hide a strong vacancy (score ≥ 55) get a
+🔥 badge and float to the top of Pending Review, with a ⏰ marker when the
+application deadline is within 7 days.
+
+## Telegram digest
+
+`scripts/telegram_digest.py` pushes a daily digest of fresh scored
+vacancies to a Telegram chat with inline 👍/👎 buttons (`send` mode), and a
+long-polling listener writes the taps back to `vacancy.status` as
+`liked`/`passed` (`poll` mode). Strong vacancies at unreviewed candidate
+companies go into a separate buttons-free section so deadlines aren't
+missed while the company waits for review. Run `poll --loop` as a daemon
+and `send` from cron; see `.claude/commands/digest.md`.
+
+## Architecture decisions
+
+- **Why is `db_conn.py` separate from `database_supabase.py`?** To break an
+  import cycle: `company_registry.py` uses `db_conn`, and
+  `database_supabase.py` uses both.
+- **Why is `dedup_hash` md5 and not a uuid?** Stability. The same title at
+  the same company from different sources collapses into one record without
+  user involvement.
+- **Why Opus for scoring?** A benchmark showed Sonnet has higher variance
+  on the same vacancy. Opus is stable within ±2 points rather than ±10.
+- **Why 1 vacancy = 1 subagent?** Batch scoring systematically inflates
+  scores by 20–50 points. Context isolation is the only way to get honest
+  numbers.
+- **Why is the quality gate a separate module?** `quality.py` is imported
+  by the DAL, the importers, and the enrichers; keeping it stdlib-only
+  means none of them drag in Firecrawl or psycopg2 transitively. The gate
+  exists because one consent-wall page once overwrote dozens of real
+  descriptions through a length-comparison loophole.

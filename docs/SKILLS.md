@@ -1,124 +1,161 @@
-# Слэш-команды
+# Slash commands
 
-В репозитории есть набор слэш-команд для Claude Code (папка
-`.claude/commands/`). Запустите Claude Code из корня проекта — команды
-подхватятся автоматически. Каждый файл — простая инструкция, что и в
-каком порядке делать.
+The repo ships a set of slash commands for Claude Code (the
+`.claude/commands/` folder). Launch Claude Code from the project root and
+the commands are picked up automatically. Each file is a plain instruction
+list — what to do and in what order.
 
-Список и краткое описание:
+The list, briefly:
 
-## `/fetch` — собрать вакансии
+## `/fetch` — fetch vacancies
 
-Интерактивный сбор:
+Interactive fetching:
 
-1. Покажет статус всех источников (когда последний раз обновлялись).
-2. Спросит, что собирать: всё / только активные компании / выбранные.
-3. Запустит `python3 scripts/fetch_vacancies.py` с нужными флагами.
-4. После сбора покажет, сколько новых вакансий пришло.
+1. Shows the status of every source (when it was last refreshed).
+2. Asks what to fetch: everything / active companies only / a selection.
+3. Runs `python3 scripts/fetch_vacancies.py` with the right flags.
+4. Reports how many new vacancies arrived.
 
-Опции:
+During the merge, every description passes the `quality.py` gate (cookie
+walls, error pages, and nav chrome are never saved). For direct-ATS
+strategies that return the complete listing, unseen vacancies missing from
+a fresh fetch are auto-archived as `gone_from_source`; JS-rendered shell
+pages are marked `js_required` instead of silently returning zero.
 
-- `--force-all` — игнорировать TTL, тянуть все компании.
-- `--companies "A,B,C"` — только перечисленные.
-- `--tier S` — компании с тиром S.
-- `--auto-score` — после сбора сразу запустить filter + score.
+Options:
 
-## `/filter` — почистить мусор
+- `--force-all` — ignore TTL, pull every company.
+- `--companies "A,B,C"` — only the listed ones.
+- `--tier S` — companies with tier S.
+- `--auto-score` — run filter + score right after the fetch.
 
-Quality gate между сбором и скорингом:
+## `/filter` — clean out junk
 
-1. Загружает несочёрные вакансии.
-2. Классифицирует по blacklist'у заголовков, локациям, описаниям.
-3. Помечает дубликаты (точные и fuzzy по заголовку).
-4. Удаляет junk, оставляет ready-set для скоринга.
-5. Если нашёл повторяющиеся паттерны — предлагает добавить их в
+The quality gate between fetching and scoring:
+
+1. Loads unscored vacancies.
+2. Classifies by title blacklist, locations, descriptions.
+3. Geo deletion via `geo.py` buckets: USA-only, CIS in-person, and
+   rest-of-world postings are deleted before scoring (this replaced
+   location penalties inside the LLM score).
+4. Marks duplicates (exact and fuzzy by title).
+5. Deletes junk, leaves a ready set for scoring.
+6. If it spots recurring patterns, it suggests adding them to
    `GLOBAL_BLACKLIST`.
 
-Опции:
+Options:
 
-- `--dedup` — включить fuzzy-сравнение по заголовкам (порог 0.85).
-- `--dry-run` — показать что бы удалил, но ничего не трогать.
+- `--dedup` — enable fuzzy title comparison (0.85 threshold).
+- `--dry-run` — show what would be deleted without touching anything.
 
-## `/score` — скорить через Claude
+## `/score` — score with Claude
 
-Запускает Opus subagent на каждую вакансию (1 vacancy = 1 запрос).
-Параллелизм по умолчанию — 5 одновременных subagent'ов.
+Launches an Opus subagent per vacancy (1 vacancy = 1 request). Default
+parallelism is 5 concurrent subagents.
 
-1. Выгружает несочёрные вакансии (по умолчанию 20 за раз).
-2. Запускает subagent на каждую, ждёт ответ.
-3. Сохраняет `llm_score`, `reasoning`, `tags`, `hard_requirements`,
+1. Pulls unscored vacancies (20 at a time by default). By default it also
+   rescues a capped batch of strong vacancies from unreviewed *candidate*
+   companies (`--no-candidates` disables this).
+2. Runs a subagent per vacancy, waits for the answers.
+3. Saves `llm_score`, `reasoning`, `tags`, `hard_requirements`,
    `summary`, `deadline`.
-4. Автоархивирует всё со скором ниже `LLM_SCORE_THRESHOLD` (по
-   умолчанию 20), если статус `unseen`.
-5. Печатает сессионный отчёт с распределением скоров и junk-flag'ами.
+4. Prints a session report with score distribution and junk flags.
 
-## `/archive` — почистить старое
+Scoring is **pure fit** (prompt v4.0): geography and visa considerations
+are excluded — they're handled by `/filter`. Score-threshold auto-archive
+is currently paused under pure-fit scoring (opt-in only via
+`archive_vacancies(force=True)`).
 
-Интерактивный архив низкоскорящих неразобранных вакансий:
+## `/archive` — clean out old postings
 
-1. Показывает превью: сколько кандидатов в каждой группе скоров
+Interactive archival of low-scoring unreviewed vacancies:
+
+1. Shows a preview: how many candidates per score bracket
    (0–10, 10–20, 20–30).
-2. Помечает borderline-кейсы (близкие к порогу, blind-scored).
-3. Ждёт явного подтверждения.
-4. Меняет статус на `passed` и убирает из дашборда.
+2. Flags borderline cases (near the threshold, blind-scored).
+3. Waits for explicit confirmation.
+4. Sets the status to `archived` — the vacancy moves to the read-only
+   Archive tab on the dashboard, and its `dedup_hash` is tombstoned in
+   `archived_hash` so boards can't re-import it.
 
-Также позволяет восстановить ранее заархивированные через
-`vac mark <id> --status unseen`.
+Previously archived vacancies can be restored with
+`vac mark <id> unseen`.
 
-## `/triage` — глубокий разбор «лайкнутого»
+## `/triage` — deep review of liked vacancies
 
-Структурированное интервью по каждой лайкнутой вакансии:
+A structured interview over every liked vacancy:
 
-1. Группирует по компаниям.
-2. По одной вакансии: задаёт 3–5 вопросов о вашем интересе,
-   соответствии, рисках.
-3. Записывает решение: `apply` / `skip` / `research`.
-4. Создаёт GitHub Issue с acceptance criteria, если решение `apply`.
-5. По концу сессии сравнивает решения с llm_score — если есть
-   расхождения, предлагает обновить prompt.
+1. Groups them by company.
+2. One vacancy at a time: asks 3–5 questions about your interest, fit, and
+   risks — including whether the role offers enough complexity for real
+   growth.
+3. Records the decision: `apply` / `skip` / `research`.
+4. Creates a tracker issue with acceptance criteria when the decision is
+   `apply`.
+5. At the end of the session compares decisions against `llm_score` — if
+   they diverge, suggests a prompt update.
 
-## `/vac` — терминальный триаж
+## `/vac` — terminal triage
 
-KISS-CLI для повседневной работы из терминала, без браузера:
+A KISS CLI for day-to-day work from the terminal, no browser:
 
 ```bash
-python3 scripts/vac.py list                  # топ 20 по скору
-python3 scripts/vac.py list --status liked   # только лайкнутые
-python3 scripts/vac.py show <id>             # полное описание
-python3 scripts/vac.py mark <id> --status liked
-python3 scripts/vac.py open <id>             # открыть URL в браузере
-python3 scripts/vac.py companies             # сводка по компаниям
+python3 scripts/vac.py list                  # top 20 by score
+python3 scripts/vac.py list --status liked   # liked only
+python3 scripts/vac.py list --geo uk,europe  # filter by geo buckets
+python3 scripts/vac.py show <id>             # full description
+python3 scripts/vac.py mark <id> liked       # change status (incl. archived)
+python3 scripts/vac.py open <id>             # open the URL in the browser
+python3 scripts/vac.py companies             # company summary
 ```
 
-Используйте, когда не хочется открывать дашборд.
+`--geo` accepts the `geo.py` buckets: `uk`, `germany`, `europe`, `us`,
+`cis`, `other`, `unknown`. Use it when you don't feel like opening the
+dashboard.
 
-## `/add-source` — новая компания
+## `/digest` — Telegram digest
 
-Добавляет компанию в мониторинг:
+Drives `scripts/telegram_digest.py`:
 
-1. Принимает URL careers-страницы или название компании.
-2. Автоматически определяет ATS (Greenhouse, Lever, Ashby, Workable,
-   Workday) через `discover_ats.py`.
-3. Запускает тестовый сбор — 1–2 вакансии для проверки парсера.
-4. Если результат норм — добавляет в `company` со статусом `active`,
-   иначе показывает что пошло не так.
+- `send` — posts the top fresh scored vacancies to a Telegram chat as
+  separate messages with inline 👍/👎 buttons and stamps `digest_sent_at`.
+  Strong vacancies at unreviewed candidate companies go into a separate
+  buttons-free section. Run from cron/scheduler once a day.
+- `poll` — long-polls for button taps and writes `liked`/`passed` back to
+  `vacancy.status`. Run `poll --loop` as a long-lived daemon. Only one
+  process per bot token may call getUpdates.
 
-## `/finish-session` — закрыть сессию
+Configuration is env-driven: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
+`SUPABASE_DB_URL` (see `.env.example`).
 
-Финализация работы:
+## `/add-source` — a new company
 
-1. Регенерирует `public/data.js` (`fetch_vacancies.py --report-only`).
-2. Коммитит изменения с осмысленным сообщением.
-3. Пушит в репозиторий — Vercel автоматически перевыкатит дашборд.
+Adds a company to monitoring:
 
-Используйте после любой серии изменений: добавили компанию,
-перенастроили промпт, потриажили партию вакансий.
+1. Takes a careers-page URL or a company name.
+2. Auto-detects the ATS (Greenhouse, Lever, Ashby, Workable, Workday) via
+   `discover_ats.py`.
+3. Runs a test fetch — a vacancy or two to validate the parser.
+4. If the result looks right, adds it to `company`; otherwise shows what
+   went wrong.
 
-## Как Claude Code находит эти команды
+## `/finish-session` — close the session
 
-Команды живут в файлах `.claude/commands/<name>.md` в корне репо. Когда
-вы запускаете Claude Code из этой папки, он сканирует `.claude/` и
-добавляет команды в список доступных слэшей. Сами файлы — просто
-человекочитаемая инструкция, что делать пошагово.
+Finalizes the work:
 
-Если хотите изменить поведение — отредактируйте `.md` файл.
+1. Regenerates `public/data.js` (`fetch_vacancies.py --report-only`) —
+   including the Archive tab data.
+2. Commits the changes with a meaningful message.
+3. Pushes to the repo — Vercel redeploys the dashboard automatically.
+
+Use it after any batch of changes: a new company, a reworked prompt, a
+triaged batch of vacancies.
+
+## How Claude Code finds these commands
+
+Commands live in `.claude/commands/<name>.md` at the repo root. When you
+launch Claude Code from this folder, it scans `.claude/` and adds the
+commands to the available slash list. The files themselves are just
+human-readable step-by-step instructions.
+
+Want different behavior? Edit the `.md` file.
