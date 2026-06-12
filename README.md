@@ -172,27 +172,39 @@ private job search, keep a password on it.
 Daily top-5 unseen vacancies with 👍/👎 buttons. See
 [INSTALL.md](INSTALL.md#9-telegram-digest-optional).
 
-## Agent commands
+## Agent commands — three you actually use
 
-Workflow runbooks ship in `.claude/commands/` — they load as slash commands
-in Claude Code and work as plain-markdown runbooks for any other agent
-(Codex etc. — see [AGENTS.md](AGENTS.md)):
+You only need three:
+
+| Command | When | What it does |
+| --- | --- | --- |
+| `/start` | once | Discovers starter companies from your profile, fetches, scores, opens the dashboard |
+| `/jobs` | daily | Fetch → filter → score → top new matches in chat, like/pass verdicts saved |
+| `/triage` | weekly | Deep review of liked vacancies — decide what to actually apply to |
+
+`/jobs` runs the whole machinery (fetching, junk filtering, scoring,
+archiving), so you never think about the stages. To add a company, just ask
+the agent ("add Stripe") — it uses `/add-source` itself.
+
+<details>
+<summary><b>Advanced commands</b> — individual stages, for fine control</summary>
 
 | Command | What it does |
 | --- | --- |
-| `/start` | First run: discover starter companies from your profile, fetch, score, launch local dashboard |
-| `/jobs` | Daily loop: fetch → filter → score → top new matches in chat with verdicts |
-| `/fetch` | Interactive vacancy fetching with source selection |
-| `/filter` | Quality gate: junk removal, dedup, geography buckets |
-| `/score` | LLM scoring (1 vacancy = 1 parallel subagent) |
-| `/archive` | Preview + confirm archiving of low scores |
-| `/triage` | Deep review of liked vacancies — apply/skip/research verdicts |
-| `/vac` | Terminal triage CLI, no dashboard needed |
 | `/add-source` | Add a company: ATS auto-detection, test fetch |
-| `/digest` | Send/poll the Telegram digest |
-| `/finish-session` | Regenerate dashboard, commit, push |
+| `/fetch` | Vacancy fetching alone, with source selection |
+| `/filter` | Quality gate alone: junk removal, dedup, geography buckets |
+| `/score` | LLM scoring alone (1 vacancy = 1 request) |
+| `/archive` | Preview + confirm archiving of low scores |
+| `/vac` | Terminal triage CLI, no dashboard needed |
+| `/digest` | Send/poll the Telegram digest (full mode) |
+| `/finish-session` | Regenerate dashboard, commit, push (full mode) |
 
-Full reference: [docs/SKILLS.md](docs/SKILLS.md).
+</details>
+
+Runbooks live in `.claude/commands/` — slash commands in Claude Code, plain
+markdown runbooks for any other agent (see [AGENTS.md](AGENTS.md)). Full
+reference: [docs/SKILLS.md](docs/SKILLS.md).
 
 ## Documentation
 

@@ -7,6 +7,13 @@ list — what to do and in what order.
 
 The list, briefly:
 
+## The three you actually use
+
+Day to day you need only `/start` (once), `/jobs` (daily) and `/triage`
+(weekly). `/jobs` chains fetch → filter → score → verdict capture, so the
+stage commands below are for fine control and debugging, not the daily
+routine.
+
 ## `/fetch` — fetch vacancies
 
 Interactive fetching:
