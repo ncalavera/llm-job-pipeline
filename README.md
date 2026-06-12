@@ -67,7 +67,7 @@ flowchart LR
     A2[Company pages] -->|enrich| B
     B -->|filter + quality gate| C[Clean vacancies]
     C -->|score, Claude| D[Scores 0-100]
-    D -->|auto-archive low| E[Archive]
+    D -->|archive low, optional| E[Archive]
     D --> F[Dashboard / vac CLI / Telegram]
     F -->|triage| G{liked / passed /<br/>to_apply / applied}
     G -->|status| B

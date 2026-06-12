@@ -32,8 +32,8 @@ Scoring does not call any LLM API from Python — the orchestrating agent IS
 the scorer. The loop:
 
 1. `python3 scripts/score_vacancies.py --local --limit N` prints JSON to
-   stdout: a `system_prompt` plus a list of vacancies, each with `member_ids`
-   and a `user_msg`.
+   stdout: a list of vacancies, each item carrying its own `system_prompt`,
+   `user_msg` and `member_ids`.
 2. For EACH vacancy independently (never batch several into one request —
    batching causes systematic over-scoring), evaluate `system_prompt` +
    `user_msg` with your strongest available model and produce the JSON object

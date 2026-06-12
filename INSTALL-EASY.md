@@ -47,7 +47,7 @@ That's it. No database account, no API keys required to start.
 ```bash
 git clone https://github.com/ncalavera/llm-job-pipeline
 cd llm-job-pipeline
-pip install requests beautifulsoup4 python-dateutil
+python3 -m pip install requests beautifulsoup4 python-dateutil
 ```
 
 If that errors with **`externally-managed-environment`** (PEP 668, common on
@@ -56,7 +56,7 @@ recent macOS/Linux Python), use a virtual environment instead:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install requests beautifulsoup4 python-dateutil
+python3 -m pip install requests beautifulsoup4 python-dateutil
 ```
 
 (Or, if you prefer not to use a venv, `pip install --user requests beautifulsoup4 python-dateutil`.)

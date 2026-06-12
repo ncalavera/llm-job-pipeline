@@ -22,7 +22,7 @@ from config import (
     LOCATION_BLACKLIST, REGION_US, resolve_canonical_name,
 )
 from geo import geo_bucket
-from psycopg2.extras import RealDictCursor
+from db_backend import RealDictCursor
 from database_supabase import (
     _is_blacklisted, _is_content_junk, load_vacancies,
     delete_vacancies as db_delete_vacancies,
@@ -1009,7 +1009,7 @@ def delete_vacancies_filtered(ids_to_delete: list[str]) -> Path:
     Writes local JSON archive before deleting.
     Returns path to the archive file.
     """
-    from psycopg2.extras import RealDictCursor, Json
+    from db_backend import RealDictCursor, Json
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
