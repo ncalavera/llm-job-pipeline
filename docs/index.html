@@ -8,6 +8,7 @@
       name="description"
       content="Run your own AI job-search pipeline. Answer a few questions, copy one prompt, paste it into your coding agent."
     />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -371,6 +372,7 @@
       }
       .term-body {
         padding: 22px 26px 26px;
+        min-height: 312px;
         font: 400 13.5px/1.9 var(--mono);
         color: var(--term-text);
       }
@@ -400,6 +402,17 @@
         background: var(--mint);
         vertical-align: -3px;
         margin-left: 6px;
+        animation: termBlink 1s steps(1) infinite;
+      }
+      @keyframes termBlink {
+        0%,
+        49% {
+          opacity: 1;
+        }
+        50%,
+        100% {
+          opacity: 0;
+        }
       }
 
       /* ---- bottom CTA ---- */
@@ -846,49 +859,7 @@
               <span class="dot" style="background: #f26b3a"></span>
               <span class="term-title" data-i18n="term_title"></span>
             </div>
-            <div class="term-body">
-              <div>
-                <span class="g">~/job-search $</span>
-                <span class="br">/jobs</span>
-              </div>
-              <div>
-                <span class="g">✓</span> backend · local sqlite —
-                data/jobsearch.db
-              </div>
-              <div>
-                → fetching 24 companies <span class="dim">.........</span>
-                <span class="br">412 open roles</span>
-              </div>
-              <div>
-                → filtering junk &amp; geo <span class="dim">..........</span>
-                <span class="br">168 worth reading</span>
-              </div>
-              <div>
-                → scoring against your profile
-                <span class="dim">(your agent)</span>
-              </div>
-              <div class="indent">
-                <span class="g" style="font-weight: 600">87</span> · Product
-                Manager — Khan Academy
-              </div>
-              <div class="indent">
-                <span class="g" style="font-weight: 600">81</span> · Head of
-                Operations — The Ocean Cleanup
-              </div>
-              <div class="indent">
-                <span class="lav" style="font-weight: 600">74</span> · Chief of
-                Staff — GiveDirectly
-              </div>
-              <div class="indent dim">… 20 more scored 70+</div>
-              <div>
-                <span class="g">✓</span> done in 4m 12s —
-                <span class="br">6 new matches</span>
-              </div>
-              <div>
-                → dashboard · <span class="lav-link">http://127.0.0.1:8000</span
-                ><span class="cursor"></span>
-              </div>
-            </div>
+            <div class="term-body" id="termBody"></div>
           </div>
         </div>
 
@@ -1715,6 +1686,105 @@ ${buildProfile()}
 
       // Browser language auto-detect
       setLang(/^ru/i.test(navigator.language || "") ? "ru" : "en");
+
+      // ---------------------------------------------------------------- terminal animation
+      (function () {
+        // [delayMsBeforeThisLine, innerHTML, extraClass]
+        const LINES = [
+          [
+            500,
+            '<span class="g">~/job-search $</span> <span class="br">/jobs</span>',
+          ],
+          [
+            600,
+            '<span class="g">✓</span> backend · local sqlite — data/jobsearch.db',
+          ],
+          [
+            1000,
+            '→ fetching 24 companies <span class="dim">.........</span> <span class="br">412 open roles</span>',
+          ],
+          [
+            1000,
+            '→ filtering junk &amp; geo <span class="dim">..........</span> <span class="br">168 worth reading</span>',
+          ],
+          [
+            700,
+            '→ scoring against your profile <span class="dim">(your agent)</span>',
+          ],
+          [
+            550,
+            '<span class="g" style="font-weight:600">87</span> · Product Manager — Khan Academy',
+            "indent",
+          ],
+          [
+            450,
+            '<span class="g" style="font-weight:600">81</span> · Head of Operations — The Ocean Cleanup',
+            "indent",
+          ],
+          [
+            450,
+            '<span class="lav" style="font-weight:600">74</span> · Chief of Staff — GiveDirectly',
+            "indent",
+          ],
+          [600, '<span class="dim">… 20 more scored 70+</span>', "indent"],
+          [
+            850,
+            '<span class="g">✓</span> done in 4m 12s — <span class="br">6 new matches</span>',
+          ],
+          [
+            500,
+            '→ dashboard · <span class="lav-link">http://127.0.0.1:8000</span>',
+          ],
+        ];
+        const HOLD_MS = 5200; // pause on finished output before replaying
+
+        const body = document.getElementById("termBody");
+        if (!body) return;
+        const cursorLine = document.createElement("div");
+        cursorLine.innerHTML = '<span class="cursor"></span>';
+        let i = 0;
+
+        function makeLine(l) {
+          const div = document.createElement("div");
+          if (l[2]) div.className = l[2];
+          div.innerHTML = l[1];
+          return div;
+        }
+
+        // Accessibility: render everything at once for reduced-motion users.
+        if (
+          window.matchMedia &&
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ) {
+          LINES.forEach((l) => body.appendChild(makeLine(l)));
+          body.appendChild(cursorLine);
+          return;
+        }
+
+        function reset() {
+          body.innerHTML = "";
+          body.appendChild(cursorLine);
+          i = 0;
+        }
+
+        function step() {
+          if (i < LINES.length) {
+            setTimeout(() => {
+              body.insertBefore(makeLine(LINES[i]), cursorLine);
+              i++;
+              step();
+            }, LINES[i][0]);
+          } else {
+            setTimeout(() => {
+              reset();
+              step();
+            }, HOLD_MS);
+          }
+        }
+
+        reset();
+        step();
+      })();
     </script>
   </body>
 </html>
