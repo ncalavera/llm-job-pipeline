@@ -5,7 +5,7 @@ import os
 import urllib.parse
 
 from .assets import FAVICON_SVG
-from .data_prep import prepare_report_data, prepare_company_data, prepare_triage_data, prepare_scoring_feed
+from .data_prep import prepare_report_data, prepare_company_data, prepare_triage_data, prepare_scoring_feed, prepare_archived_data
 
 from config import PUBLIC_DIR, resolve_canonical_name
 
@@ -76,6 +76,14 @@ def generate_dashboard(db: dict = None) -> None:
     # --- Build triage data for Triage tab ---
     triage_reviews = prepare_triage_data()
 
+    # --- Build archived vacancies for Archive tab ---
+    archived_groups = prepare_archived_data()
+    for g in archived_groups:
+        canonical = resolve_canonical_name(g["org"])
+        g["calculated_tier"] = tier_lookup.get(canonical)
+        g["company_slug"] = slug_lookup.get(canonical)
+        g["company_name"] = canonical if slug_lookup.get(canonical) else None
+
     # --- Build VACANCY_DATA payload for JS ---
     from datetime import datetime
     vacancy_data = {
@@ -89,6 +97,7 @@ def generate_dashboard(db: dict = None) -> None:
         "groups": groups,
         "companies": companies,
         "triage_reviews": triage_reviews,
+        "archived_groups": archived_groups,
     }
 
     # --- Write data.js ---
@@ -119,11 +128,11 @@ def generate_dashboard(db: dict = None) -> None:
         scoring_feed_html = f'\n<div class="scoring-feed-bar">&#9889; {items}</div>'
 
     html = f'''<!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Дашборд вакансий</title>
+<title>Job Vacancy Dashboard</title>
 <link rel="icon" type="image/svg+xml" href="{favicon_data_uri}">
 <link href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
@@ -132,13 +141,14 @@ def generate_dashboard(db: dict = None) -> None:
 <nav class="top-nav">
   <div class="top-nav-brand">Job Search 2026</div>
   <div class="mode-toggle">
-    <button class="mode-btn" id="modeCompanies" onclick="switchMode('companies')">&#9881; Компании</button>
-    <button class="mode-btn" id="modeCatalog" onclick="switchMode('catalog')">&#9636; Вакансии</button>
-    <button class="mode-btn" id="modePipeline" onclick="switchMode('pipeline')">&#9654; Триаж</button>
-    <button class="mode-btn" id="modeStats" onclick="switchMode('stats')">&#128205; Гео</button>
+    <button class="mode-btn" id="modeCompanies" onclick="switchMode('companies')">&#9881; Companies</button>
+    <button class="mode-btn" id="modeCatalog" onclick="switchMode('catalog')">&#9636; Vacancies</button>
+    <button class="mode-btn" id="modePipeline" onclick="switchMode('pipeline')">&#9654; Triage</button>
+    <button class="mode-btn" id="modeStats" onclick="switchMode('stats')">&#128205; Geo</button>
+    <button class="mode-btn" id="modeArchive" onclick="switchMode('archive')">&#128230; Archive</button>
   </div>
   <div class="top-nav-right">
-    <span class="hero-date" id="heroDate">Обновлено: {last_updated}</span>
+    <span class="hero-date" id="heroDate">Updated: {last_updated}</span>
   </div>
 </nav>{scoring_feed_html}
 
@@ -151,7 +161,7 @@ def generate_dashboard(db: dict = None) -> None:
 
     <div class="catalog-loading" id="catalogLoading">
       <img src="images/illus-catalog.png" alt="Manny reviews vacancies" class="loading-manny">
-      <p class="loading-text">Manny проверяет статусы…</p>
+      <p class="loading-text">Sorting vacancies…</p>
     </div>
 
     <div class="gf-companion">
@@ -164,33 +174,33 @@ def generate_dashboard(db: dict = None) -> None:
     <div class="basket-tabs">
       <button class="basket-tab" data-basket="liked" onclick="switchBasket(this)">
         <span class="basket-dot"></span>
-        Выбранные
+        Liked
         <span class="basket-count" id="countLiked">0</span>
       </button>
       <button class="basket-tab active" data-basket="unseen" onclick="switchBasket(this)">
         <span class="basket-dot"></span>
-        Неразобранные
+        Unreviewed
         <span class="basket-count" id="countUnseen">0</span>
       </button>
       <button class="basket-tab" data-basket="passed" onclick="switchBasket(this)">
         <span class="basket-dot"></span>
-        Откинутые
+        Passed
         <span class="basket-count" id="countPassed">0</span>
       </button>
     </div>
 
     <div class="catalog-filters">
-      <input type="text" class="catalog-search" id="catalogSearch" placeholder="Поиск по названию, организации, локации..." oninput="renderCatalog()">
+      <input type="text" class="catalog-search" id="catalogSearch" placeholder="Search by title, organization, location..." oninput="renderCatalog()">
       <select class="catalog-org-filter" id="catalogOrgFilter" onchange="renderCatalog()">
-        <option value="">Все компании</option>
+        <option value="">All companies</option>
       </select>
       <div class="catalog-loc-chips">
-        <button class="chip" data-cloc="europe" onclick="toggleCatalogLoc(this)">Европа</button>
+        <button class="chip" data-cloc="europe" onclick="toggleCatalogLoc(this)">Europe</button>
         <button class="chip" data-cloc="us" onclick="toggleCatalogLoc(this)">US</button>
         <button class="chip" data-cloc="remote" onclick="toggleCatalogLoc(this)">Remote</button>
-        <button class="chip" data-cloc="other" onclick="toggleCatalogLoc(this)">Другое</button>
+        <button class="chip" data-cloc="other" onclick="toggleCatalogLoc(this)">Other</button>
       </div>
-      <button class="chip catalog-sort-btn active" onclick="toggleCatalogSort(this)">Скор&#160;&#8595;</button>
+      <button class="chip catalog-sort-btn active" onclick="toggleCatalogSort(this)">Score&#160;&#8595;</button>
     </div>
 
     <div class="catalog-results-count" id="catalogResultsCount"></div>
@@ -212,19 +222,19 @@ def generate_dashboard(db: dict = None) -> None:
       <button class="company-sub-tab" data-subtab="archived" onclick="switchCompanySubTab('archived')">Archived</button>
     </div>
     <div class="companies-filters">
-      <input type="text" class="catalog-search" id="companySearch" placeholder="Поиск по компании, описанию, локации..." oninput="renderCompanies()">
+      <input type="text" class="catalog-search" id="companySearch" placeholder="Search by company, description, location..." oninput="renderCompanies()">
       <select class="catalog-org-filter" id="companyTierFilter" onchange="renderCompanies()">
-        <option value="">Все тиры</option>
+        <option value="">All tiers</option>
         <option value="S">S — Strategic</option>
         <option value="A">A — Strong Fit</option>
         <option value="B">B — Monitor</option>
         <option value="C">C — Low Priority</option>
-        <option value="__unscored">— Без скора</option>
+        <option value="__unscored">— Unscored</option>
       </select>
       <div class="company-sort-chips">
-        <button class="chip chip-sort active" data-csort="liked" onclick="toggleCompanySort(this)">Выбранные &#8595;</button>
-        <button class="chip chip-sort" data-csort="score" onclick="toggleCompanySort(this)">Скор</button>
-        <button class="chip chip-sort" data-csort="interest" onclick="toggleCompanySort(this)">Интерес</button>
+        <button class="chip chip-sort active" data-csort="liked" onclick="toggleCompanySort(this)">Liked &#8595;</button>
+        <button class="chip chip-sort" data-csort="score" onclick="toggleCompanySort(this)">Score</button>
+        <button class="chip chip-sort" data-csort="interest" onclick="toggleCompanySort(this)">Interest</button>
       </div>
     </div>
     <div class="company-enrichment-stats" id="companyEnrichmentStats"></div>
@@ -247,6 +257,28 @@ def generate_dashboard(db: dict = None) -> None:
 
   <!-- === STATS MODE === -->
   <div class="stats-section" id="statsSection"></div>
+
+  <!-- === ARCHIVE MODE === -->
+  <div class="archive-section" id="archiveSection">
+    <div class="gf-companion">
+      <img src="images/illus-archive.png" alt="Clayman at the archive">
+    </div>
+    <div class="gf-accent">
+      <img src="images/accent-archive.png" alt="">
+    </div>
+    <div class="archive-intro">
+      <h2 class="archive-title">&#128230; Vacancy archive</h2>
+      <p class="archive-sub">Older vacancies from before the search restart. View only.</p>
+    </div>
+    <div class="catalog-filters">
+      <input type="text" class="catalog-search" id="archiveSearch" placeholder="Search by title, organization, location..." oninput="renderArchive()">
+      <select class="catalog-org-filter" id="archiveOrgFilter" onchange="renderArchive()">
+        <option value="">All companies</option>
+      </select>
+    </div>
+    <div class="catalog-results-count" id="archiveResultsCount"></div>
+    <div class="catalog-grid" id="archiveGrid"></div>
+  </div><!-- /archive-section -->
 
   <!-- === COMPANY PROFILE PAGE === -->
   <div class="company-profile-page" id="companyProfile"></div>

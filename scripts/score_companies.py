@@ -55,7 +55,7 @@ MAX_RETRIES = 3
 # Placeholder values to sanitize from LLM output
 _PLACEHOLDER_VALUES = {
     "not specified", "n/a", "unknown", "year not specified",
-    "na", "none", "не указано", "неизвестно", "нет данных",
+    "na", "none",
 }
 
 # Strategy sections to extract from strategy.md
@@ -567,7 +567,7 @@ def cmd_save(_args):
 
     # Auto-review scored companies
     review = {"approved": [], "rejected": [], "pending": []}
-    if saved > 0:
+    if saved > 0 and not getattr(_args, "no_auto_review", False):
         review = auto_review_candidates()
 
     approved = len(review.get("approved", []))
@@ -655,7 +655,7 @@ def cmd_api(args):
     conn.commit()
     print(f"\nDone! Scored {scored} companies. Errors: {errors}")
 
-    if scored > 0:
+    if scored > 0 and not args.no_auto_review:
         review = auto_review_candidates()
         print(
             f"Auto-review: {len(review.get('approved', []))} approved, "
@@ -795,7 +795,7 @@ def cmd_openclaw(args):
     elapsed = time.time() - start_time
     print(f"\nDone! Scored {scored} companies in {elapsed / 60:.1f}m. Errors: {total_errors}")
 
-    if scored > 0:
+    if scored > 0 and not args.no_auto_review:
         review = auto_review_candidates()
         print(
             f"Auto-review: {len(review.get('approved', []))} approved, "
@@ -820,6 +820,8 @@ def main():
     parser.add_argument("--model", type=str)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-workers", type=int, default=MAX_CONCURRENT)
+    parser.add_argument("--no-auto-review", action="store_true",
+                        help="Skip auto_review_candidates() — scored companies stay 'candidate'")
 
     args = parser.parse_args()
 

@@ -51,7 +51,7 @@ export function toggleCompanyCardFilter(filter) {
     state.companyMonitorFilters.clear();
   } else {
     state.companyCardFilter = filter;
-    // "Требуют внимания" card → preset chips
+    // "Needs attention" card → preset chips
     if (filter === "needAction") {
       state.companyMonitorFilters = new Set(["error", "stale", "never"]);
     } else {
@@ -232,6 +232,22 @@ function getFilteredSortedCompanies() {
     return asc ? va - vb : vb - va;
   });
 
+  // In Pending Review, float companies that have a strong vacancy (🔥) to the
+  // very top so a forgotten company with a great role gets seen. Stable
+  // partition preserves the chosen sort order within each bucket.
+  if (subTab === "pending") {
+    var hot = [];
+    var rest = [];
+    filtered.forEach(function (c) {
+      if (c.hot_vacancy && c.hot_vacancy.score != null) hot.push(c);
+      else rest.push(c);
+    });
+    hot.sort(function (a, b) {
+      return (b.hot_vacancy.score || 0) - (a.hot_vacancy.score || 0);
+    });
+    filtered = hot.concat(rest);
+  }
+
   return filtered;
 }
 
@@ -324,7 +340,7 @@ function _getColumns() {
     { key: "offices", label: "Location", sortable: false, cls: "ct-col-loc" },
     {
       key: "monitoring",
-      label: "Мониторинг",
+      label: "Monitoring",
       sortable: true,
       cls: "ct-col-monitoring",
     },
@@ -356,14 +372,14 @@ function _renderStatsCards(unfilteredByCard, filtered) {
     var needAction = staleCount + errorCount;
     var activeFilter = state.companyCardFilter;
 
-    // Subtitle for "Требуют внимания"
+    // Subtitle for "Needs attention"
     var actionParts = [];
-    if (staleCount > 0) actionParts.push(staleCount + " устарело");
-    if (errorCount > 0) actionParts.push(errorCount + " ошибок");
+    if (staleCount > 0) actionParts.push(staleCount + " stale");
+    if (errorCount > 0) actionParts.push(errorCount + " errors");
     var actionSub = actionParts.join(" \u00B7 ") || "\u2014";
 
-    // Subtitle for "С новыми"
-    var newSub = withNew > 0 ? withNew + " непросмотренных" : "\u2014";
+    // Subtitle for "With new"
+    var newSub = withNew > 0 ? withNew + " unreviewed" : "\u2014";
 
     statsEl.innerHTML =
       '<div class="ces-card ces-card--approved ces-card--clickable' +
@@ -372,7 +388,7 @@ function _renderStatsCards(unfilteredByCard, filtered) {
       '<span class="ces-number">' +
       total +
       "</span>" +
-      '<span class="ces-label">Всего</span>' +
+      '<span class="ces-label">Total</span>' +
       '<span class="ces-sub">\u00A0</span>' +
       "</div>" +
       '<div class="ces-card ces-card--new ces-card--clickable' +
@@ -381,7 +397,7 @@ function _renderStatsCards(unfilteredByCard, filtered) {
       '<span class="ces-number">' +
       withNew +
       "</span>" +
-      '<span class="ces-label">С новыми</span>' +
+      '<span class="ces-label">With new</span>' +
       '<span class="ces-sub">' +
       escHtml(newSub) +
       "</span>" +
@@ -392,7 +408,7 @@ function _renderStatsCards(unfilteredByCard, filtered) {
       '<span class="ces-number">' +
       needAction +
       "</span>" +
-      '<span class="ces-label">Требуют внимания</span>' +
+      '<span class="ces-label">Needs attention</span>' +
       '<span class="ces-sub">' +
       escHtml(actionSub) +
       "</span>" +
@@ -441,7 +457,7 @@ function _getMonitoringStatus(c) {
   ) {
     return {
       level: "error",
-      label: "Ошибка fetch",
+      label: "Fetch error",
       dotCls: "mon-dot--error",
       tooltip: c.fetch_status,
     };
@@ -449,33 +465,33 @@ function _getMonitoringStatus(c) {
   if (c.fetch_status === "no_data") {
     return {
       level: "nodata",
-      label: "Нет данных",
+      label: "No data",
       dotCls: "mon-dot--nodata",
-      tooltip: "Fetch прошёл, но вакансий не найдено",
+      tooltip: "Fetch succeeded, but no vacancies found",
     };
   }
   if (c.is_manual_check) {
     return {
       level: "manual",
-      label: "Ручной",
+      label: "Manual",
       dotCls: "mon-dot--manual",
-      tooltip: "Ручная проверка",
+      tooltip: "Manual check",
     };
   }
   if (c.needs_source || !c.strategy) {
     return {
       level: "nosource",
-      label: "Нет источника",
+      label: "No source",
       dotCls: "mon-dot--nosource",
-      tooltip: "Источник не настроен",
+      tooltip: "Source not configured",
     };
   }
   if (!c.last_fetched) {
     return {
       level: "never",
-      label: "Не запускали",
+      label: "Never run",
       dotCls: "mon-dot--never",
-      tooltip: "Ни разу не запускали fetch",
+      tooltip: "Fetch never run",
     };
   }
   // Check staleness
@@ -483,16 +499,16 @@ function _getMonitoringStatus(c) {
   if (daysSince > 7) {
     return {
       level: "stale",
-      label: daysSince + "д назад",
+      label: daysSince + "d ago",
       dotCls: "mon-dot--stale",
-      tooltip: "Последний fetch " + daysSince + " дней назад",
+      tooltip: "Last fetch " + daysSince + " days ago",
     };
   }
   return {
     level: "ok",
-    label: "Работает",
+    label: "Working",
     dotCls: "mon-dot--ok",
-    tooltip: "Последний fetch " + _daysSince(c.last_fetched) + "д назад",
+    tooltip: "Last fetch " + _daysSince(c.last_fetched) + "d ago",
   };
 }
 
@@ -549,13 +565,13 @@ var MON_CHIP_ORDER = [
   "ok",
 ];
 var MON_CHIP_LABELS = {
-  error: "Ошибки",
-  stale: "Устарело",
-  never: "Не запускали",
-  nosource: "Нет источника",
-  nodata: "Нет данных",
-  manual: "Ручной",
-  ok: "Ок",
+  error: "Errors",
+  stale: "Stale",
+  never: "Never run",
+  nosource: "No source",
+  nodata: "No data",
+  manual: "Manual",
+  ok: "OK",
 };
 
 function _renderMonitoringChips(baseList) {
@@ -651,18 +667,18 @@ export function renderCompanies() {
   var shownEl = document.getElementById("companyShownCount");
   if (shownEl) {
     var cardFilter = state.companyCardFilter;
-    var cardLabels = { withNew: "С новыми", needAction: "Требуют внимания" };
+    var cardLabels = { withNew: "With new", needAction: "Needs attention" };
     var hasChips = state.companyMonitorFilters.size > 0;
     if (cardFilter && cardLabels[cardFilter]) {
       shownEl.innerHTML =
         filtered.length +
-        " показано \u00B7 " +
+        " shown \u00B7 " +
         escHtml(cardLabels[cardFilter]) +
         ' <span class="ces-filter-dismiss" onclick="toggleCompanyCardFilter(\'' +
         cardFilter +
         "')\">✕</span>";
     } else if (hasChips) {
-      shownEl.textContent = filtered.length + " показано";
+      shownEl.textContent = filtered.length + " shown";
     } else {
       // Count total for current sub-tab
       var subTab = state.companySubTab;
@@ -674,7 +690,7 @@ export function renderCompanies() {
         else if (subTab === "archived" && rs === "rejected") tabTotal++;
       }
       shownEl.textContent =
-        filtered.length !== tabTotal ? filtered.length + " показано" : "";
+        filtered.length !== tabTotal ? filtered.length + " shown" : "";
     }
   }
 
@@ -842,6 +858,22 @@ function _buildPendingRow(c) {
     cid +
     "','reject')\" title=\"Reject\">\u2717</button>";
 
+  // \ud83d\udd25 badge when a strong vacancy is waiting behind this unreviewed
+  // company, plus a \u23f0 deadline marker if it expires soon.
+  var hotBadge = "";
+  if (c.hot_vacancy && c.hot_vacancy.score != null) {
+    var dl = c.hot_vacancy.deadline_label
+      ? ' <span class="ct-hot-deadline">\u23f0 ' +
+        escHtml(c.hot_vacancy.deadline_label) +
+        "</span>"
+      : "";
+    hotBadge =
+      ' <span class="ct-hot-badge" title="Strong vacancy at an unreviewed company">\ud83d\udd25 ' +
+      c.hot_vacancy.score +
+      "</span>" +
+      dl;
+  }
+
   return (
     '<tr class="ct-row" style="--row-accent:' +
     fg +
@@ -850,7 +882,9 @@ function _buildPendingRow(c) {
     "')\">" +
     '<td class="ct-td ct-col-name ct-col-name--pending"><span class="ct-name-text">' +
     escHtml(c.name) +
-    "</span></td>" +
+    "</span>" +
+    hotBadge +
+    "</td>" +
     '<td class="ct-td ct-col-cat ct-col-cat--pending">' +
     catText +
     "</td>" +

@@ -17,13 +17,15 @@ export default async function handler(req, res) {
   }
 
   const warnings = validateConfig();
-  if (warnings.length) console.warn("statuses: config warning —", warnings.join("; "));
+  if (warnings.length)
+    console.warn("statuses: config warning —", warnings.join("; "));
 
   try {
     const { data, error } = await getSupabase()
       .from("vacancy")
       .select("id, status, status_updated_at")
-      .neq("status", "unseen");
+      .neq("status", "unseen")
+      .neq("status", "archived");
 
     if (error) throw error;
 

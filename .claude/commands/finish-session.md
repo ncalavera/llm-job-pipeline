@@ -1,52 +1,51 @@
 ---
-description: Финализация сессии — регенерация public/data.js, коммит изменений, push в Vercel.
+description: End-of-session finalization — regenerate public/data.js, commit changes, push to Vercel.
 ---
 
 # /finish-session
 
-Запускается в конце любой содержательной сессии (добавили компанию,
-поскорили партию, перенастроили промпт).
+Run at the end of any meaningful session (added a company, scored a batch, reconfigured a prompt).
 
-## Шаги
+## Steps
 
-1. Перегенерировать снапшот для дашборда:
+1. Regenerate the dashboard snapshot:
    ```bash
    python3 scripts/fetch_vacancies.py --report-only
    ```
-   Это пересоздаст `public/data.js` со свежими данными из Supabase.
-2. Проверить `git status`. Если изменений нет — закончить и сообщить.
-3. Показать `git diff --stat`. Если изменений много (>10 файлов) —
-   спросить, точно ли коммитить всё одним коммитом.
-4. Сформулировать commit message по правилам conventional commits:
-   - `feat:` — добавили компанию, новую возможность.
-   - `fix:` — исправили парсер, ошибку в скрипте.
-   - `chore:` — обновили dependencies, переформатировали.
-   - `docs:` — обновили README или docs/.
-   - `data:` — только `public/data.js` обновили (триаж, скоринг).
-5. Закоммитить выборочно нужные файлы (не `git add .` — это рискует
-   засосать локальные кэши и `.env`).
-6. Запушить в origin:
+   This rebuilds `public/data.js` with fresh data from Supabase.
+
+2. Check `git status`. If there are no changes — stop and report.
+
+3. Show `git diff --stat`. If more than 10 files changed — ask whether to commit everything in one commit.
+
+4. Draft a commit message using conventional commits:
+   - `feat:` — added a company, added a feature.
+   - `fix:` — fixed a parser, fixed a script error.
+   - `chore:` — updated dependencies, reformatted.
+   - `docs:` — updated README or docs.
+   - `data:` — only `public/data.js` changed (triage, scoring).
+
+5. Stage specific files (never `git add .` — it risks capturing local caches and `.env` files).
+
+6. Push to origin:
    ```bash
    git push
    ```
-7. Если репозиторий подключён к Vercel — деплой пойдёт автоматически.
-   Покажите URL: `https://<project>.vercel.app`.
 
-## Что НЕ коммитить
+7. If the repository is connected to Vercel — deployment runs automatically. Show the URL: `https://<project>.vercel.app`.
 
-- `.env` — секреты.
-- `config/user_profile.md` — личные данные.
-- `.firecrawl/` — кэш парсеров (gitignored).
-- `vacancies/` — старые архивы (gitignored).
-- `.claude-session-acceptance.md` — критерии текущей сессии.
+## What NOT to commit
 
-Все эти пути уже в `.gitignore` — но если случайно прописали в `git
-add -A`, обязательно проверьте `git diff --staged` перед коммитом.
+- `.env` — secrets.
+- `config/user_profile.md` — personal data.
+- `.firecrawl/` — scraper cache (gitignored).
+- `vacancies/` — old archives (gitignored).
+- `.claude-session-acceptance.md` — current session acceptance criteria.
 
-## Если push провалился
+All these paths are already in `.gitignore` — but if you accidentally staged them via `git add -A`, always check `git diff --staged` before committing.
 
-- **Pre-commit hook упал**: исправьте проблему и сделайте новый коммит
-  (не `--amend` — это потенциальная потеря работы).
-- **Конфликт с remote**: `git pull --rebase` и снова push.
-- **Vercel не задеплоился**: посмотрите логи в дашборде Vercel —
-  обычно отсутствует переменная окружения или сломался build.
+## If push fails
+
+- **Pre-commit hook failed**: fix the issue and make a new commit (not `--amend` — that risks losing work).
+- **Conflict with remote**: `git pull --rebase` then push again.
+- **Vercel did not deploy**: check the Vercel dashboard logs — usually a missing environment variable or a broken build step.

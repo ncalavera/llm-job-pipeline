@@ -42,13 +42,23 @@ from fetchers import (
     fetch_recruitee, fetch_teamtailor_rss, fetch_bamboohr,
     fetch_amazon_jobs,
     get_firecrawl_change_statuses,
+    get_scrape_statuses,
 )
 from database_supabase import (
-    get_conn, merge_vacancies,
+    get_conn, merge_vacancies, archive_gone_vacancies,
     should_fetch_board, mark_board_fetched, merge_board_vacancies,
     update_source_tracking, load_vacancies, print_reconciliation_report,
     pass_expired_vacancies,
 )
+
+# Strategies whose fetch returns the company's COMPLETE current listing —
+# safe to treat "absent from fetch" as "closed at source". Excluded:
+# firecrawl_scrape (change tracking returns [] when the page is unchanged)
+# and amazon_jobs (search-based, may return a subset).
+GONE_DETECTION_STRATEGIES = {
+    "greenhouse", "lever", "ashby", "workable", "recruitee",
+    "teamtailor_rss", "bamboohr", "workday_api", "unops_widget",
+}
 from report import generate_dashboard
 
 
@@ -269,12 +279,12 @@ def main():
         manual = [(name, cfg) for name, cfg in COMPANIES.items()
                   if cfg["strategy"] == "manual_check"]
         if manual:
-            print("\n⚠️  Ручная проверка нужна для:")
+            print("\n⚠️  Manual check needed for:")
             for name, cfg in manual:
                 print(f"  - {name}: {cfg['careers_url']}")
-            print("\nЗайди на сайты и проверь новые вакансии.")
+            print("\nVisit the sites and check for new vacancies.")
         else:
-            print("\n✓ Нет компаний с ручной проверкой.")
+            print("\n✓ No companies require a manual check.")
         return
 
     conn = get_conn()
@@ -349,8 +359,17 @@ def main():
                 print(f"  [{org_name}] Fetch error: {exc}")
                 fetch_status = f"error: {exc}"
 
+            # Honest marking: local scraper flagged a JS-rendered shell page.
+            scrape_status = get_scrape_statuses().get(org_name)
+            if scrape_status == "js_required" and fetch_status == "ok" and not jobs:
+                fetch_status = "js_required"
+
             # Save raw fetch log
             _save_fetch_log(f"{strategy}_{org_name.lower().replace(' ', '_')}", jobs, fetch_status)
+
+            # Full pre-filter listing — gone-detection must diff against what
+            # the source actually lists, not the department-filtered subset.
+            raw_jobs = jobs
 
             # Department exclusion filter (configured per-company in ats_config)
             dept_exclude = config.get("department_exclude", [])
@@ -371,6 +390,11 @@ def main():
             total_new += new_count
             if new_count > 0:
                 print(f"  [{org_name}] {new_count} NEW vacancies added")
+
+            # Gone-from-source: a complete direct-ATS listing is ground truth.
+            # An unseen vacancy missing from a successful fetch was closed.
+            if fetch_status == "ok" and strategy in GONE_DETECTION_STRATEGIES:
+                archive_gone_vacancies(org_name, raw_jobs)
 
         # --- Job Board Aggregators ---
         manual_boards = []
@@ -448,12 +472,12 @@ def main():
         print_reconciliation_report()
 
         if manual_companies or manual_boards:
-            print("\n⚠️  Ручная проверка нужна для:")
+            print("\n⚠️  Manual check needed for:")
             for name, url in manual_companies:
                 print(f"  - {name}: {url}")
             for name, url in manual_boards:
-                print(f"  - {name} (борд): {url}")
-            print("  Зайди на сайты и проверь новые вакансии.")
+                print(f"  - {name} (board): {url}")
+            print("  Visit the sites and check for new vacancies.")
 
         # --- Auto-score pipeline (subprocess isolation) ---
         if total_new > 0 and args.auto_score:

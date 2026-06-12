@@ -9,6 +9,7 @@ import subprocess
 import time
 import urllib.parse
 import urllib.request
+from collections import Counter
 
 try:
     import requests
@@ -89,6 +90,7 @@ def fetch_workday_api(org_name: str, tenant: str, board: str, base_url: str, con
     """
     list_url = f"{base_url}/wday/cxs/{tenant}/{board}/jobs"
     url_prefix = (config or {}).get("url_prefix", "")
+    search_text = (config or {}).get("search_text", "")
     print(f"  [{org_name}] Workday API: {list_url}")
 
     jobs = []
@@ -108,7 +110,7 @@ def fetch_workday_api(org_name: str, tenant: str, board: str, base_url: str, con
                 "appliedFacets": {},
                 "limit": limit,
                 "offset": offset,
-                "searchText": "",
+                "searchText": search_text,
             }).encode()
             req = urllib.request.Request(list_url, data=payload, headers=headers)
             with urllib.request.urlopen(req, timeout=20) as resp:
@@ -683,10 +685,297 @@ FIRECRAWL_JOBS_SCHEMA = {
 # Change tracking status cache (org_name → changeStatus string)
 _last_firecrawl_change_status: dict[str, str] = {}
 
+# Per-run scrape outcome cache (org_name → fetch_status override, e.g. "js_required")
+_last_scrape_status: dict[str, str] = {}
+
+# Firecrawl credit balance, checked once per run. None = not yet checked.
+_firecrawl_credits_remaining: "int | None" = None
+
 
 def get_firecrawl_change_statuses() -> dict[str, str]:
     """Return the change tracking statuses from the last fetch run."""
     return dict(_last_firecrawl_change_status)
+
+
+def get_scrape_statuses() -> dict[str, str]:
+    """Return fetch_status overrides set by the scraper (e.g. js_required)."""
+    return dict(_last_scrape_status)
+
+
+def _firecrawl_credits_available() -> bool:
+    """Check Firecrawl credit balance once per run.
+
+    Queries GET /v2/team/credit-usage with $FIRECRAWL_API_KEY. Caches the
+    result for the rest of the process. Returns True only when credits > 0.
+    On any error (no key, network), assumes credits available and lets the
+    normal Firecrawl path surface the real error.
+    """
+    global _firecrawl_credits_remaining
+    if _firecrawl_credits_remaining is not None:
+        return _firecrawl_credits_remaining > 0
+
+    import os
+    key = os.environ.get("FIRECRAWL_API_KEY", "")
+    if not key:
+        # No key: can't check, but Firecrawl client likely unusable anyway.
+        _firecrawl_credits_remaining = -1  # unknown → treat as "try anyway"
+        return True
+    try:
+        resp = requests.get(
+            "https://api.firecrawl.dev/v2/team/credit-usage",
+            headers={"Authorization": f"Bearer {key}"},
+            timeout=15,
+        )
+        data = resp.json().get("data", {}) if resp.ok else {}
+        remaining = int(data.get("remainingCredits", -1))
+        _firecrawl_credits_remaining = remaining
+        if remaining == 0:
+            print("  Firecrawl credits exhausted — using local scraper")
+        return remaining != 0  # >0 → use Firecrawl; -1 (unknown) → try anyway
+    except Exception as e:
+        print(f"  Firecrawl credit check failed ({e}); will attempt Firecrawl")
+        _firecrawl_credits_remaining = -1
+        return True
+
+
+# Errors from the Firecrawl SDK that signal quota exhaustion / rate limits.
+_QUOTA_ERROR_MARKERS = (
+    "402", "429", "payment required", "insufficient credit",
+    "out of credit", "rate limit", "quota", "too many requests",
+)
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(m in msg for m in _QUOTA_ERROR_MARKERS)
+
+
+# Browser-like User-Agent so sites don't serve a bot/blank page.
+_LOCAL_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
+
+def _html_to_markdown(html: str) -> str:
+    """Convert raw HTML to markdown using html2text (links + structure kept)."""
+    try:
+        import html2text
+    except ImportError:
+        # Last-resort: crude tag strip so parse_markdown_jobs still sees links.
+        text = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
+        text = re.sub(r"<[^>]+>", " ", text)
+        return html_module.unescape(re.sub(r"\s+", " ", text))
+    h = html2text.HTML2Text()
+    h.body_width = 0          # no hard wrapping
+    h.ignore_images = True
+    h.ignore_emphasis = True
+    h.single_line_break = True
+    return h.handle(html)
+
+
+def _absolutize_links(html: str, base_url: str) -> str:
+    """Rewrite root-relative href="/..." links to absolute URLs."""
+    from urllib.parse import urljoin
+    return re.sub(r'(href=")(/[^"]+)',
+                  lambda m: m.group(1) + urljoin(base_url, m.group(2)), html)
+
+
+def _fetch_pageup_xhr(org_name: str, url: str, *,
+                      url_filter: str = "") -> list[dict]:
+    """PageUp ATS (e.g. jobs.unicef.org): facet filters apply only via XHR.
+
+    Plain GET ignores ?optionsFacetsDD_* facets and returns the unfiltered
+    board. With X-Requested-With the server returns {"results": "<html>"}
+    honoring the facet. PageUp throttles bursts (HTTP 202 + empty body), so
+    retry with backoff; production cadence is one request per TTL cycle.
+    """
+    import time
+    print(f"  [{org_name}] PageUp XHR scrape: {url}")
+    headers = {
+        "User-Agent": _LOCAL_UA,
+        "X-Requested-With": "XMLHttpRequest",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    def _get_throttled(req_url, *, xhr=True, retries=3):
+        """GET with backoff: PageUp answers bursts with HTTP 202 + empty body."""
+        h = headers if xhr else {"User-Agent": _LOCAL_UA}
+        for attempt in range(retries):
+            if attempt:
+                time.sleep(60 * attempt)
+            try:
+                resp = requests.get(req_url, headers=h, timeout=20)
+                if resp.status_code == 200 and resp.text:
+                    return resp.text
+                print(f"  [{org_name}] PageUp throttled "
+                      f"(HTTP {resp.status_code}), retry {attempt + 1}/{retries}...")
+            except Exception as e:
+                print(f"  [{org_name}] PageUp fetch error: {e}")
+        return ""
+
+    url_filter_re = re.compile(url_filter) if url_filter else None
+    jobs, seen_urls, all_md = [], set(), []
+    sep = "&" if "?" in url else "?"
+    for page in range(1, 6):
+        page_url = url if page == 1 else f"{url}{sep}page={page}"
+        raw = _get_throttled(page_url)
+        if not raw.strip().startswith("{"):
+            break
+        html = _absolutize_links(json.loads(raw).get("results", ""), url)
+        all_md.append(_html_to_markdown(html))
+
+        # Parse the PageUp list structure directly: markdown-parsing drops
+        # most rows (titles routinely exceed the 100-char title limit).
+        page_new = 0
+        for m in re.finditer(
+                r'class="job-link"\s+href="([^"]+)"\s*>\s*([^<]+)</a>(.{0,2000}?)'
+                r'(?=class="job-link"|$)', html, re.DOTALL):
+            job_url, title, tail = (m.group(1),
+                                    html_module.unescape(m.group(2)).strip(),
+                                    m.group(3))
+            if job_url in seen_urls:
+                continue
+            seen_urls.add(job_url)
+            if url_filter_re and not url_filter_re.search(job_url):
+                continue
+            snippet_m = re.search(r"<p[^>]*>\s*([^<]{30,})</p>", tail)
+            loc_m = re.search(r"location[^>]*>\s*<[^>]*>\s*([^<]+)<", tail,
+                              re.IGNORECASE)
+            jobs.append({
+                "title": title,
+                "location": (loc_m.group(1).strip() if loc_m else ""),
+                "department": "",
+                "url": job_url,
+                "external_id": hashlib.md5(job_url.encode()).hexdigest()[:12],
+                "snippet": (html_module.unescape(snippet_m.group(1).strip())
+                            if snippet_m else ""),
+            })
+            page_new += 1
+        if page_new == 0:  # page param ignored or past the end
+            break
+        time.sleep(10)
+    if not jobs:
+        _last_scrape_status[org_name] = "js_required"
+        return []
+    _cache_markdown(org_name, "\n".join(all_md), source="pageup")
+    print(f"  [{org_name}] PageUp parsed {len(jobs)} vacancies")
+
+    # Detail pages are server-rendered; fetch gently to respect throttling.
+    for job in jobs:
+        time.sleep(10)
+        detail_html = _get_throttled(job["url"], xhr=False, retries=2)
+        if len(detail_html) > 2000:
+            detail_md = _html_to_markdown(detail_html)
+            if len(detail_md) > len(job.get("snippet", "")):
+                job["full_description"] = detail_md
+    with_desc = sum(1 for j in jobs if j.get("full_description"))
+    print(f"  [{org_name}] PageUp descriptions: {with_desc}/{len(jobs)}")
+    return jobs
+
+
+def _fetch_wagtail_jobs_api(org_name: str, url: str) -> list[dict]:
+    """Wagtail CMS pages API (e.g. /api/v2/pages/?type=jobs.JobPage).
+
+    The jobs *listing* page is a JS app, but the underlying Wagtail API and
+    the per-job detail pages are server-rendered — zero-cost to fetch.
+    """
+    import time
+    print(f"  [{org_name}] Wagtail jobs API: {url}")
+    try:
+        resp = requests.get(url, headers={"User-Agent": _LOCAL_UA}, timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"  [{org_name}] Wagtail API error: {e}")
+        _last_scrape_status[org_name] = "js_required"
+        return []
+
+    jobs = []
+    for it in data.get("items", []):
+        title = (it.get("title") or "").strip()
+        job_url = (it.get("meta", {}).get("html_url") or "").strip()
+        if not title or not job_url:
+            continue
+        def _s(key):
+            v = it.get(key)
+            return v.strip() if isinstance(v, str) else ""
+        extras = " | ".join(filter(None, [
+            _s("location"), _s("salary"), _s("contract_type"),
+            f"closes {it['closes'][:10]}" if isinstance(it.get("closes"), str) else "",
+        ]))
+        snippet = " ".join(filter(None, [_s("listing_summary"), extras]))
+        jobs.append({
+            "title": title,
+            "location": _s("location"),
+            "department": "",
+            "url": job_url,
+            "external_id": hashlib.md5(job_url.encode()).hexdigest()[:12],
+            "snippet": snippet,
+        })
+    print(f"  [{org_name}] Wagtail API: {len(jobs)} vacancies")
+
+    for job in jobs:
+        time.sleep(2)
+        try:
+            resp = requests.get(job["url"],
+                                headers={"User-Agent": _LOCAL_UA}, timeout=20)
+            if resp.status_code == 200 and len(resp.text) > 2000:
+                job["full_description"] = _html_to_markdown(resp.text)
+        except Exception as e:
+            print(f"  [{org_name}] detail fetch failed for {job['title']}: {e}")
+    with_desc = sum(1 for j in jobs if j.get("full_description"))
+    print(f"  [{org_name}] Wagtail descriptions: {with_desc}/{len(jobs)}")
+    return jobs
+
+
+def _fetch_local_scrape(org_name: str, url: str, *,
+                        url_filter: str = "") -> list[dict]:
+    """Zero-cost fallback: fetch the page with requests → markdown → parse.
+
+    Records a 'js_required' status override when the page looks like a
+    JS-rendered shell (little text / no links) so the company row is marked
+    honestly instead of faking a successful empty fetch.
+    """
+    if "optionsFacetsDD" in url or "/filter/?" in url:
+        return _fetch_pageup_xhr(org_name, url, url_filter=url_filter)
+    if "/api/v2/pages/" in url:
+        return _fetch_wagtail_jobs_api(org_name, url)
+    print(f"  [{org_name}] Local scrape (no Firecrawl credits): {url}")
+    try:
+        resp = requests.get(
+            url,
+            headers={
+                "User-Agent": _LOCAL_UA,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"  [{org_name}] Local fetch error: {e}")
+        return []
+
+    markdown = _html_to_markdown(resp.text)
+    _cache_markdown(org_name, markdown, source="local")
+
+    # JS-shell detection: thin text or no links → can't scrape without a browser.
+    text_len = len(re.sub(r"\s+", " ", markdown).strip())
+    has_links = "](" in markdown
+    if text_len < 500 or not has_links:
+        print(f"  [{org_name}] Page looks JS-rendered "
+              f"(text={text_len} chars, links={has_links}) → js_required")
+        _last_scrape_status[org_name] = "js_required"
+        return []
+
+    jobs = parse_markdown_jobs(markdown, org_name, url_filter=url_filter)
+    print(f"  [{org_name}] Local scraper parsed {len(jobs)} vacancies")
+    if not jobs:
+        # HTML had links but parser found no job-like rows: likely JS-gated list.
+        _last_scrape_status[org_name] = "js_required"
+    return jobs
 
 
 def _parse_json_jobs(json_data: dict, org_name: str, base_url: str,
@@ -915,12 +1204,24 @@ def fetch_firecrawl_scrape(org_name: str, url: str, *,
     With use_json=False (boards): requests markdown only (1 credit).
     """
     FIRECRAWL_CACHE.mkdir(parents=True, exist_ok=True)
+
+    # PageUp facets (?optionsFacetsDD_*, /filter/?) apply only via XHR with
+    # X-Requested-With — Firecrawl's plain render gets the unfiltered board,
+    # so route these straight to the local PageUp scraper.
+    if "optionsFacetsDD" in url or "/filter/?" in url:
+        return _fetch_local_scrape(org_name, url, url_filter=url_filter)
+
+    # Quota guard: if credits are exhausted, skip Firecrawl entirely (saves
+    # ~60s of latency per company) and go straight to the local scraper.
+    if not _firecrawl_credits_available():
+        return _fetch_local_scrape(org_name, url, url_filter=url_filter)
+
     print(f"  [{org_name}] Firecrawl scrape: {url}")
 
     client = get_firecrawl_client()
     if client is None:
-        print(f"  [{org_name}] SDK not available, falling back to CLI")
-        return _fetch_firecrawl_scrape_cli(org_name, url, url_filter=url_filter)
+        print(f"  [{org_name}] SDK not available, falling back to local scraper")
+        return _fetch_local_scrape(org_name, url, url_filter=url_filter)
 
     # Build formats list
     formats = ["markdown", "changeTracking"]
@@ -937,8 +1238,14 @@ def fetch_firecrawl_scrape(org_name: str, url: str, *,
         )
     except Exception as e:
         print(f"  [{org_name}] SDK error: {e}")
-        print(f"  [{org_name}] Falling back to CLI")
-        return _fetch_firecrawl_scrape_cli(org_name, url)
+        if _is_quota_error(e):
+            # Mark credits exhausted for the rest of the run, then go local.
+            global _firecrawl_credits_remaining
+            _firecrawl_credits_remaining = 0
+            print(f"  [{org_name}] Quota/rate-limit error — switching to local scraper")
+        else:
+            print(f"  [{org_name}] Falling back to local scraper")
+        return _fetch_local_scrape(org_name, url, url_filter=url_filter)
 
     # --- Handle change tracking if present ---
     change_tracking = getattr(result, "changeTracking", None)
@@ -978,8 +1285,8 @@ def fetch_firecrawl_scrape(org_name: str, url: str, *,
         jobs = _enrich_blind_jobs(jobs, org_name)
         return jobs
 
-    print(f"  [{org_name}] No content returned from SDK")
-    return []
+    print(f"  [{org_name}] No content returned from SDK — trying local scraper")
+    return _fetch_local_scrape(org_name, url, url_filter=url_filter)
 
 
 def _enrich_blind_jobs(jobs: list[dict], org_name: str) -> list[dict]:
@@ -1047,14 +1354,20 @@ def _enrich_blind_jobs(jobs: list[dict], org_name: str) -> list[dict]:
     return jobs
 
 
-def _cache_markdown(org_name: str, markdown: str) -> None:
-    """Save markdown to cache file for debugging."""
+def _cache_markdown(org_name: str, markdown: str, *, source: str = "firecrawl") -> None:
+    """Save markdown to cache file for debugging.
+
+    Prepends a one-line provenance marker recording which scraper produced
+    the content (firecrawl vs local).
+    """
     if not markdown:
         return
+    FIRECRAWL_CACHE.mkdir(parents=True, exist_ok=True)
     slug = org_name.lower().replace(" ", "_").replace(".", "")
     output_file = FIRECRAWL_CACHE / f"{slug}.md"
     try:
-        output_file.write_text(markdown, encoding="utf-8")
+        header = f"<!-- source: {source} | {time.strftime('%Y-%m-%d %H:%M')} -->\n"
+        output_file.write_text(header + markdown, encoding="utf-8")
     except Exception:
         pass
 
@@ -1236,6 +1549,10 @@ def _fetch_unops_job_detail(url: str) -> str:
     try:
         resp = requests.get(url, timeout=20)
         resp.raise_for_status()
+        # Gone jobs 302-redirect to /careersmarketplace/Error — without this
+        # guard the error page text would be saved as a full_description.
+        if "/error" in resp.url.lower():
+            return ""
         html = resp.text
     except Exception:
         return ""
@@ -1350,11 +1667,21 @@ def parse_markdown_jobs(markdown: str, org_name: str, *,
         r'\[([^\]]{5,100})\]\((https?://[^\)]+)\)', re.IGNORECASE
     )
     image_ext_re = re.compile(r'\.(webp|jpg|jpeg|png|gif|svg)(\?|$)', re.IGNORECASE)
+
+    # Navigation guard: header/footer menu links repeat on every page section
+    # of a scrape (nav links can appear 6+ times), while a job link appears
+    # once or twice. A URL repeated 3+ times is site chrome, not a job.
+    url_counts = Counter(
+        m.group(2).strip() for m in link_pattern.finditer(markdown)
+    )
+
     for match in link_pattern.finditer(markdown):
         title = match.group(1).strip()
         url = match.group(2).strip()
         # Skip image links: ![alt](img-url) captured as [!alt](img-url) or image URL
         if title.startswith("!") or "/images/" in url or image_ext_re.search(url):
+            continue
+        if url_counts[url] >= 3:
             continue
         if url_filter_re and not url_filter_re.search(url):
             continue
@@ -1486,9 +1813,15 @@ def _looks_like_job_title(text: str) -> bool:
         "designer", "advisor", "consultant", "researcher", "assistant",
         "vice president", "vp", "chief", "senior", "junior", "intern",
         "partner", "recruiter", "administrator", "strategist",
-        "program", "project", "product", "operations",
+        "program", "programme", "project", "product", "operations",
     ]
-    has_keyword = any(kw in text_lower for kw in job_keywords)
+    # Word-boundary match (allowing plural): a bare substring check let
+    # "international" match "intern" and "Projected" match "project",
+    # importing research articles as vacancies.
+    has_keyword = any(
+        re.search(rf'\b{re.escape(kw)}s?\b', text_lower)
+        for kw in job_keywords
+    )
 
     # Reject pure "FirstName LastName" pattern (2-3 capitalized words, no job keyword)
     words = text.split()

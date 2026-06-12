@@ -9,6 +9,7 @@ const VALID_STATUSES = [
   "to_network",
   "skipped",
   "applied",
+  "archived",
 ];
 
 export default async function handler(req, res) {
@@ -26,7 +27,8 @@ export default async function handler(req, res) {
   }
 
   const warnings = validateConfig();
-  if (warnings.length) console.warn("save: config warning —", warnings.join("; "));
+  if (warnings.length)
+    console.warn("save: config warning —", warnings.join("; "));
 
   const { id, status } = req.body;
   if (!id || !status)

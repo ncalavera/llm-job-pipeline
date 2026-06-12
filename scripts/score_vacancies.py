@@ -40,9 +40,8 @@ sys.stdout = _real_stdout
 # Constants
 # ---------------------------------------------------------------------------
 
-USA_ONLY_SCORE_CAP = 15
 MAX_TOKENS = 1024
-PROMPT_VERSION = "v3.2_2026_03_10_domain_calibration"
+PROMPT_VERSION = "v4.0_2026_pure_fit"
 BILLING_ABORT_THRESHOLD = 5
 
 # OpenClaw SSH
@@ -92,31 +91,6 @@ def _is_blacklisted(title: str, description: str = "") -> bool:
         if any(kw in d for kw in GLOBAL_BLACKLIST_DESC_SUBSTR):
             return True
     return False
-
-
-def is_usa_only(vacancy) -> bool:
-    """Check if vacancy has only US-based locations (v2 structure)."""
-    locs = vacancy.get("locations", [])
-    if not locs:
-        return False
-    has_us = False
-    for loc in locs:
-        country = (loc.get("country") or "").lower()
-        region = (loc.get("region") or "").lower()
-        work_mode = (loc.get("work_mode") or "").lower()
-        if country in ("united states", "usa", "us"):
-            has_us = True
-            continue
-        if region == "americas" and not country:
-            has_us = True
-            continue
-        if work_mode == "remote" and not country and not region:
-            return False
-        if country or region:
-            return False
-        if not country and not region:
-            return False
-    return has_us
 
 
 def _sanitize_text(text: str) -> str:
@@ -247,17 +221,28 @@ def _build_openclaw_message(user_msg: str) -> str:
 # Data loading + dedup
 # ---------------------------------------------------------------------------
 
-def _load_and_dedup(*, force=False, exclude_usa=False, include_passed=False,
-                    limit=None, offset=0):
+def _load_and_dedup(*, force=False, include_passed=False,
+                    include_candidates=True, limit=None, offset=0):
     """Load vacancies, dedup by (org, title), filter.
 
     Returns: (roles, fitness_map, stats)
         roles = [(key, rep, members), ...]
+
+    include_candidates=True (default) also pulls strong unscored vacancies from
+    *candidate* companies (alignment >= floor or unscored), capped per run, so a
+    forgotten company's strong role still gets scored. Disable with
+    --no-candidates.
+
+    Note: geography filtering (US/CIS/rest-of-world) lives in the pre-score
+    filter (filter_vacancies.py), not here.
     """
-    from database_supabase import load_vacancies, get_company_fitness_map
+    from database_supabase import (
+        load_vacancies, get_company_fitness_map,
+        load_candidate_vacancies_for_scoring,
+    )
 
     # Skip already-decided vacancies by default — /score should not waste
-    # subagent budget on auto-passed expired or user-skipped rows (issue #233).
+    # subagent budget on auto-passed expired or user-skipped rows.
     status_exclude = None if include_passed else ["passed", "skipped"]
     vacancies = (
         load_vacancies(status_exclude=status_exclude) if force
@@ -265,13 +250,33 @@ def _load_and_dedup(*, force=False, exclude_usa=False, include_passed=False,
     )
     fitness_map = get_company_fitness_map()
 
+    # Candidate rescue: merge in promising unscored vacancies from candidate
+    # companies (capped). Keyed by UUID, so no double-counting with the active
+    # pool above (which only contains active companies anyway).
+    candidate_count = 0
+    if include_candidates and not force:
+        candidates = load_candidate_vacancies_for_scoring(
+            status_exclude=status_exclude or ["passed", "skipped"],
+        )
+        for uid, vac in candidates.items():
+            if uid not in vacancies:
+                vacancies[uid] = vac
+                candidate_count += 1
+        if candidate_count:
+            print(
+                f"  [CANDIDATE RESCUE] +{candidate_count} vacancies from "
+                f"candidate (unreviewed) companies",
+                file=sys.stderr, flush=True,
+            )
+
     role_groups: dict[tuple[str, str], list[dict]] = {}
     for v in vacancies.values():
         key = (v["org"], v["title"])
         role_groups.setdefault(key, []).append(v)
 
     roles = []
-    stats = {"blacklisted": 0, "usa": 0, "blind": 0, "total": len(vacancies)}
+    stats = {"blacklisted": 0, "blind": 0, "total": len(vacancies),
+             "candidates": candidate_count}
     for key, members in role_groups.items():
         rep = max(
             members,
@@ -281,9 +286,6 @@ def _load_and_dedup(*, force=False, exclude_usa=False, include_passed=False,
         desc = rep.get("full_description") or rep.get("snippet") or ""
         if _is_blacklisted(rep["title"], desc):
             stats["blacklisted"] += 1
-            continue
-        if exclude_usa and is_usa_only(rep):
-            stats["usa"] += 1
             continue
         # Blind vacancy gate — skip if no description AND no snippet
         if not desc.strip():
@@ -307,10 +309,12 @@ def _load_and_dedup(*, force=False, exclude_usa=False, include_passed=False,
 # ---------------------------------------------------------------------------
 
 def _make_score_data(result: dict, rep: dict) -> dict:
-    """Build score_data dict with USA cap applied."""
+    """Build score_data dict from an LLM result.
+
+    Geography is enforced in the pre-score filter (delete_usa/cis/row), not
+    here — scoring no longer caps by location.
+    """
     score = result["score"]
-    if isinstance(score, (int, float)) and score > USA_ONLY_SCORE_CAP and is_usa_only(rep):
-        score = USA_ONLY_SCORE_CAP
     data = {
         "llm_score": score,
         "llm_reasoning": result["reasoning"],
@@ -334,8 +338,9 @@ def cmd_local(args):
     sys.stdout = sys.stderr
 
     roles, fitness_map, stats = _load_and_dedup(
-        force=args.force, exclude_usa=args.exclude_usa,
+        force=args.force,
         include_passed=args.include_passed,
+        include_candidates=not args.no_candidates,
         limit=args.limit, offset=args.offset,
     )
 
@@ -358,7 +363,6 @@ def cmd_local(args):
             "member_ids": [m["id"] for m in members],
             "org": rep["org"],
             "title": rep["title"],
-            "is_usa_only": is_usa_only(rep),
             "system_prompt": SYSTEM_PROMPT,
             "user_msg": user_msg,
         })
@@ -405,12 +409,7 @@ def cmd_save(_args):
             errors += 1
             continue
 
-        # Apply USA-only cap
-        if entry.get("is_usa_only") and isinstance(
-            score_data.get("llm_score"), (int, float)
-        ):
-            if score_data["llm_score"] > USA_ONLY_SCORE_CAP:
-                score_data["llm_score"] = USA_ONLY_SCORE_CAP
+        # Geography is enforced in the pre-score filter — no score cap here.
 
         # Warn on short summaries
         summary = score_data.get("llm_summary", "")
@@ -445,8 +444,8 @@ def cmd_save(_args):
             heal_cur = conn.cursor()
             heal_cur.execute(
                 "SELECT id, locations, full_description, snippet "
-                "FROM vacancy WHERE id = ANY(%s) AND locations IS NOT NULL",
-                (scored_ids,),
+                "FROM vacancy WHERE id = ANY(%s::uuid[]) AND locations IS NOT NULL",
+                ([str(i) for i in scored_ids],),
             )
             healed = 0
             for vid, locs, desc, snip in heal_cur.fetchall():
@@ -470,6 +469,9 @@ def cmd_save(_args):
                 conn.commit()
                 print(f"Self-healed {healed} vacancies with dirty locations.")
     except Exception as e:
+        # A failed statement poisons the shared connection — roll back so the
+        # dashboard regeneration below still works.
+        conn.rollback()
         print(f"Self-healing skipped: {e}", file=sys.stderr)
 
     # Regenerate dashboard so ticker and stats reflect new scores
@@ -489,7 +491,8 @@ def cmd_openclaw(args):
         sys.exit(1)
 
     roles, fitness_map, stats = _load_and_dedup(
-        exclude_usa=args.exclude_usa, include_passed=args.include_passed,
+        include_passed=args.include_passed,
+        include_candidates=not args.no_candidates,
         limit=args.limit,
     )
 
@@ -605,12 +608,17 @@ def main():
 
     parser.add_argument("--limit", type=int)
     parser.add_argument("--offset", type=int, default=0)
-    parser.add_argument("--exclude-usa", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
         "--include-passed",
         action="store_true",
-        help="Score vacancies even if status='passed' or 'skipped' (default: skip them — issue #233)",
+        help="Score vacancies even if status='passed' or 'skipped' (default: skip them)",
+    )
+    parser.add_argument(
+        "--no-candidates",
+        action="store_true",
+        help="Do NOT pull strong vacancies from candidate (unreviewed) companies "
+             "(default: include them, capped per run)",
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-workers", type=int, default=MAX_CONCURRENT)

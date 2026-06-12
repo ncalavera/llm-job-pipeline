@@ -67,8 +67,8 @@ export function toggleCatalogLoc(btn) {
 export function toggleCatalogSort(btn) {
   state.catalogSortDesc = !state.catalogSortDesc;
   btn.textContent = state.catalogSortDesc
-    ? "Скор\u00A0\u2193"
-    : "Скор\u00A0\u2191";
+    ? "Score\u00A0\u2193"
+    : "Score\u00A0\u2191";
   renderCatalog();
 }
 
@@ -83,7 +83,7 @@ export function initCatalog() {
       groups.filter((g) => isGroupCompanyApproved(g)).map((g) => g.org),
     ),
   ].sort();
-  sel.innerHTML = '<option value="">Все компании</option>';
+  sel.innerHTML = '<option value="">All companies</option>';
   orgs.forEach((org) => {
     const opt = document.createElement("option");
     opt.value = org;
@@ -136,19 +136,19 @@ export function renderCatalog() {
   });
 
   document.getElementById("catalogResultsCount").textContent =
-    filtered.length + " из " + inBasket.length + " вакансий";
+    filtered.length + " of " + inBasket.length + " vacancies";
 
   if (filtered.length === 0) {
     const labels = {
-      liked: "Выбранных",
-      unseen: "Неразобранных",
-      passed: "Откинутых",
+      liked: "liked",
+      unseen: "unreviewed",
+      passed: "passed",
     };
     grid.innerHTML =
       '<div class="catalog-empty"><div class="catalog-empty-icon">\uD83D\uDDC2</div>' +
       (query || orgFilter || state.activeCatalogLocs.size > 0
-        ? "Ничего не найдено по фильтрам"
-        : labels[state.currentBasket] + " вакансий нет") +
+        ? "Nothing matches the filters"
+        : "No " + labels[state.currentBasket] + " vacancies") +
       "</div>";
     return;
   }
@@ -245,7 +245,7 @@ function buildCatalogCard(g) {
   }
 
   const regionLabels = {
-    europe: "Европа",
+    europe: "Europe",
     americas: "Americas",
     remote: "Remote",
     asia: "Asia",
@@ -291,26 +291,26 @@ function buildCatalogCard(g) {
       g.id +
       "'," +
       mids +
-      ',\'pass\')" title="Откинуть">\uD83D\uDC4E</button>';
+      ',\'pass\')" title="Pass">\uD83D\uDC4E</button>';
   } else if (basket === "unseen") {
     thumbBtns =
       '<button class="thumb-btn like" onclick="event.stopPropagation();catalogThumbAction(\'' +
       g.id +
       "'," +
       mids +
-      ',\'like\')" title="Нравится">\uD83D\uDC4D</button>' +
+      ',\'like\')" title="Like">\uD83D\uDC4D</button>' +
       '<button class="thumb-btn pass" onclick="event.stopPropagation();catalogThumbAction(\'' +
       g.id +
       "'," +
       mids +
-      ',\'pass\')" title="Пропустить">\uD83D\uDC4E</button>';
+      ',\'pass\')" title="Skip">\uD83D\uDC4E</button>';
   } else if (basket === "passed") {
     thumbBtns =
       '<button class="thumb-btn like" onclick="event.stopPropagation();catalogThumbAction(\'' +
       g.id +
       "'," +
       mids +
-      ',\'like\')" title="В избранное">\uD83D\uDC4D</button>';
+      ',\'like\')" title="Like">\uD83D\uDC4D</button>';
   }
 
   const hasExpandContent =
@@ -318,7 +318,7 @@ function buildCatalogCard(g) {
       g.full_description.length > summaryText.length + 50) ||
     g.llm_reasoning;
   const expandBtn = hasExpandContent
-    ? '<button class="expand-btn" onclick="event.stopPropagation();toggleCatalogExpand(this)">Подробнее</button>'
+    ? '<button class="expand-btn" onclick="event.stopPropagation();toggleCatalogExpand(this)">Details</button>'
     : "";
   let expandParts = [];
   if (g.llm_reasoning) {
@@ -414,5 +414,5 @@ export function toggleCatalogExpand(btn) {
   const desc = card.querySelector(".catalog-full-desc");
   if (!desc) return;
   const expanded = desc.classList.toggle("expanded");
-  btn.textContent = expanded ? "Свернуть" : "Подробнее";
+  btn.textContent = expanded ? "Collapse" : "Details";
 }

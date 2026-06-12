@@ -1,58 +1,85 @@
 ---
-description: Запустить LLM-скоринг через Claude Opus. Один subagent на вакансию (без батчей). Сохраняет score, reasoning, tags, hard_requirements, summary.
+description: Run LLM scoring via Claude Opus subagents. One subagent per vacancy (no batching). Saves score, reasoning, tags, hard_requirements, summary. Pure-fit scoring — geography handled by /filter, not by the scoring prompt.
 ---
 
 # /score
 
-Скорит вакансии параллельно через subagents в Claude Code (в рамках
-подписки и её токен-лимитов), без вызовов Anthropic API. По умолчанию
-20 вакансий за раз, 5 одновременно.
+Scores vacancies in parallel via subagents in Claude Code (within the subscription's token limits), without calling the Anthropic API directly. Default batch: 20 vacancies, 5 in parallel.
 
-## Шаги
+## Pure-fit scoring model
 
-1. Прочитать `config/user_profile.md` — убедиться, что он не пустой и
-   не равен `user_profile.example.md`. Если профиль не настроен —
-   предупредить пользователя.
-2. Спросить:
-   - Сколько вакансий скорить (по умолчанию 20)?
-   - Только с пустым `llm_score` (по умолчанию) или пересчитать всё
-     (`--rescore`)?
-3. Запустить (этап 1 — выгрузка):
+The scoring prompt evaluates **role fit only** — skills, seniority, domain, responsibilities. Geography and visa restrictions are **not** part of the LLM score; they are handled earlier in the `/filter` step via geo buckets. This means a great role in the wrong location still gets a high score so you can make an informed decision, rather than being silently downgraded.
+
+## Steps
+
+1. Read `config/user_profile.md` — make sure it is not empty and not equal to `user_profile.example.md`. If the profile is not configured, warn the user.
+
+2. Pre-flight check: show total/scored/unscored counts and a breakdown of unscored vacancies by company.
+
+3. **Data quality audit (mandatory before scoring):**
+   - Count vacancies with full description / snippet only / no description.
+   - If blind vacancies exceed 20% of candidates, show a strong warning and require explicit confirmation before proceeding.
+   - At ≤ 20% blind, show an info-level warning and continue.
+
+4. Ask:
+   - How many vacancies to score (default 20)?
+   - Only with empty `llm_score` (default) or rescore everything (`--rescore`)?
+
+5. **Candidate companies** — scoring also pulls in strong vacancies from unreviewed ("candidate") companies when they have a high enough raw fit signal. These are capped and clearly labeled in the output. To disable this behavior, use `--no-candidates`.
+
+6. Run (phase 1 — load):
    ```bash
-   python3 scripts/score_vacancies.py --local --limit N
+   source ~/.zshrc 2>/dev/null && python3 scripts/score_vacancies.py --local --limit N
    ```
-   Скрипт напечатает JSON-массив вакансий в stdout.
-4. Запарсить JSON. Для каждой вакансии запустить отдельный subagent с
-   `subagent_type=general-purpose`. Промпт subagent'а:
-   - System prompt: `VACANCY_SCORING_PROMPT` (загруженный шаблон).
-   - User message: `VACANCY_SCORING_USER_TEMPLATE` с подстановкой.
-   - Subagent возвращает JSON с полями: `score`, `reasoning`, `tags`,
-     `hard_requirements`, `short_summary`, `deadline`.
-5. Собрать ответы в массив `[{id, score, reasoning, ...}]`.
-6. Сохранить:
+   The script prints a JSON array of vacancies to stdout.
+
+7. Parse the JSON. For each vacancy launch a separate subagent with `model: "opus"`. Subagent prompt:
+   - System prompt: `VACANCY_SCORING_PROMPT` (loaded template from `scripts/prompts/vacancy-scoring.md`).
+   - User message: `VACANCY_SCORING_USER_TEMPLATE` with substitution.
+   - Subagent returns JSON with fields: `score`, `reasoning`, `tags`, `hard_requirements`, `short_summary`.
+
+8. Collect responses into an array `[{id, score, reasoning, ...}]`.
+
+9. Save:
    ```bash
-   echo '<JSON-массив>' | python3 scripts/score_vacancies.py --save
+   echo '<JSON array>' | source ~/.zshrc 2>/dev/null && python3 scripts/score_vacancies.py --save
    ```
-7. Показать распределение: сколько 75+, 55-74, 35-54, ниже 35.
-8. Автоархив (внутри `--save`): вакансии со скором < `LLM_SCORE_THRESHOLD`
-   (по умолчанию 20) и статусом `unseen` помечаются `passed`. Это
-   нормально — они так и так бы не подошли.
 
-## Критично
+10. Show distribution: how many scored 75+, 55–74, 35–54, below 35.
 
-- **1 вакансия = 1 subagent.** Никогда не отправляйте 2-3 в одном
-  промпте — это даёт систематическое завышение на 20-50 баллов.
-- **member_ids**: при сохранении используйте `member_ids` из вывода
-  `--local`, не свой `id`. Это UUID из Supabase, а не sequential
-  number.
-- **flush=True** в Python скриптах: они уже используют `print(...,
-  flush=True)` для прогресса. Если в Claude Code не видно прогресса —
-  проверьте, что не запущены через `subprocess` без `stdout=None`.
+11. **Session report** — generate a Markdown report at `vacancies/REPORT-scoring-{YYYYMMDD}.md` with:
+    - Score distribution for this session
+    - Top candidates (score ≥ 50)
+    - Scraping quality issues found during scoring (not-a-vacancy artifacts, broken pages, incomplete descriptions)
+    - Recommendations for `/filter` and `/fetch` pipeline improvements
 
-## Если скоринг сломался
+## Auto-archive after scoring
 
-- `Empty profile`: `config/user_profile.md` не создан или пустой.
-  Скопируйте из example.
-- `Anthropic API error`: проверьте `ANTHROPIC_API_KEY` в `.env`.
-- `Subagent timeout`: один из subagent'ов завис. Уменьшите параллелизм
-  в orchestrator'е.
+After scoring, vacancies with `llm_score < LLM_SCORE_THRESHOLD` (default 20) and `status = unseen` can be auto-archived. **This is currently paused under pure-fit scoring** — a high score from a role in an excluded geography would be incorrectly archived. Auto-archive is opt-in only: confirm with the user before running `archive_vacancies()`.
+
+## Two scoring modes
+
+| Mode | Flag | Cost | Notes |
+|------|------|------|-------|
+| **Local** (Opus subagents) | `--local` (default) | $0 (included in subscription) | Primary mode |
+| **OpenClaw** (SSH) | `--openclaw` | Server cost | Requires SSH access to configured host |
+
+## Critical rules
+
+- **1 vacancy = 1 subagent.** Never send 2–3 vacancies in one prompt — this causes systematic over-scoring of +20–50 points.
+- **Use `member_ids`** from `--local` output when building the save payload, not the top-level `id`. The `member_ids` array contains the real Supabase UUIDs.
+- **`flush=True`** — scripts already use `print(..., flush=True)` for progress. If progress is not visible in Claude Code, check that the script is not invoked via `subprocess` with a captured pipe.
+
+## OpenClaw mode
+
+```bash
+source ~/.zshrc 2>/dev/null && python3 scripts/score_vacancies.py --openclaw --limit {BATCH_SIZE}
+```
+
+Uses SSH to a remote host configured via `OPENCLAW_SSH_*` environment variables.
+
+## If scoring breaks
+
+- `Empty profile`: `config/user_profile.md` not created or empty. Copy from `user_profile.example.md`.
+- `Subagent timeout`: one subagent hung. Reduce parallelism in the orchestrator or re-run (scoring is idempotent).
+- **High blind rate**: more than 20% of vacancies have no description. Run `/fetch` with enrichment before scoring for better accuracy.

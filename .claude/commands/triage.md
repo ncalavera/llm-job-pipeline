@@ -1,56 +1,101 @@
 ---
-description: Глубокий разбор лайкнутых вакансий. По каждой — структурированное интервью, решение apply/research/skip, опциональный GitHub Issue с acceptance criteria.
+description: Deep review of liked vacancies. Structured interview per vacancy, apply/research/network/skip verdicts, issue tracking integration, and pipeline calibration feedback.
 ---
 
 # /triage
 
-Когда LLM-скоринг выделил лайкнутые вакансии — `/triage` помогает
-пройти по ним по очереди и принять осознанное решение.
+When LLM scoring has surfaced liked vacancies — `/triage` walks through them one by one and helps make an informed decision.
 
-## Шаги
+## Steps
 
-1. Загрузить вакансии со `status = 'liked'` через
-   `scripts/triage.py:load_liked_vacancies()`.
-2. Сгруппировать по компаниям. Если в одной компании 5+ открытых
-   позиций — спросить, разбирать все или выбрать верх по скору.
-3. Для каждой вакансии — структурированное интервью (по одному вопросу
-   за раз):
-   - Что в этой роли резонирует с тем, чем вы хотите заниматься?
-   - Какие 2-3 риска / нестыковки видите?
-   - Что нужно дополнительно узнать, чтобы решить?
-   - У вас есть контакт внутри компании? (если да — пометить
-     `to_network`)
-   - Готовы подавать сейчас или нужно сначала исследовать компанию?
-4. По итогам интервью — решение:
-   - `to_apply` — отправить отклик.
-   - `to_research` — нужно изучить компанию глубже.
-   - `to_network` — сначала найти контакт.
-   - `skipped` — после интервью передумали.
-5. Сохранить решение и заметки:
+1. Load vacancies with `status = 'liked'` via `scripts/triage.py:load_liked_vacancies()`.
+
+2. Filter out vacancies past their deadline. Show closed vacancies briefly, then proceed with open ones only.
+
+3. Group by company. If a company has 5+ open positions, ask: review all or just the top-scoring ones.
+
+4. For each vacancy — structured interview (one question at a time):
+
+   **Q1: First impression**
+   - Interested / Uncertain / Skip
+
+   **Q2: Requirements match**
+   - Yes / Partially / No
+   - If "No" — suggest Skip (hard requirements are critical).
+
+   **Q2.5: Growth and complexity**
+   - The next role should offer tasks complex enough to produce real growth — mission fit alone is not sufficient.
+   - Options: Yes, it's new/building and I'll grow / Mixed, partly growth partly maintenance / No, mostly maintenance
+   - If "No" — suggest Skip.
+
+   **Q3: Verdict**
+   - `to_apply` — will apply
+   - `to_research` — needs more investigation before deciding
+   - `to_network` — long-term target, need a warm contact first
+   - `skipped` — decided not to apply
+
+   **Q4: Verdict-specific follow-up**
+   - Apply: CV adaptation notes, preparation steps, deadline
+   - Skip: reason (for scoring calibration)
+   - Research: what to investigate, deadline
+   - Network: who could be a contact
+
+5. Save decision and notes immediately after each vacancy (do not defer):
    ```python
    triage.persist_decision(vacancy_id, status='to_apply', notes=...)
    ```
-6. Если `to_apply` — предложить создать GitHub Issue:
-   ```bash
-   gh issue create --title "apply: <Company> — <Role>" \
-                   --label "apply,p1" \
-                   --body "Acceptance criteria: ..."
-   ```
-7. По окончании сессии — сравнить ваши решения с `llm_score`. Если в
-   нескольких случаях вы поставили `skipped` на вакансии со скором 80+
-   — это сигнал, что промпт стоит подкрутить. Покажите паттерн.
+   Write to `triage/session-notes-{date}.md` via the Edit/Write tool after every single vacancy.
+
+6. Save incrementally after every company (Step 1d) — prevents data loss if the session is interrupted.
+
+7. If `to_apply` — create a tracking issue in your issue tracker:
+   - Title: `{COMPANY} — {ROLE} (score {SCORE})`
+   - Include: location, deadline, CV notes, preparation checklist, apply link
+   - One issue per company (multiple roles in one issue), not one per vacancy.
+
+8. After all companies are reviewed — update vacancy statuses in Supabase:
+
+   | Verdict | Status |
+   |---------|--------|
+   | apply | `to_apply` |
+   | skip | `skipped` |
+   | research | `to_research` |
+   | network | `to_network` |
 
 ## Calibration loop
 
-В конце сессии `/triage` собирает обратную связь:
+At the end of the session, ask three calibration questions (one at a time):
 
-- Если 3+ вакансий с высоким скором (>70) ушли в `skipped` —
-  предложить добавить паттерн в `EXCLUDE_PATTERNS` в `user_profile.md`.
-- Если 3+ вакансий с низким скором (<40) ушли в `to_apply` — спросить,
-  какой сигнал LLM пропустил.
+1. **Scoring accuracy** — were any LLM scores significantly off (too high or too low)?
+2. **Pipeline calibration** — any new blacklist patterns to add? Companies to stop monitoring?
+3. **Strategy insights** — patterns, direction shifts, new priorities?
 
-## Файлы
+If the user provides feedback:
+- Proposed scoring prompt changes → show exact diff, ask for confirmation before editing.
+- New blacklist patterns → show them, ask for confirmation before editing `scripts/config.py`.
+- Strategy updates → propose updating `strategy.md`, ask for confirmation.
 
-- `scripts/triage.py` — helpers (загрузка, группировка, persist).
-- `vacancy.triage` JSONB колонка — туда пишутся заметки и метаданные
-  решения.
+## When to run
+
+- After each `/score` session — to review newly liked vacancies.
+- Before `/finish-session` — to clean up the liked list.
+
+## Files
+
+- `scripts/triage.py` — helpers (load, group, persist).
+- `vacancy.triage` JSONB column — stores notes and decision metadata.
+- `triage/triage.json` — session history (metadata only; Supabase `vacancy.status` is the source of truth).
+- `triage/session-notes-{date}.md` — running Markdown notes for the session.
+
+## Auto-archive note
+
+The auto-archive by score threshold is currently paused under pure-fit scoring — do not archive automatically from within `/triage`. Use `/archive` explicitly after reviewing.
+
+## Important rules
+
+- **One question at a time** — never ask multiple questions at once.
+- **Save after every vacancy** — append to `triage/session-notes-{date}.md` immediately, never defer.
+- **Save after every company** — incremental DB save is mandatory, not optional.
+- **1 tracker issue = 1 company** — not one per vacancy, to avoid tracker spam.
+- **Calibration changes need confirmation** — never auto-edit the scoring prompt or blacklist.
+- **Supabase `vacancy.status` is the source of truth** — `triage.json` stores metadata only.

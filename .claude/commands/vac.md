@@ -1,37 +1,79 @@
 ---
-description: KISS-CLI для триажа вакансий из терминала без открытия дашборда. Команды list / show / mark / open / companies.
+description: KISS-CLI for daily vacancy triage from the terminal — list / show / mark / open / companies over Supabase, without opening the dashboard.
 ---
 
 # /vac
 
-Тонкий CLI поверх Supabase для повседневного триажа. Используется,
-когда не хочется открывать дашборд или вы на сервере без браузера.
+Thin CLI on top of Supabase for everyday triage. Use it when you do not want to open the dashboard or are on a server without a browser.
 
-## Шаги
+## Commands
 
-В зависимости от запроса — запустить нужную подкоманду:
+All commands run against the project directory. The script loads `database_supabase.py` automatically.
 
-| Хочу… | Команда |
+```bash
+python3 scripts/vac.py <command>
+```
+
+If a `vac` alias is configured in your shell — you can write `vac <command>` directly.
+
+| Goal | Command |
 | --- | --- |
-| Посмотреть топ-20 по скору | `python3 scripts/vac.py list` |
-| Только лайкнутые | `python3 scripts/vac.py list --status liked` |
-| Только из конкретной компании | `python3 scripts/vac.py list --company "GiveDirectly"` |
-| Сортировка по дате | `python3 scripts/vac.py list --sort last_seen` |
-| Развёрнутое описание | `python3 scripts/vac.py show <uuid>` |
-| Поменять статус | `python3 scripts/vac.py mark <uuid> --status liked` |
-| Открыть URL в браузере | `python3 scripts/vac.py open <uuid>` |
-| Сводка по компаниям | `python3 scripts/vac.py companies` |
+| Top 20 by score | `python3 scripts/vac.py list` |
+| Only liked | `python3 scripts/vac.py list --status liked` |
+| Only from a specific company | `python3 scripts/vac.py list --company "GiveDirectly"` |
+| Sort by date | `python3 scripts/vac.py list --sort last_seen` |
+| Filter by geo bucket | `python3 scripts/vac.py list --geo uk` |
+| Full details | `python3 scripts/vac.py show <uuid>` |
+| Change status | `python3 scripts/vac.py mark <uuid> --status liked` |
+| Open URL in browser | `python3 scripts/vac.py open <uuid>` |
+| Company summary | `python3 scripts/vac.py companies` |
 
-## Флаги
+## Flags
 
-- `--limit N` — сколько строк показать (по умолчанию 20 для `list`).
-- `--status liked,unseen` — через запятую.
-- `--no-website` — компании без careers_url (полезно для `/add-source`).
+- `--limit N` — number of rows to show (default 20 for `list`).
+- `--status liked,unseen` — comma-separated list of statuses.
+- `--no-website` — companies without a `careers_url` (useful for `/add-source`).
+- `--geo {bucket}` — filter by geographic bucket. Accepted values: `uk`, `germany`, `europe`, `us`, `cis`, `other`, `unknown`. Buckets are assigned by `geo.py` based on vacancy location data.
 
-## Когда не использовать
+## Supported statuses
 
-- Массовые операции (>10 вакансий) — открывайте дашборд.
-- Триаж с длинными заметками — открывайте `/triage`, он пишет в
-  `vacancy.triage` JSONB.
-- Поиск по тексту описания — нет full-text search, проще через
-  Supabase SQL Editor.
+`unseen`, `liked`, `passed`, `to_apply`, `to_research`, `to_network`, `skipped`, `applied`, `archived`
+
+The `archived` status covers vacancies moved to the Archive tab (low-scoring or gone from source) — they remain in the database but are hidden from the main catalog view.
+
+## Typical workflows
+
+**Morning review of liked vacancies:**
+```bash
+python3 scripts/vac.py list --status liked
+python3 scripts/vac.py show <id>     # read the most interesting one
+python3 scripts/vac.py open <id>     # check the original page
+python3 scripts/vac.py mark <id> to_apply
+```
+
+**Scan new high-scoring unseen:**
+```bash
+python3 scripts/vac.py list --status unseen --min-score 70 --sort score
+```
+
+**Find all vacancies for a company:**
+```bash
+python3 scripts/vac.py list --org FundraiseUp --include-candidates
+```
+
+**Filter by UK-only locations:**
+```bash
+python3 scripts/vac.py list --geo uk
+```
+
+## When NOT to use
+
+- Bulk operations (>10 vacancies) — use the dashboard.
+- Triage with long notes — use `/triage`, which writes to `vacancy.triage` JSONB.
+- Full-text search in descriptions — no full-text search here; use the Supabase SQL Editor.
+
+## Architecture
+
+- Code: `scripts/vac.py` (no dependencies beyond psycopg2 and stdlib).
+- Database: Supabase (shared with `/fetch`, `/score`, `/triage`). No local caches.
+- DAL: `database_supabase.py` — `load_vacancies()`, `update_vacancy_status()`.

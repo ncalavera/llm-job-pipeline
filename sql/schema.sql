@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS company (
     tier              TEXT CHECK (tier IN ('S', 'A', 'B', 'C')),
     category          TEXT,
 
+    -- Official website (filled by scripts/find_company_urls.py /
+    -- scripts/fetch_companies.py; used by the enrichment pipeline).
+    website           TEXT,
+
     -- Fetch configuration (see scripts/fetchers.py).
     fetch_strategy    TEXT,         -- e.g. 'greenhouse', 'lever', 'ashby'
     careers_url       TEXT,
@@ -82,11 +86,13 @@ CREATE TABLE IF NOT EXISTS vacancy (
     first_seen            DATE NOT NULL,
     last_seen             DATE NOT NULL,
 
-    -- Triage decision (8-state workflow).
+    -- Triage decision. 'archived' is a status VALUE (not a column) — a vacancy
+    -- removed from the active catalog (low score, gone from source, or manual).
     status                TEXT NOT NULL DEFAULT 'unseen'
                           CHECK (status IN ('unseen', 'liked', 'passed',
                                             'to_apply', 'to_research',
-                                            'to_network', 'skipped', 'applied')),
+                                            'to_network', 'skipped', 'applied',
+                                            'archived')),
     status_updated_at     TIMESTAMPTZ,
 
     -- LLM scoring output (filled by scripts/score_vacancies.py).
@@ -100,6 +106,10 @@ CREATE TABLE IF NOT EXISTS vacancy (
     -- Free-form triage notes (filled by /triage flow).
     triage                JSONB DEFAULT '{}',
 
+    -- Set by scripts/telegram_digest.py when a vacancy is pushed to the
+    -- Telegram digest, so it is never sent twice.
+    digest_sent_at        TIMESTAMPTZ,
+
     created_at            TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -107,6 +117,23 @@ CREATE INDEX IF NOT EXISTS idx_vacancy_company    ON vacancy (company_id);
 CREATE INDEX IF NOT EXISTS idx_vacancy_status     ON vacancy (status);
 CREATE INDEX IF NOT EXISTS idx_vacancy_dedup_hash ON vacancy (dedup_hash);
 CREATE INDEX IF NOT EXISTS idx_vacancy_llm_score  ON vacancy (llm_score DESC NULLS LAST);
+
+-- ---------------------------------------------------------------------------
+-- archived_hash — tombstones for archived/removed vacancies.
+-- When a vacancy is archived (low score, gone from source, junk), its
+-- dedup_hash is recorded here so a lagging job board can't re-import the same
+-- posting for a cooldown window. `reason` distinguishes a source-side close
+-- ('gone_from_source') from other archival reasons — a direct ATS re-listing
+-- can resurrect a 'gone_from_source' hash, lagging boards cannot.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS archived_hash (
+    dedup_hash   TEXT PRIMARY KEY,
+    reason       TEXT,
+    archived_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_archived_hash_at ON archived_hash (archived_at);
 
 -- ---------------------------------------------------------------------------
 -- Row-Level Security

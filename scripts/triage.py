@@ -31,7 +31,7 @@ _MPP_PRESTIGE_HINTS = {
         "UN ", "United Nations", "World Bank", "IMF", "UNHCR", "UNICEF",
         "WFP", "WHO", "ILO", "UNDP", "UNOPS", "IFC",
     ],
-    "крупный фонд": [
+    "major foundation": [
         "Foundation", "Trust", "Wellcome", "Gates", "Omidyar",
         "Rockefeller", "Ford", "Open Society", "Bloomberg",
     ],
@@ -278,7 +278,7 @@ def add_review(session: dict, review: dict):
 def format_vacancy_briefing(v: dict, enrichment: dict) -> str:
     """Format a vacancy for CLI display during triage interview."""
     lines = []
-    lines.append(f"  Позиция: {v.get('title', '?')}")
+    lines.append(f"  Position: {v.get('title', '?')}")
 
     score = v.get("llm_score")
     if score is not None:
@@ -288,18 +288,18 @@ def format_vacancy_briefing(v: dict, enrichment: dict) -> str:
     locs = v.get("locations", [])
     if locs:
         loc_strs = [l.get("location", "?") for l in locs]
-        lines.append(f"  Локации: {', '.join(loc_strs)}")
+        lines.append(f"  Locations: {', '.join(loc_strs)}")
 
     # Compensation
     comp = v.get("compensation", "")
     if not comp and locs:
         comp = next((l.get("compensation", "") for l in locs if l.get("compensation")), "")
     if comp:
-        lines.append(f"  Компенсация: {comp}")
+        lines.append(f"  Compensation: {comp}")
 
     # Deadline
     if v.get("deadline"):
-        lines.append(f"  Дедлайн: {v['deadline']}")
+        lines.append(f"  Deadline: {v['deadline']}")
 
     # URL (first found in locations)
     url = find_vacancy_url(v)
@@ -308,16 +308,16 @@ def format_vacancy_briefing(v: dict, enrichment: dict) -> str:
 
     # LLM summary
     if v.get("llm_summary"):
-        lines.append(f"\n  Резюме: {v['llm_summary']}")
+        lines.append(f"\n  Summary: {v['llm_summary']}")
 
     # LLM tags
     if v.get("llm_tags"):
-        lines.append(f"  Теги: {', '.join(v['llm_tags'])}")
+        lines.append(f"  Tags: {', '.join(v['llm_tags'])}")
 
     # LLM reasoning (gap analysis) — support both field name variants
     reasoning = v.get("llm_reasoning") or v.get("llm_rationale", "")
     if reasoning:
-        lines.append(f"\n  Анализ: {reasoning}")
+        lines.append(f"\n  Analysis: {reasoning}")
 
     return "\n".join(lines)
 
@@ -328,42 +328,42 @@ def _get_mpp_prestige_label(org: str, tier) -> str | None:
         if any(p.lower() in org.lower() for p in patterns):
             return label
     if str(tier) == "S":
-        return "топ-организация (tier S)"
+        return "top organization (tier S)"
     return None
 
 
 def format_company_briefing(org: str, tier, enrichment: dict) -> str:
     """Format company context for CLI display."""
     tier_display = tier if tier in ("S", "A", "B", "C") else "?"
-    lines = [f"  Компания: {org} (Tier {tier_display})"]
+    lines = [f"  Company: {org} (Tier {tier_display})"]
 
     about = enrichment.get("about", {})
     mission = enrichment.get("mission_fit", {})
 
     if about.get("description"):
         desc = about["description"][:200]
-        lines.append(f"  О компании: {desc}")
+        lines.append(f"  About: {desc}")
 
     if about.get("hq_location"):
         lines.append(f"  HQ: {about['hq_location']}")
 
     if about.get("employee_count"):
-        lines.append(f"  Сотрудников: {about['employee_count']}")
+        lines.append(f"  Employees: {about['employee_count']}")
 
     prestige = _get_mpp_prestige_label(org, tier)
     if prestige:
-        lines.append(f"  MPP-престиж: {prestige}")
+        lines.append(f"  Prestige signal: {prestige}")
 
     if mission.get("alignment_score") is not None:
         lines.append(f"  Alignment: {mission['alignment_score']}/100 ({mission.get('alignment_label', '')})")
 
     if mission.get("mission_verdict"):
-        lines.append(f"  Вердикт: {mission['mission_verdict']}")
+        lines.append(f"  Verdict: {mission['mission_verdict']}")
 
     if mission.get("strengths"):
-        lines.append(f"  Сильные стороны: {'; '.join(mission['strengths'][:3])}")
+        lines.append(f"  Strengths: {'; '.join(mission['strengths'][:3])}")
 
     if mission.get("risks"):
-        lines.append(f"  Риски: {'; '.join(mission['risks'][:2])}")
+        lines.append(f"  Risks: {'; '.join(mission['risks'][:2])}")
 
     return "\n".join(lines)

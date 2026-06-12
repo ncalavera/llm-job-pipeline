@@ -1,5 +1,5 @@
 // =============================================================================
-// stats.js — Гео mode: vacancy distribution by city + country
+// stats.js — Geo mode: vacancy distribution by city + country
 // Aggregation re-runs on every render (live updates, ~1-2ms for ~1000 vacancies).
 // =============================================================================
 
@@ -14,10 +14,10 @@ import { escHtml, getFlagForChip } from "./helpers.js";
 
 const REMOTE_KEY = "__remote_unknown";
 const HELP_TEXT =
-  "Вакансия с N локациями считается N раз — таблица показывает доступность ролей по городам.";
+  "A vacancy with N locations is counted N times — the table shows role availability by city.";
 const REMOTE_LABEL = "Remote / Unknown";
-const COUNTRY_ONLY_LABEL = "(вся страна)";
-const EMPTY_LABEL = "🏢 Нет данных";
+const COUNTRY_ONLY_LABEL = "(whole country)";
+const EMPTY_LABEL = "🏢 No data";
 
 // ---------------------------------------------------------------------------
 // Pure aggregator — easy to unit-test if a JS framework is added later
@@ -131,8 +131,8 @@ export function sortStatsTable(col) {
 // ---------------------------------------------------------------------------
 
 const COLUMNS = [
-  { key: "city", label: "Город" },
-  { key: "country", label: "Страна" },
+  { key: "city", label: "City" },
+  { key: "country", label: "Country" },
   { key: "count", label: "Count" },
   { key: "liked", label: "Liked" },
   { key: "score", label: "Mean score" },

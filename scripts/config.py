@@ -118,11 +118,15 @@ REGION_REMOTE = ["remote"]
 # ---------------------------------------------------------------------------
 
 LOCATION_BLACKLIST = [
-    # Example: a Europe-based searcher excluding US-only postings
+    # Example: a Europe-based searcher excluding US/Canada-only postings.
+    # Generic country markers (matched as a substring of the location text):
+    ", usa", ", united states", ", us",
     "remote, usa", "remote - usa", "remote (usa)",
     "remote, united states", "remote - united states", "remote (united states)",
     "united states, north america",
     "canada,", "canada, north america",
+    # Add specific US cities here if you want to exclude them by name, e.g.:
+    # "san francisco", "new york", "nyc", "boston", "seattle",
 ]
 
 USA_EXCLUDE_LOCATIONS = LOCATION_BLACKLIST  # backward-compat alias
@@ -209,6 +213,23 @@ GLOBAL_BLACKLIST_SUBSTR = [
     "data center", "datacenter",
     "system admin", "systems admin",
     "epidemiolog",
+
+    # Field-agnostic non-vacancy listings sometimes scraped from boards.
+    # The comma suffix avoids false positives (e.g. "funding," won't hit
+    # "crowdfunding manager"; "course," won't hit "concourse").
+    "list of ",     # aggregator meta-listings ("List of places to find…")
+    "funding,",     # grant / funding calls ("Funding, …")
+    "course,",      # course listings ("Course, Intro to …")
+    "summer school",# educational programmes, not jobs
+    "bootcamp",     # training programmes, not jobs
+    "training on",  # training events ("Training on M&E Methods …")
+    "fellowship",   # fellowships / scholarships, not staff roles
+
+    # Examples of field-specific stems to add for YOUR search (commented out —
+    # these excluded roles the original author didn't want; adjust to taste):
+    # "nutritio",      # nutritionist / nutrition-coordinator roles
+    # "stagiaire",     # French intern contracts
+    # "alternance",    # French apprenticeship contracts
 ]
 
 # Description-level kill phrases — substring-matched against full_description.

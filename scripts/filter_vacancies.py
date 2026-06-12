@@ -21,6 +21,7 @@ from config import (
     COMPANIES, VACANCIES_DIR, GLOBAL_BLACKLIST,
     LOCATION_BLACKLIST, REGION_US, resolve_canonical_name,
 )
+from geo import geo_bucket
 from psycopg2.extras import RealDictCursor
 from database_supabase import (
     _is_blacklisted, _is_content_junk, load_vacancies,
@@ -68,7 +69,7 @@ from difflib import SequenceMatcher
 
 _FUZZY_THRESHOLD: float = 0.85
 _PROTECTED_STATUSES: frozenset[str] = frozenset({
-    "liked", "to_apply", "to_research", "to_network", "applied",
+    "liked", "to_apply", "to_research", "to_network", "applied", "archived",
 })
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -422,6 +423,57 @@ def _is_usa_only(vac: dict) -> bool:
     return True
 
 
+def _geo_entry_vote(loc: dict) -> tuple[str, str]:
+    """Vote on a single location entry for geo filtering.
+
+    Returns (vote, reason) where vote is 'delete' or 'keep'.
+    reason ∈ {'us', 'cis', 'row', 'keep'} — used to pick the dominant
+    delete category at vacancy level.
+
+    DELETE: 'cis' in-person (work_mode != remote); 'other' (any work_mode —
+            relocation target must be an upgrade). US handled by _is_usa_only.
+    KEEP:   'uk', 'germany', 'europe', 'unknown', global remote, 'cis' remote.
+    """
+    bucket = geo_bucket(loc)
+    work_mode = (loc.get("work_mode") or "").lower().strip()
+
+    if bucket == "cis":
+        # Remote from a CIS country (e.g. Georgia) is fine — user works remotely.
+        return ("keep", "keep") if work_mode == "remote" else ("delete", "cis")
+    if bucket == "other":
+        return ("delete", "row")
+    if bucket == "us":
+        # US handled by the dedicated _is_usa_only path; vote keep here so geo
+        # categorization doesn't double-count (delete_usa fires first anyway).
+        return ("keep", "keep")
+    # uk / germany / europe / unknown → keep
+    return ("keep", "keep")
+
+
+def _geo_delete_category(vac: dict) -> str | None:
+    """Return 'delete_cis' or 'delete_row' if ALL location entries are geo
+    delete votes (CIS in-person / ROW). Returns None if any entry votes keep.
+
+    USA-only deletion is handled separately by _is_usa_only (higher priority).
+    Vacancies with no locations → kept (handled by caller).
+    """
+    locs = vac.get("locations", [])
+    if not locs:
+        return None
+
+    reasons = []
+    for loc in locs:
+        vote, reason = _geo_entry_vote(loc)
+        if vote == "keep":
+            return None  # any keep → not deleted
+        reasons.append(reason)
+
+    # All entries are delete votes. Pick dominant reason: cis if any cis present.
+    if "cis" in reasons:
+        return "delete_cis"
+    return "delete_row"
+
+
 def _has_full_description(vac: dict) -> bool:
     """Check if vacancy has meaningful full_description."""
     # Check top-level
@@ -457,6 +509,8 @@ def classify_vacancies(db: dict = None) -> dict:
         "delete_junk": [],
         "delete_rearchived": [],
         "delete_usa": [],
+        "delete_cis": [],
+        "delete_row": [],
         "delete_stale_blind": [],
         "reenrich_blind": [],
         "reenrich_thin": [],
@@ -470,6 +524,9 @@ def classify_vacancies(db: dict = None) -> dict:
         # Only unscored vacancies
         score = vac.get("llm_score")
         if score is not None and score >= 0:
+            continue
+
+        if vac.get("status", "unseen") in _PROTECTED_STATUSES:
             continue
 
         title = vac.get("title", "")
@@ -496,12 +553,18 @@ def classify_vacancies(db: dict = None) -> dict:
             categories["delete_rearchived"].append((vid, vac))
             continue
 
-        # Priority 4: USA-only
+        # Priority 4: USA-only (keeps priority over other geo buckets)
         if _is_usa_only(vac):
             categories["delete_usa"].append((vid, vac))
             continue
 
-        # Priority 4: stale blind (has URL, no description, >7 days old)
+        # Priority 5: geo — CIS in-person / rest-of-world (all entries delete vote)
+        geo_cat = _geo_delete_category(vac)
+        if geo_cat:
+            categories[geo_cat].append((vid, vac))
+            continue
+
+        # Priority 6: stale blind (has URL, no description, >7 days old)
         if has_url and not has_desc:
             first_seen = vac.get("first_seen", "")
             if first_seen:
@@ -541,6 +604,8 @@ def compute_stats(categories: dict) -> dict:
         + len(categories.get("delete_junk", []))
         + len(categories.get("delete_rearchived", []))
         + len(categories["delete_usa"])
+        + len(categories.get("delete_cis", []))
+        + len(categories.get("delete_row", []))
         + len(categories["delete_stale_blind"])
     )
     company_gated = 0  # removed: company gate handled by active/inactive status
@@ -560,7 +625,7 @@ def compute_stats(categories: dict) -> dict:
 
     # Per-org table (across all categories)
     org_stats = defaultdict(lambda: {"tier": "C", "total": 0, "ready": 0, "delete": 0, "reenrich": 0})
-    delete_cats = ["delete_blacklist", "delete_junk", "delete_rearchived", "delete_usa", "delete_stale_blind"]
+    delete_cats = ["delete_blacklist", "delete_junk", "delete_rearchived", "delete_usa", "delete_cis", "delete_row", "delete_stale_blind"]
     reenrich_cats = ["reenrich_blind", "reenrich_thin"]
     for cat_name, items in categories.items():
         for _, vac in items:
@@ -619,11 +684,13 @@ def generate_html_report(categories: dict, stats: dict, output_path: Path) -> Pa
     delete_sections_html = ""
 
     delete_cats = [
-        ("delete_blacklist", "Blacklist Match", "#D4787A", "Заголовок совпал с GLOBAL_BLACKLIST"),
+        ("delete_blacklist", "Blacklist Match", "#D4787A", "Title matched GLOBAL_BLACKLIST"),
         ("delete_junk", "Content Junk", "#9B59B6", "reCAPTCHA, donation widgets, error pages, navigation snippets"),
-        ("delete_rearchived", "Re-archived", "#E67E22", "Ранее заархивировано (90-day cooldown)"),
-        ("delete_usa", "USA-Only", "#7EB5D6", "Все локации — US, нет remote"),
-        ("delete_stale_blind", "Stale Blind", "#A89680", "Есть URL, нет описания, >7 дней"),
+        ("delete_rearchived", "Re-archived", "#E67E22", "Previously archived (90-day cooldown)"),
+        ("delete_usa", "USA-Only", "#7EB5D6", "All locations US/Canada, no remote"),
+        ("delete_cis", "CIS In-Person", "#C99A6B", "All locations CIS, no remote (e.g. Georgia, Russia)"),
+        ("delete_row", "Rest of World", "#A0846B", "All locations outside UK/DE/EU/CIS (e.g. Turkey, Asia, Africa, LatAm)"),
+        ("delete_stale_blind", "Stale Blind", "#A89680", "Has URL, no description, >7 days"),
     ]
     for cat_key, cat_label, cat_color, cat_desc in delete_cats:
         items = categories[cat_key]
@@ -653,9 +720,9 @@ def generate_html_report(categories: dict, stats: dict, output_path: Path) -> Pa
             <div style="padding:8px 0 0">
                 <table class="data-table">
                     <thead><tr>
-                        <th style="width:25%">Организация</th>
-                        <th style="width:45%">Должность</th>
-                        <th style="width:30%">Локация</th>
+                        <th style="width:25%">Organization</th>
+                        <th style="width:45%">Position</th>
+                        <th style="width:30%">Location</th>
                     </tr></thead>
                     <tbody>{rows}</tbody>
                 </table>
@@ -879,10 +946,10 @@ body::after {{
         {f'''<div class="card" style="overflow-x:auto">
             <table class="data-table">
                 <thead><tr>
-                    <th>Организация</th>
-                    <th>Должность</th>
+                    <th>Organization</th>
+                    <th>Position</th>
                     <th>URL</th>
-                    <th>Тип</th>
+                    <th>Type</th>
                 </tr></thead>
                 <tbody>{reenrich_rows}</tbody>
             </table>
@@ -896,7 +963,7 @@ body::after {{
         <div class="card" style="overflow-x:auto">
             <table class="data-table">
                 <thead><tr>
-                    <th>Организация</th>
+                    <th>Organization</th>
                     <th>Tier</th>
                     <th>Total</th>
                     <th>Ready</th>
@@ -1151,7 +1218,7 @@ def main():
 
     # --- Structured filter summary (for feedback loop) ---
     print(f"\n--- Filter Summary ---", file=sys.stderr, flush=True)
-    for cat in ["delete_blacklist", "delete_junk", "delete_rearchived", "delete_usa", "delete_stale_blind"]:
+    for cat in ["delete_blacklist", "delete_junk", "delete_rearchived", "delete_usa", "delete_cis", "delete_row", "delete_stale_blind"]:
         count = len(categories.get(cat, []))
         if count:
             print(f"  {cat}: {count}", file=sys.stderr, flush=True)
@@ -1173,7 +1240,7 @@ def main():
 
     # Collect all delete IDs by category
     delete_ids = {}
-    for cat in ["delete_blacklist", "delete_junk", "delete_rearchived", "delete_usa", "delete_stale_blind"]:
+    for cat in ["delete_blacklist", "delete_junk", "delete_rearchived", "delete_usa", "delete_cis", "delete_row", "delete_stale_blind"]:
         delete_ids[cat] = [vid for vid, _ in categories.get(cat, [])]
 
     reenrich_ids = {

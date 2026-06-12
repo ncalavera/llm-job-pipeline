@@ -41,6 +41,7 @@ import {
 } from "./modules/companies.js";
 import { renderPipeline } from "./modules/pipeline.js";
 import { initStats, renderStats } from "./modules/stats.js";
+import { initArchive, renderArchive } from "./modules/archive.js";
 
 // ---------------------------------------------------------------------------
 // Initialize UI elements (toast, scroll-to-top)
@@ -101,6 +102,7 @@ function switchMode(mode) {
   const companiesSection = document.getElementById("companiesSection");
   const pipelineSection = document.getElementById("pipelineSection");
   const statsSection = document.getElementById("statsSection");
+  const archiveSection = document.getElementById("archiveSection");
 
   document
     .getElementById("modeCatalog")
@@ -113,12 +115,17 @@ function switchMode(mode) {
     .classList.toggle("active", mode === "pipeline");
   var modeStatsBtn = document.getElementById("modeStats");
   if (modeStatsBtn) modeStatsBtn.classList.toggle("active", mode === "stats");
+  var modeArchiveBtn = document.getElementById("modeArchive");
+  if (modeArchiveBtn)
+    modeArchiveBtn.classList.toggle("active", mode === "archive");
 
   catalogSection.classList.toggle("active", mode === "catalog");
   companiesSection.classList.toggle("active", mode === "companies");
   if (pipelineSection)
     pipelineSection.classList.toggle("active", mode === "pipeline");
   if (statsSection) statsSection.classList.toggle("active", mode === "stats");
+  if (archiveSection)
+    archiveSection.classList.toggle("active", mode === "archive");
 
   // Lazy-load images for the activated section
   var sectionMap = {
@@ -126,6 +133,7 @@ function switchMode(mode) {
     companies: companiesSection,
     pipeline: pipelineSection,
     stats: statsSection,
+    archive: archiveSection,
   };
   var section = sectionMap[mode];
   if (section) {
@@ -143,6 +151,8 @@ function switchMode(mode) {
     renderPipeline();
   } else if (mode === "stats") {
     initStats();
+  } else if (mode === "archive") {
+    initArchive();
   }
 }
 
@@ -212,6 +222,7 @@ window.viewOrgInCatalog = viewOrgInCatalog;
 window.openCompanyProfile = openCompanyProfile;
 window.closeCompanyProfile = closeCompanyProfile;
 window.renderPipeline = renderPipeline;
+window.renderArchive = renderArchive;
 
 // ---------------------------------------------------------------------------
 // Init sequence

@@ -30,7 +30,15 @@ def _build_companies_from_db() -> dict:
     Only rows with a non-empty fetch_strategy and status != 'inactive'
     become monitored companies. ats_config JSONB is merged into the config
     dict for complex fields (Workday tenant/board, Firecrawl url overrides).
+
+    Degrades gracefully when no database is configured (e.g. offline unit
+    tests): returns an empty registry instead of exiting, so importing this
+    module never requires a live connection.
     """
+    import os
+    if not (os.environ.get("SUPABASE_DB_URL") or os.environ.get("SUPABASE_DIRECT_URL")):
+        return {}
+
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
@@ -85,7 +93,12 @@ def _build_alias_index() -> dict[str, str]:
     """Build alias→canonical_name index from DB.
 
     All aliases are lowercased on read to prevent case-sensitivity bugs.
+    Returns an empty index when no database is configured (offline tests).
     """
+    import os
+    if not (os.environ.get("SUPABASE_DB_URL") or os.environ.get("SUPABASE_DIRECT_URL")):
+        return {}
+
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
@@ -122,7 +135,14 @@ _COMPANIES_LOWER: dict[str, str] = {k.lower(): k for k in COMPANIES}
 
 
 def _load_all_known_names() -> set[str]:
-    """Return ALL canonical names from DB (including inactive/candidate)."""
+    """Return ALL canonical names from DB (including inactive/candidate).
+
+    Returns an empty set when no database is configured (offline tests).
+    """
+    import os
+    if not (os.environ.get("SUPABASE_DB_URL") or os.environ.get("SUPABASE_DIRECT_URL")):
+        return set()
+
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("SELECT canonical_name FROM company")

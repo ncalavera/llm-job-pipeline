@@ -1,7 +1,7 @@
-"""KISS CLI для триажа вакансий — list / show / mark / open / companies.
+"""KISS CLI for vacancy triage — list / show / mark / open / companies.
 
-Запуск: python3 scripts/vac.py list --status liked
-Алиас: alias vac="cd ~/Projects/personal/job-search-2026 && python3 scripts/vac.py"
+Run: python3 scripts/vac.py list --status liked
+Alias: alias vac="cd /path/to/llm-job-pipeline && python3 scripts/vac.py"
 """
 
 import argparse
@@ -21,12 +21,15 @@ from database_supabase import (
     load_vacancies,
     update_vacancy_status,
 )
+from geo import geo_bucket
 
 VALID_STATUSES = {
     "unseen", "liked", "passed",
     "to_apply", "to_research", "to_network",
-    "skipped", "applied",
+    "skipped", "applied", "archived",
 }
+
+GEO_BUCKETS = {"uk", "germany", "europe", "us", "cis", "other", "unknown"}
 
 
 def _term_width() -> int:
@@ -72,7 +75,7 @@ def _resolve_uid(prefix: str, vacancies: dict) -> str | None:
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
-        print(f"Префикс '{prefix}' неоднозначен — {len(matches)} совпадений.")
+        print(f"Prefix '{prefix}' is ambiguous — {len(matches)} matches.")
     return None
 
 
@@ -102,7 +105,18 @@ def cmd_list(args):
         light=True,
         limit=args.limit,
         include_candidate_companies=args.include_candidates,
+        # By default hide archived rows unless a status filter explicitly asks.
+        status_exclude=None if args.status else ["archived"],
     )
+
+    geo_filter = None
+    if args.geo:
+        geo_filter = {g.strip().lower() for g in args.geo.split(",") if g.strip()}
+        bad = geo_filter - GEO_BUCKETS
+        if bad:
+            print(f"Unknown geo buckets: {', '.join(sorted(bad))}. "
+                  f"Allowed: {', '.join(sorted(GEO_BUCKETS))}")
+            sys.exit(1)
 
     rows = []
     for uid, v in vacancies.items():
@@ -115,6 +129,10 @@ def cmd_list(args):
             org = (v.get("org") or "").lower()
             if args.org.lower() not in org:
                 continue
+        if geo_filter is not None:
+            locs = v.get("locations") or []
+            if not any(geo_bucket(loc) in geo_filter for loc in locs):
+                continue
         rows.append((uid, v))
 
     if args.sort == "score":
@@ -125,14 +143,14 @@ def cmd_list(args):
         rows.sort(key=lambda r: (r[1].get("org") or "").lower())
 
     if not rows:
-        print("Ничего не найдено.")
+        print("Nothing found.")
         return
 
     width = _term_width()
     company_w = 18
     title_w = max(20, width - 8 - 1 - company_w - 1 - 4 - 1 - 10 - 1 - 14 - 5)
 
-    header = f"{'ID':<8} {'Компания':<{company_w}} {'Должность':<{title_w}} {'Балл':>4} {'Статус':<10} {'Локация':<14}"
+    header = f"{'ID':<8} {'Company':<{company_w}} {'Title':<{title_w}} {'Score':>4} {'Status':<10} {'Location':<14}"
     print(_ansi("1", header))
     print("─" * min(width, len(header) + 2))
 
@@ -145,7 +163,7 @@ def cmd_list(args):
         print(f"{_short_id(uid):<8} {company:<{company_w}} {title:<{title_w}} {score_s} {status_s:<19} {loc:<14}")
 
     print()
-    print(f"Всего: {len(rows)}")
+    print(f"Total: {len(rows)}")
 
 
 def cmd_show(args):
@@ -156,20 +174,20 @@ def cmd_show(args):
     )
     uid = _resolve_uid(args.id, vacancies)
     if not uid:
-        print(f"Не найдено: {args.id}")
+        print(f"Not found: {args.id}")
         sys.exit(1)
     v = vacancies[uid]
     width = min(_term_width(), 100)
 
     print(_ansi("1", f"{v.get('org', '—')} — {v.get('title', '—')}"))
-    print(f"ID: {uid}   Балл: {v.get('llm_score') or '—'}   Статус: {_color_status(v.get('status') or 'unseen')}")
+    print(f"ID: {uid}   Score: {v.get('llm_score') or '—'}   Status: {_color_status(v.get('status') or 'unseen')}")
     if v.get("compensation"):
-        print(f"Компенсация: {v['compensation']}")
+        print(f"Compensation: {v['compensation']}")
     if v.get("deadline"):
-        print(f"Дедлайн: {v['deadline']}")
+        print(f"Deadline: {v['deadline']}")
     locs = v.get("locations") or []
     if locs:
-        print("Локации:")
+        print("Locations:")
         for loc in locs:
             url = loc.get("url") or ""
             bits = [loc.get("work_mode") or "", loc.get("city") or loc.get("country") or "", loc.get("compensation") or ""]
@@ -180,22 +198,22 @@ def cmd_show(args):
         print(textwrap.fill(v["llm_summary"], width=width))
     if v.get("llm_reasoning"):
         print()
-        print(_ansi("1", "Почему этот балл:"))
+        print(_ansi("1", "Why this score:"))
         print(textwrap.fill(v["llm_reasoning"], width=width))
     if v.get("llm_hard_requirements"):
         print()
-        print(_ansi("1", "Жёсткие требования:"))
+        print(_ansi("1", "Hard requirements:"))
         for r in v["llm_hard_requirements"]:
             print(f"  • {r}")
     if args.full and v.get("full_description"):
         print()
-        print(_ansi("1", "Описание:"))
+        print(_ansi("1", "Description:"))
         print(textwrap.fill(v["full_description"], width=width))
 
 
 def cmd_mark(args):
     if args.status not in VALID_STATUSES:
-        print(f"Неверный статус: {args.status}. Допустимые: {', '.join(sorted(VALID_STATUSES))}")
+        print(f"Invalid status: {args.status}. Allowed: {', '.join(sorted(VALID_STATUSES))}")
         sys.exit(1)
     vacancies = load_vacancies(
         light=True,
@@ -204,7 +222,7 @@ def cmd_mark(args):
     )
     uid = _resolve_uid(args.id, vacancies)
     if not uid:
-        print(f"Не найдено: {args.id}")
+        print(f"Not found: {args.id}")
         sys.exit(1)
     v = vacancies[uid]
     update_vacancy_status(uid, args.status)
@@ -220,7 +238,7 @@ def cmd_open(args):
     )
     uid = _resolve_uid(args.id, vacancies)
     if not uid:
-        print(f"Не найдено: {args.id}")
+        print(f"Not found: {args.id}")
         sys.exit(1)
     v = vacancies[uid]
     locs = v.get("locations") or []
@@ -228,9 +246,9 @@ def cmd_open(args):
     if not url:
         url = v.get("org_url")
     if not url:
-        print("Нет ссылки.")
+        print("No link.")
         sys.exit(1)
-    print(f"Открываю: {url}")
+    print(f"Opening: {url}")
     if sys.platform == "darwin":
         subprocess.run(["open", url])
     elif os.name == "nt":
@@ -258,49 +276,50 @@ def cmd_companies(args):
     cur.close()
 
     if not rows:
-        print("Ничего не найдено.")
+        print("Nothing found.")
         return
 
-    print(_ansi("1", f"{'Компания':<32} {'Tier':<5} {'Align':>5}  {'Статус':<10} {'Триаж':>10}"))
+    print(_ansi("1", f"{'Company':<32} {'Tier':<5} {'Align':>5}  {'Status':<10} {'Triaged':>10}"))
     print("─" * 80)
     for name, tier, align, status, triaged, total in rows:
         align_s = f"{align:>3}" if align is not None else "  —"
         triaged_s = f"{triaged}/{total}"
         print(f"{(name or '')[:32]:<32} {tier or '—':<5} {align_s}  {_color_status(status):<19} {triaged_s:>10}")
     print()
-    print(f"Всего: {len(rows)}")
+    print(f"Total: {len(rows)}")
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="vac", description="KISS-триаж вакансий из терминала.")
+    parser = argparse.ArgumentParser(prog="vac", description="KISS vacancy triage from the terminal.")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_list = sub.add_parser("list", help="Список вакансий с фильтрами.")
-    p_list.add_argument("--status", help="Фильтр по статусу: unseen, liked, passed, to_apply…")
-    p_list.add_argument("--min-score", type=int, help="Минимальный балл LLM.")
-    p_list.add_argument("--tier", help="Фильтр по уровню компании (S/A/B/C).")
-    p_list.add_argument("--org", help="Фильтр по подстроке имени компании.")
-    p_list.add_argument("--limit", type=int, help="Сколько строк показать.")
+    p_list = sub.add_parser("list", help="List vacancies with filters.")
+    p_list.add_argument("--status", help="Filter by status: unseen, liked, passed, to_apply…")
+    p_list.add_argument("--min-score", type=int, help="Minimum LLM score.")
+    p_list.add_argument("--tier", help="Filter by company tier (S/A/B/C).")
+    p_list.add_argument("--org", help="Filter by company-name substring.")
+    p_list.add_argument("--limit", type=int, help="How many rows to show.")
     p_list.add_argument("--sort", choices=["score", "recent", "company"], default="score")
-    p_list.add_argument("--include-candidates", action="store_true", help="Показать вакансии не-approved компаний.")
+    p_list.add_argument("--include-candidates", action="store_true", help="Show vacancies from non-approved companies.")
+    p_list.add_argument("--geo", help="Geo buckets, comma-separated: uk,germany,europe,us,cis,other,unknown. Shows vacancies with at least one location in the chosen buckets.")
     p_list.set_defaults(func=cmd_list)
 
-    p_show = sub.add_parser("show", help="Детали одной вакансии.")
-    p_show.add_argument("id", help="Префикс UUID (минимум 4 символа).")
-    p_show.add_argument("--full", action="store_true", help="Показать full_description.")
+    p_show = sub.add_parser("show", help="Details of a single vacancy.")
+    p_show.add_argument("id", help="UUID prefix (at least 4 chars).")
+    p_show.add_argument("--full", action="store_true", help="Show full_description.")
     p_show.set_defaults(func=cmd_show)
 
-    p_mark = sub.add_parser("mark", help="Поменять статус вакансии.")
-    p_mark.add_argument("id", help="Префикс UUID.")
-    p_mark.add_argument("status", help="Новый статус (liked, passed, to_apply, applied, …)")
+    p_mark = sub.add_parser("mark", help="Change a vacancy's status.")
+    p_mark.add_argument("id", help="UUID prefix.")
+    p_mark.add_argument("status", help="New status (liked, passed, to_apply, applied, …)")
     p_mark.set_defaults(func=cmd_mark)
 
-    p_open = sub.add_parser("open", help="Открыть ссылку на вакансию в браузере.")
-    p_open.add_argument("id", help="Префикс UUID.")
+    p_open = sub.add_parser("open", help="Open the vacancy link in the browser.")
+    p_open.add_argument("id", help="UUID prefix.")
     p_open.set_defaults(func=cmd_open)
 
-    p_co = sub.add_parser("companies", help="Список компаний.")
-    p_co.add_argument("--status", help="Фильтр по статусу: active / candidate / inactive.")
+    p_co = sub.add_parser("companies", help="List companies.")
+    p_co.add_argument("--status", help="Filter by status: active / candidate / inactive.")
     p_co.add_argument("--limit", type=int, default=50)
     p_co.set_defaults(func=cmd_companies)
 

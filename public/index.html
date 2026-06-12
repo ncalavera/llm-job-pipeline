@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Дашборд вакансий</title>
+    <title>Job Vacancy Dashboard</title>
     <link
       rel="icon"
       type="image/svg+xml"
@@ -17,31 +17,38 @@
   </head>
   <body>
     <nav class="top-nav">
-      <div class="top-nav-brand">Дашборд вакансий</div>
+      <div class="top-nav-brand">Job Search 2026</div>
       <div class="mode-toggle">
         <button
           class="mode-btn"
           id="modeCompanies"
           onclick="switchMode('companies')"
         >
-          &#9881; Компании
+          &#9881; Companies
         </button>
         <button
           class="mode-btn"
           id="modeCatalog"
           onclick="switchMode('catalog')"
         >
-          &#9636; Вакансии
+          &#9636; Vacancies
         </button>
         <button
           class="mode-btn"
           id="modePipeline"
           onclick="switchMode('pipeline')"
         >
-          &#9654; Триаж
+          &#9654; Triage
         </button>
         <button class="mode-btn" id="modeStats" onclick="switchMode('stats')">
-          &#128205; Гео
+          &#128205; Geo
+        </button>
+        <button
+          class="mode-btn"
+          id="modeArchive"
+          onclick="switchMode('archive')"
+        >
+          &#128230; Archive
         </button>
       </div>
       <div class="top-nav-right">
@@ -60,7 +67,7 @@
             alt="Manny reviews vacancies"
             class="loading-manny"
           />
-          <p class="loading-text">Manny проверяет статусы…</p>
+          <p class="loading-text">Clayman is sorting vacancies…</p>
         </div>
 
         <div class="gf-companion">
@@ -77,7 +84,7 @@
             onclick="switchBasket(this)"
           >
             <span class="basket-dot"></span>
-            Выбранные
+            Liked
             <span class="basket-count" id="countLiked">0</span>
           </button>
           <button
@@ -86,7 +93,7 @@
             onclick="switchBasket(this)"
           >
             <span class="basket-dot"></span>
-            Неразобранные
+            Unreviewed
             <span class="basket-count" id="countUnseen">0</span>
           </button>
           <button
@@ -95,7 +102,7 @@
             onclick="switchBasket(this)"
           >
             <span class="basket-dot"></span>
-            Откинутые
+            Passed
             <span class="basket-count" id="countPassed">0</span>
           </button>
         </div>
@@ -105,7 +112,7 @@
             type="text"
             class="catalog-search"
             id="catalogSearch"
-            placeholder="Поиск по названию, организации, локации..."
+            placeholder="Search by title, organization, location..."
             oninput="renderCatalog()"
           />
           <select
@@ -113,7 +120,7 @@
             id="catalogOrgFilter"
             onchange="renderCatalog()"
           >
-            <option value="">Все компании</option>
+            <option value="">All companies</option>
           </select>
           <div class="catalog-loc-chips">
             <button
@@ -121,7 +128,7 @@
               data-cloc="europe"
               onclick="toggleCatalogLoc(this)"
             >
-              Европа
+              Europe
             </button>
             <button
               class="chip"
@@ -142,14 +149,14 @@
               data-cloc="other"
               onclick="toggleCatalogLoc(this)"
             >
-              Другое
+              Other
             </button>
           </div>
           <button
             class="chip catalog-sort-btn active"
             onclick="toggleCatalogSort(this)"
           >
-            Скор&#160;&#8595;
+            Score&#160;&#8595;
           </button>
         </div>
 
@@ -197,7 +204,7 @@
             type="text"
             class="catalog-search"
             id="companySearch"
-            placeholder="Поиск по компании, описанию, локации..."
+            placeholder="Search by company, description, location..."
             oninput="renderCompanies()"
           />
           <select
@@ -205,12 +212,12 @@
             id="companyTierFilter"
             onchange="renderCompanies()"
           >
-            <option value="">Все тиры</option>
+            <option value="">All tiers</option>
             <option value="S">S — Strategic</option>
             <option value="A">A — Strong Fit</option>
             <option value="B">B — Monitor</option>
             <option value="C">C — Low Priority</option>
-            <option value="__unscored">— Без скора</option>
+            <option value="__unscored">— Unscored</option>
           </select>
           <div class="company-sort-chips">
             <button
@@ -218,21 +225,21 @@
               data-csort="liked"
               onclick="toggleCompanySort(this)"
             >
-              Выбранные &#8595;
+              Liked &#8595;
             </button>
             <button
               class="chip chip-sort"
               data-csort="score"
               onclick="toggleCompanySort(this)"
             >
-              Скор
+              Score
             </button>
             <button
               class="chip chip-sort"
               data-csort="interest"
               onclick="toggleCompanySort(this)"
             >
-              Интерес
+              Interest
             </button>
           </div>
         </div>
@@ -257,6 +264,41 @@
 
       <!-- === STATS MODE === -->
       <div class="stats-section" id="statsSection"></div>
+
+      <!-- === ARCHIVE MODE === -->
+      <div class="archive-section" id="archiveSection">
+        <div class="gf-companion">
+          <img src="images/illus-archive.png" alt="Clayman at the archive" />
+        </div>
+        <div class="gf-accent">
+          <img src="images/accent-archive.png" alt="" />
+        </div>
+        <div class="archive-intro">
+          <h2 class="archive-title">&#128230; Vacancy archive</h2>
+          <p class="archive-sub">
+            Older vacancies from before the search restart. View only.
+          </p>
+        </div>
+        <div class="catalog-filters">
+          <input
+            type="text"
+            class="catalog-search"
+            id="archiveSearch"
+            placeholder="Search by title, organization, location..."
+            oninput="renderArchive()"
+          />
+          <select
+            class="catalog-org-filter"
+            id="archiveOrgFilter"
+            onchange="renderArchive()"
+          >
+            <option value="">All companies</option>
+          </select>
+        </div>
+        <div class="catalog-results-count" id="archiveResultsCount"></div>
+        <div class="catalog-grid" id="archiveGrid"></div>
+      </div>
+      <!-- /archive-section -->
 
       <!-- === COMPANY PROFILE PAGE === -->
       <div class="company-profile-page" id="companyProfile"></div>

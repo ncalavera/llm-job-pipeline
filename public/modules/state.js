@@ -20,6 +20,8 @@ export const {
   triage_reviews: triageReviews,
 } = window.VACANCY_DATA;
 
+export const archivedGroups = window.VACANCY_DATA.archived_groups || [];
+
 export const API_BASE =
   location.protocol === "https:" ? location.origin : config.api_base || "";
 

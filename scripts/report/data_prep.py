@@ -20,28 +20,36 @@ import os
 # Dashboard timezone — used for grouping scoring sessions and rendering dates.
 # Override by setting DASHBOARD_TZ env var (e.g. "Europe/Berlin", "UTC").
 DASHBOARD_TZ = ZoneInfo(os.environ.get("DASHBOARD_TZ", "UTC"))
-_RUSSIAN_MONTHS = ["янв", "фев", "мар", "апр", "май", "июн",
-                   "июл", "авг", "сен", "окт", "ноя", "дек"]
+_MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 _SESSION_GAP_MINUTES = 30
 
+# A candidate company with a vacancy scoring this high gets a 🔥 badge and
+# floats to the top of Pending Review so it doesn't rot unreviewed.
+HOT_VACANCY_SCORE = 55
+# Deadline within this many days → "⏰ deadline DD.MM" urgency marker.
+DEADLINE_SOON_DAYS = 7
 
-def _pluralize_vacancy(n: int) -> str:
-    """Russian pluralization for 'вакансия'."""
-    if 11 <= n % 100 <= 19:
-        return "вакансий"
-    mod10 = n % 10
-    if mod10 == 1:
-        return "вакансия"
-    if 2 <= mod10 <= 4:
-        return "вакансии"
-    return "вакансий"
+
+def _deadline_soon_label(deadline_iso: str) -> str:
+    """Return 'deadline DD.MM' if the deadline is within DEADLINE_SOON_DAYS, else ''."""
+    if not deadline_iso:
+        return ""
+    try:
+        dl = date.fromisoformat(str(deadline_iso)[:10])
+    except (ValueError, TypeError):
+        return ""
+    days_left = (dl - date.today()).days
+    if 0 <= days_left <= DEADLINE_SOON_DAYS:
+        return f"deadline {dl.day:02d}.{dl.month:02d}"
+    return ""
 
 
 def prepare_scoring_feed() -> list[dict]:
     """Cluster scored vacancies by llm_scored_at into sessions (30-min gap).
 
     Returns list of up to 5 most recent sessions:
-      [{"display": "15 мар, 14:32", "count": 23, "label": "вакансии"}, ...]
+      [{"display": "15 Mar", "count": 23}, ...]
     """
     conn = get_conn()
     cur = conn.cursor()
@@ -81,7 +89,7 @@ def prepare_scoring_feed() -> list[dict]:
         if t.date() == today_local:
             display = t.strftime("%H:%M")
         else:
-            display = f"{t.day}{_RUSSIAN_MONTHS[t.month - 1]}"
+            display = f"{t.day} {_MONTH_ABBR[t.month - 1]}"
         result.append({
             "display": display,
             "count": s["count"],
@@ -155,6 +163,127 @@ def _build_org_colors(org_names: list[str]) -> dict:
     return org_colors
 
 
+def _build_group(v: dict, org_colors: dict, company_hq: dict) -> dict:
+    """Build one frontend group dict from a vacancy row."""
+    # Locations v2: {work_mode, region, country, city, compensation, url}
+    locs = v.get("locations", [])
+    if not locs:
+        locs = [{"work_mode": None, "region": None, "country": None,
+                 "city": None, "compensation": v.get("compensation", ""),
+                 "url": ""}]
+
+    # Sort by city/country for stable ordering
+    locs.sort(key=lambda l: (l.get("city") or l.get("country") or ""))
+
+    region_priority = {"europe": 0, "americas": 1, "remote": 2,
+                       "asia": 3, "africa": 4, "oceania": 5}
+    regions = [l.get("region") or "other" for l in locs]
+    best_region = min(regions, key=lambda r: region_priority.get(r, 9))
+
+    comp = next((l.get("compensation", "") for l in locs if l.get("compensation")), "")
+
+    org_url = v.get("org_url", "")
+    if not org_url:
+        org_url = COMPANIES.get(v["org"], {}).get("careers_url", "")
+
+    llm_score = v.get("llm_score") if v.get("llm_score") is not None and v.get("llm_score", -1) >= 0 else None
+
+    # Build locations list for frontend (v2 structure)
+    # Two concerns: PLACE (city/country) and WORK MODE (remote/hybrid/onsite)
+    # Fallback: use company HQ when vacancy has no place data
+    org_hq = company_hq.get(v["org"], "")
+    entry_locations = []
+    for m in locs:
+        place_parts = [p for p in [m.get("city"), m.get("country")] if p]
+        wm = (m.get("work_mode") or "").lower()
+        region = (m.get("region") or "").lower()
+
+        # Build place string
+        place = ", ".join(place_parts) if place_parts else ""
+
+        # Build work mode with region specificity
+        if wm == "remote":
+            if region == "europe":
+                wm_display = "Remote · Europe"
+            elif region == "us" or region == "americas":
+                wm_display = "Remote · Americas"
+            elif region and region != "other" and region != "remote":
+                wm_display = "Remote · " + region.capitalize()
+            else:
+                wm_display = "Remote"
+        elif wm == "hybrid":
+            wm_display = "Hybrid"
+        else:
+            wm_display = ""  # onsite is implied, don't show
+
+        # Combine: place + work mode
+        # If no place from vacancy, use company HQ as fallback
+        if not place and org_hq:
+            place = "HQ: " + org_hq
+
+        if place and wm_display:
+            loc_display = place + ", " + wm_display
+        elif place:
+            loc_display = place
+        elif wm_display:
+            loc_display = wm_display
+        else:
+            loc_display = ""
+
+        entry_locations.append({
+            "location": loc_display,
+            "url": m.get("url") or "",
+            "work_mode": wm or "",
+            "region": m.get("region") or "",
+            "city": m.get("city") or "",
+            "country": m.get("country") or "",
+        })
+
+    return {
+        "id": v["id"],
+        "org": v["org"],
+        "title": v["title"],
+        "org_url": org_url,
+        "region": best_region,
+        "llm_score": llm_score,
+        "llm_summary": v.get("llm_summary", ""),
+        "llm_reasoning": v.get("llm_reasoning", ""),
+        "llm_hard_requirements": v.get("llm_hard_requirements", []),
+        "snippet": v.get("snippet", ""),
+        "full_description": v.get("full_description", ""),
+        "compensation": comp,
+        "deadline": v.get("deadline", ""),
+        "first_seen": v.get("first_seen", ""),
+        "org_color": org_colors.get(v["org"], ["#F97316", "#FFF7ED"]),
+        "locations": entry_locations,
+        "member_ids": [],
+        "company_id": v.get("company_id", ""),
+    }
+
+
+def _company_hq_map():
+    """Map canonical_name → HQ location for all companies."""
+    from database_supabase import get_conn
+    from psycopg2.extras import RealDictCursor
+    _conn = get_conn()
+    _cur = _conn.cursor(cursor_factory=RealDictCursor)
+    _cur.execute("SELECT canonical_name, about->>'hq_location' as hq FROM company")
+    out = {r["canonical_name"]: r["hq"] for r in _cur.fetchall() if r.get("hq")}
+    _cur.close()
+    return out
+
+
+def prepare_archived_data() -> list:
+    """Lean list of archived vacancies for the Archive tab (no full_description)."""
+    archived = load_vacancies(status="archived", include_inactive_companies=True, light=True)
+    company_hq = _company_hq_map()
+    all_orgs = sorted(set(v["org"] for v in archived.values()))
+    org_colors = _build_org_colors(all_orgs)
+    groups = [_build_group(v, org_colors, company_hq) for v in archived.values()]
+    groups.sort(key=lambda g: (-(g["llm_score"] if g["llm_score"] is not None else -1), g["org"]))
+    return groups
+
+
 def prepare_report_data(db: dict = None) -> dict:
     """Group vacancies, compute stats, assign org colors.
 
@@ -162,7 +291,7 @@ def prepare_report_data(db: dict = None) -> dict:
     Returns dict with keys: groups, stats.
     """
     today = date.today().isoformat()
-    all_vacs = load_vacancies(include_candidate_companies=True)
+    all_vacs = load_vacancies(include_candidate_companies=True, status_exclude=["archived"])
     # Exclude unscored vacancies from dashboard — they appear after /score
     vacancies = [v for v in all_vacs.values()
                  if v.get("llm_score") is not None and v.get("llm_score", -1) >= 0]
@@ -172,111 +301,10 @@ def prepare_report_data(db: dict = None) -> dict:
     org_colors = _build_org_colors(all_orgs)
 
     # --- Build company HQ lookup for location fallback (from Supabase) ---
-    from database_supabase import get_conn
-    from psycopg2.extras import RealDictCursor
-    _conn = get_conn()
-    _cur = _conn.cursor(cursor_factory=RealDictCursor)
-    _cur.execute("SELECT canonical_name, about->>'hq_location' as hq FROM company WHERE status = 'active'")
-    company_hq = {r["canonical_name"]: r["hq"] for r in _cur.fetchall() if r.get("hq")}
-    _cur.close()
+    company_hq = _company_hq_map()
 
     # --- Build grouped list (each vacancy is already unique by org+title) ---
-    groups = []
-    for v in vacancies:
-        # Locations v2: {work_mode, region, country, city, compensation, url}
-        locs = v.get("locations", [])
-        if not locs:
-            locs = [{"work_mode": None, "region": None, "country": None,
-                     "city": None, "compensation": v.get("compensation", ""),
-                     "url": ""}]
-
-        # Sort by city/country for stable ordering
-        locs.sort(key=lambda l: (l.get("city") or l.get("country") or ""))
-
-        region_priority = {"europe": 0, "americas": 1, "remote": 2,
-                           "asia": 3, "africa": 4, "oceania": 5}
-        regions = [l.get("region") or "other" for l in locs]
-        best_region = min(regions, key=lambda r: region_priority.get(r, 9))
-
-        comp = next((l.get("compensation", "") for l in locs if l.get("compensation")), "")
-
-        org_url = v.get("org_url", "")
-        if not org_url:
-            org_url = COMPANIES.get(v["org"], {}).get("careers_url", "")
-
-        llm_score = v.get("llm_score") if v.get("llm_score") is not None and v.get("llm_score", -1) >= 0 else None
-
-        # Build locations list for frontend (v2 structure)
-        # Two concerns: PLACE (city/country) and WORK MODE (remote/hybrid/onsite)
-        # Fallback: use company HQ when vacancy has no place data
-        org_hq = company_hq.get(v["org"], "")
-        entry_locations = []
-        for m in locs:
-            place_parts = [p for p in [m.get("city"), m.get("country")] if p]
-            wm = (m.get("work_mode") or "").lower()
-            region = (m.get("region") or "").lower()
-
-            # Build place string
-            place = ", ".join(place_parts) if place_parts else ""
-
-            # Build work mode with region specificity
-            if wm == "remote":
-                if region == "europe":
-                    wm_display = "Remote · Europe"
-                elif region == "us" or region == "americas":
-                    wm_display = "Remote · Americas"
-                elif region and region != "other" and region != "remote":
-                    wm_display = "Remote · " + region.capitalize()
-                else:
-                    wm_display = "Remote"
-            elif wm == "hybrid":
-                wm_display = "Hybrid"
-            else:
-                wm_display = ""  # onsite is implied, don't show
-
-            # Combine: place + work mode
-            # If no place from vacancy, use company HQ as fallback
-            if not place and org_hq:
-                place = "HQ: " + org_hq
-
-            if place and wm_display:
-                loc_display = place + ", " + wm_display
-            elif place:
-                loc_display = place
-            elif wm_display:
-                loc_display = wm_display
-            else:
-                loc_display = ""
-
-            entry_locations.append({
-                "location": loc_display,
-                "url": m.get("url") or "",
-                "work_mode": wm or "",
-                "region": m.get("region") or "",
-                "city": m.get("city") or "",
-                "country": m.get("country") or "",
-            })
-
-        groups.append({
-            "id": v["id"],
-            "org": v["org"],
-            "title": v["title"],
-            "org_url": org_url,
-            "region": best_region,
-            "llm_score": llm_score,
-            "llm_summary": v.get("llm_summary", ""),
-            "llm_reasoning": v.get("llm_reasoning", ""),
-            "llm_hard_requirements": v.get("llm_hard_requirements", []),
-            "snippet": v.get("snippet", ""),
-            "full_description": v.get("full_description", ""),
-            "compensation": comp,
-            "deadline": v.get("deadline", ""),
-            "first_seen": v.get("first_seen", ""),
-            "org_color": org_colors.get(v["org"], ["#F97316", "#FFF7ED"]),
-            "locations": entry_locations,
-            "member_ids": [],
-            "company_id": v.get("company_id", ""),
-        })
+    groups = [_build_group(v, org_colors, company_hq) for v in vacancies]
 
     # --- Stats ---
     total_postings = len(vacancies)
@@ -462,6 +490,11 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
         if llm is not None and llm >= 0:
             st["scored_count"] += 1
             st["scores"].append(llm)
+            # Track the single strongest vacancy + its deadline (hot-vacancy
+            # signal for candidate companies pending review).
+            if llm > st.get("_hot_score", -1):
+                st["_hot_score"] = llm
+                st["_hot_deadline"] = v.get("deadline") or ""
         # Region from locations[]
         locs_list = v.get("locations", [])
         if locs_list:
@@ -544,6 +577,18 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
         social = enrich.get("social", {})
         is_enriched = bool(about.get("description") or mission.get("alignment_score") is not None)
 
+        # Hot-vacancy signal: only meaningful while the company is still
+        # pending review (candidate). A strong score floats it up; a near
+        # deadline adds urgency. Baked unconditionally; the frontend gates
+        # on review status.
+        hot_vacancy = None
+        hot_score = stats.get("_hot_score")
+        if hot_score is not None and hot_score >= HOT_VACANCY_SCORE:
+            hot_vacancy = {
+                "score": hot_score,
+                "deadline_label": _deadline_soon_label(stats.get("_hot_deadline", "")),
+            }
+
         companies.append({
             "name": display_name,
             "company_id": csv_row.get("company_id", ""),
@@ -580,6 +625,7 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
             "last_fetched": sources.get(canonical, {}).get("last_fetched", ""),
             "fetch_status": sources.get(canonical, {}).get("fetch_status", ""),
             "vacancy_ids": stats.get("vacancy_ids", []),
+            "hot_vacancy": hot_vacancy,
             # --- Enrichment fields ---
             "is_enriched": is_enriched,
             "description": about.get("description", ""),
