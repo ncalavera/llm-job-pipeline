@@ -230,6 +230,37 @@
         background: var(--coral-deep);
       }
 
+      /* ---- architecture ---- */
+      .arch {
+        margin: 56px 0 8px;
+      }
+      .arch-title {
+        font: 600 21px/1.2 var(--disp);
+        letter-spacing: -0.01em;
+        border-top: 2px solid var(--ink);
+        padding-top: 14px;
+        margin-bottom: 6px;
+      }
+      .archrow {
+        display: flex;
+        gap: 22px;
+        align-items: baseline;
+        padding: 13px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .archrow .al {
+        font: 600 10.5px/1.5 var(--mono);
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--coral);
+        min-width: 92px;
+        flex: none;
+      }
+      .archrow .ad {
+        color: var(--soft);
+        font-size: 14.5px;
+      }
+
       /* ---- wizard ---- */
       #wizard {
         display: none;
@@ -578,6 +609,26 @@
         ></button>
       </div>
 
+      <div class="arch">
+        <h2 class="arch-title" data-i18n="archt"></h2>
+        <div class="archrow">
+          <span class="al" data-i18n="a1l"></span>
+          <span class="ad" data-i18n="a1d"></span>
+        </div>
+        <div class="archrow">
+          <span class="al" data-i18n="a2l"></span>
+          <span class="ad" data-i18n="a2d"></span>
+        </div>
+        <div class="archrow">
+          <span class="al" data-i18n="a3l"></span>
+          <span class="ad" data-i18n="a3d"></span>
+        </div>
+        <div class="archrow">
+          <span class="al" data-i18n="a4l"></span>
+          <span class="ad" data-i18n="a4d"></span>
+        </div>
+      </div>
+
       <div id="wizard">
         <div class="progress"><i id="bar" style="width: 0%"></i></div>
         <div class="qcard">
@@ -659,7 +710,16 @@
           enterhint: "Enter ↵",
           qof: (i, n) =>
             `Question ${String(i).padStart(2, "0")} / ${String(n).padStart(2, "0")}`,
-          r1t: "Your setup prompt",
+          archt: "How it works under the hood",
+    a1l: "Database",
+    a1d: "A single file on your computer (or a free cloud database in full mode) holds your companies and every vacancy they post.",
+    a2l: "Fetching",
+    a2d: "Scripts poll the companies' own hiring systems — Greenhouse, Lever, Ashby and eight more — plus optional curated job boards. No scraping services.",
+    a3l: "Scoring",
+    a3d: "Your AI agent reads every new vacancy and scores it 0–100 against your profile, with written reasoning — one vacancy per request for consistent judgement.",
+    a4l: "Triage",
+    a4d: "You review the short list in a local dashboard, the terminal, or Telegram; every like or pass is saved back into your database.",
+    r1t: "Your setup prompt",
           r1d: "Copy this and paste it into Claude Code (or any coding agent) in an empty folder. It contains your profile and step-by-step install instructions for the agent.",
           copy: "Copy prompt",
           download: "Download as file",
@@ -694,7 +754,16 @@
           enterhint: "Enter ↵",
           qof: (i, n) =>
             `Вопрос ${String(i).padStart(2, "0")} / ${String(n).padStart(2, "0")}`,
-          r1t: "Твой промпт установки",
+          archt: "Как это устроено внутри",
+    a1l: "База",
+    a1d: "Один файл на твоём компьютере (или бесплатная облачная база в полном режиме) хранит твои компании и все их вакансии.",
+    a2l: "Сбор",
+    a2d: "Скрипты опрашивают системы найма самих компаний — Greenhouse, Lever, Ashby и ещё восемь — плюс проверенные доски вакансий по желанию. Без платных сервисов сбора.",
+    a3l: "Оценка",
+    a3d: "Твой ИИ-агент читает каждую новую вакансию и ставит ей 0–100 под твой профиль, с письменным объяснением — по одной вакансии за запрос, чтобы оценки были ровными.",
+    a4l: "Разбор",
+    a4d: "Короткий список смотришь в локальной панели, терминале или Телеграме; каждое «нравится»/«мимо» сохраняется в твою базу.",
+    r1t: "Твой промпт установки",
           r1d: "Скопируй и вставь в Claude Code (или другого кодящего агента) в пустой папке. Внутри — твой профиль и пошаговая инструкция установки для агента.",
           copy: "Скопировать",
           download: "Скачать файлом",
