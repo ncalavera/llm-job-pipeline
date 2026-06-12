@@ -263,8 +263,8 @@ def _build_group(v: dict, org_colors: dict, company_hq: dict) -> dict:
 
 def _company_hq_map():
     """Map canonical_name → HQ location for all companies."""
-    from database_supabase import get_conn
-    from psycopg2.extras import RealDictCursor
+    from db_conn import get_conn
+    from db_backend import RealDictCursor
     _conn = get_conn()
     _cur = _conn.cursor(cursor_factory=RealDictCursor)
     _cur.execute("SELECT canonical_name, about->>'hq_location' as hq FROM company")
