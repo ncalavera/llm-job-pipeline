@@ -2,7 +2,6 @@
 
 import hashlib
 import html as html_module
-import http.cookiejar
 import json
 import re
 import subprocess
@@ -18,6 +17,7 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "requests", "-q"])
     import requests
 
+import settings
 from config import FIRECRAWL_CACHE, GLOBAL_BLACKLIST, GLOBAL_BLACKLIST_SUBSTR, get_firecrawl_client
 
 GENERIC_PIPELINE_TITLE_PATTERNS = [
@@ -25,6 +25,16 @@ GENERIC_PIPELINE_TITLE_PATTERNS = [
     r"\btalent pool\b",
     r"\bgeneral application(?:s)?\b",
 ]
+
+# Location-EXTRACTION hint (never a filter): the city tokens the markdown
+# parser looks for near a job link to pull a location substring out of free
+# text. The list lives in config/defaults.toml ([parsing] location_hint_cities)
+# so it is not an owner-geography filter; broaden it for your own regions.
+_LOCATION_HINT_CITIES = settings.parsing_location_hint_cities()
+_LOCATION_HINT_RE = (
+    r'\b((?:' + "|".join(re.escape(c) for c in _LOCATION_HINT_CITIES)
+    + r')[^|\n\[\]()]{0,30})'
+) if _LOCATION_HINT_CITIES else r'(?!x)x'  # never-matching regex when empty
 
 
 # ---------------------------------------------------------------------------
@@ -563,7 +573,7 @@ def _extract_compensation(raw_html: str) -> str:
     if not text:
         return ""
 
-    # Pattern 1: "Compensation: \u20acX,XXX - \u20acY,YYY" (FundraiseUp Highlights style)
+    # Pattern 1: "Compensation: \u20acX,XXX - \u20acY,YYY" (a common highlights layout)
     m = re.search(
         r'[Cc]ompensation[:\s]+([\u20ac$\u00a3][\d,]+(?:\.\d+)?)\s*[-\u2013]\s*([\u20ac$\u00a3]?[\d,]+(?:\.\d+)?)',
         text
@@ -1593,7 +1603,7 @@ def _is_non_job_url(url: str) -> bool:
     """Return True if the URL points to a non-job page (about, team, etc.).
 
     Catches patterns like:
-      - longview.org/about/#partners
+      - example.org/about/#partners
       - example.org/about/
       - example.org/team/#leadership
     """
@@ -1632,7 +1642,7 @@ def _has_dept_count_suffix(title: str) -> bool:
     """Match trailing (N) where N has 1-2 digits — department-heading marker.
 
     Catches non-vacancy entries like "Senior Director's Office, CFO (1)"
-    that aggregate departments rather than represent a real role (#231).
+    that aggregate departments rather than represent a real role.
     Distinguishes count from year-in-parens like (2026) which is 4 digits.
     """
     return bool(_DEPT_COUNT_SUFFIX_RE.search(title))
@@ -1644,7 +1654,8 @@ _CAREERS_BOILERPLATE_PATTERNS = (
 
 
 def _is_careers_boilerplate(text: str) -> bool:
-    """Detect known careers-homepage boilerplate strings (#231 Amnesty)."""
+    """Detect known careers-homepage boilerplate strings (a homepage slogan
+    scraped in place of a real listing)."""
     if not text:
         return False
     lower = text.lower()
@@ -1875,9 +1886,7 @@ def _extract_location_near(text: str, start: int, end: int, job_url: str = "") -
     loc_patterns = [
         r'(?:Location|Office|Based in|\u2022)[:\s]+([A-Za-z][^\n\[\]()\u2022|]{2,50}?)(?:\s*[\u2022|\n]|$)',
         r'\b((?:Remote|Hybrid|On-site)[^|\n\[\]()]{0,40})',
-        r'\b((?:Berlin|London|Lisbon|Munich|Paris|Geneva|Amsterdam|Brussels|Dublin|'
-        r'New York|Washington|San Francisco|NYC|DC|UK|Germany|Portugal|'
-        r'US|USA|Europe|EMEA|Remote)[^|\n\[\]()]{0,30})',
+        _LOCATION_HINT_RE,
     ]
     for pat in loc_patterns:
         m = re.search(pat, context, re.IGNORECASE)
@@ -2254,66 +2263,15 @@ def _extract_rss_field(html: str, pattern: str) -> str:
 # Impactpool board (server-rendered HTML, free)
 # ---------------------------------------------------------------------------
 
-_IMPACTPOOL_EU_LOCATIONS = {
-    "london", "manchester", "edinburgh", "glasgow", "oxford", "cambridge", "bristol", "leeds",
-    "berlin", "munich", "frankfurt", "hamburg", "cologne", "bonn",
-    "paris", "lyon", "marseille", "strasbourg",
-    "amsterdam", "the hague", "rotterdam", "utrecht",
-    "brussels", "antwerp",
-    "madrid", "barcelona", "lisbon", "porto",
-    "rome", "milan", "florence", "turin",
-    "vienna", "geneva", "zurich", "bern", "basel", "lausanne",
-    "stockholm", "gothenburg", "copenhagen", "oslo", "helsinki", "reykjavik",
-    "dublin",
-    "warsaw", "krakow", "prague", "budapest", "bucharest", "athens",
-    "tallinn", "riga", "vilnius", "sofia", "bratislava", "ljubljana", "luxembourg",
-}
-
-_IMPACTPOOL_EU_KEYWORDS = (
-    "remote", "europe", "european", "eu ", "global", "multiple locations", "home based",
-    "hybrid", "anywhere",
-)
-
-_IMPACTPOOL_SENIORITY_BAD = (
-    "internship", "intern ", "trainee", "junior", "entry level", "general service",
-    "administrative support", "locally recruited", "national professional",
-    "ungraded", "gs-", "g-3", "g-4", "g-5", "g-6", "g-7",
-)
-
-_IMPACTPOOL_NON_EU_HINTS = {
-    "nairobi", "bangkok", "phnom penh", "kabul", "islamabad", "monrovia", "kathmandu",
-    "addis ababa", "kampala", "lagos", "abuja", "khartoum", "port sudan", "kinshasa",
-    "panamá", "panama", "bogotá", "bogota", "buenos aires", "santiago", "lima",
-    "mexico city", "guatemala city", "tegucigalpa", "san salvador", "cap-haïtien",
-    "port-au-prince", "tunis", "rabat", "casablanca", "cairo", "amman", "beirut",
-    "baghdad", "tehran", "kabul", "delhi", "mumbai", "manila", "jakarta", "seoul",
-    "tokyo", "beijing", "shanghai", "ho chi minh", "hanoi", "new york", "washington",
-    "san francisco", "boston", "chicago", "los angeles", "ottawa", "toronto",
-    "kyiv", "moscow", "tashkent", "almaty", "ashgabat", "suva", "brasília", "brasilia",
-}
-
 def _impactpool_location_ok(loc: str) -> bool:
-    if not loc:
-        return False
-    low = loc.lower()
-    # "Remote | X" — the city after the pipe is the real anchor
-    if "remote |" in low or "home based" in low:
-        if any(hint in low for hint in _IMPACTPOOL_NON_EU_HINTS):
-            return False
-        return True
-    if "remote" in low and "|" not in low:
-        return True
-    if any(kw in low for kw in ("europe", "european", "eu nationals", "global", "multiple locations", "hybrid", "anywhere")):
-        return True
-    if any(hint in low for hint in _IMPACTPOOL_NON_EU_HINTS):
-        return False
-    return any(city in low for city in _IMPACTPOOL_EU_LOCATIONS)
+    # Neutral: no geography is privileged. Every location is accepted; drop a
+    # location via the user profile's exclude_countries instead.
+    return True
 
 def _impactpool_seniority_ok(level: str) -> bool:
-    if not level:
-        return True  # missing = let it through
-    low = level.lower()
-    return not any(bad in low for bad in _IMPACTPOOL_SENIORITY_BAD)
+    # Neutral: no seniority is privileged. Drop a seniority via the user
+    # profile's exclude_title_keywords instead.
+    return True
 
 def fetch_impactpool_board(board_cfg: dict) -> list[dict]:
     """Fetch jobs from impactpool.org/search by paginating server-rendered HTML.
@@ -2859,209 +2817,3 @@ def fetch_hn_whoishiring_board(board_cfg: dict) -> list[dict]:
     print(f"  [{board_name}] HN: {len(jobs)} postings from {total} top-level comments")
     return jobs
 
-
-# ---------------------------------------------------------------------------
-# Devex cookie-authenticated API
-# ---------------------------------------------------------------------------
-
-_DEVEX_BASE_URL = "https://www.devex.com/api/public/search/jobs"
-_DEVEX_DETAIL_URL = "https://www.devex.com/api/jobs/{job_id}"
-_DEVEX_COOKIE_FILE = __import__("pathlib").Path.home() / "Downloads" / "www.devex.com_cookies.txt"
-_DEVEX_KEYWORDS = [
-    "community", "social impact", "partnerships", "operations director",
-    "chief of staff", "program manager", "strategy", "fundraising",
-    "grants", "philanthropy",
-]
-_DEVEX_EUROPEAN_LOCATIONS = [
-    "United Kingdom", "Germany", "Netherlands", "Switzerland", "Belgium",
-    "France", "Portugal", "Ireland", "Denmark", "Sweden", "Austria",
-    "Spain", "Italy", "Norway", "Finland", "Luxembourg", "Czech Republic",
-]
-_DEVEX_EXCLUDE_PATTERNS = [
-    "software engineer", "developer", "devops", "data scientist",
-    "doctor", "nurse", "epidemiologist", "midwife", "pharmacist",
-    "veterinary", "fisheries specialist", "agriculture specialist",
-    "driver", "cleaner", "security guard",
-]
-
-
-def _devex_html_to_text(html_str: str) -> str:
-    if not html_str:
-        return ""
-    text = re.sub(r"<br\s*/?>", "\n", html_str, flags=re.I)
-    text = re.sub(r"</p>", "\n\n", text, flags=re.I)
-    text = re.sub(r"</li>", "\n", text, flags=re.I)
-    text = re.sub(r"<li[^>]*>", "- ", text, flags=re.I)
-    text = re.sub(r"</h[1-6]>", "\n\n", text, flags=re.I)
-    text = re.sub(r"<[^>]+>", "", text)
-    text = html_module.unescape(text)
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
-
-
-def _devex_fetch_json(url: str, opener) -> dict:
-    req = urllib.request.Request(url, headers={
-        "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        "X-Requested-With": "XMLHttpRequest",
-    })
-    with opener.open(req) as resp:
-        return json.loads(resp.read().decode("utf-8"))
-
-
-def _devex_normalize_places(raw_places: list[dict]) -> str:
-    """Deduplicate Devex places: drop bare countries/regions already covered by city pairs."""
-    names = []
-    for p in raw_places:
-        name = (p.get("place_name") or p.get("name") or "").strip()
-        if name:
-            names.append(name)
-    if not names:
-        return "Not specified"
-
-    # Split into city+country pairs vs standalone entries
-    # A standalone "Belgium" is redundant if "Brussels, Belgium" exists
-    seen_lower = set()
-    unique = []
-    for n in names:
-        key = n.lower()
-        if key not in seen_lower:
-            seen_lower.add(key)
-            unique.append(n)
-
-    # Remove bare country/region if it already appears as suffix of a city pair
-    final = []
-    all_lower = [u.lower() for u in unique]
-    for u in unique:
-        low = u.lower()
-        # Skip if this is a bare name that appears as suffix ", X" in another entry
-        is_redundant = any(
-            other != low and other.endswith(", " + low)
-            for other in all_lower
-        )
-        if not is_redundant:
-            final.append(u)
-
-    return ", ".join(final) if final else "Not specified"
-
-
-def _devex_parse_job(raw: dict) -> dict:
-    employer = raw.get("employer_company", {})
-    return {
-        "id": raw["id"],
-        "title": raw.get("name", "").strip(),
-        "organization": employer.get("name", "Unknown"),
-        "location": _devex_normalize_places(raw.get("places", [])),
-        "is_remote": raw.get("is_remote", False),
-        "url": f"https://www.devex.com/jobs/{raw.get('slug_and_id', raw['id'])}",
-        "closing_date": raw.get("closing_date"),
-        "posted_date": raw.get("published_at", "")[:10],
-    }
-
-
-def fetch_devex_cookie_api(board_cfg: dict) -> list[dict]:
-    """Scrape Devex jobs API using exported browser cookies.
-
-    Requires cookie file at ~/Downloads/www.devex.com_cookies.txt.
-    Skips gracefully if file is missing.
-    Returns list of standardized job dicts (same format as other fetchers).
-    """
-    if not _DEVEX_COOKIE_FILE.exists():
-        print(f"  [Devex] Cookie file not found: {_DEVEX_COOKIE_FILE}")
-        print("  [Devex] Export cookies from browser and retry.")
-        return []
-
-    print(f"  [Devex] Loading cookies from {_DEVEX_COOKIE_FILE}")
-    jar = http.cookiejar.MozillaCookieJar(str(_DEVEX_COOKIE_FILE))
-    jar.load(ignore_discard=True, ignore_expires=True)
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-    board_blacklist = [kw.lower() for kw in board_cfg.get("board_blacklist", [])]
-
-    all_jobs: dict[int, dict] = {}
-
-    def _collect(keyword: str | None, location: str | None, is_remote: bool = False) -> None:
-        page = 1
-        while True:
-            params = [("page[number]", str(page)), ("page[size]", "50")]
-            if keyword:
-                params.append(("filter[keywords][]", keyword))
-            if location:
-                params.append(("filter[locations][]", location))
-            if is_remote:
-                params.append(("filter[is_remote]", "true"))
-            url = f"{_DEVEX_BASE_URL}?{urllib.parse.urlencode(params)}"
-            try:
-                data = _devex_fetch_json(url, opener)
-            except Exception as e:
-                print(f"  [Devex] API error: {e}")
-                break
-            for raw in data.get("data", []):
-                job = _devex_parse_job(raw)
-                title_lower = job["title"].lower()
-                if any(p in title_lower for p in _DEVEX_EXCLUDE_PATTERNS):
-                    continue
-                if any(p in title_lower for p in board_blacklist):
-                    continue
-                if _is_generic_pipeline_title(job["title"]):
-                    continue
-                all_jobs[job["id"]] = job
-            page_info = data.get("page", {})
-            if page >= page_info.get("pages", 1):
-                break
-            page += 1
-            time.sleep(0.3)
-
-    # Keyword × location grid
-    for location in _DEVEX_EUROPEAN_LOCATIONS:
-        for keyword in _DEVEX_KEYWORDS:
-            _collect(keyword, location)
-            time.sleep(0.1)
-    # Remote keyword queries
-    for keyword in _DEVEX_KEYWORDS:
-        _collect(keyword, None, is_remote=True)
-        time.sleep(0.1)
-    # All European jobs without keyword filter
-    for location in _DEVEX_EUROPEAN_LOCATIONS:
-        _collect(None, location)
-        time.sleep(0.1)
-
-    print(f"  [Devex] Collected {len(all_jobs)} unique jobs — fetching descriptions...")
-
-    # Enrich with full descriptions from detail API
-    for i, (job_id, job) in enumerate(all_jobs.items()):
-        url = _DEVEX_DETAIL_URL.format(job_id=job_id)
-        req = urllib.request.Request(url, headers={
-            "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-            "X-Requested-With": "XMLHttpRequest",
-        })
-        try:
-            with opener.open(req) as resp:
-                detail = json.loads(resp.read().decode("utf-8"))
-                job["description"] = _devex_html_to_text(detail.get("description", ""))
-        except Exception as e:
-            print(f"  [Devex] detail error for {job_id}: {e}")
-            job["description"] = ""
-        if (i + 1) % 50 == 0:
-            print(f"  [Devex] {i + 1}/{len(all_jobs)} descriptions fetched")
-        time.sleep(0.3)
-
-    # Convert to standardized fetcher output format
-    result = []
-    for job in all_jobs.values():
-        result.append({
-            "title": job["title"],
-            "location": job["location"],
-            "external_id": str(job["id"]),
-            "url": job["url"],
-            "snippet": "",
-            "full_description": job.get("description", ""),
-            "department": "",
-            "compensation": "",
-            "deadline": job.get("closing_date", "") or "",
-            "org_override": job["organization"],
-        })
-
-    print(f"  [Devex] Done: {len(result)} jobs ready for import")
-    return result

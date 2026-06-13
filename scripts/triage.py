@@ -23,26 +23,6 @@ TRIAGED_STATUSES = {"to_apply", "to_research", "to_network", "skipped", "applied
 
 
 # ---------------------------------------------------------------------------
-# MPP prestige hints
-# ---------------------------------------------------------------------------
-
-_MPP_PRESTIGE_HINTS = {
-    "UN-level": [
-        "UN ", "United Nations", "World Bank", "IMF", "UNHCR", "UNICEF",
-        "WFP", "WHO", "ILO", "UNDP", "UNOPS", "IFC",
-    ],
-    "major foundation": [
-        "Foundation", "Trust", "Wellcome", "Gates", "Omidyar",
-        "Rockefeller", "Ford", "Open Society", "Bloomberg",
-    ],
-    "mission-tech": [
-        "FundraiseUp", "Miro", "Figma", "Canva", "Notion",
-        "1Password", "Airbnb", "Duolingo",
-    ],
-}
-
-
-# ---------------------------------------------------------------------------
 # Redis helpers
 # ---------------------------------------------------------------------------
 
@@ -322,16 +302,6 @@ def format_vacancy_briefing(v: dict, enrichment: dict) -> str:
     return "\n".join(lines)
 
 
-def _get_mpp_prestige_label(org: str, tier) -> str | None:
-    """Return MPP prestige category label for org, or None."""
-    for label, patterns in _MPP_PRESTIGE_HINTS.items():
-        if any(p.lower() in org.lower() for p in patterns):
-            return label
-    if str(tier) == "S":
-        return "top organization (tier S)"
-    return None
-
-
 def format_company_briefing(org: str, tier, enrichment: dict) -> str:
     """Format company context for CLI display."""
     tier_display = tier if tier in ("S", "A", "B", "C") else "?"
@@ -349,10 +319,6 @@ def format_company_briefing(org: str, tier, enrichment: dict) -> str:
 
     if about.get("employee_count"):
         lines.append(f"  Employees: {about['employee_count']}")
-
-    prestige = _get_mpp_prestige_label(org, tier)
-    if prestige:
-        lines.append(f"  Prestige signal: {prestige}")
 
     if mission.get("alignment_score") is not None:
         lines.append(f"  Alignment: {mission['alignment_score']}/100 ({mission.get('alignment_label', '')})")

@@ -440,6 +440,26 @@ def _load_enrichment() -> dict[str, dict]:
 
 from database_supabase import calculate_company_tier  # noqa: E402
 
+try:  # The configured custom-boost key (+ legacy back-compat). Optional import.
+    from prompts import CUSTOM_BOOST_KEYS as _BOOST_KEYS  # noqa: E402
+except Exception:  # pragma: no cover - degrade to known keys if prompts unavailable
+    _BOOST_KEYS = ("career_narrative_boost", "mpa_narrative_boost")
+
+
+def _custom_boost(mission: dict):
+    """Read the optional custom boost from a mission_fit dict.
+
+    Accepts the configured key (e.g. 'career_narrative_boost') and the legacy
+    'mpa_narrative_boost'. Returns None when absent or non-numeric.
+    """
+    if not isinstance(mission, dict):
+        return None
+    for key in _BOOST_KEYS:
+        val = mission.get(key)
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            return val
+    return None
+
 
 def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]:
     """Aggregate per-company stats from all data sources.
@@ -642,7 +662,7 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
             "fit_approach": mission.get("approach", ""),
             "experience_reasoning": mission.get("experience_match_reasoning", ""),
             "mission_verdict": mission.get("mission_verdict", ""),
-            "mpa_prestige": mission.get("mpa_narrative_boost"),
+            "mpa_prestige": _custom_boost(mission),
             "glassdoor_rating": social.get("glassdoor_rating"),
             "linkedin_employees": social.get("linkedin_employees", ""),
             "recent_news": social.get("recent_news", []),

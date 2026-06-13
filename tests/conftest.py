@@ -16,11 +16,23 @@ import pytest
 # real ``data/jobsearch.db`` during collection. Tests that need their own DB
 # still override JOBSEARCH_DB_PATH themselves.
 # ---------------------------------------------------------------------------
-if not (os.environ.get("SUPABASE_DB_URL") or os.environ.get("SUPABASE_DIRECT_URL")):
-    os.environ.setdefault(
-        "JOBSEARCH_DB_PATH",
-        os.path.join(tempfile.mkdtemp(prefix="ljp_default_db_"), "jobsearch.db"),
-    )
+# The offline suite must be DETERMINISTIC regardless of the developer's shell.
+# A stray SUPABASE_DB_URL exported in the environment (e.g. the maintainer's own
+# production Postgres) would otherwise make every test that imports the registry
+# / DAL run against that live database — yielding order-dependent failures
+# (CN09: stale _ALL_CSV_NAMES vs a 74-company prod DB; INT02: RealDictCursor
+# mismatch) and, worse, silently reading/writing real data. Force the local
+# SQLite backend for the whole test session by clearing the Supabase env before
+# any test module imports config / company_registry / database_supabase.
+#
+# A test that genuinely needs Postgres must set SUPABASE_DB_URL itself and skip
+# when it is absent; none in this suite do.
+os.environ.pop("SUPABASE_DB_URL", None)
+os.environ.pop("SUPABASE_DIRECT_URL", None)
+os.environ.setdefault(
+    "JOBSEARCH_DB_PATH",
+    os.path.join(tempfile.mkdtemp(prefix="ljp_default_db_"), "jobsearch.db"),
+)
 
 
 @pytest.fixture

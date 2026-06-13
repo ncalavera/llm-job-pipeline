@@ -27,8 +27,7 @@ export function showSyncStatus(text, isError) {
 export function showOfflineBanner() {
   const el = document.getElementById("syncIndicator");
   if (!el) return;
-  el.textContent =
-    "\u26A0 \u041E\u0444\u043B\u0430\u0439\u043D-\u0440\u0435\u0436\u0438\u043C \u2014 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u043D\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u044F\u044E\u0442\u0441\u044F";
+  el.textContent = "\u26A0 Offline \u2014 changes are not being saved";
   el.classList.remove("fade-out");
   el.classList.add("sync-offline");
   if (syncHideTimer) clearTimeout(syncHideTimer);
@@ -59,8 +58,7 @@ export function saveToServer(id, status) {
           hideOfflineBanner();
         }
         showSyncStatus(
-          "\u2705 \u0421\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u043E: " +
-            new Date().toLocaleTimeString(),
+          "\u2705 Saved: " + new Date().toLocaleTimeString(),
           false,
         );
       } else {

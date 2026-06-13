@@ -73,6 +73,39 @@ matches a target role:
 - US-only roles that don't accept European employees.
 - AI safety research roles at non-prestigious orgs (cap at 35).
 
+## HARD_FILTERS
+
+<!--
+HARD filters drop vacancies BEFORE the LLM ever scores them. They are
+deterministic on/off rules, not score penalties. Use them only for things you
+NEVER want to see — everything softer belongs in EXCLUDE_PATTERNS above (those
+just lower the score).
+
+Two fields, both comma-separated. Leave a field as "(none)" to disable it.
+
+- exclude_countries: drop a vacancy if EVERY location it lists is in one of
+  these countries. A multi-country posting that also lists a country you did
+  NOT exclude is kept. Match is on the country name (e.g. "united states",
+  "canada"). Empty by default — so by default NO vacancy is dropped on
+  geography.
+
+- exclude_title_keywords: drop a vacancy if its job TITLE contains one of these
+  words (matched on whole words, so "engineer" does not hit "engineering
+  manager" only if you list the exact word). Empty by default — so by default
+  NO vacancy is dropped on its title discipline.
+
+Example — a non-technical European searcher who never wants US/Canada roles or
+engineering titles would write:
+
+    exclude_countries: united states, canada
+    exclude_title_keywords: engineer, developer, software engineer
+
+The template below is EMPTY on purpose. Add your own only if you are sure.
+-->
+
+exclude_countries: (none)
+exclude_title_keywords: (none)
+
 ## SHORT_SUMMARY_INSTRUCTION
 
 A 4–6 sentence factual summary in **English** for the dashboard card.

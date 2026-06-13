@@ -17,7 +17,7 @@ Fetch from all monitored companies (TTL cooldown applies, so this is cheap to
 run daily):
 
 ```bash
-source ~/.zshrc 2>/dev/null && python3 -u scripts/fetch_vacancies.py 2>&1
+python3 -u scripts/fetch_vacancies.py 2>&1
 ```
 
 Job boards are off by default and stay off here. If the user has opted into
@@ -36,7 +36,7 @@ Run the quality gate to drop junk and obvious non-fits before spending scoring
 budget:
 
 ```bash
-source ~/.zshrc 2>/dev/null && python3 scripts/filter_vacancies.py 2>&1
+python3 scripts/filter_vacancies.py 2>&1
 ```
 
 ## Step 3: Score the new vacancies
@@ -88,7 +88,7 @@ Statuses: `liked`, `passed`, `skipped`, `to_apply`, `to_research`, `to_network`,
 Regenerate `public/data.js` so the local dashboard reflects today's run:
 
 ```bash
-source ~/.zshrc 2>/dev/null && python3 scripts/fetch_vacancies.py --report-only 2>&1
+python3 scripts/fetch_vacancies.py --report-only 2>&1
 ```
 
 If the local dashboard server is already running, the user just refreshes the

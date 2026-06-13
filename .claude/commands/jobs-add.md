@@ -126,7 +126,7 @@ If already exists, stop and tell the user.
 **Add new company record:**
 
 ```bash
-source ~/.zshrc 2>/dev/null && python3 -c "
+python3 -c "
 import sys
 sys.path.insert(0, 'scripts')
 from database_supabase import ensure_company, get_conn
@@ -147,7 +147,7 @@ cur.execute('''
 ''', ('{STRATEGY}', '{SLUG}', '{CAREERS_URL}', '{ATS_CONFIG_JSON}', '{WEBSITE}', company_id))
 conn.commit()
 cur.close()
-print(f'Company {company_id} metadata updated in Supabase')
+print(f'Company {company_id} metadata updated')
 "
 ```
 
@@ -163,7 +163,7 @@ print(f'Company {company_id} metadata updated in Supabase')
 Run a targeted fetch for just this company:
 
 ```bash
-source ~/.zshrc 2>/dev/null && python3 scripts/fetch_vacancies.py --companies "{COMPANY_NAME}"
+python3 scripts/fetch_vacancies.py --companies "{COMPANY_NAME}"
 ```
 
 Show results:
@@ -188,7 +188,7 @@ Options:
 If the test fetch returned vacancies, offer to merge them into the database:
 
 ```bash
-source ~/.zshrc 2>/dev/null && python3 -c "
+python3 -c "
 import sys
 sys.path.insert(0, 'scripts')
 from company_registry import COMPANIES

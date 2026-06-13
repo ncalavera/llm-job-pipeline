@@ -163,22 +163,20 @@ function switchMode(mode) {
 (function updateHeroDate() {
   var el = document.getElementById("heroDate");
   if (!el) return;
-  var raw = el.textContent
-    .replace("\u041E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u043E: ", "")
-    .trim();
+  var raw = el.textContent.replace("Updated: ", "").trim();
   if (!raw || raw === "\u2014") return;
   try {
     var d = new Date(raw);
     if (!isNaN(d.getTime())) {
       el.textContent =
-        "\u041E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u043E: " +
-        d.toLocaleDateString("ru-RU", {
+        "Updated: " +
+        d.toLocaleDateString("en-US", {
           day: "numeric",
           month: "long",
           year: "numeric",
         }) +
         ", " +
-        d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+        d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
     }
   } catch (e) {
     /* ignore parse errors */

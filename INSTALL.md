@@ -161,11 +161,11 @@ A daily push of your top unscored vacancies with 👍/👎 inline buttons.
    token. Message your bot once so it can reach you, get your chat id
    (e.g. via `https://api.telegram.org/bot<token>/getUpdates`).
 2. Add to `.env`: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
-3. Send manually: `python3 scripts/telegram_digest.py --send --limit 5`
-4. Record button presses: run `python3 scripts/telegram_digest.py --poll`
+3. Send manually: `python3 scripts/telegram_digest.py send --limit 5`
+4. Record button presses: run `python3 scripts/telegram_digest.py poll`
    as a daemon (systemd, launchd, or a cron every few minutes). Buttons write
    `liked`/`passed` straight to the database.
-5. Schedule `--send` daily via cron.
+5. Schedule `send` daily via cron.
 
 ## Daily rhythm
 

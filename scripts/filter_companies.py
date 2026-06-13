@@ -2,7 +2,7 @@
 """Pre-filter candidate companies by name/type patterns.
 
 Removes structural junk (aggregators, board duplicates, government,
-universities, animal welfare) before expensive enrichment steps.
+universities) before expensive enrichment steps.
 
 Usage:
     python3 scripts/filter_companies.py                 # Analyze + markdown report
@@ -83,20 +83,6 @@ def _check_university(name: str) -> str | None:
     return None
 
 
-_ANIMAL_WELFARE = {
-    "Advocates for Animals", "AIxAnimals Funding", "Animal Law Foundation",
-    "Animal Legal Defense Fund", "Sentient Futures", "Shrimp Welfare Project",
-    "We Animals Media",
-}
-
-
-def _check_animal_welfare(name: str) -> str | None:
-    """Pattern 5: Animal welfare organizations (explicit list)."""
-    if name in _ANIMAL_WELFARE:
-        return "animal welfare"
-    return None
-
-
 # ---------------------------------------------------------------------------
 # Classification
 # ---------------------------------------------------------------------------
@@ -106,7 +92,6 @@ _CHECKS = [
     _check_board_duplicate,
     _check_government,
     _check_university,
-    _check_animal_welfare,
 ]
 
 

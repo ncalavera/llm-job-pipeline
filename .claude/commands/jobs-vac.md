@@ -71,7 +71,7 @@ python3 scripts/vac.py list --status unseen --min-score 70 --sort score
 
 **Find all vacancies for a company:**
 ```bash
-python3 scripts/vac.py list --org FundraiseUp --include-candidates
+python3 scripts/vac.py list --org "Acme Foundation" --include-candidates
 ```
 
 **Filter by UK-only locations:**

@@ -31,7 +31,7 @@ Runs `scripts/fetch_vacancies.py` with the right flags after a short interactive
 Before fetching, display a live source status dashboard showing each company, when it was last fetched, vacancy count, and whether it is stale or due:
 
 ```bash
-source ~/.zshrc 2>/dev/null && python3 -c "
+python3 -c "
 import sys
 from datetime import datetime, date
 sys.path.insert(0, 'scripts')
@@ -79,7 +79,7 @@ Run in background and monitor progress. **Never launch all 100+ companies in one
 Always use `python3 -u` (unbuffered stdout) so progress lines appear in real time:
 
 ```bash
-source ~/.zshrc 2>/dev/null && python3 -u scripts/fetch_vacancies.py {FLAGS} 2>&1
+python3 -u scripts/fetch_vacancies.py {FLAGS} 2>&1
 ```
 
 **Single-company or targeted runs:**
@@ -120,8 +120,10 @@ If a company page requires JavaScript rendering and the fetch returns nothing us
 After fetching, run enrichment to clean up blind vacancies:
 
 ```bash
-source ~/.zshrc 2>/dev/null && python3 scripts/enrich_blind_vacancies.py 2>&1
+python3 scripts/enrich_blind_vacancies.py 2>&1
 ```
+
+(Requires `FIRECRAWL_API_KEY` in your environment.)
 
 This enriches vacancies that have a URL but no description (via Firecrawl), and deletes junk vacancies with no URL and no description.
 
@@ -134,7 +136,7 @@ After fetching, show:
 - Any fetch errors
 
 ```bash
-source ~/.zshrc 2>/dev/null && python3 -c "
+python3 -c "
 import sys
 from collections import Counter
 from datetime import date
@@ -184,7 +186,7 @@ COOKIE_FILE=~/Downloads/www.devex.com_cookies.txt
 [ -f "$COOKIE_FILE" ] && echo "Found" || echo "MISSING — export from browser first"
 
 # Scrape and import
-source ~/.zshrc 2>/dev/null && python3 scripts/scrape_devex.py 2>&1 && python3 scripts/import_devex.py 2>&1
+python3 scripts/scrape_devex.py 2>&1 && python3 scripts/import_devex.py 2>&1
 ```
 
 If the cookie file is missing, warn the user and skip Devex without failing the rest of the fetch.

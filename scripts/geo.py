@@ -3,7 +3,11 @@
 A location entry is a v2 dict {work_mode, region, country, city, ...} or a
 v1 dict with a free-text 'location' key. `geo_bucket()` maps it to one of:
 
-    uk | germany | europe | us | cis | other | unknown
+    uk | germany | europe | us | other | unknown
+
+These are neutral structural buckets — none is treated as a "home" region.
+Geography preference comes entirely from the user profile's exclude_countries
+(see filter_vacancies.py), so the classifier privileges no region by default.
 
 This is the authoritative geo classifier used by the pre-score filter and the
 `vac` CLI. The stored `region` field (set at fetch time by classify_region())
@@ -11,107 +15,215 @@ is display-only legacy — `geo_bucket` is computed on the fly and does not read
 or trust it as primary signal. Country wins, then city, then region/work_mode.
 """
 
-# Country name → bucket (lowercased substring match against country/text)
-_UK_COUNTRIES = {"united kingdom", "uk", "great britain", "england", "scotland", "wales"}
-_DE_COUNTRIES = {"germany", "deutschland"}
-_EUROPE_COUNTRIES = {
-    "ireland", "france", "netherlands", "belgium", "luxembourg",
-    "spain", "portugal", "italy", "austria", "switzerland",
-    "poland", "czech republic", "czechia", "slovakia", "hungary",
-    "denmark", "sweden", "norway", "finland", "iceland",
-    "estonia", "latvia", "lithuania", "greece", "croatia",
-    "slovenia", "romania", "bulgaria", "cyprus", "malta",
-    "liechtenstein", "monaco",
-}
-_US_COUNTRIES = {"united states", "usa", "us", "u.s.", "u.s.a.", "canada"}
-_CIS_COUNTRIES = {
-    "russia", "russian federation", "belarus", "georgia", "armenia",
-    "azerbaijan", "kazakhstan", "uzbekistan", "kyrgyzstan", "tajikistan",
-    "turkmenistan", "moldova",
-}
-# Recognized-but-not-target countries → 'other'
-_OTHER_COUNTRIES = {
-    "turkey", "israel", "uae", "united arab emirates", "saudi arabia",
-    "egypt", "jordan", "iraq", "lebanon", "qatar", "kuwait", "bahrain",
-    "india", "china", "japan", "singapore", "south korea", "korea",
-    "thailand", "vietnam", "indonesia", "malaysia", "philippines",
-    "pakistan", "bangladesh", "hong kong", "taiwan",
-    "kenya", "south africa", "nigeria", "ghana", "ethiopia", "tanzania",
-    "uganda", "morocco", "tunisia", "senegal", "rwanda", "zambia",
-    "australia", "new zealand",
-    "brazil", "mexico", "argentina", "chile", "colombia", "peru",
-}
+# Structural country/city → bucket DATA, loaded from config/defaults.toml
+# ([geo.countries] / [geo.cities]). The classification LOGIC lives here; only
+# the data lives in TOML. Buckets are neutral structural labels — no "home".
+import re
 
-# City → bucket
-_UK_CITIES = {"london", "oxford", "cambridge", "edinburgh", "manchester",
-              "bristol", "glasgow", "birmingham", "leeds", "cardiff", "belfast"}
-_DE_CITIES = {"berlin", "munich", "münchen", "frankfurt", "hamburg",
-              "cologne", "köln", "stuttgart", "düsseldorf", "leipzig"}
-_EUROPE_CITIES = {
-    "paris", "amsterdam", "lisbon", "dublin", "geneva", "zurich", "zürich",
-    "brussels", "stockholm", "oslo", "vienna", "wien", "madrid", "barcelona",
-    "rome", "milan", "warsaw", "prague", "copenhagen", "helsinki",
-    "tallinn", "riga", "vilnius", "athens", "budapest", "lyon", "porto",
-    "rotterdam", "the hague", "luxembourg", "basel", "bern", "antwerp",
-}
-_US_CITIES = {
-    "new york", "nyc", "san francisco", "washington", "seattle", "boston",
-    "chicago", "austin", "los angeles", "redwood city", "berkeley",
-    "houston", "denver", "atlanta", "miami", "minneapolis", "reston",
-    "bay area", "palo alto", "mountain view", "toronto", "vancouver",
-}
-_CIS_CITIES = {
-    "tbilisi", "yerevan", "baku", "almaty", "tashkent", "minsk", "moscow",
-    "saint petersburg", "st petersburg", "nur-sultan", "astana", "bishkek",
-    "dushanbe", "ashgabat", "chisinau", "batumi",
-}
-_OTHER_CITIES = {
-    "istanbul", "ankara", "tel aviv", "dubai", "abu dhabi", "cairo",
-    "amman", "baghdad", "beirut", "riyadh", "doha",
-    "mumbai", "delhi", "bangalore", "bengaluru", "hyderabad", "chennai",
-    "beijing", "shanghai", "tokyo", "seoul", "bangkok", "jakarta",
-    "manila", "kuala lumpur", "karachi", "dhaka", "hong kong", "taipei",
-    "nairobi", "cape town", "johannesburg", "lagos", "accra", "addis ababa",
-    "kampala", "casablanca", "dakar", "kigali",
-    "sydney", "melbourne",
-    "são paulo", "sao paulo", "rio de janeiro", "mexico city",
-    "buenos aires", "santiago", "bogota", "bogotá", "lima",
-}
+import settings
+
+_COUNTRY_MAP = settings.geo_country_map()
+_CITY_MAP = settings.geo_city_map()
+
+# Compiled word-boundary matchers for every bucket, so a term only matches when
+# it stands as its own token. Without this, "us" would match inside "belarus"
+# (the city "Minsk, Belarus" → mislabelled US). `\b` treats letters/digits as
+# word chars, so "u.s." still matches the "u" and "s" tokens correctly and
+# "new york" matches as a phrase. Rebuilt by _rebuild_matchers() on config
+# reload (tests swap defaults.toml).
+_COUNTRY_RE: dict[str, "re.Pattern | None"] = {}
+_CITY_RE: dict[str, "re.Pattern | None"] = {}
 
 
-def _match(text: str, terms: set) -> bool:
-    """True if any term appears as a token-ish substring in text."""
-    return any(term in text for term in terms)
+def _compile_terms(terms: set) -> "re.Pattern | None":
+    """Compile a set of location terms into one word-boundary alternation.
+
+    Returns None when there are no terms (an empty pattern would match every
+    string). Each term is escaped and wrapped in \\b…\\b so it only matches on
+    token boundaries, never as a substring inside another word.
+    """
+    cleaned = [t.strip() for t in terms if t and t.strip()]
+    if not cleaned:
+        return None
+    # Longest-first so multi-word phrases win over their fragments.
+    cleaned.sort(key=len, reverse=True)
+    alt = "|".join(re.escape(t) for t in cleaned)
+    return re.compile(r"\b(?:" + alt + r")\b")
+
+
+#: alias (lowercased) → canonical country (lowercased). Rebuilt on reload.
+_COUNTRY_ALIASES: dict[str, str] = {}
+
+
+def _rebuild_matchers() -> None:
+    """Recompile the bucket matchers from the current country/city maps."""
+    global _COUNTRY_MAP, _CITY_MAP, _COUNTRY_ALIASES
+    _COUNTRY_MAP = settings.geo_country_map()
+    _CITY_MAP = settings.geo_city_map()
+    _COUNTRY_ALIASES = settings.geo_country_aliases()
+    for key in ("uk", "de", "europe", "us", "other"):
+        _COUNTRY_RE[key] = _compile_terms(_COUNTRY_MAP.get(key, set()))
+        _CITY_RE[key] = _compile_terms(_CITY_MAP.get(key, set()))
+
+
+def canonical_country(name: str) -> str:
+    """Normalize a country name to its canonical form (lowercased).
+
+    Collapses known synonyms of ONE country (usa/us/u.s. → "united states") so
+    exact-country exclusion is alias-proof, while keeping DISTINCT countries
+    distinct. Unknown names pass through normalized (lowercased + stripped).
+    """
+    norm = (name or "").lower().strip()
+    return _COUNTRY_ALIASES.get(norm, norm)
+
+# Internal bucket ORDER for classification (most specific → least). The TOML key
+# is the bucket id; the returned label maps the "de" TOML key to "germany". This
+# is a neutral lookup table — no bucket is privileged, the order only resolves
+# overlaps (a country listed under several keys takes the earliest).
+_BUCKET_ORDER = ("uk", "de", "europe", "us", "other")
+_BUCKET_LABEL = {"de": "germany"}  # TOML key → public bucket label
+
+# Legacy stored `region` field → bucket id. Data-driven so no code branches on a
+# specific region name; extend the table, not the logic.
+_REGION_FIELD_TO_BUCKET = {
+    "europe": "europe",
+    "us": "us",
+    "americas": "us",
+}
+
+# Build the word-boundary matchers from the freshly loaded maps (also called by
+# tests after they swap defaults.toml + settings.clear_cache()).
+_rebuild_matchers()
+
+
+def _label(bucket_key: str) -> str:
+    """Map an internal bucket key to its public label (de → germany)."""
+    return _BUCKET_LABEL.get(bucket_key, bucket_key)
+
+
+def _match(text: str, pattern: "re.Pattern | None") -> bool:
+    """True if the compiled bucket pattern matches a whole token in text.
+
+    Token-boundary match (not raw substring) so e.g. the "us" bucket term does
+    not fire on the "us" inside "Belarus".
+    """
+    return bool(pattern and pattern.search(text))
 
 
 def _bucket_from_text(text: str) -> str | None:
-    """Classify a free-text location string. Order: UK→DE→EU→CIS→US→other."""
+    """Classify a free-text location string by walking the bucket table in
+    order. Country names and cities for a bucket are checked together."""
     if not text:
         return None
-    # Country names first (more specific), then cities.
-    if _match(text, _UK_COUNTRIES) or _match(text, _UK_CITIES):
-        return "uk"
-    if _match(text, _DE_COUNTRIES) or _match(text, _DE_CITIES):
-        return "germany"
-    if _match(text, _EUROPE_COUNTRIES) or _match(text, _EUROPE_CITIES):
-        return "europe"
-    if _match(text, _CIS_COUNTRIES) or _match(text, _CIS_CITIES):
-        return "cis"
-    if _match(text, _US_COUNTRIES) or _match(text, _US_CITIES):
-        return "us"
-    if _match(text, _OTHER_COUNTRIES) or _match(text, _OTHER_CITIES):
-        return "other"
+    for key in _BUCKET_ORDER:
+        if _match(text, _COUNTRY_RE.get(key)) or _match(text, _CITY_RE.get(key)):
+            return _label(key)
+    return None
+
+
+def bucket_for_country(name: str) -> str:
+    """Map a bare country (or city) name to a geo bucket.
+
+    Used to translate the user's profile ``exclude_countries`` entries (free
+    text like "united states" / "canada" / "germany") into the same buckets the
+    location filter computes. Returns 'unknown' when the name is not recognised.
+    """
+    text = (name or "").lower().strip()
+    if not text:
+        return "unknown"
+    # Exact country-set match first (handles short tokens cleanly), then the
+    # substring matcher (handles cities + loose phrasing). Both walk the table.
+    for key in _BUCKET_ORDER:
+        if text in _COUNTRY_MAP[key]:
+            return _label(key)
+    return _bucket_from_text(text) or "unknown"
+
+
+def _all_country_names() -> set[str]:
+    """Every recognised country token across all buckets (lowercased)."""
+    out: set[str] = set()
+    for terms in _COUNTRY_MAP.values():
+        out |= {t.lower().strip() for t in terms if t}
+    return out
+
+
+def _city_to_country() -> dict[str, str]:
+    """city (lowercased) → country name (lowercased), from geo.city_country."""
+    return {str(k).lower().strip(): str(v).lower().strip()
+            for k, v in settings.geo_city_country().items()}
+
+
+def country_for_location(loc: dict) -> str | None:
+    """Return the recognised COUNTRY of a single location entry (lowercased),
+    or None when no country can be resolved.
+
+    This is the basis for EXACT-country exclusion (unlike geo_bucket, which
+    coarsens many countries into one bucket). Resolution order:
+        1. explicit `country` field;
+        2. `city` field → country via the city_country map;
+        3. a recognised country name found as a whole token in the `city` or
+           free-text `location` string.
+    A None result means "no resolvable country" → never geo-excluded.
+    """
+    if not loc:
+        return None
+
+    known = _all_country_names()
+
+    # 1) Explicit country field.
+    country = (loc.get("country") or "").lower().strip()
+    if country:
+        # Return the explicit country canonicalized so an exclude list naming it
+        # (even via an alias or an unrecognised country) still matches exactly.
+        return canonical_country(country)
+
+    city_country = _city_to_country()
+
+    # 2) City field → country (exact city key, then token scan).
+    city = (loc.get("city") or "").lower().strip()
+    if city:
+        if city in city_country:
+            return canonical_country(city_country[city])
+        hit = _country_in_text(city, known, city_country)
+        if hit:
+            return canonical_country(hit)
+
+    # 3) Free-text location string.
+    loc_text = (loc.get("location") or "").lower().strip()
+    if loc_text:
+        hit = _country_in_text(loc_text, known, city_country)
+        if hit:
+            return canonical_country(hit)
+
+    return None
+
+
+def _country_in_text(text: str, known: set[str], city_country: dict[str, str]) -> str | None:
+    """Find a recognised country in free text by whole-token match.
+
+    Checks explicit country names first, then known cities (mapped to their
+    country). Token boundaries prevent "us" matching inside "Belarus".
+    """
+    # Country names (longest first so "united states" beats "us").
+    for name in sorted(known, key=len, reverse=True):
+        if re.search(r"\b" + re.escape(name) + r"\b", text):
+            return name
+    # City names → country.
+    for city, ctry in sorted(city_country.items(), key=lambda kv: len(kv[0]), reverse=True):
+        if re.search(r"\b" + re.escape(city) + r"\b", text):
+            return ctry
     return None
 
 
 def geo_bucket(loc: dict) -> str:
     """Map one location entry to a geography bucket.
 
-    Returns: 'uk' | 'germany' | 'europe' | 'us' | 'cis' | 'other' | 'unknown'.
+    Returns: 'uk' | 'germany' | 'europe' | 'us' | 'other' | 'unknown'.
 
     Decision order: country → city → free-text 'location' → region/work_mode
     fallbacks. 'unknown' means no recognizable location (incl. global remote
-    with no country — which the filter treats as KEEP).
+    with no country — which the filter treats as KEEP). The mapping is purely
+    table-driven; no bucket is special-cased in control flow.
     """
     if not loc:
         return "unknown"
@@ -119,23 +231,13 @@ def geo_bucket(loc: dict) -> str:
     country = (loc.get("country") or "").lower().strip()
     city = (loc.get("city") or "").lower().strip()
     region = (loc.get("region") or "").lower().strip()
-    work_mode = (loc.get("work_mode") or "").lower().strip()
     loc_text = (loc.get("location") or "").lower().strip()
 
     # 1) Country wins.
     if country:
-        if country in _UK_COUNTRIES:
-            return "uk"
-        if country in _DE_COUNTRIES:
-            return "germany"
-        if country in _EUROPE_COUNTRIES:
-            return "europe"
-        if country in _US_COUNTRIES:
-            return "us"
-        if country in _CIS_COUNTRIES:
-            return "cis"
-        if country in _OTHER_COUNTRIES:
-            return "other"
+        for key in _BUCKET_ORDER:
+            if country in _COUNTRY_MAP[key]:
+                return _label(key)
         # Unrecognized but explicit country → other (recognized-as-a-place).
         return "other"
 
@@ -151,12 +253,11 @@ def geo_bucket(loc: dict) -> str:
         if b:
             return b
 
-    # 4) Region fallback (legacy stored value — weakest signal).
+    # 4) Region fallback (legacy stored value — weakest signal, table lookup).
     if region:
-        if region == "europe":
-            return "europe"
-        if region in ("us", "americas"):
-            return "us"
+        bucket = _REGION_FIELD_TO_BUCKET.get(region)
+        if bucket:
+            return _label(bucket)
 
     # 5) Global remote with no place → unknown (filter keeps it).
     return "unknown"

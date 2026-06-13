@@ -229,36 +229,66 @@ class TestCleanDescriptionNoFalsePositives:
 # ===========================================================================
 
 class TestBlacklistJunkMatched:
-    """Non-vacancy junk listings must match the blacklist."""
+    """Universal-junk listings must match — only "there is no concrete single
+    role here at all" markers (talent pools, generic applications, volunteer
+    calls). Discipline-/format-flavored words are NOT universal junk and are
+    asserted absent in TestBlacklistFormatWordsNotJunk below."""
 
     @pytest.fixture(autouse=True)
     def import_blacklist(self):
         from score_vacancies import _is_blacklisted
         self._is_blacklisted = _is_blacklisted
 
-    def test_funding_comma_suffix(self):
-        # "funding," → grant / funding calls
-        assert self._is_blacklisted("Funding, Human Self-Enhancement Research 2026") is True
+    def test_talent_pool(self):
+        assert self._is_blacklisted("Talent Pool — Future Roles") is True
 
-    def test_course_comma_suffix(self):
-        # "course," → courses, not vacancies
-        assert self._is_blacklisted("Course, Intro to X") is True
+    def test_expression_of_interest(self):
+        assert self._is_blacklisted("Expression of Interest: General") is True
 
-    def test_summer_school(self):
-        # "summer school" → educational programmes
-        assert self._is_blacklisted("Summer School, Human-Aligned AI") is True
+    def test_general_application(self):
+        assert self._is_blacklisted("General Application") is True
 
-    def test_bootcamp(self):
-        # "bootcamp" → training, not vacancies
-        assert self._is_blacklisted("AI Safety Bootcamp 2026") is True
+    def test_open_application(self):
+        assert self._is_blacklisted("Open Application — Any Team") is True
 
-    def test_training_on(self):
-        # "training on" → training events
-        assert self._is_blacklisted("Training on M&E Methods for NGOs") is True
+    def test_talent_network(self):
+        assert self._is_blacklisted("Join Our Talent Network") is True
 
-    def test_fellowship(self):
-        # "fellowship" → scholarships / programmes, not vacancies
-        assert self._is_blacklisted("Fellowship Programme in AI Governance") is True
+    def test_speculative_application(self):
+        assert self._is_blacklisted("Speculative Application") is True
+
+
+class TestBlacklistFormatWordsNotJunk:
+    """Format-/discipline-flavored words ship NEUTRAL: they are the user's
+    optional taste (profile exclude_title_keywords), never universal junk. A
+    bootcamp instructor, a paid fellowship, a funding-strategy lead can be real
+    roles. With an empty profile none of these are dropped."""
+
+    @pytest.fixture(autouse=True)
+    def import_blacklist(self):
+        from score_vacancies import _is_blacklisted
+        self._is_blacklisted = _is_blacklisted
+
+    def test_bootcamp_not_junk(self):
+        # "Data Science Bootcamp" instructor is a real job
+        assert self._is_blacklisted("Data Science Bootcamp Lead Instructor") is False
+
+    def test_course_not_junk(self):
+        assert self._is_blacklisted("Course, Intro to X") is False
+
+    def test_summer_school_not_junk(self):
+        assert self._is_blacklisted("Summer School Coordinator") is False
+
+    def test_training_on_not_junk(self):
+        assert self._is_blacklisted("Training on M&E Methods for NGOs") is False
+
+    def test_fellowship_not_junk(self):
+        # Many real paid staff roles are called fellowships
+        assert self._is_blacklisted("Fellowship Programme in AI Governance") is False
+
+    def test_funding_not_junk(self):
+        # Grant/funding calls are real jobs for fundraisers
+        assert self._is_blacklisted("Funding Strategy Lead 2026") is False
 
 
 class TestBlacklistLegitNotMatched:
@@ -276,11 +306,9 @@ class TestBlacklistLegitNotMatched:
         assert self._is_blacklisted("Senior Operations Manager") is False
 
     def test_crowdfunding_lead_not_blacklisted(self):
-        # "crowdfunding" does not contain "funding," — the comma is required
         assert self._is_blacklisted("Crowdfunding Lead") is False
 
     def test_head_of_courses_strategy_not_blacklisted(self):
-        # "course," needs the comma — "courses" alone is not a trigger
         assert self._is_blacklisted("Head of Courses Strategy") is False
 
     def test_director_of_training_not_blacklisted(self):
@@ -412,7 +440,12 @@ class TestIntegrationReadOnly:
     def test_INT02_no_unseen_at_inactive_companies(self):
         """No unseen vacancies should remain at inactive companies."""
         from db_conn import get_conn
-        from psycopg2.extras import RealDictCursor
+        # Import RealDictCursor from db_backend, not psycopg2 directly: on the
+        # SQLite backend the cursor only yields dict rows when handed the
+        # db_backend marker class. The genuine psycopg2 RealDictCursor is a
+        # different object the SQLite cursor doesn't recognise, so it would fall
+        # back to plain tuples and `row["cnt"]` would raise "tuple indices".
+        from db_backend import RealDictCursor
 
         conn = get_conn()
         cur = conn.cursor(cursor_factory=RealDictCursor)

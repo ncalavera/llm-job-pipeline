@@ -1,25 +1,17 @@
 #!/usr/bin/env python3
-"""Unified company scoring — 3 backends, identical LLM input.
-
-Replaces: enrich_prep.py, enrich_save.py, enrich_companies.py (LLM parts),
-          old score_companies.py
+"""Company scoring — local subagent + API backends, deterministic LLM input.
 
 Usage:
     score_companies.py --local --limit 5          # subagent scoring (default)
     score_companies.py --api --limit 20           # Anthropic API
-    score_companies.py --openclaw --limit 20      # OpenClaw SSH
 """
 
 import argparse
 import json
-import os
-import random
 import re
-import shlex
 import subprocess
 import sys
 import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -32,7 +24,12 @@ _real_stdout = sys.stdout
 if "--local" in sys.argv:
     sys.stdout = sys.stderr
 
-from prompts import COMPANY_SCORING_PROMPT, COMPANY_SCORING_USER_TEMPLATE  # noqa: E402
+from prompts import (  # noqa: E402
+    COMPANY_SCORING_PROMPT,
+    COMPANY_SCORING_USER_TEMPLATE,
+    CUSTOM_BOOST_FIELD,
+    CUSTOM_BOOST_KEYS,
+)
 
 sys.stdout = _real_stdout
 
@@ -43,14 +40,8 @@ sys.stdout = _real_stdout
 MAX_TOKENS = 2000
 BILLING_ABORT_THRESHOLD = 5
 
-# OpenClaw SSH
-EC2_KEY = os.environ.get("OPENCLAW_SSH_KEY", "")
-EC2_USER = os.environ.get("OPENCLAW_SSH_USER", "")
-EC2_HOST = os.environ.get("OPENCLAW_SSH_HOST", "")
-OPENCLAW_AGENT = "scorer"
-OPENCLAW_TIMEOUT = 120
+# Default parallelism for the API backend.
 MAX_CONCURRENT = 3
-MAX_RETRIES = 3
 
 # Placeholder values to sanitize from LLM output
 _PLACEHOLDER_VALUES = {
@@ -242,63 +233,6 @@ def _score_api(client, model: str, system_prompt: str, user_msg: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# OpenClaw backend
-# ---------------------------------------------------------------------------
-
-def _ssh_call(message: str) -> dict:
-    """Send to OpenClaw via SSH, return parsed result."""
-    escaped_msg = shlex.quote(message)
-    cmd = [
-        "ssh", "-i", EC2_KEY,
-        "-o", "ConnectTimeout=10",
-        "-o", "ServerAliveInterval=30",
-        f"{EC2_USER}@{EC2_HOST}",
-        f"openclaw agent --agent {OPENCLAW_AGENT} "
-        f"--session-id company-{uuid.uuid4().hex[:8]} "
-        f"--timeout {OPENCLAW_TIMEOUT} --message {escaped_msg}",
-    ]
-    t0 = time.time()
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=OPENCLAW_TIMEOUT + 30,
-        )
-        latency = time.time() - t0
-        if result.returncode != 0:
-            return {
-                "error": f"SSH exit {result.returncode}: {result.stderr.strip()[:200]}",
-                "latency": round(latency, 2),
-            }
-        parsed = _parse_json(result.stdout.strip())
-        parsed["latency"] = round(latency, 2)
-        return parsed
-    except subprocess.TimeoutExpired:
-        return {"error": "SSH timeout", "latency": round(time.time() - t0, 2)}
-    except Exception as e:
-        return {"error": str(e), "latency": round(time.time() - t0, 2)}
-
-
-def _ssh_call_with_retry(message: str) -> dict:
-    """Send with exponential backoff on failures."""
-    result = {}
-    for attempt in range(MAX_RETRIES):
-        result = _ssh_call(message)
-        if not result.get("error"):
-            return result
-        if attempt < MAX_RETRIES - 1:
-            backoff = (2 ** attempt) * (1 + random.random())
-            time.sleep(backoff)
-    return result
-
-
-def _build_openclaw_message(system_prompt: str, user_msg: str) -> str:
-    """Wrap system+user for OpenClaw."""
-    return (
-        f"<system>\n{system_prompt}\n</system>\n\n{user_msg}\n\n"
-        "IMPORTANT: Return ONLY valid JSON, no markdown fences, no preamble."
-    )
-
-
-# ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
 
@@ -343,6 +277,22 @@ def _load_companies(*, company_filter=None, limit=None):
 # Shared: extract enrichment from LLM result
 # ---------------------------------------------------------------------------
 
+def _read_custom_boost(mission: dict):
+    """Return the custom-boost value from a mission_fit dict, or None.
+
+    Reads the configured key first (CUSTOM_BOOST_FIELD, e.g.
+    'career_narrative_boost') and falls back to the legacy 'mpa_narrative_boost'
+    for older payloads. Non-numeric values are ignored.
+    """
+    if not isinstance(mission, dict):
+        return None
+    for key in CUSTOM_BOOST_KEYS:
+        val = mission.get(key)
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            return val
+    return None
+
+
 def _extract_enrichment(result: dict) -> dict | None:
     """Extract about + mission_fit from parsed LLM response.
 
@@ -370,15 +320,18 @@ def _extract_enrichment(result: dict) -> dict | None:
         about_data["about_enriched_at"] = now
         about_data["about_source"] = "llm_from_markdown"
 
-    # Build mission_fit
+    # Build mission_fit. The custom-boost key is user-configurable
+    # (CUSTOM_BOOST_FIELD), so allow both the configured + legacy names plus
+    # their *_reasoning siblings.
     mission_data = mission if isinstance(mission, dict) else {}
+    boost_keys = set(CUSTOM_BOOST_KEYS) | {f"{k}_reasoning" for k in CUSTOM_BOOST_KEYS}
+    keep_keys = (
+        "alignment_score", "alignment_label", "strengths", "risks",
+        "approach", "experience_match_reasoning", "mission_verdict",
+    ) + tuple(boost_keys)
     mission_fit = {
         k: mission_data[k]
-        for k in (
-            "alignment_score", "alignment_label", "strengths", "risks",
-            "approach", "experience_match_reasoning", "mission_verdict",
-            "mpa_narrative_boost", "mpa_narrative_reasoning",
-        )
+        for k in keep_keys
         if k in mission_data and mission_data[k] is not None
     }
     mission_fit["mission_fit_enriched_at"] = now
@@ -542,8 +495,8 @@ def cmd_save(_args):
             vals.append(alignment)
 
             from database_supabase import calculate_company_tier
-            mpa = mission.get("mpa_narrative_boost") if isinstance(mission, dict) else None
-            tier, _ = calculate_company_tier(alignment, mpa)
+            boost = _read_custom_boost(mission)
+            tier, _ = calculate_company_tier(alignment, boost)
             if tier is not None:
                 updates.append("tier = %s")
                 vals.append(tier)
@@ -664,154 +617,13 @@ def cmd_api(args):
 
 
 # ---------------------------------------------------------------------------
-# Mode: --openclaw
-# ---------------------------------------------------------------------------
-
-def cmd_openclaw(args):
-    """Score companies via OpenClaw SSH."""
-    if not all([EC2_KEY, EC2_USER, EC2_HOST]):
-        print("ERROR: Set OPENCLAW_SSH_KEY, OPENCLAW_SSH_USER, OPENCLAW_SSH_HOST")
-        sys.exit(1)
-
-    companies = _load_companies(company_filter=args.company, limit=args.limit)
-    scrape_cache = _load_scrape_cache()
-    system_prompt = _get_system_prompt()
-    strategy_context = _load_strategy_context()
-
-    if not companies:
-        print("No companies to score.")
-        return
-
-    # Build items: (name, message) for companies with cached markdown
-    items = []
-    for c in companies:
-        user_msg = _build_user_msg(c, scrape_cache, strategy_context)
-        if user_msg is None:
-            continue
-        message = _build_openclaw_message(system_prompt, user_msg)
-        items.append((c["canonical_name"], message))
-
-    if not items:
-        print("No companies with cached markdown. Run fetch_companies.py first.")
-        return
-
-    print(
-        f"Scoring {len(items)} companies via OpenClaw "
-        f"({OPENCLAW_AGENT}, {args.max_workers}x parallel)"
-    )
-
-    if args.dry_run:
-        for i, (name, _) in enumerate(items[:20], 1):
-            print(f"  {i}. {name}")
-        if len(items) > 20:
-            print(f"  ... and {len(items) - 20} more")
-        return
-
-    from database_supabase import save_company_enrichment, auto_review_candidates, get_conn
-
-    conn = get_conn()
-    conn.rollback()
-    cur = conn.cursor()
-    cur.execute("SET statement_timeout = 30000")
-    cur.close()
-    conn.commit()
-
-    consecutive_errors = 0
-    scored = 0
-    total_errors = 0
-    start_time = time.time()
-
-    def _worker(item):
-        idx, (name, message) = item
-        time.sleep(random.uniform(1.0, 3.0))
-        return idx, name, _ssh_call_with_retry(message)
-
-    with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
-        future_map = {
-            executor.submit(_worker, (i, item)): i
-            for i, item in enumerate(items, 1)
-        }
-
-        for future in as_completed(future_map):
-            idx, name, result = future.result()
-
-            if result.get("error"):
-                consecutive_errors += 1
-                total_errors += 1
-                print(f"  [{idx}/{len(items)}] {name:40s} ERR: {result['error'][:80]}")
-                if consecutive_errors >= BILLING_ABORT_THRESHOLD:
-                    conn.commit()
-                    print(f"\n  {consecutive_errors} consecutive errors — stopping.")
-                    for f in future_map:
-                        f.cancel()
-                    break
-                continue
-
-            enrichment = _extract_enrichment(result)
-            if enrichment is None:
-                consecutive_errors += 1
-                total_errors += 1
-                raw = json.dumps(result, ensure_ascii=False)[:120]
-                print(f"  [{idx}/{len(items)}] {name:40s} ERR: no alignment_score: {raw}")
-                continue
-
-            alignment = enrichment["alignment_score"]
-            label = enrichment["mission_fit"].get("alignment_label", "")
-            latency = result.get("latency", 0)
-            print(
-                f"  [{idx}/{len(items)}] {name:40s} "
-                f"-> {alignment:3.0f} ({label})  ({latency:.1f}s)"
-            )
-
-            enrichment["mission_fit"]["mission_fit_model"] = f"openclaw/{OPENCLAW_AGENT}"
-            try:
-                save_company_enrichment(
-                    name,
-                    about=enrichment["about"],
-                    mission_fit=enrichment["mission_fit"],
-                    alignment_score=alignment,
-                )
-                conn.commit()
-            except Exception as e:
-                conn.rollback()
-                total_errors += 1
-                consecutive_errors += 1
-                print(f"    DB error: {e}")
-                continue
-
-            scored += 1
-            consecutive_errors = 0
-
-            if scored % 10 == 0:
-                elapsed = time.time() - start_time
-                rate = scored / max(elapsed / 60, 0.1)
-                remaining = (len(items) - idx) / rate if rate > 0 else 0
-                print(
-                    f"  --- progress: {scored} scored, "
-                    f"{rate:.1f}/min, ~{remaining:.0f}m remaining ---"
-                )
-
-    conn.commit()
-    elapsed = time.time() - start_time
-    print(f"\nDone! Scored {scored} companies in {elapsed / 60:.1f}m. Errors: {total_errors}")
-
-    if scored > 0 and not args.no_auto_review:
-        review = auto_review_candidates()
-        print(
-            f"Auto-review: {len(review.get('approved', []))} approved, "
-            f"{len(review.get('rejected', []))} rejected"
-        )
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Unified company scoring")
+    parser = argparse.ArgumentParser(description="Company scoring")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--api", action="store_true", help="Anthropic API")
-    mode.add_argument("--openclaw", action="store_true", help="OpenClaw SSH")
     mode.add_argument("--local", action="store_true", help="JSON → stdout for subagents")
     mode.add_argument("--save", action="store_true", help="stdin JSON → DB (internal)")
 
@@ -827,8 +639,6 @@ def main():
 
     if args.api:
         cmd_api(args)
-    elif args.openclaw:
-        cmd_openclaw(args)
     elif args.local:
         cmd_local(args)
     elif args.save:

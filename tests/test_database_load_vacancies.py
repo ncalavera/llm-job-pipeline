@@ -97,8 +97,8 @@ def test_load_vacancies_light_still_includes_locations_and_status(monkeypatch):
 
 def test_load_vacancies_status_exclude_filters_in_sql(monkeypatch):
     """status_exclude=['passed','skipped'] must produce a SQL clause that
-    excludes those statuses (regression guard for issue #233 — /score must
-    not waste subagent budget on auto-passed expired vacancies)."""
+    excludes those statuses — /score must not process auto-passed expired
+    vacancies."""
     import database_supabase as db
 
     conn, cur = _mock_conn()

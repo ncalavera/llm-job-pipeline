@@ -2,8 +2,7 @@
 
 Validates Pydantic model constraints match the live Supabase schema.
 Tests cover: enum values, NOT NULL enforcement, value range constraints.
-The static schema.sql was dropped 2026-05-01 (issue #226) — runtime
-validate_db() now owns the drift-detection contract.
+Runtime validate_db() owns the drift-detection contract.
 """
 
 import pytest
@@ -79,7 +78,7 @@ def test_experience_match_range():
 
 
 def test_vacancy_dedup_hash_field():
-    """Vacancy should have dedup_hash field (renamed from legacy_id)."""
+    """Vacancy should have dedup_hash field for deduplication."""
     from models import Vacancy
     v = Vacancy(
         id="00000000-0000-0000-0000-000000000001",
@@ -91,7 +90,7 @@ def test_vacancy_dedup_hash_field():
 
 
 def test_company_description_field():
-    """Company should have description field (renamed from product)."""
+    """Company should have description field."""
     from models import Company
     c = Company(
         id="00000000-0000-0000-0000-000000000001",
@@ -102,7 +101,7 @@ def test_company_description_field():
 
 
 def test_company_notes_field():
-    """Company should have notes field (renamed from user_comments)."""
+    """Company should have notes field."""
     from models import Company
     c = Company(
         id="00000000-0000-0000-0000-000000000001",

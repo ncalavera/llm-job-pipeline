@@ -4,7 +4,6 @@ Find official website URLs for board companies using Firecrawl search.
 Adds found companies to Supabase for subsequent enrichment.
 
 Usage:
-    source ~/.zshrc 2>/dev/null
     python3 scripts/find_company_urls.py [--dry-run] [--limit N]
 """
 

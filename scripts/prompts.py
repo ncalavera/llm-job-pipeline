@@ -10,6 +10,7 @@ Edit your profile in one place; both prompts see the change.
 
 import os
 import re
+import sys
 from pathlib import Path
 
 _PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
@@ -37,6 +38,16 @@ def _load_user_profile() -> dict[str, str]:
         path = DEFAULT_PROFILE_PATH
     elif EXAMPLE_PROFILE_PATH.exists():
         path = EXAMPLE_PROFILE_PATH
+        # Falling back to the bundled EXAMPLE profile (a fictional person). Scores
+        # produced against it are meaningless. Warn loudly so a user never scores
+        # an entire run against the example without knowing.
+        print(
+            "⚠  No config/user_profile.md found — using the EXAMPLE profile "
+            "(a fictional person). Scores are MEANINGLESS until you create your "
+            "own: copy config/user_profile.example.md to config/user_profile.md "
+            "and fill it in.",
+            file=sys.stderr,
+        )
     else:
         raise FileNotFoundError(
             "No user profile found. Create config/user_profile.md "
@@ -74,6 +85,17 @@ def _render(template: str, sections: dict[str, str]) -> str:
 
 
 _profile = _load_user_profile()
+
+#: The JSON key the company-scoring prompt asks the LLM to emit for the optional
+#: custom boost. Read from the profile's CUSTOM_BOOST_FIELD section so the prompt
+#: and the score-ingestion code agree on ONE name. Falls back to the example
+#: default. The legacy key "mpa_narrative_boost" is still accepted downstream.
+CUSTOM_BOOST_FIELD = (_profile.get("CUSTOM_BOOST_FIELD", "").strip()
+                      or "career_narrative_boost")
+
+#: Keys downstream code accepts as the custom boost (configured first, then the
+#: legacy name) — back-compat for older enrichment payloads.
+CUSTOM_BOOST_KEYS = tuple(dict.fromkeys([CUSTOM_BOOST_FIELD, "mpa_narrative_boost"]))
 
 VACANCY_SCORING_PROMPT = _render(_load_template("vacancy-scoring.md"), _profile)
 COMPANY_SCORING_PROMPT = _render(_load_template("company-scoring.md"), _profile)

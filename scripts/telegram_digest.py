@@ -33,9 +33,25 @@ import urllib.request
 from pathlib import Path
 
 DEFAULT_STATE_FILE = "~/.jobsearch_digest_state.json"
-SUMMARY_FALLBACK_CHARS = 600
-SUMMARY_MAX_CHARS = 1500  # llm_summary is unbounded in the DB — guard the Telegram limit
-MESSAGE_MAX_CHARS = 4000
+
+# Digest defaults come from config/defaults.toml ([digest]) when the settings
+# loader is importable. This script also runs standalone on a bare host (no
+# project tree), so fall back to neutral literals if settings is unavailable.
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import settings as _settings  # noqa: E402
+    _DIGEST = _settings.digest()
+except Exception:
+    _DIGEST = {
+        "hot_vacancy_score": 55, "deadline_soon_days": 7,
+        "default_limit": 5, "default_min_score": 40,
+        "summary_fallback_chars": 600, "summary_max_chars": 1500,
+        "message_max_chars": 4000,
+    }
+
+SUMMARY_FALLBACK_CHARS = _DIGEST["summary_fallback_chars"]
+SUMMARY_MAX_CHARS = _DIGEST["summary_max_chars"]  # guard the Telegram message limit
+MESSAGE_MAX_CHARS = _DIGEST["message_max_chars"]
 CALLBACK_PREFIX = "v"
 ACTION_TO_STATUS = {"l": "liked", "p": "passed"}
 STATUS_LABEL = {"liked": "👍 Liked", "passed": "👎 Passed"}
@@ -58,8 +74,8 @@ LIMIT %s
 # Strong vacancies at companies you haven't reviewed yet (status=candidate).
 # A separate digest section without buttons — just a line with a link, so a
 # deadline isn't missed while the company sits in the review queue.
-HOT_VACANCY_SCORE = 55
-DEADLINE_SOON_DAYS = 7
+HOT_VACANCY_SCORE = int(os.environ.get("DIGEST_HOT_SCORE", _DIGEST["hot_vacancy_score"]))
+DEADLINE_SOON_DAYS = int(os.environ.get("DIGEST_DEADLINE_SOON_DAYS", _DIGEST["deadline_soon_days"]))
 SELECT_CANDIDATE_HOT_SQL = """
 SELECT v.id, v.title, c.canonical_name AS org, v.llm_score,
        v.locations, v.deadline
@@ -524,8 +540,10 @@ def main():
     sub = parser.add_subparsers(dest="mode", required=True)
 
     p_send = sub.add_parser("send", help="send the digest")
-    p_send.add_argument("--limit", type=int, default=5)
-    p_send.add_argument("--min-score", type=int, default=40)
+    p_send.add_argument("--limit", type=int,
+                        default=int(os.environ.get("DIGEST_LIMIT", _DIGEST["default_limit"])))
+    p_send.add_argument("--min-score", type=int,
+                        default=int(os.environ.get("DIGEST_MIN_SCORE", _DIGEST["default_min_score"])))
     p_send.add_argument("--dry-run", action="store_true")
     p_send.set_defaults(func=cmd_send)
 

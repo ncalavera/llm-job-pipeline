@@ -30,7 +30,7 @@ from quality import (_COOKIE_BANNER_RE, COOKIE_MIN_REMAINDER,
                      COOKIE_SCORE_POLLUTION, _find_cookie_banner_end,
                      is_cookie_boilerplate, strip_cookie_boilerplate)
 from score_vacancies import _is_blacklisted
-from filter_vacancies import _is_usa_only as is_usa_only
+from filter_vacancies import _all_locations_excluded
 
 
 # ---------------------------------------------------------------------------
@@ -155,10 +155,10 @@ def main():
     conn = get_conn()
 
     # Find blind vacancies: no full_description or < 100 chars, has URL
-    # Pre-filter: skip blacklisted titles and USA-only locations
+    # Pre-filter: skip blacklisted titles and excluded-country locations
     blind = []
     skipped_blacklist = 0
-    skipped_usa = 0
+    skipped_excluded = 0
     skipped_no_url = 0
     for vid, vac in all_vacs.items():
         desc = (vac.get("full_description") or "").strip()
@@ -167,8 +167,8 @@ def main():
         if _is_blacklisted(vac.get("title", "")):
             skipped_blacklist += 1
             continue
-        if is_usa_only(vac):
-            skipped_usa += 1
+        if _all_locations_excluded(vac):
+            skipped_excluded += 1
             continue
         url = _get_vacancy_url(vac)
         if not url:
@@ -183,8 +183,8 @@ def main():
     if limit:
         blind = blind[:limit]
 
-    if skipped_blacklist or skipped_usa or skipped_no_url:
-        print(f"Pre-filtered: {skipped_blacklist} blacklisted, {skipped_usa} USA-only, {skipped_no_url} no URL")
+    if skipped_blacklist or skipped_excluded or skipped_no_url:
+        print(f"Pre-filtered: {skipped_blacklist} blacklisted, {skipped_excluded} excluded-country, {skipped_no_url} no URL")
     print(f"Found {len(blind)} blind vacancies with URLs to enrich")
     print(f"Estimated Firecrawl credits: ~{len(blind)} (1 per page)")
 

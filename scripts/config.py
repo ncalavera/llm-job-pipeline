@@ -1,16 +1,29 @@
-"""Shared configuration: paths, keyword lists, blacklists.
+"""Shared configuration — a thin façade over the settings loader.
+
+Every tunable list, threshold, keyword and board definition lives in
+``config/defaults.toml`` (neutral tool mechanics) and ``config/user_profile.md``
+(personal taste). This module reads them through ``scripts/settings.py`` and
+re-exports the same names it always has, so existing wide imports keep working
+unchanged — but the DATA lives in TOML, not here.
 
 For a public reusable pipeline:
 - Paths are derived from PROJECT_ROOT (the directory containing /scripts).
-- Blacklists below are EXAMPLES — extend them for your own search. The
-  comments in each block tell you what they catch.
-- Region keywords are generic Europe / US / Remote buckets used by the
-  dashboard. Adjust REGION_EUROPE / REGION_US for your target geography.
+- The only filtering that ships ON by default is UNIVERSAL_JUNK — postings that
+  are not a specific open role for ANYONE (speculative / evergreen pipeline
+  entries: talent pools, expressions of interest, general/open applications).
+  Nothing tied to discipline, seniority, career stage, format, geography or
+  sector ships on by default. Those are personal taste and activate only when
+  the user opts in via their profile (config/user_profile.md, loaded by
+  hard_filters.py). See EXCLUDE_COUNTRIES / EXCLUDE_TITLE_KEYWORDS.
+- Numeric thresholds (LLM_SCORE_THRESHOLD, tier cutoffs) are neutral defaults
+  from defaults.toml, overridable via environment variables.
 """
 
 import os
 import sys
 from pathlib import Path
+
+import settings
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -64,181 +77,95 @@ from company_registry import (  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# Relevance keywords (matched against job title, case-insensitive)
-# Tweak for your target functions.
+# Region keyword buckets — neutral DATA loaded from config/defaults.toml. Each
+# bucket (the TOML key, e.g. "europe"/"us"/"remote") maps to its keyword list.
+# No bucket is privileged: this is a plain lookup table, not a preference. The
+# real geography classification lives in geo.py (computed on the fly); the
+# stored `region` field is display-only legacy. No code branches on a specific
+# bucket name here — callers index REGION_KEYWORDS by a bucket value if needed.
 # ---------------------------------------------------------------------------
 
-RELEVANCE_HIGH = [
-    "chief of staff", "head of", "director", "vp ", "vp,", "vice president",
-    "general manager", "gm,", "gm ", " gm,", " gm ",
-]
-RELEVANCE_MEDIUM = [
-    "program manager", "product manager", "product owner",
-    "project manager", "community", "impact",
-    "operations manager", "strategy", "coordinator", "partnerships",
-    "philanthropy", "grants", "grantmaking", "social impact",
-    "sustainability", "engagement",
-]
-RELEVANCE_LOW = [
-    "analyst", "associate", "officer", "specialist", "advisor",
-    "consultant", "researcher", "team lead",
-]
+#: {bucket_name: [keywords]} — bucket names are data keys from TOML, not code.
+REGION_KEYWORDS: dict[str, list[str]] = {
+    bucket: list(keywords)
+    for bucket, keywords in settings.region_keywords().items()
+}
 
 # ---------------------------------------------------------------------------
-# Location keywords — adjust to your target region.
+# Personal HARD filters — geography + title-keyword exclusions.
+#
+# These are NOT hardcoded to anyone's taste. They come from the
+# `## HARD_FILTERS` section of YOUR user profile (config/user_profile.md) and
+# are EMPTY by default — so out of the box nothing is dropped on geography or
+# on a title's discipline. Edit them with /jobs-rules, or by hand in the
+# profile. See scripts/hard_filters.py for the loader.
 # ---------------------------------------------------------------------------
 
-LOCATION_KEYWORDS = [
-    # Europe-focused defaults
-    "berlin", "london", "lisbon", "europe", "european", "emea",
-    "uk", "germany", "portugal", "spain", "poland", "remote",
-    "amsterdam", "netherlands", "brussels", "belgium",
-    "oslo", "norway", "vienna", "austria", "zurich", "switzerland",
-    "rome", "italy", "paris", "france", "worldwide",
-]
+from hard_filters import load_hard_filters  # noqa: E402
 
-REGION_EUROPE = [
-    "london", "berlin", "lisbon", "uk", "germany", "portugal", "spain",
-    "poland", "europe", "european", "emea",
-    "amsterdam", "netherlands", "brussels", "belgium",
-    "oslo", "norway", "vienna", "austria", "zurich", "switzerland",
-    "rome", "italy", "geneva", "paris", "munich",
-]
-REGION_US = [
-    "san francisco", "new york", "nyc", "washington", "dc", "seattle",
-    "houston", "usa", "us ", " us", "ca ", "wa ", "ny ",
-]
-REGION_REMOTE = ["remote"]
+_HARD_FILTERS = load_hard_filters()
 
-# ---------------------------------------------------------------------------
-# Location blacklist — vacancies whose location matches any term are excluded
-# from the dashboard. Checked BEFORE LOCATION_KEYWORDS so "Remote, USA" doesn't
-# accidentally match "remote".
-# Replace this list with locations that don't fit YOUR job search.
-# ---------------------------------------------------------------------------
+#: Countries the user never wants. A vacancy is dropped only when EVERY one of
+#: its locations is in one of these countries. Empty → drop nothing on geo.
+EXCLUDE_COUNTRIES = list(_HARD_FILTERS["exclude_countries"])
 
-LOCATION_BLACKLIST = [
-    # Example: a Europe-based searcher excluding US/Canada-only postings.
-    # Generic country markers (matched as a substring of the location text):
-    ", usa", ", united states", ", us",
-    "remote, usa", "remote - usa", "remote (usa)",
-    "remote, united states", "remote - united states", "remote (united states)",
-    "united states, north america",
-    "canada,", "canada, north america",
-    # Add specific US cities here if you want to exclude them by name, e.g.:
-    # "san francisco", "new york", "nyc", "boston", "seattle",
-]
+#: Title keywords the user never wants (e.g. "engineer"). Matched on word
+#: boundaries against the job title. Empty → drop nothing on title discipline.
+EXCLUDE_TITLE_KEYWORDS = list(_HARD_FILTERS["exclude_title_keywords"])
 
-USA_EXCLUDE_LOCATIONS = LOCATION_BLACKLIST  # backward-compat alias
+# Backward-compat: a few call sites still import LOCATION_BLACKLIST as a list of
+# location-text substrings. It is now empty by default and only filled from the
+# profile's exclude_countries (so legacy substring matching keeps working for
+# users who opt in). The authoritative geo check is country-based via
+# EXCLUDE_COUNTRIES in filter_vacancies.py.
+LOCATION_BLACKLIST = list(EXCLUDE_COUNTRIES)
 
 # ---------------------------------------------------------------------------
 # LLM score threshold — vacancies below this are auto-archived.
 # Only unseen vacancies are archived; liked/passed (user decisions) are kept.
-# ---------------------------------------------------------------------------
-
-LLM_SCORE_THRESHOLD = 20
-
-# ---------------------------------------------------------------------------
-# Global blacklist — applied to ALL sources (companies + job boards).
-# Removes obviously irrelevant titles BEFORE saving to DB. Add patterns when
-# you see repeated low-score matches you keep archiving manually.
 #
-# Each entry is a substring; if it appears in `lower(title)` between word
-# boundaries, the vacancy is dropped. See GLOBAL_BLACKLIST_SUBSTR below for
-# stem matching (no word boundaries).
-#
-# This is an EXAMPLE list — keep what's relevant for you, drop the rest.
+# Default comes from defaults.toml ([thresholds] llm_score_threshold). The
+# LLM_SCORE_THRESHOLD env var overrides it (e.g. 0 disables auto-archive).
 # ---------------------------------------------------------------------------
 
-GLOBAL_BLACKLIST = [
-    # Interns and students
-    "intern", "internship", "apprentice", "apprenticeship",
-    "new grad", "trainee",
+LLM_SCORE_THRESHOLD = int(
+    os.environ.get("LLM_SCORE_THRESHOLD", settings.thresholds()["llm_score_threshold"])
+)
 
-    # Academic
-    "phd", "postdoc", "professor", "lecturer", "faculty",
-    "research scientist", "research associate",
+# ---------------------------------------------------------------------------
+# Universal junk — applied to ALL sources (companies + job boards).
+#
+# Catches postings that are not a specific open role for ANYONE: speculative /
+# evergreen pipeline entries (talent pools, expressions of interest,
+# general/open applications). Contains NO geography and NO discipline, seniority,
+# career stage, format or sector — those are personal taste and live in the
+# profile's EXCLUDE_TITLE_KEYWORDS. The data ships in defaults.toml ([junk]).
+#
+# `UNIVERSAL_JUNK` is matched on word boundaries against lower(title);
+# `UNIVERSAL_JUNK_SUBSTR` is matched as a substring (no word boundaries).
+# ---------------------------------------------------------------------------
 
-    # Volunteer
-    "volunteer", "volunteer position", "volunteer opportunity",
+_JUNK = settings.junk()
+UNIVERSAL_JUNK = list(_JUNK["words"])
+UNIVERSAL_JUNK_SUBSTR = list(_JUNK["substr"])
 
-    # Engineering / tech
-    "engineer", "developer", "software engineer",
-    "backend", "frontend", "devops", "sre",
-    "data scientist", "machine learning",
-    "software architect", "solutions architect",
-    "ml researcher", "technical lead", "technical project manager",
-    "it support", "qa engineer", "quality assurance",
+# ---------------------------------------------------------------------------
+# Combined title blacklist used by the pre-score filter (_is_blacklisted).
+#
+# = UNIVERSAL_JUNK + the user's personal EXCLUDE_TITLE_KEYWORDS (from the
+# profile, empty by default). Importers keep using GLOBAL_BLACKLIST /
+# GLOBAL_BLACKLIST_SUBSTR; the universal half is always present, the personal
+# half appears only when the user lists keywords. With an empty profile this
+# equals UNIVERSAL_JUNK, so no discipline/format is dropped for anyone.
+# ---------------------------------------------------------------------------
 
-    # Finance / legal
-    "accountant", "accounting", "auditor", "bookkeeper",
-    "lawyer", "legal counsel", "paralegal", "tax", "counsel",
-
-    # Medical / clinical
-    "nurse", "physician", "clinician", "therapist",
-    "pharmacist", "dentist", "midwife", "psychologist", "clinical",
-
-    # Sales / GTM
-    "account executive", "account manager", "account director",
-    "sales development", "sales representative", "sales manager",
-    "sales director", "sales", "bdr",
-    "business development representative",
-
-    # HR / recruiting
-    "recruiter", "recruiting", "recruitment", "talent acquisition",
-    "people operations", "payroll", "executive assistant",
-    "human resources", "people & culture", "people and culture",
-
-    # Marketing execution
-    "marketing operations", "marketing automation",
-    "email marketing", "lifecycle marketing", "demand generation",
-    "product marketing", "content marketing", "marketing manager",
-
-    # Support / admin
-    "helpdesk", "help desk", "receptionist", "customer support agent",
-    "data entry", "office services assistant",
-
-    # Trades / manual
-    "driver", "cleaner", "janitor", "guard", "storekeeper",
-    "warehouse", "mechanic", "electrician", "construction",
-
-    # Generic non-vacancy postings
-    "expression of interest", "talent pool", "general application",
-    "talent community",
-]
-
-# Partial-stem blacklist — matched via substring (no word boundaries).
-# Use for word stems (e.g. "nutritio" catches nutrition*, nutritionist).
-GLOBAL_BLACKLIST_SUBSTR = [
-    "data center", "datacenter",
-    "system admin", "systems admin",
-    "epidemiolog",
-
-    # Field-agnostic non-vacancy listings sometimes scraped from boards.
-    # The comma suffix avoids false positives (e.g. "funding," won't hit
-    # "crowdfunding manager"; "course," won't hit "concourse").
-    "list of ",     # aggregator meta-listings ("List of places to find…")
-    "funding,",     # grant / funding calls ("Funding, …")
-    "course,",      # course listings ("Course, Intro to …")
-    "summer school",# educational programmes, not jobs
-    "bootcamp",     # training programmes, not jobs
-    "training on",  # training events ("Training on M&E Methods …")
-    "fellowship",   # fellowships / scholarships, not staff roles
-
-    # Examples of field-specific stems to add for YOUR search (commented out —
-    # these excluded roles the original author didn't want; adjust to taste):
-    # "nutritio",      # nutritionist / nutrition-coordinator roles
-    # "stagiaire",     # French intern contracts
-    # "alternance",    # French apprenticeship contracts
-]
+GLOBAL_BLACKLIST = list(UNIVERSAL_JUNK) + list(EXCLUDE_TITLE_KEYWORDS)
+GLOBAL_BLACKLIST_SUBSTR = list(UNIVERSAL_JUNK_SUBSTR)
 
 # Description-level kill phrases — substring-matched against full_description.
 # Kept narrow (visa/citizenship boilerplate only) to avoid false positives.
-GLOBAL_BLACKLIST_DESC_SUBSTR = [
-    "visa sponsorship not available",
-    "must be a us citizen",
-    "must be us citizen",
-]
+# Ships in defaults.toml ([junk] desc_substr).
+GLOBAL_BLACKLIST_DESC_SUBSTR = list(_JUNK["desc_substr"])
 
 # ---------------------------------------------------------------------------
 # Job board aggregators — fetched on a freshness schedule (TTL days).
@@ -262,91 +189,17 @@ GLOBAL_BLACKLIST_DESC_SUBSTR = [
 #                    flags; ARBEITNOW_VISA_ONLY=1 keeps sponsorship-only jobs
 #   remotive       — remote-first jobs; REMOTIVE_CATEGORIES=product,marketing
 #                    narrows by their category slugs (one request per category)
-#   weworkremotely — remote jobs via category RSS; WWR_CATEGORIES overrides
-#                    the default product,management-and-finance
+#   weworkremotely — remote jobs via category RSS; defaults to ALL categories,
+#                    narrow with WWR_CATEGORIES (comma list of slugs)
 #   hn_whoishiring — monthly Hacker News "Who is hiring?" thread (startup /
 #                    engineering heavy; 30-day TTL matches the cadence)
 #
 # Leave JOB_BOARDS unset to fetch only your tracked companies.
 # ---------------------------------------------------------------------------
 
-_ALL_JOB_BOARDS = {
-    "80k_hours": {
-        "strategy": "algolia_api",
-        "name": "80,000 Hours",
-        "url": "https://jobs.80000hours.org",
-        # Public Algolia credentials embedded in their site search — replace
-        # with your own if 80k Hours changes them.
-        "algolia_app_id": "W6KM1UDIB3",
-        "algolia_api_key": "d1d7f2c8696e7b36837d5ed337c4a319",
-        "algolia_index": "jobs_prod_super_ranked",
-        "board_blacklist": [
-            "career advising", "research", "researcher", "scientist",
-            "engineer", "engineering", "developer", "software",
-            "machine learning", "ml ", "sre", "devops", "infrastructure",
-            "junior", "entry level", "apprentice", "trainee", "fellow,",
-            "student", "data analyst", "data scientist", "statistician",
-            "graphic design", "ux design", "ui design",
-        ],
-        "ttl_days": 3,
-        "tier": "B",
-        "free": True,
-    },
-    "reliefweb": {
-        "strategy": "reliefweb_api",
-        "name": "ReliefWeb",
-        "url": "https://reliefweb.int/jobs",
-        "board_blacklist": [
-            "wash", "shelter", "mine action", "demining", "camp management",
-        ],
-        "ttl_days": 3,
-        "tier": "B",
-        "free": True,
-    },
-    "arbeitnow": {
-        "strategy": "arbeitnow_api",
-        "name": "Arbeitnow",
-        "url": "https://www.arbeitnow.com",
-        # How many API pages to pull per run (100 jobs/page).
-        "pages": 3,
-        "board_blacklist": [],
-        "ttl_days": 3,
-        "tier": "B",
-        "free": True,
-    },
-    "remotive": {
-        "strategy": "remotive_api",
-        "name": "Remotive",
-        "url": "https://remotive.com",
-        # Remotive asks for very few API calls (max ~4/day): one request per
-        # run, or one per category when REMOTIVE_CATEGORIES is set.
-        "board_blacklist": [],
-        "ttl_days": 3,
-        "tier": "B",
-        "free": True,
-    },
-    "weworkremotely": {
-        "strategy": "wwr_rss",
-        "name": "We Work Remotely",
-        "url": "https://weworkremotely.com",
-        # Category slugs for the RSS feeds; override with WWR_CATEGORIES.
-        "default_categories": ["product", "management-and-finance"],
-        "board_blacklist": [],
-        "ttl_days": 3,
-        "tier": "B",
-        "free": True,
-    },
-    "hn_whoishiring": {
-        "strategy": "hn_whoishiring",
-        "name": "HN Who is hiring",
-        "url": "https://news.ycombinator.com/submitted?id=whoishiring",
-        "board_blacklist": [],
-        # The thread is monthly — a 30-day TTL stops daily refetches.
-        "ttl_days": 30,
-        "tier": "C",
-        "free": True,
-    },
-}
+# All defined boards, loaded from defaults.toml ([boards.*]). Each ships with an
+# empty board_blacklist; narrow per board via the documented env vars.
+_ALL_JOB_BOARDS = settings.boards()
 
 
 def _select_enabled_boards() -> dict:

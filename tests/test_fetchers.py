@@ -1,5 +1,5 @@
 """Tests for parse_markdown_jobs URL filtering (non-job URL exclusion)
-and _parse_json_jobs url_filter behavior (fix for #193).
+and _parse_json_jobs url_filter behavior.
 """
 import pytest
 from fetchers import parse_markdown_jobs, _is_non_job_url, _parse_json_jobs
@@ -13,9 +13,9 @@ class TestIsNonJobUrl:
     """Test the _is_non_job_url helper directly."""
 
     @pytest.mark.parametrize("url", [
-        "https://longview.org/about/#partners",
-        "https://longview.org/about/#advisory-board",
-        "https://longview.org/about/",
+        "https://acme.org/about/#partners",
+        "https://acme.org/about/#advisory-board",
+        "https://acme.org/about/",
         "https://example.org/about/our-story",
         "https://example.org/team/",
         "https://example.org/team/#leadership",
@@ -29,8 +29,8 @@ class TestIsNonJobUrl:
         assert _is_non_job_url(url) is True, f"Expected {url} to be rejected"
 
     @pytest.mark.parametrize("url", [
-        "https://longview.org/careers/research-analyst",
-        "https://longview.org/vacancies/program-manager",
+        "https://acme.org/careers/research-analyst",
+        "https://acme.org/vacancies/program-manager",
         "https://example.org/jobs/senior-engineer",
         "https://boards.greenhouse.io/company/jobs/123",
         "https://example.org/opportunities/head-of-community",
@@ -67,43 +67,43 @@ class TestParseMarkdownJobsUrlFiltering:
             )
         return f"[{title}]({url})\n\n{snippet_text}\n"
 
-    def test_excludes_longview_about_partners(self):
+    def test_excludes_about_partners(self):
         md = self._make_markdown_with_link(
-            "Partners", "https://longview.org/about/#partners"
+            "Partners", "https://acme.org/about/#partners"
         )
-        jobs = parse_markdown_jobs(md, "Longview Philanthropy")
+        jobs = parse_markdown_jobs(md, "Acme Foundation")
         assert len(jobs) == 0
 
-    def test_excludes_longview_about_advisory_board(self):
+    def test_excludes_about_advisory_board(self):
         md = self._make_markdown_with_link(
-            "Advisory Board", "https://longview.org/about/#advisory-board"
+            "Advisory Board", "https://acme.org/about/#advisory-board"
         )
-        jobs = parse_markdown_jobs(md, "Longview Philanthropy")
+        jobs = parse_markdown_jobs(md, "Acme Foundation")
         assert len(jobs) == 0
 
     def test_keeps_legitimate_job_url(self):
         md = self._make_markdown_with_link(
             "Research Analyst",
-            "https://longview.org/careers/research-analyst",
+            "https://acme.org/careers/research-analyst",
         )
-        jobs = parse_markdown_jobs(md, "Longview Philanthropy")
+        jobs = parse_markdown_jobs(md, "Acme Foundation")
         assert len(jobs) == 1
         assert jobs[0]["title"] == "Research Analyst"
 
     def test_excludes_about_page_in_mixed_markdown(self):
         """When markdown has both real jobs and /about/ links, only jobs survive."""
         md = (
-            "[Research Analyst](https://longview.org/careers/research-analyst)\n\n"
+            "[Research Analyst](https://acme.org/careers/research-analyst)\n\n"
             "Join our team to conduct impactful research on global catastrophic risks "
             "and help shape policy recommendations for decision-makers worldwide.\n\n"
-            "[Partners](https://longview.org/about/#partners)\n\n"
+            "[Partners](https://acme.org/about/#partners)\n\n"
             "We work with leading organizations in the effective altruism community "
             "and global catastrophic risk reduction to maximize our collective impact.\n\n"
-            "[Advisory Board](https://longview.org/about/#advisory-board)\n\n"
+            "[Advisory Board](https://acme.org/about/#advisory-board)\n\n"
             "Our advisory board includes distinguished researchers and policy experts "
             "who guide our strategic direction and ensure research quality standards.\n"
         )
-        jobs = parse_markdown_jobs(md, "Longview Philanthropy")
+        jobs = parse_markdown_jobs(md, "Acme Foundation")
         titles = [j["title"] for j in jobs]
         assert "Research Analyst" in titles
         assert "Partners" not in titles
@@ -121,12 +121,12 @@ class TestParseMarkdownJobsUrlFiltering:
         md = (
             "## Program Director\n\n"
             "Lead our grantmaking programs and manage a portfolio of grants.\n\n"
-            "[Learn more](https://longview.org/about/#partners)\n\n"
+            "[Learn more](https://acme.org/about/#partners)\n\n"
             "## Research Analyst\n\n"
             "Conduct research on existential risks and help shape our strategy.\n\n"
-            "[Apply here](https://longview.org/careers/research-analyst)\n"
+            "[Apply here](https://acme.org/careers/research-analyst)\n"
         )
-        jobs = parse_markdown_jobs(md, "Longview Philanthropy")
+        jobs = parse_markdown_jobs(md, "Acme Foundation")
         # Program Director's only link goes to /about/ — should have no URL
         # Research Analyst links to /careers/ — should have a URL
         research_jobs = [j for j in jobs if j["title"] == "Research Analyst"]
@@ -146,31 +146,31 @@ class TestParseJsonJobsUrlFiltering:
 
     def test_excludes_about_page_url(self):
         data = self._make_json_data([
-            {"title": "Partners", "url": "https://longview.org/about/#partners",
+            {"title": "Partners", "url": "https://acme.org/about/#partners",
              "location": "", "department": "", "snippet": ""},
         ])
-        jobs = _parse_json_jobs(data, "Longview Philanthropy", "https://longview.org")
+        jobs = _parse_json_jobs(data, "Acme Foundation", "https://acme.org")
         assert len(jobs) == 0
 
     def test_keeps_legitimate_job_url(self):
         data = self._make_json_data([
-            {"title": "Research Analyst", "url": "https://longview.org/careers/analyst",
+            {"title": "Research Analyst", "url": "https://acme.org/careers/analyst",
              "location": "London", "department": "Research", "snippet": "Conduct research."},
         ])
-        jobs = _parse_json_jobs(data, "Longview Philanthropy", "https://longview.org")
+        jobs = _parse_json_jobs(data, "Acme Foundation", "https://acme.org")
         assert len(jobs) == 1
         assert jobs[0]["title"] == "Research Analyst"
 
     def test_filters_mixed_json_jobs(self):
         data = self._make_json_data([
-            {"title": "Research Analyst", "url": "https://longview.org/careers/analyst",
+            {"title": "Research Analyst", "url": "https://acme.org/careers/analyst",
              "location": "", "department": "", "snippet": ""},
-            {"title": "Advisory Board", "url": "https://longview.org/about/#advisory-board",
+            {"title": "Advisory Board", "url": "https://acme.org/about/#advisory-board",
              "location": "", "department": "", "snippet": ""},
-            {"title": "Head of Operations", "url": "https://longview.org/team/ops",
+            {"title": "Head of Operations", "url": "https://acme.org/team/ops",
              "location": "", "department": "", "snippet": ""},
         ])
-        jobs = _parse_json_jobs(data, "Longview Philanthropy", "https://longview.org")
+        jobs = _parse_json_jobs(data, "Acme Foundation", "https://acme.org")
         titles = [j["title"] for j in jobs]
         assert "Research Analyst" in titles
         assert "Advisory Board" not in titles
@@ -178,7 +178,7 @@ class TestParseJsonJobsUrlFiltering:
 
 
 # ---------------------------------------------------------------------------
-# GovAI url_filter tests — fix for #193
+# GovAI url_filter tests
 # External links (stripe.com, lever.co) must be excluded when url_filter
 # is set to governance.ai/post/ pattern
 # ---------------------------------------------------------------------------
@@ -225,7 +225,7 @@ Join a fast-growing startup to build infrastructure for AI safety research and d
 
 
 class TestGovAIMarkdownUrlFilter:
-    """Tests for url_filter in parse_markdown_jobs (inline link pattern) — #193."""
+    """Tests for url_filter in parse_markdown_jobs (inline link pattern)."""
 
     def test_GV01_no_filter_captures_all_links(self):
         """Without url_filter, all links with job-like titles are captured."""
@@ -265,7 +265,7 @@ class TestGovAIMarkdownUrlFilter:
 
 
 class TestGovAIHeadingUrlFilter:
-    """Tests for url_filter in heading+lookahead pattern (GovAI/Webflow) — #193."""
+    """Tests for url_filter in heading+lookahead pattern (GovAI/Webflow)."""
 
     def test_GH01_heading_pattern_with_filter(self):
         """With filter, heading pattern only captures governance.ai/post/ links."""
@@ -290,9 +290,9 @@ class TestGovAIHeadingUrlFilter:
 
 
 class TestParseJsonJobsGovAIUrlFilter:
-    """Tests for url_filter in _parse_json_jobs (JSON extraction path) — #193.
+    """Tests for url_filter in _parse_json_jobs (JSON extraction path).
 
-    This was the root cause: _parse_json_jobs had no url_filter parameter,
+    Root cause being guarded: _parse_json_jobs had no url_filter parameter,
     so the JSON extraction path always accepted external URLs.
     """
 
@@ -410,14 +410,14 @@ class TestParseJsonJobsGovAIUrlFilter:
 
 
 # ---------------------------------------------------------------------------
-# parse_markdown_jobs — department heading rejection (#231 Amnesty parser bug)
+# parse_markdown_jobs — department heading rejection
 # ---------------------------------------------------------------------------
 
 
 class TestParseMarkdownJobsRejectsDeptHeadings:
-    """#231 — Amnesty fetcher grabbed dept-heading aggregations like
+    """A careers homepage fetcher grabbed dept-heading aggregations like
     'Senior Director's Office, Chief Financial Officer (1)' as pseudo-vacancies.
-    Two parser-level guards: trailing-count suffix in title, and Amnesty
+    Two parser-level guards: trailing-count suffix in title, and a
     careers-homepage boilerplate signature in snippet.
     """
 
@@ -429,48 +429,48 @@ class TestParseMarkdownJobsRejectsDeptHeadings:
     def test_rejects_dept_heading_single_count_suffix(self):
         md = (
             "[Senior Director's Office, Chief Financial Officer (1)]"
-            "(https://careers.amnesty.org/vacancy/find/results/)\n\n"
+            "(https://careers.example.org/vacancy/find/results/)\n\n"
             f"{self.LONG_SNIPPET}\n"
         )
-        jobs = parse_markdown_jobs(md, "Amnesty International")
+        jobs = parse_markdown_jobs(md, "Example Org")
         assert len(jobs) == 0
 
     def test_rejects_dept_heading_double_digit_count_suffix(self):
         md = (
-            "[Programmes (12)](https://careers.amnesty.org/vacancy/find/results/)\n\n"
+            "[Programmes (12)](https://careers.example.org/vacancy/find/results/)\n\n"
             f"{self.LONG_SNIPPET}\n"
         )
-        jobs = parse_markdown_jobs(md, "Amnesty International")
+        jobs = parse_markdown_jobs(md, "Example Org")
         assert len(jobs) == 0
 
     def test_keeps_real_role_without_count_suffix(self):
         md = (
             "[Programme Coordinator]"
-            "(https://careers.amnesty.org/vacancy/find/desc/12345/programme-coordinator)\n\n"
+            "(https://careers.example.org/vacancy/find/desc/12345/programme-coordinator)\n\n"
             "We seek a Programme Coordinator with experience in human rights "
             "research and advocacy across our regional offices in Europe."
         )
-        jobs = parse_markdown_jobs(md, "Amnesty International")
+        jobs = parse_markdown_jobs(md, "Example Org")
         assert len(jobs) == 1
         assert jobs[0]["title"] == "Programme Coordinator"
 
-    def test_rejects_amnesty_homepage_boilerplate_in_snippet(self):
+    def test_rejects_careers_homepage_boilerplate_in_snippet(self):
         md = (
             "[Programme Coordinator]"
-            "(https://careers.amnesty.org/vacancy/find/desc/12345/programme-coordinator)\n\n"
+            "(https://careers.example.org/vacancy/find/desc/12345/programme-coordinator)\n\n"
             "FREEDOM, JUSTICE, EQUALITY LET'S GET TO WORK Search login register "
             "Career FAQs apply now navigation links and login form placeholders.\n"
         )
-        jobs = parse_markdown_jobs(md, "Amnesty International")
+        jobs = parse_markdown_jobs(md, "Example Org")
         assert len(jobs) == 0
 
     def test_count_suffix_check_is_case_insensitive_and_stripped(self):
         """Whitespace before the (N) suffix should still trigger rejection."""
         md = (
-            "[Communications  (3)](https://careers.amnesty.org/vacancy/find/results/)\n\n"
+            "[Communications  (3)](https://careers.example.org/vacancy/find/results/)\n\n"
             f"{self.LONG_SNIPPET}\n"
         )
-        jobs = parse_markdown_jobs(md, "Amnesty International")
+        jobs = parse_markdown_jobs(md, "Example Org")
         assert len(jobs) == 0
 
     def test_keeps_role_with_year_in_parens_not_count(self):

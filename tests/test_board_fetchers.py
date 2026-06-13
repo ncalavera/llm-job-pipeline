@@ -70,10 +70,10 @@ ARBEITNOW_PAGE = {
             "created_at": 1780000000,
         },
         {
-            "slug": "software-engineer-2",
+            "slug": "talent-pool-2",
             "company_name": "Other GmbH",
-            "title": "Software Engineer",  # GLOBAL_BLACKLIST: "engineer"
-            "description": "<p>Write code all day.</p>",
+            "title": "Talent Pool — General Application",  # UNIVERSAL_JUNK: no concrete role
+            "description": "<p>Register your interest for future roles.</p>",
             "remote": False,
             "url": "https://example.test/2",
             "tags": [],
@@ -119,7 +119,8 @@ def test_arbeitnow_parses_and_blacklists(monkeypatch):
     titles = {j["title"] for j in jobs}
     assert "Head of Product" in titles
     assert "Operations Manager" in titles
-    assert "Software Engineer" not in titles  # blacklisted
+    # Only the true non-job ("talent pool" → no concrete role) is dropped.
+    assert "Talent Pool — General Application" not in titles
 
     head = next(j for j in jobs if j["title"] == "Head of Product")
     assert head["org_override"] == "Acme GmbH"
@@ -215,7 +216,8 @@ def test_remotive_one_request_per_category_and_dedup(monkeypatch):
 
 def test_remotive_blacklist_applied(monkeypatch):
     monkeypatch.delenv("REMOTIVE_CATEGORIES", raising=False)
-    junk = dict(REMOTIVE_JOB, id=2, title="Sales Manager")  # blacklisted
+    # Universal junk = a non-job pipeline entry, NOT a real role of any kind.
+    junk = dict(REMOTIVE_JOB, id=2, title="Expression of Interest")
     fake = FakeRequests(lambda url, p: FakeResponse(
         json_data=_remotive_payload([REMOTIVE_JOB, junk])))
     monkeypatch.setattr(fetchers, "requests", fake)
@@ -225,6 +227,30 @@ def test_remotive_blacklist_applied(monkeypatch):
         "url": "https://remotive.com", "board_blacklist": [],
     })
     assert [j["title"] for j in jobs] == ["Head of Product"]
+
+
+def test_remotive_real_roles_survive_neutral_gate(monkeypatch):
+    """Neutral default keeps every real role — discipline/format/career-stage
+    are not dropped. A fellowship, an internship, a volunteer coordinator all
+    survive (a student / career-changer wants to see them)."""
+    monkeypatch.delenv("REMOTIVE_CATEGORIES", raising=False)
+    survivors = [
+        dict(REMOTIVE_JOB, id=10, title="Research Fellowship"),
+        dict(REMOTIVE_JOB, id=11, title="Summer Internship"),
+        dict(REMOTIVE_JOB, id=12, title="Volunteer Coordinator"),
+        dict(REMOTIVE_JOB, id=13, title="Data Science Bootcamp Instructor"),
+        dict(REMOTIVE_JOB, id=14, title="Software Engineer"),
+    ]
+    fake = FakeRequests(lambda url, p: FakeResponse(json_data=_remotive_payload(survivors)))
+    monkeypatch.setattr(fetchers, "requests", fake)
+    jobs = fetch_remotive_board({
+        "strategy": "remotive_api", "name": "Remotive",
+        "url": "https://remotive.com", "board_blacklist": [],
+    })
+    assert {j["title"] for j in jobs} == {
+        "Research Fellowship", "Summer Internship", "Volunteer Coordinator",
+        "Data Science Bootcamp Instructor", "Software Engineer",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -247,12 +273,12 @@ WWR_RSS = """<?xml version="1.0" encoding="UTF-8"?>
       <link>https://weworkremotely.com/remote-jobs/nearcut-product-manager</link>
     </item>
     <item>
-      <title>SalesCorp: Sales Manager</title>
+      <title>HelpCorp: Talent Pool</title>
       <region>Europe Only</region>
-      <category>Sales</category>
-      <description>&lt;p&gt;Close deals.&lt;/p&gt;</description>
-      <link>https://weworkremotely.com/remote-jobs/salescorp-sales-manager</link>
-      <guid>https://weworkremotely.com/remote-jobs/salescorp-sales-manager</guid>
+      <category>Other</category>
+      <description>&lt;p&gt;Register your interest for future roles.&lt;/p&gt;</description>
+      <link>https://weworkremotely.com/remote-jobs/helpcorp-talent-pool</link>
+      <guid>https://weworkremotely.com/remote-jobs/helpcorp-talent-pool</guid>
     </item>
   </channel>
 </rss>
@@ -270,7 +296,8 @@ def test_wwr_parses_company_role_and_blacklists(monkeypatch):
         "default_categories": ["product"],
         "board_blacklist": [],
     })
-    # Sales Manager is GLOBAL_BLACKLISTed; only the PM survives.
+    # "Talent Pool" is a non-job pipeline entry (universal junk); only the PM
+    # survives. A real role of any discipline/format would NOT be dropped here.
     assert len(jobs) == 1
     j = jobs[0]
     assert j["org_override"] == "Nearcut"            # "Company: Role" split
@@ -328,7 +355,7 @@ HN_ITEM = {
         },
         {
             "id": 1003,
-            "text": "EngineerCo | Software Engineer | Remote<p>Write Rust.</p>",
+            "text": "HelpCo | Talent Pool | Remote<p>Register interest for future roles.</p>",
             "children": [],
         },
         {"id": 1004, "text": None, "children": []},  # deleted comment
@@ -362,7 +389,7 @@ def test_hn_parses_top_level_comments_only(monkeypatch):
     orgs = {j["org_override"] for j in jobs}
     assert "Acme Robotics" in orgs           # pipe-separated
     assert "BetaCorp" in orgs                # em-dash-separated
-    assert "EngineerCo" not in orgs          # blacklisted title
+    assert "HelpCo" not in orgs              # universal-junk title (talent pool)
     # Nested reply (id 9999) must NOT appear — top-level only.
     assert all(j["external_id"] != "9999" for j in jobs)
 
@@ -506,11 +533,13 @@ def test_board_merge_rejects_quality_gate_junk(sqlite_dal):
     assert "404 not found" not in (
         by_title["Head of Community"].get("full_description") or "")
 
-    # The good one is intact, and board orgs land as candidate companies.
+    # The good one is intact. In simple mode (SQLite) a board-discovered org
+    # lands ACTIVE — there is no dashboard review step, so the candidate gate
+    # would otherwise blackhole every board company.
     assert "Head of Product" in by_title
     cur = db.get_conn().cursor()
     cur.execute("SELECT status FROM company WHERE canonical_name = %s", ("Acme GmbH",))
-    assert cur.fetchone()[0] == "candidate"
+    assert cur.fetchone()[0] == "active"
     cur.close()
 
 

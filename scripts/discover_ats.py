@@ -47,19 +47,6 @@ CAREERS_KEYWORDS = {
     "work-with-us", "apply", "hiring", "opportunities",
 }
 
-# Companies that should stay manual_check regardless of discovery results
-MANUAL_ALLOWLIST = {
-    "United Nations Children's Fund (UNICEF)",
-    "United Nations Development Programme (UNDP)",
-    "United Nations Environment Programme",
-    "United Nations Department of Economic and Social Affairs (UNDESA)",
-    "United Nations Office for Disaster Risk Reduction (UNDRR)",
-    "European Union, AI Office",
-    "European Union, European Commission",
-    "Apple CSR",
-    "Microsoft Philanthropies",
-}
-
 # ATS strategies that are considered "working" and should never be downgraded
 WORKING_ATS_STRATEGIES = {
     "greenhouse", "lever", "ashby", "workable", "recruitee",
@@ -193,15 +180,9 @@ def _load_enrichment_tiers() -> dict[str, str]:
             continue
         mission = data.get("mission_fit", {})
         alignment = mission.get("alignment_score")
-        mpa = mission.get("mpa_narrative_boost")
-        if alignment is None and mpa is None:
+        if alignment is None:
             continue
-        if alignment is not None and mpa is not None:
-            composite = 0.70 * alignment + 0.30 * mpa
-        elif alignment is not None:
-            composite = alignment * 0.85
-        else:
-            composite = mpa * 0.70
+        composite = alignment
         if composite >= 65:
             tiers[name] = "S"
         elif composite >= 50:
@@ -367,9 +348,6 @@ def _apply_results(scan_results: list[dict], dry_run: bool = False) -> None:
 
         # --- Safety guardrail B: manual_check → firecrawl_scrape rules ---
         if current_strategy == "manual_check":
-            if company in MANUAL_ALLOWLIST:
-                print(f"  SKIP {company} — in MANUAL_ALLOWLIST")
-                continue
             # manual_check → firecrawl_scrape only if no ATS detected + valid careers URL
             # But if we found an ATS, we upgrade to that ATS (not firecrawl_scrape)
             # This guardrail applies only when trying to go manual_check → firecrawl_scrape

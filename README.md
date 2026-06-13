@@ -153,6 +153,9 @@ via the Supabase SQL Editor.
 
 ### 6. Run the pipeline
 
+Make sure you have filled in `config/user_profile.md` (step 4) before scoring
+— scoring against the example placeholder produces meaningless results.
+
 ```bash
 python3 scripts/fetch_vacancies.py                  # fetch (TTL-aware)
 python3 scripts/filter_vacancies.py                 # junk filter + dedup

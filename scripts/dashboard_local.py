@@ -21,7 +21,7 @@ import os
 import sys
 import threading
 import webbrowser
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -41,8 +41,12 @@ VALID_ACTIONS = {"approve", "reject"}
 
 _COMPANY_REVIEW_MAP = {"active": "approved", "candidate": "pending", "inactive": "rejected"}
 
-# One process-wide lock — the DAL connection is a singleton and SQLite writes
-# must be serialized across the threaded server.
+# The server is single-threaded (HTTPServer, not ThreadingHTTPServer): the DAL
+# connection is a singleton and the SQLite backend opens its connection with
+# check_same_thread=True, so a connection created on one thread cannot be used
+# on another. Serving requests sequentially keeps every DB call on one thread
+# and is plenty for a localhost single-user dashboard. The lock is kept as a
+# defensive no-op guard around DB access (harmless, uncontended).
 _db_lock = threading.Lock()
 
 
@@ -246,7 +250,7 @@ def main():
         os.environ.get("SUPABASE_DB_URL") or os.environ.get("SUPABASE_DIRECT_URL")
     ) else "Supabase"
 
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    server = HTTPServer((args.host, args.port), Handler)
     url = f"http://{args.host}:{args.port}/"
     print(f"  Dashboard backend: {backend}")
     print(f"  Serving {PUBLIC_DIR}")

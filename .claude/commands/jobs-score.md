@@ -29,7 +29,7 @@ The scoring prompt evaluates **role fit only** — skills, seniority, domain, re
 
 6. Run (phase 1 — load):
    ```bash
-   source ~/.zshrc 2>/dev/null && python3 scripts/score_vacancies.py --local --limit N
+   python3 scripts/score_vacancies.py --local --limit N
    ```
    The script prints a JSON array of vacancies to stdout.
 
@@ -58,13 +58,11 @@ The scoring prompt evaluates **role fit only** — skills, seniority, domain, re
    nested `score_data`. (`payload_kind` defaults to `vacancy`; the older shape
    with a pre-built `score_data` still works if you already have it.)
 
-9. Save by writing the array to a temp file and feeding it on **stdin** — never
-   pipe the JSON into `source` (that sends the JSON to `source`, not the script):
+9. Save by writing the array to a temp file and feeding it on **stdin**:
    ```bash
    cat > /tmp/scores.json <<'EOF'
    <JSON array from step 8>
    EOF
-   source ~/.zshrc 2>/dev/null
    python3 scripts/score_vacancies.py --save < /tmp/scores.json
    ```
    Add `--archive` to auto-archive unseen vacancies scoring below the threshold
@@ -90,26 +88,21 @@ After scoring, vacancies with `llm_score < LLM_SCORE_THRESHOLD` (default 20) and
   saving (`archive_vacancies(force=True)`). Confirm with the user before using
   it until thresholds are recalibrated for the pure-fit scale.
 
-## Two scoring modes
+## Scoring mode
 
-| Mode | Flag | Cost | Notes |
-|------|------|------|-------|
-| **Local** (Opus subagents) | `--local` (default) | $0 (included in subscription) | Primary mode |
-| **OpenClaw** (SSH) | `--openclaw` | Server cost | Requires SSH access to configured host |
+Scoring runs entirely through the agent (Claude Code or another coding agent) — the pipeline calls no external LLM API from Python. The flag is `--local`, which is also the default:
+
+```bash
+python3 scripts/score_vacancies.py --local --limit N
+```
+
+This is the only supported scoring mode: the script emits the vacancies to score, your coding agent scores each one, and `--save` writes the results back.
 
 ## Critical rules
 
 - **1 vacancy = 1 subagent.** Never send 2–3 vacancies in one prompt — this causes systematic over-scoring of +20–50 points.
-- **Use `member_ids`** from `--local` output when building the save payload, not the top-level `id`. The `member_ids` array contains the real Supabase UUIDs.
+- **Use `member_ids`** from `--local` output when building the save payload, not the top-level `id`. The `member_ids` array contains the real database UUIDs.
 - **`flush=True`** — scripts already use `print(..., flush=True)` for progress. If progress is not visible in Claude Code, check that the script is not invoked via `subprocess` with a captured pipe.
-
-## OpenClaw mode
-
-```bash
-source ~/.zshrc 2>/dev/null && python3 scripts/score_vacancies.py --openclaw --limit {BATCH_SIZE}
-```
-
-Uses SSH to a remote host configured via `OPENCLAW_SSH_*` environment variables.
 
 ## If scoring breaks
 

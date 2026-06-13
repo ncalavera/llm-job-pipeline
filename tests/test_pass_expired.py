@@ -1,8 +1,8 @@
 """Tests for pass_expired_vacancies — auto-pass timestamp invariant.
 
-Regression guard for issue #233 (comment): pass_expired_vacancies() set
-status='passed' WITHOUT updating status_updated_at, making it impossible
-to distinguish system auto-pass from user-driven status changes.
+Ensures pass_expired_vacancies() sets status='passed' AND updates
+status_updated_at, making it possible to distinguish system auto-pass
+from user-driven status changes.
 
 These tests mock psycopg2 — no live DB required.
 """

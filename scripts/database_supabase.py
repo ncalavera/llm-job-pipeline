@@ -1,7 +1,7 @@
-"""Supabase-backed data access layer for job-search-2026.
+"""Supabase-backed data access layer.
 
-Replaces database.py (JSON/Redis) with direct Postgres via psycopg2.
-Singleton connection, autocommit OFF — callers commit at logical checkpoints.
+Direct Postgres via psycopg2. Singleton connection, autocommit OFF — callers
+commit at logical checkpoints.
 """
 
 import hashlib
@@ -17,15 +17,15 @@ from company_registry import (
     _ALL_KNOWN_NAMES as _ALL_CSV_NAMES,
     resolve_canonical_name,
 )
+import settings
 from config import (
     GLOBAL_BLACKLIST, GLOBAL_BLACKLIST_SUBSTR, GLOBAL_BLACKLIST_DESC_SUBSTR,
     LLM_SCORE_THRESHOLD,
-    REGION_EUROPE, REGION_REMOTE, REGION_US,
     VACANCIES_DIR,
 )
 # Json / RealDictCursor come from db_backend so they work under both the
 # Supabase (psycopg2) and the local SQLite backend without importing psycopg2.
-from db_backend import Json, RealDictCursor
+from db_backend import IS_SQLITE, Json, RealDictCursor
 from db_conn import get_conn, close_conn
 from quality import clean_description
 
@@ -48,50 +48,33 @@ def is_fetch_error(status: str | None) -> bool:
 # Pure functions (no DB)
 # ---------------------------------------------------------------------------
 
-# City→country mapping for location parsing
-_CITY_COUNTRY = {
-    "berlin": "Germany", "munich": "Germany", "hamburg": "Germany",
-    "london": "United Kingdom", "manchester": "United Kingdom",
-    "paris": "France", "amsterdam": "Netherlands",
-    "barcelona": "Spain", "madrid": "Spain",
-    "lisbon": "Portugal", "porto": "Portugal",
-    "rome": "Italy", "milan": "Italy",
-    "stockholm": "Sweden", "copenhagen": "Denmark",
-    "oslo": "Norway", "helsinki": "Finland",
-    "dublin": "Ireland", "vienna": "Austria",
-    "zurich": "Switzerland", "geneva": "Switzerland",
-    "brussels": "Belgium", "warsaw": "Poland",
-    "prague": "Czech Republic", "budapest": "Hungary",
-    "tallinn": "Estonia", "riga": "Latvia", "vilnius": "Lithuania",
-    "new york": "United States", "san francisco": "United States",
-    "seattle": "United States", "austin": "United States",
-    "boston": "United States", "chicago": "United States",
-    "toronto": "Canada", "vancouver": "Canada",
-    "sydney": "Australia", "melbourne": "Australia",
-    "singapore": "Singapore", "tokyo": "Japan",
-    "nairobi": "Kenya", "cape town": "South Africa",
-    "tel aviv": "Israel", "dubai": "UAE",
-}
+# Location-parsing DATA from config/defaults.toml ([geo.city_country],
+# [geo.work_mode]). The parse LOGIC lives here; only the maps live in TOML.
+_CITY_COUNTRY = settings.geo_city_country()
 
-_REMOTE_KW = {"remote", "anywhere", "worldwide", "global", "distributed",
-              "work from home", "wfh", "fully remote", "home-based"}
-_HYBRID_KW = {"hybrid", "flexible"}
+_WORK_MODE = settings.geo_work_mode()
+_REMOTE_KW = _WORK_MODE["remote"]
+_HYBRID_KW = _WORK_MODE["hybrid"]
 
 
 def classify_region(location: str) -> str | None:
-    """Classify location string into region."""
-    loc = location.lower()
-    if any(kw in loc for kw in REGION_EUROPE):
+    """Classify a location string into a coarse region label.
+
+    Structural classification via geo.py's country/city → bucket mapping — no
+    owner keyword lists, no region treated as "preferred". The stored `region`
+    is display-only legacy; geo_bucket() is the authoritative on-the-fly geo.
+
+    Returns "europe" | "americas" | None, matching the legacy field contract
+    (callers stamp vacancy.region).
+    """
+    if not location:
+        return None
+    from geo import bucket_for_country
+    bucket = bucket_for_country(location)
+    if bucket in ("uk", "germany", "europe"):
         return "europe"
-    if any(kw in loc for kw in REGION_US):
+    if bucket == "us":
         return "americas"
-    for city, country in _CITY_COUNTRY.items():
-        if city in loc:
-            c = country.lower()
-            if any(kw in c for kw in REGION_EUROPE):
-                return "europe"
-            if any(kw in c for kw in REGION_US):
-                return "americas"
     return None
 
 
@@ -139,8 +122,8 @@ def _is_blacklisted(title: str, description: str = "") -> bool:
     if _BLACKLIST_PATTERN.search(t):
         return True
     # Description-level kill phrases — narrow, conservative list (visa/citizenship
-    # only). See feedback memory: full GLOBAL_BLACKLIST on descriptions causes FPs
-    # ("developer" at JetBrains, "ai safety" at Anthropic). Issue #232.
+    # only). A full title blacklist applied to descriptions causes false
+    # positives (a discipline word in a JD body that is not the role itself).
     if description:
         d = description.lower()
         if any(kw in d for kw in GLOBAL_BLACKLIST_DESC_SUBSTR):
@@ -301,8 +284,22 @@ def resolve_company_id(org_name: str):
     return None
 
 
+#: In simple mode (SQLite) the board/ATS auto-discovery path creates companies
+#: ACTIVE, not 'candidate' — there is no dashboard review step to approve them,
+#: so the candidate gate would blackhole every board company (filter/score/
+#: dashboard only count active ones → "Ready to score: 0", empty dashboard). Full
+#: mode (Supabase) keeps the candidate→review gate. See merge_vacancies / the
+#: board ingestion path.
+AUTO_DISCOVERED_STATUS = "active" if IS_SQLITE else "candidate"
+
+
 def ensure_company(org_name: str, status: str = "candidate"):
-    """Find or create a company. Returns UUID."""
+    """Find or create a company. Returns UUID.
+
+    ``status`` is honoured verbatim — callers that want a candidate get one. The
+    board/ATS auto-discovery path passes ``AUTO_DISCOVERED_STATUS`` so it lands
+    active in simple mode (see merge_vacancies).
+    """
     cid = resolve_company_id(org_name)
     if cid is not None:
         return cid
@@ -328,7 +325,6 @@ def ensure_company(org_name: str, status: str = "candidate"):
 
 # Vacancy columns loaded when light=True. Intentionally excludes full_description
 # (~8 KB p90) to cut Supabase egress for callers that only need metadata.
-# See docs/plans/2026-04-22-001-refactor-dal-egress-narrowing-plan.md (issue #225).
 _VACANCY_LIGHT_COLUMNS = (
     "id", "created_at", "updated_at",
     "dedup_hash", "company_id", "title", "snippet",
@@ -439,7 +435,7 @@ def _row_to_vacancy(row) -> dict:
 
 # Default cap on candidate-company vacancies pulled into a single scoring run —
 # keeps subagent/LLM budget bounded while still rescuing strong roles from
-# companies the owner hasn't reviewed yet.
+# companies that have not been reviewed yet.
 CANDIDATE_SCORE_LIMIT = 15
 # A candidate company's vacancy is worth scoring only if the company shows
 # some promise: alignment ≥ this floor, or not yet enriched (NULL).
@@ -453,7 +449,7 @@ def load_candidate_vacancies_for_scoring(
     """Load unscored vacancies from *candidate* companies that look promising.
 
     Rescues the "strong vacancy at a forgotten company" case: a candidate
-    company the owner never reviewed would otherwise be invisible to scoring
+    company nobody reviewed would otherwise be invisible to scoring
     (load_vacancies filters to active companies). We let in candidate companies
     whose alignment_score is >= CANDIDATE_ALIGNMENT_FLOOR or NULL (not yet
     enriched), newest first, capped at `limit` to bound LLM spend.
@@ -627,7 +623,7 @@ def merge_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     org_name = resolve_canonical_name(org_name)
     company_id = resolve_company_id(org_name)
     if company_id is None:
-        company_id = ensure_company(org_name, status="candidate")
+        company_id = ensure_company(org_name, status=AUTO_DISCOVERED_STATUS)
     today = date.today().isoformat()
     new_count = 0
     conn = get_conn()
@@ -805,7 +801,7 @@ def merge_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
         company_id = resolve_company_id(org)
         if company_id is None:
             if org not in _ALL_CSV_NAMES and not org.startswith("[via "):
-                company_id = ensure_company(org, status="candidate")
+                company_id = ensure_company(org, status=AUTO_DISCOVERED_STATUS)
             else:
                 company_id = ensure_company(org, status="active")
 
@@ -911,8 +907,17 @@ def merge_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
 # Company fitness (for filter gate)
 # ---------------------------------------------------------------------------
 
-def auto_review_candidates(approve_threshold=60, reject_threshold=25) -> dict:
+def auto_review_candidates(approve_threshold=None, reject_threshold=None,
+                           enabled=None) -> dict:
     """Auto-approve/reject candidate companies by alignment_score threshold.
+
+    OPT-IN: this mutates company status with no human in the loop, so it does
+    nothing unless explicitly enabled. Enable by passing ``enabled=True`` or by
+    setting env ``AUTO_REVIEW_CANDIDATES=1``. When disabled, every candidate is
+    left untouched and returned under "pending".
+
+    Thresholds default to env ``AUTO_REVIEW_APPROVE`` / ``AUTO_REVIEW_REJECT``
+    (falling back to 60 / 25). Pass explicit numbers to override.
 
     Companies with alignment_score >= approve_threshold → active.
     Companies with alignment_score <= reject_threshold → inactive.
@@ -920,6 +925,28 @@ def auto_review_candidates(approve_threshold=60, reject_threshold=25) -> dict:
 
     Returns summary: {"approved": [...], "rejected": [...], "pending": [...]}.
     """
+    import os
+
+    if enabled is None:
+        enabled = os.environ.get("AUTO_REVIEW_CANDIDATES", "").lower() in (
+            "1", "true", "yes", "on",
+        )
+    if approve_threshold is None:
+        approve_threshold = int(os.environ.get("AUTO_REVIEW_APPROVE", "60"))
+    if reject_threshold is None:
+        reject_threshold = int(os.environ.get("AUTO_REVIEW_REJECT", "25"))
+
+    if not enabled:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT canonical_name FROM company "
+            "WHERE status = 'candidate' AND alignment_score IS NOT NULL"
+        )
+        pending = [r[0] for r in cur.fetchall()]
+        cur.close()
+        return {"approved": [], "rejected": [], "pending": pending}
+
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
@@ -1344,30 +1371,33 @@ def load_company_enrichment(org_name: str) -> dict:
     }
 
 
-def calculate_company_tier(alignment_score, mpa_prestige):
-    """Compute tier (S/A/B/C) + composite from strategic signals.
+def calculate_company_tier(alignment_score, custom_boost=None):
+    """Compute tier (S/A/B/C) + composite from the company alignment score.
 
-    Mirrors scripts/report/data_prep.py:calculate_company_tier — same formula
-    so frontend display and DB `company.tier` column stay in sync.
+    Tiering is alignment-only by default — no owner prestige axis. ``custom_boost``
+    is an OPTIONAL user-defined signal (0..100) that ships unset; when a user's
+    profile supplies one it nudges the composite, otherwise it has no effect.
 
-    Returns (tier_letter, composite_score) — both None if no data.
+    Mirrors scripts/report/data_prep.py:calculate_company_tier so frontend
+    display and the DB `company.tier` column stay in sync.
+
+    Returns (tier_letter, composite_score) — both None if no alignment data.
     """
-    has_align = alignment_score is not None
-    has_mpa = mpa_prestige is not None
-    if not has_align and not has_mpa:
+    if alignment_score is None:
         return None, None
-    if has_align and has_mpa:
-        composite = 0.70 * float(alignment_score) + 0.30 * float(mpa_prestige)
-    elif has_align:
-        composite = float(alignment_score) * 0.85
-    else:
-        composite = float(mpa_prestige) * 0.70
+    th = settings.thresholds()
+    composite = float(alignment_score)
+    if custom_boost is not None:
+        composite = (
+            th["composite_alignment_weight"] * composite
+            + th["composite_boost_weight"] * float(custom_boost)
+        )
     composite = round(composite, 1)
-    if composite >= 65:
+    if composite >= th["tier_s"]:
         tier = "S"
-    elif composite >= 50:
+    elif composite >= th["tier_a"]:
         tier = "A"
-    elif composite >= 35:
+    elif composite >= th["tier_b"]:
         tier = "B"
     else:
         tier = "C"
@@ -1392,10 +1422,7 @@ def save_company_enrichment(org_name: str, about=None, mission_fit=None,
         updates.append("alignment_score = %s")
         vals.append(alignment_score)
 
-    mpa = None
-    if isinstance(mission_fit, dict):
-        mpa = mission_fit.get("mpa_narrative_boost")
-    tier, _ = calculate_company_tier(alignment_score, mpa)
+    tier, _ = calculate_company_tier(alignment_score)
     if tier is not None:
         updates.append("tier = %s")
         vals.append(tier)

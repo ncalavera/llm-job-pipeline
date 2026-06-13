@@ -35,7 +35,7 @@ def test_TG04_past_deadline_is_passed():
 
 def test_TG05_old_deadline_is_passed():
     from triage import is_deadline_passed
-    old = "2026-01-29"  # The example from issue #199
+    old = "2026-01-29"
     # This should be passed since we're well past Jan 2026
     if date.today() > date(2026, 1, 29):
         assert is_deadline_passed({"deadline": old}) is True

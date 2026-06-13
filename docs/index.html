@@ -169,18 +169,43 @@
         flex-wrap: wrap;
       }
       .cta {
-        font: 700 16px/1 var(--onest);
+        font: 700 17px/1 var(--onest);
         background: var(--green-bright);
         color: #fff;
-        padding: 18px 36px;
+        padding: 20px 40px;
         border: none;
         border-radius: 9999px;
-        box-shadow: 0 6px 20px rgba(16, 185, 129, 0.32);
+        box-shadow: 0 8px 26px rgba(16, 185, 129, 0.34);
         cursor: pointer;
-        transition: background 0.13s;
+        transition:
+          background 0.13s,
+          transform 0.13s,
+          box-shadow 0.13s;
+        animation: cta-pulse 2.6s ease-in-out infinite;
       }
       .cta:hover {
         background: var(--green-hover);
+        transform: translateY(-1px);
+        box-shadow: 0 10px 30px rgba(16, 185, 129, 0.4);
+        animation: none;
+      }
+      @keyframes cta-pulse {
+        0%,
+        100% {
+          box-shadow:
+            0 8px 26px rgba(16, 185, 129, 0.34),
+            0 0 0 0 rgba(16, 185, 129, 0.32);
+        }
+        50% {
+          box-shadow:
+            0 8px 26px rgba(16, 185, 129, 0.34),
+            0 0 0 9px rgba(16, 185, 129, 0);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .cta {
+          animation: none;
+        }
       }
       .guidelink {
         font: 600 14px/1 var(--onest);
@@ -488,11 +513,12 @@
       .qhint {
         color: var(--muted);
         font-size: 14.5px;
-        margin-bottom: 18px;
+        margin-bottom: 14px;
         max-width: 58ch;
       }
       .qbody {
-        flex: 1;
+        flex: 0 0 auto;
+        margin-bottom: 8px;
       }
       input[type="text"],
       textarea,
@@ -505,6 +531,14 @@
         font-size: 15px;
         background: var(--page);
         color: var(--ink);
+      }
+      /* The answer field is the focal point — make it stand out. */
+      .qbody input[type="text"],
+      .qbody textarea {
+        padding: 15px 16px;
+        font-size: 17px;
+        border-color: var(--green-bright);
+        box-shadow: 0 2px 10px rgba(16, 185, 129, 0.1);
       }
       textarea {
         min-height: 112px;
@@ -824,6 +858,52 @@
       </header>
     </div>
 
+    <div class="container wizard-wrap">
+      <div id="wizard">
+        <div class="progress"><i id="bar" style="width: 0%"></i></div>
+        <div class="qcard">
+          <div class="qnum" id="qnum"></div>
+          <div class="qtitle" id="qtitle"></div>
+          <div class="qhint" id="qhint"></div>
+          <div class="qbody" id="qbody"></div>
+          <div class="req-warn" id="reqwarn" data-i18n="required"></div>
+          <div class="nav">
+            <button
+              class="back"
+              id="backBtn"
+              data-i18n="back"
+              onclick="prevQ()"
+            ></button>
+            <div class="right">
+              <span class="enterhint" id="enterhint"></span>
+              <button
+                class="skip"
+                id="skipBtn"
+                data-i18n="skip"
+                onclick="nextQ(true)"
+              ></button>
+              <button class="next" id="nextBtn" onclick="nextQ()"></button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="result">
+        <div class="result-card">
+          <h3 data-i18n="r1t"></h3>
+          <p data-i18n="r1d"></p>
+          <pre id="promptOut"></pre>
+          <button class="primary" id="copyPrompt" data-i18n="copy"></button>
+          <button class="ghost" id="dlPrompt" data-i18n="download"></button>
+          <span class="copied" id="copiedMark"></span>
+        </div>
+        <div class="result-card">
+          <h3 data-i18n="r2t"></h3>
+          <p id="r2body"></p>
+        </div>
+      </div>
+    </div>
+
     <section class="hiw">
       <div class="container">
         <div class="hiw-head">
@@ -882,52 +962,6 @@
       </div>
     </section>
 
-    <div class="container wizard-wrap">
-      <div id="wizard">
-        <div class="progress"><i id="bar" style="width: 0%"></i></div>
-        <div class="qcard">
-          <div class="qnum" id="qnum"></div>
-          <div class="qtitle" id="qtitle"></div>
-          <div class="qhint" id="qhint"></div>
-          <div class="qbody" id="qbody"></div>
-          <div class="req-warn" id="reqwarn" data-i18n="required"></div>
-          <div class="nav">
-            <button
-              class="back"
-              id="backBtn"
-              data-i18n="back"
-              onclick="prevQ()"
-            ></button>
-            <div class="right">
-              <span class="enterhint" id="enterhint"></span>
-              <button
-                class="skip"
-                id="skipBtn"
-                data-i18n="skip"
-                onclick="nextQ(true)"
-              ></button>
-              <button class="next" id="nextBtn" onclick="nextQ()"></button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div id="result">
-        <div class="result-card">
-          <h3 data-i18n="r1t"></h3>
-          <p data-i18n="r1d"></p>
-          <pre id="promptOut"></pre>
-          <button class="primary" id="copyPrompt" data-i18n="copy"></button>
-          <button class="ghost" id="dlPrompt" data-i18n="download"></button>
-          <span class="copied" id="copiedMark"></span>
-        </div>
-        <div class="result-card">
-          <h3 data-i18n="r2t"></h3>
-          <p id="r2body"></p>
-        </div>
-      </div>
-    </div>
-
     <footer>
       <span data-i18n="footer"></span>
       <span class="mono"
@@ -976,6 +1010,7 @@
           finish: "Build my setup prompt",
           required: "This one matters for scoring quality — please fill it in.",
           enterhint: "Enter ↵",
+          enterhintTa: "Enter ↵ — Shift+Enter for a new line",
           qof: (i, n) =>
             `Question ${String(i).padStart(2, "0")} / ${String(n).padStart(2, "0")}`,
           r1t: "Your setup prompt",
@@ -1025,6 +1060,7 @@
           finish: "Собрать мой промпт",
           required: "Это важно для качества оценки — заполни, пожалуйста.",
           enterhint: "Enter ↵",
+          enterhintTa: "Enter ↵ — Shift+Enter для новой строки",
           qof: (i, n) =>
             `Вопрос ${String(i).padStart(2, "0")} / ${String(n).padStart(2, "0")}`,
           r1t: "Твой промпт установки",
@@ -1170,7 +1206,7 @@
           req: true,
           en: {
             t: "Target role titles",
-            h: "The job titles you want to see. One per line or comma-separated.",
+            h: "The job titles you want to see. One per line.",
             ph: "Product Manager, Senior Product Manager\nHead of Operations, Chief of Staff",
           },
           ru: {
@@ -1217,7 +1253,7 @@
             t: "Where are you, and where would you work?",
             h: "Cities, countries, or “remote-EU” style answers.",
             a: "Where you live now",
-            aph: "Lisbon, Portugal",
+            aph: "Your city, Country",
             b: "Locations you'd work in",
             bph: "Berlin, London, remote-EU",
           },
@@ -1435,7 +1471,8 @@
           : "inline-block";
         document.getElementById("nextBtn").textContent =
           cur === QUESTIONS.length - 1 ? t("finish") : t("next");
-        document.getElementById("enterhint").textContent = t("enterhint");
+        document.getElementById("enterhint").textContent =
+          q.type === "textarea" ? t("enterhintTa") : t("enterhint");
 
         const first = body.querySelector("input, textarea, select");
         if (first) first.focus();
@@ -1449,7 +1486,9 @@
         );
         body.querySelectorAll("textarea").forEach((el) =>
           el.addEventListener("keydown", (e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            // Plain Enter = proceed (consistent with the hint).
+            // Shift+Enter = insert a newline. Cmd/Ctrl+Enter still works.
+            if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               nextQ();
             }
@@ -1502,8 +1541,10 @@
 
       // ---------------------------------------------------------------- output
       function asLines(s) {
+        // Split ONLY on newlines — never on commas. Commas are common inside a
+        // single line ("2022–2026, Senior PM at Foundation — led team of 6").
         return (s || "")
-          .split(/\n|,(?![^()]*\))/)
+          .split(/\r?\n/)
           .map((x) => x.trim())
           .filter(Boolean);
       }
@@ -1723,7 +1764,7 @@ ${buildProfile()}
           ],
           [
             450,
-            '<span class="lav" style="font-weight:600">74</span> · Chief of Staff — GiveDirectly',
+            '<span class="lav" style="font-weight:600">74</span> · Chief of Staff — Example Org',
             "indent",
           ],
           [600, '<span class="dim">… 20 more scored 70+</span>', "indent"],

@@ -66,6 +66,9 @@ Those three packages cover fetching and the local database. (You do **not** need
 `psycopg2-binary` — that is only for the Supabase path. Installing the full
 `requirements.txt` also works and does no harm.)
 
+If you want to run the test suite (`python3 -m pytest tests/ -q`), also install
+`pytest`: `pip install pytest`.
+
 You do not create or configure a database. The first time anything connects, the
 pipeline creates `data/jobsearch.db` and its tables for you.
 

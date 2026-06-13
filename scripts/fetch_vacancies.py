@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Vacancy Monitoring System for Mission-Driven Job Search
-Fetches jobs from top-tier orgs, scores relevance, generates HTML dashboard.
+Vacancy Monitoring System
+Fetches jobs from tracked orgs, scores relevance, generates HTML dashboard.
 
 Usage:
     python3 scripts/fetch_vacancies.py                                  # Full run (all orgs + boards)
     python3 scripts/fetch_vacancies.py --free-only                      # Free ATS only (no credits)
     python3 scripts/fetch_vacancies.py --report-only                    # Regenerate dashboard only
-    python3 scripts/fetch_vacancies.py --companies "FundraiseUp,Miro"   # Specific companies
+    python3 scripts/fetch_vacancies.py --companies "Acme Foundation,Example Org"  # Specific companies
     python3 scripts/fetch_vacancies.py --tier S --no-boards             # S-tier companies only
     python3 scripts/fetch_vacancies.py --strategy greenhouse            # All Greenhouse companies
     python3 scripts/fetch_vacancies.py --force-all                      # Fetch ALL companies (ignore TTL)
@@ -40,7 +40,7 @@ from fetchers import (
     fetch_impactpool_board,
     fetch_arbeitnow_board, fetch_remotive_board, fetch_wwr_board,
     fetch_hn_whoishiring_board,
-    fetch_devex_cookie_api, fetch_unops_widget,
+    fetch_unops_widget,
     fetch_recruitee, fetch_teamtailor_rss, fetch_bamboohr,
     fetch_amazon_jobs,
     get_firecrawl_change_statuses,
@@ -76,15 +76,9 @@ def _load_enrichment_tiers() -> dict[str, str]:
     for name, data in enrichment.items():
         mission = data.get("mission_fit", {})
         alignment = mission.get("alignment_score")
-        mpa = mission.get("mpa_narrative_boost")
-        if alignment is None and mpa is None:
+        if alignment is None:
             continue
-        if alignment is not None and mpa is not None:
-            composite = 0.70 * alignment + 0.30 * mpa
-        elif alignment is not None:
-            composite = alignment * 0.85
-        else:
-            composite = mpa * 0.70
+        composite = alignment
         if composite >= 65:
             tiers[name] = "S"
         elif composite >= 50:
@@ -242,7 +236,7 @@ def _filter_companies(args) -> dict:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Fetch vacancies from mission-driven organizations")
+    parser = argparse.ArgumentParser(description="Fetch job vacancies from configured sources")
     parser.add_argument("--free-only", action="store_true",
                         help="Only fetch from Greenhouse orgs (no Firecrawl credits)")
     parser.add_argument("--report-only", action="store_true",
@@ -273,7 +267,7 @@ def main():
         parser.error("--boards-only and --no-boards are mutually exclusive")
 
     print("=" * 60)
-    print("  VACANCY MONITOR — Mission-Driven Job Search")
+    print("  Job vacancy fetch")
     print("=" * 60)
 
     from db_backend import print_backend_banner
@@ -447,8 +441,6 @@ def main():
                         jobs = fetch_wwr_board(board_cfg)
                     elif strategy == "hn_whoishiring":
                         jobs = fetch_hn_whoishiring_board(board_cfg)
-                    elif strategy == "devex_cookie_api":
-                        jobs = fetch_devex_cookie_api(board_cfg)
                 except Exception as exc:
                     print(f"  [{board_name}] Fetch error: {exc}")
                     board_fetch_status = f"error: {exc}"

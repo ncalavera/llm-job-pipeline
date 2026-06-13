@@ -263,7 +263,9 @@ def test_auto_review_candidates(dal):
     dal.save_company_enrichment("Lowfit Inc", alignment_score=10)
     _commit(dal)
 
-    result = dal.auto_review_candidates(approve_threshold=60, reject_threshold=25)
+    # auto-review is opt-in (no human in the loop); enable it explicitly here.
+    result = dal.auto_review_candidates(
+        approve_threshold=60, reject_threshold=25, enabled=True)
     assert "Highfit Inc" in result["approved"]
     assert "Lowfit Inc" in result["rejected"]
 
@@ -322,3 +324,42 @@ def test_pass_expired_vacancies(dal):
     _commit(dal)
     assert n == 1
     assert dal.get_vacancy_statuses()[vid] == "passed"
+
+
+# ---------------------------------------------------------------------------
+# Simple-mode company gate — board path must NOT blackhole vacancies.
+#
+# In SQLite (simple) mode there is no dashboard review step, so a board-created
+# company must be usable WITHOUT manual approval: ensure_company / merge create
+# it 'active' and its vacancies are immediately visible to load_vacancies.
+# ---------------------------------------------------------------------------
+
+def test_board_company_is_active_in_sqlite(dal):
+    """A company auto-created by the board/ATS path (default 'candidate') lands
+    'active' in SQLite mode, so its vacancies are visible without approval."""
+    # merge_vacancies auto-creates the unknown org via ensure_company(candidate).
+    new = dal.merge_vacancies("Newly Discovered Org", "B", [_fake_job()])
+    _commit(dal)
+    assert new == 1
+
+    # Default load (active companies only) must see it — no manual approval.
+    vacs = dal.load_vacancies()
+    assert len(vacs) == 1
+
+    # And the company really is 'active', not 'candidate'.
+    fitness = dal.get_company_fitness_map()
+    assert fitness["Newly Discovered Org"]["status"] == "active"
+
+
+def test_auto_discovered_status_is_active_in_sqlite(dal):
+    """The board auto-discovery status resolves to 'active' in SQLite mode."""
+    assert dal.AUTO_DISCOVERED_STATUS == "active"
+
+
+def test_explicit_candidate_still_honoured_in_sqlite(dal):
+    """ensure_company honours an explicit status verbatim — the candidate gate
+    stays available for full-mode-style flows / auto-review tests."""
+    dal.ensure_company("Pending Co", status="candidate")
+    _commit(dal)
+    fitness = dal.get_company_fitness_map()
+    assert fitness["Pending Co"]["status"] == "candidate"

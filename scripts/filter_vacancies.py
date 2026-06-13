@@ -19,9 +19,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import (
     COMPANIES, VACANCIES_DIR, GLOBAL_BLACKLIST,
-    LOCATION_BLACKLIST, REGION_US, resolve_canonical_name,
+    EXCLUDE_COUNTRIES, resolve_canonical_name,
 )
-from geo import geo_bucket
+from geo import canonical_country, country_for_location
 from db_backend import RealDictCursor
 from database_supabase import (
     _is_blacklisted, _is_content_junk, load_vacancies,
@@ -356,122 +356,96 @@ def _get_vacancy_url(vac: dict) -> str:
     return vac.get("url", "")
 
 
-def _is_loc_entry_blacklisted(loc: dict) -> bool:
-    """True if a single location entry is blacklisted (US, Canada, conflict zones, etc.).
+# ---------------------------------------------------------------------------
+# Personal geography exclusions — driven by the user profile, NOT hardcoded.
+#
+# EXCLUDE_COUNTRIES comes from config.py, which reads the `## HARD_FILTERS`
+# section of the user profile. It is EMPTY by default → no vacancy is dropped on
+# geography. A location is excluded ONLY when its resolved COUNTRY is EXACTLY in
+# this list (normalized). Geo BUCKETS (us / europe / …) are region LABELS only
+# and are NEVER used for exclusion — excluding "canada" must not drop the United
+# States just because both share the "us" bucket. No country is privileged.
+# ---------------------------------------------------------------------------
 
-    Handles both v1 entries (with 'location' text key) and v2 entries
-    (with 'country', 'region', 'city' structured keys).
+def _normalize_country(name: str) -> str:
+    """Canonicalize a country name for exact comparison (alias-proof)."""
+    return canonical_country(name)
+
+
+#: Exact (canonical) country names the user excluded. Empty → drop nothing.
+_EXCLUDED_COUNTRIES: frozenset[str] = frozenset(
+    _normalize_country(c) for c in EXCLUDE_COUNTRIES if _normalize_country(c)
+)
+
+
+def _entry_is_excluded_geo(loc: dict) -> bool:
+    """True if a single location entry's COUNTRY is exactly in the user's
+    exclude_countries. Always False when the user listed no exclude_countries.
+
+    Matching is on the EXACT (normalized) country name — never on a region
+    bucket. Handles v2 entries (country/city fields) and v1 entries (free-text
+    'location'): country_for_location() resolves the country from either form.
+    A location whose country cannot be resolved is never excluded.
     """
-    country = (loc.get("country") or "").lower()
-    region = (loc.get("region") or "").lower()
-    work_mode = (loc.get("work_mode") or "").lower()
-    city = (loc.get("city") or "").lower()
-    loc_str = (loc.get("location") or "").lower()
+    if not _EXCLUDED_COUNTRIES:
+        return False  # nothing excluded → keep everything on geography
 
-    # v2 structured checks — country field is most reliable
-    if country in ("united states", "usa", "us", "canada"):
-        return True
-    # Region "europe" or "remote" → definitely not blacklisted
-    if region in ("europe", "remote"):
+    # Multi-city free text (";"-joined): excluded only when EVERY part resolves
+    # to an excluded country. A single kept part keeps the whole entry.
+    raw_text = _normalize_country(loc.get("location") or "") or _normalize_country(loc.get("city") or "")
+    if ";" in raw_text and not _normalize_country(loc.get("country") or ""):
+        parts = [p.strip() for p in raw_text.split(";") if p.strip()]
+        if not parts:
+            return False
+        return all(
+            _normalize_country(country_for_location({"location": part}) or "") in _EXCLUDED_COUNTRIES
+            for part in parts
+        )
+
+    country = country_for_location(loc)
+    if not country:
         return False
-    # Legacy region "us" (pre-v2 data) — blacklisted unless location says "remote"
-    if region == "us":
-        return "remote" not in loc_str
-    # Region "americas" with no country → treat as US (ambiguous)
-    if region == "americas" and not country:
-        return True
-    # Global remote (no country, no region) → not blacklisted
-    if work_mode == "remote" and not country and not region:
-        return False
-    # Non-US country explicitly set → not blacklisted
-    if country:
-        return False
-
-    # v1 text-based checks — 'location' key or 'city' key
-    text_to_check = loc_str or city
-    if not text_to_check:
-        # No location info at all → don't blacklist (keep the vacancy)
-        return False
-    # Multi-city location strings (semicolon-separated)
-    if ";" in text_to_check:
-        parts = [p.strip() for p in text_to_check.split(";") if p.strip()]
-        return all(any(bl in part for bl in LOCATION_BLACKLIST) for part in parts)
-    return any(bl in text_to_check for bl in LOCATION_BLACKLIST)
+    return _normalize_country(country) in _EXCLUDED_COUNTRIES
 
 
-def _is_usa_only(vac: dict) -> bool:
-    """True if ALL location entries are blacklisted (US, Canada, ME conflict zones, etc.).
+def _all_locations_excluded(vac: dict) -> bool:
+    """True if EVERY location of the vacancy is in a profile-excluded country.
 
-    Returns False for multi-location vacancies that include any non-US office.
+    This is the single geography gate. It privileges no country — a location is
+    a delete vote only when its resolved COUNTRY is exactly in the user's
+    _EXCLUDED_COUNTRIES. Returns False when the user excluded no countries, when
+    the vacancy has no location, or when any single location is NOT excluded
+    (multi-country postings that include a kept country survive).
     """
+    if not _EXCLUDED_COUNTRIES:
+        return False
+
     locs = vac.get("locations", [])
     if not locs:
-        # Legacy: no locations array — check top-level fields
+        # Legacy: no locations array — check top-level fields.
         region = vac.get("region", "")
-        loc_str = vac.get("location", "").lower()
+        loc_str = (vac.get("location") or "").lower()
         if not loc_str and not region:
             return False
-        # Build a synthetic location entry and delegate to the shared helper
         synthetic = {"location": loc_str, "region": region}
-        return _is_loc_entry_blacklisted(synthetic)
+        return _entry_is_excluded_geo(synthetic)
 
-    # v2 path: check each location entry individually.
-    # ALL must be blacklisted for the vacancy to be USA-only.
     for loc in locs:
-        if not _is_loc_entry_blacklisted(loc):
+        if not _entry_is_excluded_geo(loc):
             return False
     return True
 
 
-def _geo_entry_vote(loc: dict) -> tuple[str, str]:
-    """Vote on a single location entry for geo filtering.
-
-    Returns (vote, reason) where vote is 'delete' or 'keep'.
-    reason ∈ {'us', 'cis', 'row', 'keep'} — used to pick the dominant
-    delete category at vacancy level.
-
-    DELETE: 'cis' in-person (work_mode != remote); 'other' (any work_mode —
-            relocation target must be an upgrade). US handled by _is_usa_only.
-    KEEP:   'uk', 'germany', 'europe', 'unknown', global remote, 'cis' remote.
-    """
-    bucket = geo_bucket(loc)
-    work_mode = (loc.get("work_mode") or "").lower().strip()
-
-    if bucket == "cis":
-        # Remote from a CIS country (e.g. Georgia) is fine — user works remotely.
-        return ("keep", "keep") if work_mode == "remote" else ("delete", "cis")
-    if bucket == "other":
-        return ("delete", "row")
-    if bucket == "us":
-        # US handled by the dedicated _is_usa_only path; vote keep here so geo
-        # categorization doesn't double-count (delete_usa fires first anyway).
-        return ("keep", "keep")
-    # uk / germany / europe / unknown → keep
-    return ("keep", "keep")
-
-
 def _geo_delete_category(vac: dict) -> str | None:
-    """Return 'delete_cis' or 'delete_row' if ALL location entries are geo
-    delete votes (CIS in-person / ROW). Returns None if any entry votes keep.
+    """Return 'delete_geo' if ALL location entries sit in profile-excluded
+    countries (no country privileged), else None.
 
-    USA-only deletion is handled separately by _is_usa_only (higher priority).
     Vacancies with no locations → kept (handled by caller).
     """
     locs = vac.get("locations", [])
     if not locs:
         return None
-
-    reasons = []
-    for loc in locs:
-        vote, reason = _geo_entry_vote(loc)
-        if vote == "keep":
-            return None  # any keep → not deleted
-        reasons.append(reason)
-
-    # All entries are delete votes. Pick dominant reason: cis if any cis present.
-    if "cis" in reasons:
-        return "delete_cis"
-    return "delete_row"
+    return "delete_geo" if _all_locations_excluded(vac) else None
 
 
 def _has_full_description(vac: dict) -> bool:
@@ -508,9 +482,7 @@ def classify_vacancies(db: dict = None) -> dict:
         "delete_blacklist": [],
         "delete_junk": [],
         "delete_rearchived": [],
-        "delete_usa": [],
-        "delete_cis": [],
-        "delete_row": [],
+        "delete_geo": [],
         "delete_stale_blind": [],
         "reenrich_blind": [],
         "reenrich_thin": [],
@@ -553,12 +525,7 @@ def classify_vacancies(db: dict = None) -> dict:
             categories["delete_rearchived"].append((vid, vac))
             continue
 
-        # Priority 4: USA-only (keeps priority over other geo buckets)
-        if _is_usa_only(vac):
-            categories["delete_usa"].append((vid, vac))
-            continue
-
-        # Priority 5: geo — CIS in-person / rest-of-world (all entries delete vote)
+        # Priority 4: geo — every location sits in a profile-excluded country
         geo_cat = _geo_delete_category(vac)
         if geo_cat:
             categories[geo_cat].append((vid, vac))
@@ -603,9 +570,7 @@ def compute_stats(categories: dict) -> dict:
         len(categories["delete_blacklist"])
         + len(categories.get("delete_junk", []))
         + len(categories.get("delete_rearchived", []))
-        + len(categories["delete_usa"])
-        + len(categories.get("delete_cis", []))
-        + len(categories.get("delete_row", []))
+        + len(categories.get("delete_geo", []))
         + len(categories["delete_stale_blind"])
     )
     company_gated = 0  # removed: company gate handled by active/inactive status
@@ -625,7 +590,7 @@ def compute_stats(categories: dict) -> dict:
 
     # Per-org table (across all categories)
     org_stats = defaultdict(lambda: {"tier": "C", "total": 0, "ready": 0, "delete": 0, "reenrich": 0})
-    delete_cats = ["delete_blacklist", "delete_junk", "delete_rearchived", "delete_usa", "delete_cis", "delete_row", "delete_stale_blind"]
+    delete_cats = ["delete_blacklist", "delete_junk", "delete_rearchived", "delete_geo", "delete_stale_blind"]
     reenrich_cats = ["reenrich_blind", "reenrich_thin"]
     for cat_name, items in categories.items():
         for _, vac in items:
@@ -687,9 +652,7 @@ def generate_html_report(categories: dict, stats: dict, output_path: Path) -> Pa
         ("delete_blacklist", "Blacklist Match", "#D4787A", "Title matched GLOBAL_BLACKLIST"),
         ("delete_junk", "Content Junk", "#9B59B6", "reCAPTCHA, donation widgets, error pages, navigation snippets"),
         ("delete_rearchived", "Re-archived", "#E67E22", "Previously archived (90-day cooldown)"),
-        ("delete_usa", "USA-Only", "#7EB5D6", "All locations US/Canada, no remote"),
-        ("delete_cis", "CIS In-Person", "#C99A6B", "All locations CIS, no remote (e.g. Georgia, Russia)"),
-        ("delete_row", "Rest of World", "#A0846B", "All locations outside UK/DE/EU/CIS (e.g. Turkey, Asia, Africa, LatAm)"),
+        ("delete_geo", "Excluded country", "#A0846B", "All locations in a country the profile excludes, no remote"),
         ("delete_stale_blind", "Stale Blind", "#A89680", "Has URL, no description, >7 days"),
     ]
     for cat_key, cat_label, cat_color, cat_desc in delete_cats:
@@ -1221,7 +1184,7 @@ def main():
 
     # --- Structured filter summary (for feedback loop) ---
     print(f"\n--- Filter Summary ---", file=sys.stderr, flush=True)
-    for cat in ["delete_blacklist", "delete_junk", "delete_rearchived", "delete_usa", "delete_cis", "delete_row", "delete_stale_blind"]:
+    for cat in ["delete_blacklist", "delete_junk", "delete_rearchived", "delete_geo", "delete_stale_blind"]:
         count = len(categories.get(cat, []))
         if count:
             print(f"  {cat}: {count}", file=sys.stderr, flush=True)
@@ -1243,7 +1206,7 @@ def main():
 
     # Collect all delete IDs by category
     delete_ids = {}
-    for cat in ["delete_blacklist", "delete_junk", "delete_rearchived", "delete_usa", "delete_cis", "delete_row", "delete_stale_blind"]:
+    for cat in ["delete_blacklist", "delete_junk", "delete_rearchived", "delete_geo", "delete_stale_blind"]:
         delete_ids[cat] = [vid for vid, _ in categories.get(cat, [])]
 
     reenrich_ids = {

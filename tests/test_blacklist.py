@@ -2,134 +2,114 @@
 
 Pure logic, no DB.
 
-NOTE FOR THE PUBLIC TEMPLATE: this repo ships a GENERIC example
-GLOBAL_BLACKLIST / GLOBAL_BLACKLIST_SUBSTR in config.py. Test classes marked
-``FIELD_SPECIFIC`` below assert blacklist entries that are tuning for one
-particular job search (finance specialties, non-English working-language
-requirements, field-deployment consultancies, etc.). They are skipped here
-because the public config keeps those lists generic — uncomment the matching
-patterns in config.py for your own search and remove the skip to enable them.
+The default pre-score blacklist is UNIVERSAL_JUNK only — speculative / evergreen
+pipeline postings nobody wants on any job search (talent pools, expressions of
+interest, general/open applications) plus visa/citizenship kill phrases in the
+description. A specific job DISCIPLINE, format or career stage is NEVER dropped
+by default; that is a PERSONAL choice expressed via ``exclude_title_keywords``
+in the profile's ``## HARD_FILTERS`` section. The two test classes at the bottom
+prove that contract: with an empty profile a discipline title survives; with the
+keyword listed it is dropped.
 """
 
 import pytest
 from database_supabase import _is_blacklisted
 
-# Reason used to skip field-specific blacklist coverage in the public template.
-FIELD_SPECIFIC = pytest.mark.skip(
-    reason="asserts field-specific blacklist tuning kept generic in the public template"
-)
+
+# ---------------------------------------------------------------------------
+# UJ01-06: Universal junk — dropped for EVERYONE, no discipline involved
+# ---------------------------------------------------------------------------
+
+class TestUniversalJunk:
+    def test_UJ01_expression_of_interest_blacklisted(self):
+        assert _is_blacklisted("Expression of Interest — Programmes") is True
+
+    def test_UJ02_talent_pool_blacklisted(self):
+        assert _is_blacklisted("Talent Pool: Future Roles") is True
+
+    def test_UJ03_general_application_blacklisted(self):
+        assert _is_blacklisted("General Application") is True
+
+    def test_UJ04_open_application_blacklisted(self):
+        assert _is_blacklisted("Open Application — Any Team") is True
+
+    def test_UJ05_talent_community_blacklisted(self):
+        assert _is_blacklisted("Join our Talent Community") is True
+
+    def test_UJ06_talent_network_blacklisted(self):
+        assert _is_blacklisted("Talent Network Sign-up") is True
 
 
 # ---------------------------------------------------------------------------
-# BL01-04: Sales gap roles (Account Director / quota-carrying)
+# Format / career-stage roles are NOT junk — a student / career-changer wants
+# them. They ship neutral; only the profile can opt to drop them.
 # ---------------------------------------------------------------------------
 
-class TestSalesGap:
-    def test_BL01_account_director_blacklisted(self):
-        # Account Executive/Manager already covered; Director was missing
-        assert _is_blacklisted("Account Director") is True
+class TestFormatRolesNotJunk:
+    def test_volunteer_coordinator_not_junk(self):
+        assert _is_blacklisted("Volunteer Coordinator") is False
 
-    def test_BL02_account_director_with_suffix_blacklisted(self):
-        assert _is_blacklisted("Senior Account Director - EMEA") is True
+    def test_bootcamp_instructor_not_junk(self):
+        assert _is_blacklisted("Data Science Bootcamp Instructor") is False
 
-    def test_BL03_quota_carrying_blacklisted(self):
-        assert _is_blacklisted("Quota Carrying Account Executive") is True
+    def test_fellowship_not_junk(self):
+        assert _is_blacklisted("Research Fellowship") is False
 
-    def test_BL04_account_management_director_not_blacklisted_via_account_alone(self):
-        # Sanity: 'account' alone must NOT be blacklisted (catches "Account Manager"
-        # via existing pattern, not a bare 'account' word)
-        assert _is_blacklisted("Strategic Account Partner") is False
+    def test_internship_not_junk(self):
+        assert _is_blacklisted("Summer Internship") is False
 
 
 # ---------------------------------------------------------------------------
-# BL05-09: Finance specialty roles
+# ND01-06: Disciplines are NOT dropped by default (the public template ships
+# an EMPTY exclude_title_keywords — nobody's career taste is imposed)
 # ---------------------------------------------------------------------------
 
-class TestFinanceSpecialty:
-    @FIELD_SPECIFIC
-    def test_BL05_treasury_analyst_blacklisted(self):
-        assert _is_blacklisted("Treasury Analyst") is True
+class TestDisciplinesNotBlacklistedByDefault:
+    def test_ND01_software_engineer_not_blacklisted(self):
+        assert _is_blacklisted("Senior Software Engineer") is False
 
-    @FIELD_SPECIFIC
-    def test_BL06_treasury_manager_blacklisted(self):
-        assert _is_blacklisted("Senior Treasury Manager") is True
+    def test_ND02_developer_not_blacklisted(self):
+        assert _is_blacklisted("Backend Developer") is False
 
-    @FIELD_SPECIFIC
-    def test_BL07_sanctions_officer_blacklisted(self):
-        assert _is_blacklisted("Sanctions Officer") is True
+    def test_ND03_account_director_not_blacklisted(self):
+        assert _is_blacklisted("Account Director") is False
 
-    @FIELD_SPECIFIC
-    def test_BL08_operational_risk_analyst_blacklisted(self):
-        assert _is_blacklisted("Operational Risk Analyst") is True
+    def test_ND04_marketing_operations_not_blacklisted(self):
+        assert _is_blacklisted("Marketing Operations Manager") is False
 
-    @FIELD_SPECIFIC
-    def test_BL09_risk_and_controls_blacklisted(self):
-        assert _is_blacklisted("Risk & Controls Analyst") is True
+    def test_ND05_clinical_research_lead_not_blacklisted(self):
+        assert _is_blacklisted("Clinical Research Lead") is False
 
-
-# ---------------------------------------------------------------------------
-# BL10-13: Motivation gap (pure marketing-ops / RevOps)
-# ---------------------------------------------------------------------------
-
-class TestMotivationGap:
-    def test_BL10_marketing_operations_blacklisted(self):
-        assert _is_blacklisted("Marketing Operations Manager") is True
-
-    def test_BL11_marketing_automation_blacklisted(self):
-        assert _is_blacklisted("Marketing Automation Specialist") is True
-
-    @FIELD_SPECIFIC
-    def test_BL12_revops_blacklisted(self):
-        assert _is_blacklisted("RevOps Manager") is True
-
-    @FIELD_SPECIFIC
-    def test_BL13_revenue_operations_blacklisted(self):
-        assert _is_blacklisted("Revenue Operations Lead") is True
+    def test_ND06_nurse_not_blacklisted(self):
+        assert _is_blacklisted("Registered Nurse") is False
 
 
 # ---------------------------------------------------------------------------
-# BL14-16: Scientific / clinical research specialty
-# ---------------------------------------------------------------------------
-
-class TestClinicalResearch:
-    def test_BL14_clinical_research_lead_blacklisted(self):
-        assert _is_blacklisted("Clinical Research Lead") is True
-
-    def test_BL15_research_lead_clinical_blacklisted(self):
-        assert _is_blacklisted("Research Lead, Clinical") is True
-
-    @FIELD_SPECIFIC
-    def test_BL16_climate_health_consultant_blacklisted(self):
-        assert _is_blacklisted("Climate Health Consultant") is True
-
-
-# ---------------------------------------------------------------------------
-# BL17-20: Negative tests — non-blacklisted titles must remain unfiltered
+# NF01-04: No false positives on ordinary target roles
 # ---------------------------------------------------------------------------
 
 class TestNegativeNoFalsePositives:
-    def test_BL17_head_of_operations_not_blacklisted(self):
-        # 'operations' alone must not blacklist generic ops roles
+    def test_NF01_head_of_operations_not_blacklisted(self):
         assert _is_blacklisted("Head of Operations") is False
 
-    def test_BL18_chief_of_staff_not_blacklisted(self):
+    def test_NF02_chief_of_staff_not_blacklisted(self):
         assert _is_blacklisted("Chief of Staff") is False
 
-    def test_BL19_program_manager_not_blacklisted(self):
+    def test_NF03_program_manager_not_blacklisted(self):
         assert _is_blacklisted("Senior Program Manager") is False
 
-    def test_BL20_head_of_marketing_not_blacklisted(self):
-        # 'marketing' alone is NOT blacklisted — only 'marketing operations'/'automation'
+    def test_NF04_head_of_marketing_not_blacklisted(self):
         assert _is_blacklisted("Head of Marketing") is False
 
 
 # ---------------------------------------------------------------------------
-# BL21-25: Description-level kill phrases (issue #232 — visa/citizenship)
+# BL21-25: Description-level kill phrases (visa/citizenship).
+# These ARE universal (a posting that won't sponsor / requires US citizenship
+# is useless to most international searchers) and stay hardcoded.
 # ---------------------------------------------------------------------------
 
 class TestDescriptionLevelBlacklist:
     def test_BL21_visa_sponsorship_in_description_blacklists(self):
-        # Title alone is fine (Senior PM); description disqualifies via #232 fix
         title = "Senior Product Manager"
         desc = "We are hiring. Visa sponsorship not available for this role."
         assert _is_blacklisted(title, desc) is True
@@ -145,7 +125,6 @@ class TestDescriptionLevelBlacklist:
         assert _is_blacklisted(title, desc) is True
 
     def test_BL24_visa_friendly_phrasing_not_blacklisted(self):
-        # Sanity: positive visa mention must NOT trigger blacklist
         title = "Senior Product Manager"
         desc = "We welcome international applicants — visa sponsorship offered."
         assert _is_blacklisted(title, desc) is False
@@ -155,67 +134,3 @@ class TestDescriptionLevelBlacklist:
         title = "Citizen Engagement Lead"
         desc = "Help engage citizens with civic tech."
         assert _is_blacklisted(title, desc) is False
-
-
-# ---------------------------------------------------------------------------
-# BL26-32: Non-English working-language requirements (issue #233 §Layer 2)
-# ---------------------------------------------------------------------------
-
-class TestNonEnglishLanguageRequirements:
-    @FIELD_SPECIFIC
-    def test_BL26_french_is_required_in_desc(self):
-        # IRC Project Coordinator (Ensemble) real-data sample
-        desc = "French is required. Working knowledge of English is preferred."
-        assert _is_blacklisted("Project Coordinator", desc) is True
-
-    @FIELD_SPECIFIC
-    def test_BL27_arabic_is_required_in_desc(self):
-        desc = "Arabic is required (spoken and written)."
-        assert _is_blacklisted("Consultancy Telehealth", desc) is True
-
-    @FIELD_SPECIFIC
-    def test_BL28_khmer_required_in_desc(self):
-        desc = "Khmer required for fieldwork in Cambodia."
-        assert _is_blacklisted("Programme Officer", desc) is True
-
-    @FIELD_SPECIFIC
-    def test_BL29_portuguese_is_required(self):
-        desc = "Native or fluent Portuguese is required."
-        assert _is_blacklisted("Country Director", desc) is True
-
-    def test_BL30_french_desirable_not_blacklisted(self):
-        # EBRD Analyst — "fluent French highly desirable" must NOT trigger.
-        # Desirable ≠ required.
-        desc = "fluent French and/or Arabic highly desirable. Relevant industry experience."
-        assert _is_blacklisted("Analyst, NBFI", desc) is False
-
-    def test_BL31_english_required_french_secondary_not_blacklisted(self):
-        # UNCTAD Chief — "English is required. Either Spanish or Russian"
-        # English-required + secondary mention must NOT trigger.
-        desc = "English is required. Either Spanish or Russian is desirable."
-        assert _is_blacklisted("Chief of Section", desc) is False
-
-    def test_BL32_french_in_unrelated_context_not_blacklisted(self):
-        # Random "French" mention without "required/is required" must NOT match.
-        desc = "Our office is in the French Quarter. Bring your laptop."
-        assert _is_blacklisted("Operations Lead", desc) is False
-
-
-# ---------------------------------------------------------------------------
-# BL33-35: Field consultancy title patterns (issue #233 §Layer 2)
-# ---------------------------------------------------------------------------
-
-class TestFieldConsultancyTitlePatterns:
-    @FIELD_SPECIFIC
-    def test_BL33_consultant_tanzania_in_title(self):
-        # Pure Earth real-data sample
-        assert _is_blacklisted("Program Management Consultant, Tanzania") is True
-
-    @FIELD_SPECIFIC
-    def test_BL34_consultant_cambodia_in_title(self):
-        assert _is_blacklisted("Heat-Health Consultant, Cambodia") is True
-
-    def test_BL35_consultant_in_eu_country_not_filtered_by_geo(self):
-        # 'Consultant, Germany' must NOT trigger field-consultancy blacklist
-        # (Germany is not a field-deployment country)
-        assert _is_blacklisted("Consultant, Germany") is False

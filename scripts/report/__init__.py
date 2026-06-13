@@ -139,7 +139,7 @@ def generate_dashboard(db: dict = None) -> None:
 </head>
 <body>
 <nav class="top-nav">
-  <div class="top-nav-brand">Job Search 2026</div>
+  <div class="top-nav-brand">Job Vacancies</div>
   <div class="mode-toggle">
     <button class="mode-btn" id="modeCompanies" onclick="switchMode('companies')">&#9881; Companies</button>
     <button class="mode-btn" id="modeCatalog" onclick="switchMode('catalog')">&#9636; Vacancies</button>

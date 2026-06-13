@@ -50,9 +50,7 @@ FILTER ANALYSIS
     - Blacklist (title):       {delete_blacklist}
     - Content junk:            {delete_junk}
     - Re-archived:             {delete_rearchived}
-    - USA-only:                {delete_usa}
-    - CIS in-person:           {delete_cis_inperson}
-    - Rest of World:           {delete_rest_of_world}
+    - Excluded country:        {delete_geo}
     - Stale blind:             {delete_stale_blind}
   Re-enrich needed:   {sum of reenrich categories}
     - Blind (no desc):   {reenrich_blind}
@@ -60,19 +58,16 @@ FILTER ANALYSIS
 ═══════════════════════════════════════
 ```
 
-**Geo-based deletion categories** (new):
-- **CIS in-person** — vacancies located exclusively in CIS countries (Russia, Belarus, Kazakhstan, etc.) that require on-site presence. Detected via `geo.py` bucket classification.
-- **Rest of World** — vacancies in regions outside the target search geography (e.g. South-East Asia, Latin America) with no remote option. Also detected via `geo.py` buckets.
-
-These categories are separate from `delete_usa` (US-only postings) and can be toggled independently.
+**Geo-based deletion category:**
+- **Excluded country** (`delete_geo`) — vacancies whose every location sits in a country your profile lists under `## HARD_FILTERS` → `exclude_countries`, with no remote option that escapes it. Detected via `geo.py` bucket classification. No country is privileged in code; the exclusion list is yours and empty by default.
 
 ## Step 2: DELETE decision
 
 ```
 Delete {N} irrelevant vacancies?
   1. Delete all ({N}) — recommended
-  2. USA-only only ({usa_count})
-  3. Choose categories (blacklist, junk, rearchived, usa, cis_inperson, rest_of_world, stale)
+  2. Excluded-country only ({geo_count})
+  3. Choose categories (blacklist, junk, rearchived, geo, stale)
   4. Skip
 ```
 
@@ -123,7 +118,7 @@ Enrich {N} vacancies via Firecrawl (~{credits} credits)?
 
 **If enrich:**
 ```bash
-source ~/.zshrc 2>/dev/null && python3 scripts/enrich_blind_vacancies.py
+python3 scripts/enrich_blind_vacancies.py
 ```
 
 ### Step 3b: Delete still-blind (mandatory after enrichment)
@@ -142,7 +137,7 @@ Only if vacancies were deleted in Step 2:
 python3 scripts/filter_vacancies.py --suggest-blacklist
 ```
 
-Show title patterns with 3+ matches across 2+ organizations, and companies with >80% deletion rate. Ask the user to approve which patterns to add to `GLOBAL_BLACKLIST` in `scripts/config.py`.
+Show title patterns with 3+ matches across 2+ organizations, and companies with >80% deletion rate. For each suggested pattern, decide where it belongs: a universal non-job pattern (talent pool, course, etc.) goes in `UNIVERSAL_JUNK` / `UNIVERSAL_JUNK_SUBSTR` in `scripts/config.py`; a discipline you personally don't want goes in your profile's `exclude_title_keywords` via `/jobs-rules`. Ask the user before editing either.
 
 For companies with >80% deletion: ask whether to pause monitoring.
 
@@ -176,16 +171,29 @@ FILTER COMPLETE
 
 ## If the filter removes something important
 
-Each `delete_blacklist` entry shows which pattern matched. If a pattern is a false positive (e.g. "Operations Engineer" deleted because of `engineer`):
+There are two layers of deletion:
 
-1. Open `scripts/config.py`.
-2. Find the pattern in `GLOBAL_BLACKLIST`.
-3. Replace it with a narrower expression (e.g. `software engineer`, `senior engineer` instead of just `engineer`).
-4. Re-run `/jobs-filter`.
+- **Universal junk** (`UNIVERSAL_JUNK` / `UNIVERSAL_JUNK_SUBSTR` in
+  `scripts/config.py`) — talent pools, "expression of interest" listings,
+  volunteer calls, course/bootcamp listings. These apply to everyone and rarely
+  need editing.
+- **Your personal hard filters** — geography (`exclude_countries`) and title
+  words (`exclude_title_keywords`) from your profile's `## HARD_FILTERS`.
+
+If a job was dropped on geography or because of a title word (e.g. "Operations
+Engineer" deleted because you excluded `engineer`), that's a personal hard
+filter, NOT the universal list. Fix it with `/jobs-rules`: remove or narrow the
+country/word, then re-run `/jobs-filter`. Only touch `UNIVERSAL_JUNK` in
+`config.py` if something nobody would ever want is slipping through (or being
+wrongly caught).
 
 ## If relevant vacancies keep slipping through
 
-If vacancies you then mark `passed` keep appearing in `ready`, add a pattern to `GLOBAL_BLACKLIST`. The command shows common junk title words near the top of its report.
+If vacancies you then mark `passed` keep appearing in `ready`, you usually don't
+want a hard delete — let scoring rank them low instead (tune `## EXCLUDE_PATTERNS`
+in your profile). Add a word to `exclude_title_keywords` via `/jobs-rules` only
+when you NEVER want to see that discipline again. The command shows common junk
+title words near the top of its report.
 
 ## Important rules
 

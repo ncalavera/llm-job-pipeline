@@ -10,9 +10,9 @@ Generates REPORT-company-audit.md with MECE groups:
   5. Alias health      — dangling aliases, phantom orgs
 
 Usage:
-    source ~/.zshrc 2>/dev/null; python3 scripts/audit_companies.py
-    source ~/.zshrc 2>/dev/null; python3 scripts/audit_companies.py --fix --dry-run
-    source ~/.zshrc 2>/dev/null; python3 scripts/audit_companies.py --fix
+    python3 scripts/audit_companies.py
+    python3 scripts/audit_companies.py --fix --dry-run
+    python3 scripts/audit_companies.py --fix
 """
 
 import argparse

@@ -8,7 +8,7 @@ When LLM scoring has surfaced liked vacancies — `/jobs-apply` walks through th
 
 ## Steps
 
-1. Load vacancies with `status = 'liked'` via `scripts/triage.py:load_liked_vacancies()`.
+1. Load vacancies with `status = 'liked'` via `scripts/triage.py:get_liked_vacancies()`.
 
 2. Filter out vacancies past their deadline. Show closed vacancies briefly, then proceed with open ones only.
 

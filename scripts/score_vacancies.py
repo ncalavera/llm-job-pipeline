@@ -1,23 +1,16 @@
 #!/usr/bin/env python3
-"""Unified vacancy scoring — 2 backends, identical LLM input.
-
-Replaces: score_vacancies_llm.py, score_prep.py, score_save.py, score_via_openclaw.py
+"""Vacancy scoring — local subagent backend, deterministic LLM input.
 
 Usage:
-    score_vacancies.py --local --limit 5          # Opus subagent scoring (default)
-    score_vacancies.py --openclaw --limit 20      # OpenClaw SSH
+    score_vacancies.py --local --limit 5          # subagent scoring (default)
+    score_vacancies.py --save                     # stdin JSON → DB (internal)
 """
 
 import argparse
 import json
-import os
-import random
 import re
-import shlex
-import subprocess
 import sys
 import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -25,9 +18,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # Redirect stdout → stderr during imports so db_conn diagnostics don't pollute
-# JSON output in --prepare mode
+# JSON output in --local mode
 _real_stdout = sys.stdout
-if "--local" in sys.argv or not any(f in sys.argv for f in ("--openclaw", "--save")):
+if "--local" in sys.argv or "--save" not in sys.argv:
     sys.stdout = sys.stderr
 
 from config import GLOBAL_BLACKLIST, GLOBAL_BLACKLIST_SUBSTR, GLOBAL_BLACKLIST_DESC_SUBSTR  # noqa: E402
@@ -44,14 +37,8 @@ MAX_TOKENS = 1024
 PROMPT_VERSION = "v4.0_2026_pure_fit"
 BILLING_ABORT_THRESHOLD = 5
 
-# OpenClaw SSH
-EC2_KEY = os.environ.get("OPENCLAW_SSH_KEY", "")
-EC2_USER = os.environ.get("OPENCLAW_SSH_USER", "")
-EC2_HOST = os.environ.get("OPENCLAW_SSH_HOST", "")
-OPENCLAW_AGENT = "scorer"
-OPENCLAW_TIMEOUT = 120
+# Default parallelism for the local subagent orchestrator.
 MAX_CONCURRENT = 3
-MAX_RETRIES = 3
 
 
 # ---------------------------------------------------------------------------
@@ -136,84 +123,6 @@ def _build_user_msg(vacancy: dict, alignment_score=None) -> str:
         location=location_str or "",
         description=description,
         alignment_score=alignment_str,
-    )
-
-
-# ---------------------------------------------------------------------------
-# OpenClaw backend
-# ---------------------------------------------------------------------------
-
-def _ssh_score(message: str) -> dict:
-    """Send scoring request to OpenClaw via SSH."""
-    escaped_msg = shlex.quote(message)
-    cmd = [
-        "ssh", "-i", EC2_KEY,
-        "-o", "ConnectTimeout=10",
-        "-o", "ServerAliveInterval=30",
-        f"{EC2_USER}@{EC2_HOST}",
-        f"openclaw agent --agent {OPENCLAW_AGENT} "
-        f"--session-id scorer-{uuid.uuid4().hex[:8]} "
-        f"--timeout {OPENCLAW_TIMEOUT} --message {escaped_msg}",
-    ]
-    t0 = time.time()
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=OPENCLAW_TIMEOUT + 30,
-        )
-        latency = time.time() - t0
-        if result.returncode != 0:
-            return {
-                "score": -1, "reasoning": "", "tags": [],
-                "hard_requirements": [], "short_summary": "",
-                "error": f"SSH exit {result.returncode}: {result.stderr.strip()[:200]}",
-                "latency": round(latency, 2),
-            }
-        parsed = _parse_json(result.stdout.strip())
-        return {
-            "score": parsed.get("score", -1),
-            "reasoning": parsed.get("reasoning", ""),
-            "tags": parsed.get("tags", []),
-            "hard_requirements": parsed.get("hard_requirements", []),
-            "short_summary": parsed.get("short_summary", ""),
-            "model": f"openclaw/{OPENCLAW_AGENT}",
-            "scored_at": datetime.now().isoformat(),
-            "latency": round(latency, 2),
-            "error": parsed.get("error"),
-        }
-    except subprocess.TimeoutExpired:
-        return {
-            "score": -1, "reasoning": "", "tags": [],
-            "hard_requirements": [], "short_summary": "",
-            "error": "SSH timeout",
-            "latency": round(time.time() - t0, 2),
-        }
-    except Exception as e:
-        return {
-            "score": -1, "reasoning": "", "tags": [],
-            "hard_requirements": [], "short_summary": "",
-            "error": str(e),
-            "latency": round(time.time() - t0, 2),
-        }
-
-
-def _ssh_score_with_retry(message: str) -> dict:
-    """Send with exponential backoff on failures."""
-    result = {}
-    for attempt in range(MAX_RETRIES):
-        result = _ssh_score(message)
-        if not result.get("error") or result["score"] != -1:
-            return result
-        if attempt < MAX_RETRIES - 1:
-            backoff = (2 ** attempt) * (1 + random.random())
-            time.sleep(backoff)
-    return result
-
-
-def _build_openclaw_message(user_msg: str) -> str:
-    """Wrap system+user for OpenClaw (no separate system prompt support)."""
-    return (
-        f"<system>\n{SYSTEM_PROMPT}\n</system>\n\n{user_msg}\n\n"
-        "IMPORTANT: Return ONLY valid JSON, no markdown fences, no preamble."
     )
 
 
@@ -305,14 +214,14 @@ def _load_and_dedup(*, force=False, include_passed=False,
 
 
 # ---------------------------------------------------------------------------
-# Shared: apply USA cap + build score_data
+# Shared: build score_data
 # ---------------------------------------------------------------------------
 
 def _make_score_data(result: dict, rep: dict) -> dict:
     """Build score_data dict from an LLM result.
 
-    Geography is enforced in the pre-score filter (delete_usa/cis/row), not
-    here — scoring no longer caps by location.
+    Geography is enforced in the pre-score filter (delete_geo), not here —
+    scoring no longer caps by location.
     """
     score = result["score"]
     data = {
@@ -515,129 +424,13 @@ def cmd_save(_args):
 
 
 # ---------------------------------------------------------------------------
-# Mode: --openclaw
-# ---------------------------------------------------------------------------
-
-def cmd_openclaw(args):
-    """Score vacancies via OpenClaw SSH."""
-    if not all([EC2_KEY, EC2_USER, EC2_HOST]):
-        print("ERROR: Set OPENCLAW_SSH_KEY, OPENCLAW_SSH_USER, OPENCLAW_SSH_HOST")
-        sys.exit(1)
-
-    roles, fitness_map, stats = _load_and_dedup(
-        include_passed=args.include_passed,
-        include_candidates=not args.no_candidates,
-        limit=args.limit,
-    )
-
-    if not roles:
-        print("All roles already scored.")
-        return
-
-    from database_supabase import update_llm_score, get_conn, validate_db
-
-    conn = get_conn()
-    conn.rollback()
-    cur = conn.cursor()
-    cur.execute("SET statement_timeout = 30000")
-    cur.close()
-    conn.commit()
-
-    duped_total = sum(len(m) for _, _, m in roles)
-    print(
-        f"Scoring {len(roles)} unique roles ({duped_total} records) "
-        f"via OpenClaw ({OPENCLAW_AGENT}, {args.max_workers}x parallel)"
-    )
-
-    if args.dry_run:
-        for i, (_key, rep, members) in enumerate(roles[:20], 1):
-            print(f"  {i}. {rep['org']:30s} {rep['title'][:50]:50s} [x{len(members)}]")
-        if len(roles) > 20:
-            print(f"  ... and {len(roles) - 20} more")
-        return
-
-    errors = 0
-    scored = 0
-    start_time = time.time()
-
-    def _worker(item):
-        idx, (_key, rep, members) = item
-        time.sleep(random.uniform(1.0, 3.0))
-        company_info = fitness_map.get(rep["org"], {})
-        alignment = company_info.get("alignment_score")
-        user_msg = _build_user_msg(rep, alignment_score=alignment)
-        message = _build_openclaw_message(user_msg)
-        return idx, rep, members, _ssh_score_with_retry(message)
-
-    with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
-        future_map = {
-            executor.submit(_worker, (i, item)): i
-            for i, item in enumerate(roles, 1)
-        }
-
-        for future in as_completed(future_map):
-            idx, rep, members, result = future.result()
-            score = result["score"]
-
-            if result.get("error") and score == -1:
-                errors += 1
-                print(
-                    f"  [{idx}/{len(roles)}] {rep['org']:25s} "
-                    f"{rep['title'][:50]:50s}  ERR: {result['error'][:80]}"
-                )
-                if errors >= 5:
-                    conn.commit()
-                    print(f"\n  {errors} errors — cancelling.")
-                    for f in future_map:
-                        f.cancel()
-                    break
-                continue
-
-            print(
-                f"  [{idx}/{len(roles)}] {rep['org']:25s} "
-                f"{rep['title'][:50]:50s}  -> {score:3d}  "
-                f"({result['latency']:.1f}s)  [x{len(members)}]"
-            )
-
-            score_data = _make_score_data(result, rep)
-            try:
-                for m in members:
-                    update_llm_score(m["id"], score_data)
-                conn.commit()
-            except Exception as db_err:
-                conn.rollback()
-                errors += 1
-                print(f"    DB write error: {db_err}")
-                continue
-
-            scored += 1
-            if scored % 10 == 0:
-                elapsed = time.time() - start_time
-                rate = scored / max(elapsed / 60, 0.1)
-                remaining = (len(roles) - scored - errors) / rate if rate > 0 else 0
-                print(
-                    f"  --- progress: {scored} scored, "
-                    f"{rate:.1f}/min, ~{remaining:.0f}m remaining ---"
-                )
-
-    conn.commit()
-    elapsed = time.time() - start_time
-    print(
-        f"\nDone! Scored {scored} roles ({duped_total} records) "
-        f"in {elapsed / 60:.1f}m. Errors: {errors}"
-    )
-    validate_db()
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Unified vacancy scoring")
+    parser = argparse.ArgumentParser(description="Vacancy scoring")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--openclaw", action="store_true", help="OpenClaw SSH")
-    mode.add_argument("--local", action="store_true", help="JSON → stdout for Opus subagents (default)")
+    mode.add_argument("--local", action="store_true", help="JSON → stdout for subagents (default)")
     mode.add_argument("--save", action="store_true", help="stdin JSON → DB (internal)")
 
     parser.add_argument("--limit", type=int)
@@ -669,9 +462,7 @@ def main():
     from db_backend import print_backend_banner
     print_backend_banner(sys.stderr)
 
-    if args.openclaw:
-        cmd_openclaw(args)
-    elif args.save:
+    if args.save:
         cmd_save(args)
     else:
         # Default to --local

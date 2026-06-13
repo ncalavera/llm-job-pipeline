@@ -22,8 +22,15 @@ export const {
 
 export const archivedGroups = window.VACANCY_DATA.archived_groups || [];
 
+// API base resolution:
+//  - Served over http(s) (Vercel OR the local dashboard server): use the page's
+//    own origin and POST to same-origin /api/* — both deployments answer there.
+//  - Opened as a file:// (no server): fall back to the baked config.api_base,
+//    or "" which means truly offline (no save).
 export const API_BASE =
-  location.protocol === "https:" ? location.origin : config.api_base || "";
+  location.protocol === "http:" || location.protocol === "https:"
+    ? location.origin
+    : config.api_base || "";
 
 // O(1) lookup maps
 export const groupsById = new Map(groups.map((g) => [g.id, g]));

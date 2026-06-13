@@ -441,43 +441,91 @@ export const KNOWN_REGIONS = new Set([
 // Location parsing
 // ---------------------------------------------------------------------------
 
+// Continent buckets keyed by country / region words. No continent is
+// privileged — classification is purely structural. Keep keys lowercase.
+const REGION_KEYWORDS = {
+  europe: [
+    "europe",
+    "emea",
+    "uk",
+    "united kingdom",
+    "ireland",
+    "germany",
+    "france",
+    "spain",
+    "portugal",
+    "italy",
+    "netherlands",
+    "belgium",
+    "switzerland",
+    "austria",
+    "poland",
+    "sweden",
+    "norway",
+    "denmark",
+    "finland",
+    "czech",
+    "romania",
+    "greece",
+    "hungary",
+    "ukraine",
+  ],
+  americas: [
+    "americas",
+    "north america",
+    "south america",
+    "latin america",
+    "usa",
+    "united states",
+    "canada",
+    "mexico",
+    "brazil",
+    "argentina",
+    "chile",
+    "colombia",
+    "peru",
+  ],
+  asia: [
+    "asia",
+    "apac",
+    "india",
+    "china",
+    "japan",
+    "singapore",
+    "korea",
+    "indonesia",
+    "philippines",
+    "vietnam",
+    "thailand",
+    "malaysia",
+    "middle east",
+    "mena",
+    "uae",
+    "israel",
+    "turkey",
+  ],
+  africa: [
+    "africa",
+    "nigeria",
+    "kenya",
+    "south africa",
+    "egypt",
+    "ghana",
+    "ethiopia",
+    "morocco",
+    "tanzania",
+    "uganda",
+  ],
+};
+
 export function getRegionClass(locText) {
   const l = locText.toLowerCase();
-  if (l.includes("remote")) {
-    if (
-      l.includes("europe") ||
-      l.includes("london") ||
-      l.includes("berlin") ||
-      l.includes("lisbon")
-    )
-      return "europe";
-    return "remote";
+  // Match against each continent's keywords without favouring any region.
+  for (const [region, keywords] of Object.entries(REGION_KEYWORDS)) {
+    if (keywords.some((k) => l.includes(k))) return region;
   }
-  if (
-    [
-      "london",
-      "berlin",
-      "lisbon",
-      "europe",
-      "emea",
-      "uk",
-      "germany",
-      "portugal",
-    ].some((k) => l.includes(k))
-  )
-    return "europe";
-  if (
-    [
-      "new york",
-      "washington",
-      "san francisco",
-      "houston",
-      "nyc",
-      "usa",
-      "redwood",
-    ].some((k) => l.includes(k))
-  )
-    return "us";
+  // No country/region signal — distinguish remote-only from unknown.
+  if (l.includes("remote")) return "remote";
   return "other";
 }
 
@@ -647,7 +695,7 @@ export function formatDeadlineHtml(deadline, cssPrefix) {
   const isExpired = dl < todayD;
   const diffMs = dl - todayD;
   const diffDays = Math.round(diffMs / 86400000);
-  const dateStr = dl.toLocaleDateString("ru-RU", {
+  const dateStr = dl.toLocaleDateString("en-US", {
     day: "numeric",
     month: "short",
     year: "numeric",

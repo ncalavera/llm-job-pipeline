@@ -98,7 +98,7 @@ For each approved company, create the record as `active` so its vacancies enter
 the pipeline immediately:
 
 ```bash
-source ~/.zshrc 2>/dev/null && python3 -c "
+python3 -c "
 import sys; sys.path.insert(0, 'scripts')
 from database_supabase import ensure_company, get_conn
 
@@ -135,14 +135,49 @@ Ask the user before enabling any: boards add many candidate companies to review.
 If they opt in, prefix the Step 4 fetch with the chosen env vars and drop
 `--no-boards`. If they decline, keep Step 4 as is — companies only.
 
+## Step 3.6: Confirm the hard filters
+
+Before the first filter run, show the user which jobs will be dropped
+automatically BEFORE scoring. These "hard filters" come from the `## HARD_FILTERS`
+section of their profile and are EMPTY by default — so by default nothing is
+dropped on geography or job title. Read and print them:
+
+```bash
+python3 -c "
+import sys; sys.path.insert(0, 'scripts')
+from hard_filters import load_hard_filters
+hf = load_hard_filters()
+c = hf['exclude_countries']; k = hf['exclude_title_keywords']
+print('Countries dropped:', ', '.join(c) if c else '(none)')
+print('Title words dropped:', ', '.join(k) if k else '(none)')
+"
+```
+
+Say it back in plain language, for example:
+
+> Before scoring I'll drop jobs that are ONLY in these countries: (none); and
+> jobs whose title contains: (none). Nothing else is dropped before scoring —
+> everything else gets scored against your profile.
+
+Ask the user to confirm or adjust:
+
+```
+These hard filters run before scoring. Keep them as-is?
+  1. Yes, continue
+  2. Change them (I'll open /jobs-rules)
+```
+
+If they want changes, run `/jobs-rules` to edit exclude_countries /
+exclude_title_keywords, then come back here. Only continue once they confirm.
+
 ## Step 4: First fetch -> filter -> score
 
 Fetch only the companies just added (skip job boards on the first run to keep it
 fast), then filter and score:
 
 ```bash
-source ~/.zshrc 2>/dev/null && python3 -u scripts/fetch_vacancies.py --companies "{COMMA_SEPARATED_NAMES}" --no-boards 2>&1
-source ~/.zshrc 2>/dev/null && python3 scripts/filter_vacancies.py 2>&1
+python3 -u scripts/fetch_vacancies.py --companies "{COMMA_SEPARATED_NAMES}" --no-boards 2>&1
+python3 scripts/filter_vacancies.py 2>&1
 ```
 
 Scoring runs one Opus subagent per vacancy (see `/jobs-score`). For the first run,
@@ -150,7 +185,7 @@ score the unscored vacancies and save the results. Then regenerate the
 dashboard data:
 
 ```bash
-source ~/.zshrc 2>/dev/null && python3 scripts/fetch_vacancies.py --report-only 2>&1
+python3 scripts/fetch_vacancies.py --report-only 2>&1
 ```
 
 ## Step 5: Launch the local dashboard
