@@ -65,5 +65,5 @@ benchmarked with Claude models; other models work but calibration may differ.
   already commit at their logical checkpoints; if you call the DAL yourself
   (e.g. in a one-off script), commit before exit.
 - Run `python3 -m pytest tests/ -q` after changing pipeline code — the suite
-  runs offline. (`pytest` is not included in the easy-mode install; add it with
-  `pip install pytest` if needed.)
+  runs offline. (`pytest` and `pydantic` are not in the easy-mode install; add
+  them with `pip install pytest pydantic` to run the full suite.)

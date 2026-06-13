@@ -40,11 +40,13 @@ When LLM scoring has surfaced liked vacancies — `/jobs-apply` walks through th
    - Research: what to investigate, deadline
    - Network: who could be a contact
 
-5. Save decision and notes immediately after each vacancy (do not defer):
+5. Save the decision immediately after each vacancy (do not defer):
    ```python
-   triage.persist_decision(vacancy_id, status='to_apply', notes=...)
+   triage.update_status(vacancy_id, 'to_apply')   # one vacancy
+   # or, for several at once:
+   # triage.batch_update_statuses_and_commit({vac_id_1: 'to_apply', vac_id_2: 'skipped'})
    ```
-   Write to `triage/session-notes-{date}.md` via the Edit/Write tool after every single vacancy.
+   Keep free-text notes in `triage/session-notes-{date}.md` via the Edit/Write tool after every single vacancy.
 
 6. Save incrementally after every company (Step 1d) — prevents data loss if the session is interrupted.
 

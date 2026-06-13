@@ -1476,7 +1476,7 @@
 
         const first = body.querySelector("input, textarea, select");
         if (first) first.focus();
-        body.querySelectorAll("input").forEach((el) =>
+        body.querySelectorAll("input, select").forEach((el) =>
           el.addEventListener("keydown", (e) => {
             if (e.key === "Enter") {
               e.preventDefault();
