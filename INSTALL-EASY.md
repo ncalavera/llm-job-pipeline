@@ -84,6 +84,21 @@ pipeline creates `data/jobsearch.db` and its tables for you.
 > `Backend: local SQLite (...)` is what you want here. If you see
 > `Backend: Postgres (Supabase)`, stop and unset the variable.
 
+## 2b. Apply schema migrations
+
+The first time the pipeline runs it creates the database automatically. After
+that — and on every upgrade — apply any pending schema changes:
+
+```bash
+python3 scripts/migrate.py
+```
+
+This takes an automatic backup before touching anything and is safe to re-run
+(already-applied migrations are skipped). If nothing is pending, it prints
+"Up to date" and exits cleanly.
+
+Skip this on a brand-new clone — `/jobs-start` (next step) will do it for you.
+
 ## 3. One command: `/jobs-start`
 
 Open your agent in the repo and run (non-Claude agents: follow
@@ -105,6 +120,14 @@ It will:
 5. Launch the local dashboard and open it in your browser.
 
 That is the whole onboarding. No copy-pasting connection strings, no SQL.
+
+Without an agent? You can do step 2 by hand — copy the example profile and edit
+it — then add companies with `/jobs-add` (or its runbook):
+
+```bash
+cp config/user_profile.example.md config/user_profile.md
+# then edit config/user_profile.md to describe yourself
+```
 
 ## 4. Every day: `/jobs`
 

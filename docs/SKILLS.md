@@ -42,9 +42,10 @@ The quality gate between fetching and scoring:
 
 1. Loads unscored vacancies.
 2. Classifies by title blacklist, locations, descriptions.
-3. Geo deletion via `geo.py` buckets: USA-only, CIS in-person, and
-   rest-of-world postings are deleted before scoring (this replaced
-   location penalties inside the LLM score).
+3. Geography exclusion via profile hard filters: vacancies whose every
+   location falls in a country listed under `## HARD_FILTERS →
+   exclude_countries` in your profile are deleted before scoring. No
+   country is hardcoded — the list is empty by default (nothing dropped).
 4. Marks duplicates (exact and fuzzy by title).
 5. Deletes junk, leaves a ready set for scoring.
 6. If it spots recurring patterns, it suggests adding them to
@@ -86,7 +87,7 @@ Interactive archival of low-scoring unreviewed vacancies:
    `archived_hash` so boards can't re-import it.
 
 Previously archived vacancies can be restored with
-`vac mark <id> unseen`.
+`python3 scripts/vac.py mark <id> unseen`.
 
 ## `/jobs-apply` — deep review of liked vacancies
 
@@ -133,7 +134,8 @@ Drives `scripts/telegram_digest.py`:
   process per bot token may call getUpdates.
 
 Configuration is env-driven: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
-`SUPABASE_DB_URL` (see `.env.example`).
+and the database URL (see `.env.example`). `SUPABASE_DB_URL` selects the
+Postgres backend; leave it unset to target the local SQLite file instead.
 
 ## `/jobs-add` — a new company
 

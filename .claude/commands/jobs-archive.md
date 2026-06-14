@@ -92,7 +92,7 @@ If you archived something by mistake — nothing is deleted, `status = 'archived
 Restore a single vacancy:
 
 ```bash
-python3 scripts/vac.py mark <uuid> --status unseen
+python3 scripts/vac.py mark <uuid> unseen
 ```
 
 Restore multiple vacancies via SQL:

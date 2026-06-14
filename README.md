@@ -213,6 +213,24 @@ Runbooks live in `.claude/commands/` — slash commands in Claude Code, plain
 markdown runbooks for any other agent (see [AGENTS.md](AGENTS.md)). Full
 reference: [docs/SKILLS.md](docs/SKILLS.md).
 
+## Updating
+
+To update an existing install, run `/jobs-update` in your agent. It pulls the
+latest code, refreshes Python dependencies if needed, and applies pending DB
+migrations with an automatic backup.
+
+Manually:
+
+```bash
+git pull --ff-only
+pip install -r requirements.txt
+python3 scripts/migrate.py
+```
+
+`migrate.py` backs up before touching anything (SQLite file copy, Postgres
+`pg_dump`) and is safe to re-run — already-applied migrations are skipped. If
+there is nothing pending, it prints "Up to date" and exits.
+
 ## Documentation
 
 - [INSTALL.md](INSTALL.md) — agent-friendly install runbook

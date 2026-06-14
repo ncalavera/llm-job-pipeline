@@ -213,8 +213,8 @@ elif strategy == 'workday_api':
 elif strategy == 'firecrawl_scrape':
     jobs = fetch_firecrawl_scrape(org_name, config['url'])
 
-new_count = merge_vacancies(jobs, org_name)
-update_source_tracking(org_name)
+new_count = merge_vacancies(org_name, config.get('tier', 2), jobs)
+update_source_tracking(org_name, config.get('tier', 2), strategy, new_count)
 print(f'Merged: {new_count} new vacancies added to Supabase')
 "
 ```

@@ -110,11 +110,13 @@ array of objects:
 The `parse_location()` parser accepts any string and tries to extract the
 structure. Fields it can't extract stay `null`.
 
-For filtering, `geo.py` classifies each entry into a bucket
-(`uk` / `germany` / `europe` / `us` / `cis` / `other` / `unknown`) on the
-fly — country wins, then city, then free text. The pre-score filter deletes
-vacancies whose every location is a geo-delete vote (USA-only, CIS
-in-person, rest-of-world); geography therefore never reaches the LLM score.
+For filtering, `geo.py` classifies each entry into a display bucket
+(`uk` / `germany` / `europe` / `us` / `cis` / `other` / `unknown`) for the
+`--geo` CLI flag and dashboard facets. The pre-score filter (`hard_filters.py`)
+reads the `exclude_countries` list from the `## HARD_FILTERS` section of your
+user profile and deletes vacancies whose **every** location resolves to an
+excluded country — so geography never reaches the LLM score. No country is
+hardcoded; an empty profile list drops nothing.
 
 ## Vacancy statuses
 
@@ -135,7 +137,7 @@ Nine values:
 `status_updated_at` is updated automatically in the API endpoints. There is
 no SQL trigger — update it in code.
 
-## RLS
+## RLS (full mode — Supabase only)
 
 `schema.sql` leaves Row-Level Security **disabled**. The logic:
 
@@ -148,7 +150,7 @@ If you want to give someone direct access via the `anon` key, uncomment the
 `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` block at the end of
 `schema.sql`.
 
-## Egress
+## Egress (full mode — Supabase only)
 
 The Supabase free tier gives 2 GB of egress per month. A full vacancy
 description can be up to 50 KB. A batch of 5,000 vacancies is ~250 MB out.
@@ -157,9 +159,18 @@ If you hit the limit — `load_vacancies(light=True)` drops
 
 ## Migrations
 
-`schema.sql` is idempotent — `CREATE TABLE IF NOT EXISTS` and
-`CREATE INDEX IF NOT EXISTS` won't fail if the objects already exist. To
-change the schema on upgrade, add separate
-`ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...` statements in a new file
-`sql/migrations/00X_<name>.sql`. There is no dedicated migration system in
-this repo — the Supabase SQL Editor is the migration system.
+`schema.sql` (and `schema.sqlite.sql` for simple mode) are the frozen baseline
+schema — `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` so a fresh
+build never fails. Schema changes after the baseline live as numbered files under
+`sql/migrations/` and are applied by `scripts/migrate.py`.
+
+Run it after every `git pull`:
+
+```bash
+python3 scripts/migrate.py
+```
+
+It auto-backs up before touching anything (SQLite copy to `data/backups/`, Postgres
+`pg_dump`), and restores SQLite automatically on failure — the run is always a
+no-op if something goes wrong. It works for both backends; which one it talks to
+is controlled by `SUPABASE_DB_URL` (set = Postgres, unset = local SQLite).

@@ -4,10 +4,11 @@
 
 ```
 ATS / job boards ─┐
-                  ├─► fetch_vacancies.py ─► Supabase (vacancy / company)
+                  ├─► fetch_vacancies.py ─► Database (vacancy / company)
 Firecrawl scrape ─┘            │   └─ quality.py gate on every description write
-                               ▼
-                       filter_vacancies.py (mark junk, dedup, geo buckets)
+                               ▼                (SQLite in simple mode,
+                       filter_vacancies.py        Supabase in full mode)
+                       (mark junk, dedup, geo buckets)
                                │
                                ▼
                        score_vacancies.py  (Claude Opus subagents, pure fit)
@@ -17,14 +18,17 @@ Firecrawl scrape ─┘            │   └─ quality.py gate on every descrip
                                                                 │
                                                                 ▼
                                                        Vercel + Supabase API
+                                                       (full mode only)
                                                                 │
                                                                 ▼
                                                            Dashboard
 ```
 
-All data lives in Supabase — the single source of truth. Nothing is stored
-locally: the machine holds only the code plus the Firecrawl cache
-(`.firecrawl/`, gitignored).
+All data lives in the database — the single source of truth. In simple mode
+that is a local SQLite file (`data/jobsearch.db`); in full mode it is a hosted
+Supabase Postgres. Set `SUPABASE_DB_URL` for Postgres; leave it unset for the
+auto-created SQLite file. The machine holds only the code plus the Firecrawl
+cache (`.firecrawl/`, gitignored).
 
 ## Modules
 
@@ -126,7 +130,7 @@ statuses (`liked`, `to_apply`, `applied`, …) are never touched.
 For one vacancy, scoring works like this:
 
 1. `score_vacancies.py --local --limit N` — pulls the first `N` unscored
-   vacancies from Supabase and prints them to stdout as JSON. By default it
+   vacancies from the database and prints them to stdout as JSON. By default it
    also rescues a capped batch of strong vacancies from *candidate*
    (not-yet-reviewed) companies, so a forgotten company's good role still
    gets scored (`--no-candidates` disables this).
@@ -145,9 +149,11 @@ drift.
 **Pure-fit scoring (prompt v4.0):** geography, relocation, and
 visa/work-authorisation considerations are excluded from the LLM score
 entirely. The score reflects only role fit, mission fit, and seniority fit.
-Geography is enforced earlier, by the pre-score filter
-(`filter_vacancies.py` deletes USA-only / CIS-in-person / rest-of-world
-postings using the `geo.py` buckets).
+Geography is enforced earlier, by the pre-score filter: `filter_vacancies.py`
+reads `exclude_countries` from the `## HARD_FILTERS` section of your user
+profile and deletes vacancies whose every location resolves to one of those
+countries, before any vacancy reaches the LLM. The list is empty by default
+(nothing dropped); `geo.py` buckets are display/filter labels only.
 
 ## Dashboard
 
@@ -158,8 +164,8 @@ The frontend is static files on Vercel:
 - `public/modules/*.js` — UI modules (catalog, companies, pipeline, stats,
   archive, helpers, api, state).
 - `public/data.js` — a snapshot of all vacancies and companies, generated
-  from Supabase (including `archived_groups` for the read-only Archive
-  tab).
+  from the database (including `archived_groups` for the read-only Archive
+  tab; full mode only — simple mode serves this from the local dashboard).
 - `api/*.js` — Vercel serverless endpoints for real-time status updates.
 
 On load the dashboard reads `data.js` (fast render), then fetches fresh

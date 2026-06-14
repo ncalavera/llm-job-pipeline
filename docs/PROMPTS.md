@@ -16,8 +16,10 @@ Geography, relocation, remote policy, and visa / work-authorisation
 considerations are excluded from the score and from the
 `hard_requirements` field — the score reflects only role fit, mission fit,
 and seniority fit. Geography is enforced earlier by the pre-score filter
-(`filter_vacancies.py` + `geo.py` buckets), which deletes USA-only,
-CIS-in-person, and rest-of-world postings before they ever reach the LLM.
+(`filter_vacancies.py` + `hard_filters.py`), which deletes vacancies whose
+every location is in a country you listed under `exclude_countries` in the
+`## HARD_FILTERS` section of your profile — before they ever reach the LLM.
+No country is hardcoded; the list is empty by default.
 
 If you add location rules back into the prompt, remember the filter will
 double-penalize — pick one layer.

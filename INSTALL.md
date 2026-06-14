@@ -47,6 +47,19 @@ pip install -r requirements.txt
    `vacancy`) and indexes.
 3. Copy the connection string: **Project Settings → Database → Session pooler**.
 
+## 3b. Apply schema migrations
+
+After creating the database (step 3), apply any pending schema changes:
+
+```bash
+python3 scripts/migrate.py
+```
+
+`migrate.py` reads `SUPABASE_DB_URL` from your environment (or `.env` once
+you fill it in step 4) to pick the right backend — run it after step 4 if
+you haven't set the env var yet. It takes an automatic backup before any
+change and is safe to re-run; already-applied migrations are skipped.
+
 ## 4. Configure environment
 
 ```bash
