@@ -17,6 +17,23 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+
+def build_parser() -> argparse.ArgumentParser:
+    """Construct the CLI parser. Defined before the heavy project imports so
+    ``--help`` / ``-h`` prints usage without connecting to the database or
+    loading the user profile (those happen only when a real command runs)."""
+    parser = argparse.ArgumentParser(description="Filter unscored vacancies")
+    parser.add_argument("--delete-ids", type=str, help="Comma-separated IDs to archive and remove")
+    parser.add_argument("--suggest-blacklist", action="store_true", help="Analyze deleted patterns")
+    parser.add_argument("--dedup", action="store_true", help="Run dedup pre-step: clean exact hash dupes + find fuzzy dupes")
+    return parser
+
+
+# Print help and exit BEFORE importing anything that touches the DB or profile.
+from cli_help import wants_help
+if __name__ == "__main__" and wants_help():
+    build_parser().parse_args()
+
 from config import (
     COMPANIES, VACANCIES_DIR, GLOBAL_BLACKLIST,
     EXCLUDE_COUNTRIES, resolve_canonical_name,
@@ -1138,11 +1155,7 @@ def suggest_blacklist() -> dict:
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Filter unscored vacancies")
-    parser.add_argument("--delete-ids", type=str, help="Comma-separated IDs to archive and remove")
-    parser.add_argument("--suggest-blacklist", action="store_true", help="Analyze deleted patterns")
-    parser.add_argument("--dedup", action="store_true", help="Run dedup pre-step: clean exact hash dupes + find fuzzy dupes")
-    args = parser.parse_args()
+    args = build_parser().parse_args()
 
     from db_backend import print_backend_banner
     print_backend_banner()

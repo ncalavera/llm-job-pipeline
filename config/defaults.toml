@@ -15,6 +15,17 @@
 # documented neutral default and never crashes.
 
 # ===========================================================================
+# Dashboard — visual style of the generated public dashboard.
+# ===========================================================================
+[dashboard]
+# Two styles only:
+#   "illustrated" — full visuals: companion + accent illustrations (default).
+#   "minimal"     — hides decorative illustrations for a clean, plain look.
+# Env DASHBOARD_STYLE=illustrated|minimal overrides this. Any other value
+# falls back to "illustrated".
+style = "illustrated"
+
+# ===========================================================================
 # Numeric thresholds — scoring, tiers, auto-archive, auto-review.
 # ===========================================================================
 [thresholds]

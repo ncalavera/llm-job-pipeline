@@ -16,6 +16,59 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+
+def build_parser(handlers: dict | None = None) -> argparse.ArgumentParser:
+    """Construct the CLI parser. Defined before the heavy project imports so
+    ``--help`` / ``-h`` prints usage without connecting to the database or
+    loading the user profile. ``handlers`` maps each subcommand to its function
+    (only needed when actually dispatching; for ``--help`` it may be omitted)."""
+    h = handlers or {}
+    parser = argparse.ArgumentParser(prog="vac", description="KISS vacancy triage from the terminal.")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_list = sub.add_parser("list", help="List vacancies with filters.")
+    p_list.add_argument("--status", help="Filter by status: unseen, liked, passed, to_apply…")
+    p_list.add_argument("--min-score", type=int, help="Minimum LLM score.")
+    p_list.add_argument("--tier", help="Filter by company tier (S/A/B/C).")
+    p_list.add_argument("--org", help="Filter by company-name substring.")
+    p_list.add_argument("--limit", type=int, help="How many rows to show.")
+    p_list.add_argument("--sort", choices=["score", "recent", "company"], default="score")
+    p_list.add_argument("--include-candidates", action="store_true", help="Show vacancies from non-approved companies.")
+    p_list.add_argument("--geo", help="Geo buckets, comma-separated: uk,germany,europe,us,cis,other,unknown. Shows vacancies with at least one location in the chosen buckets.")
+    if "list" in h:
+        p_list.set_defaults(func=h["list"])
+
+    p_show = sub.add_parser("show", help="Details of a single vacancy.")
+    p_show.add_argument("id", help="UUID prefix (at least 4 chars).")
+    p_show.add_argument("--full", action="store_true", help="Show full_description.")
+    if "show" in h:
+        p_show.set_defaults(func=h["show"])
+
+    p_mark = sub.add_parser("mark", help="Change a vacancy's status.")
+    p_mark.add_argument("id", help="UUID prefix.")
+    p_mark.add_argument("status", help="New status (liked, passed, to_apply, applied, …)")
+    if "mark" in h:
+        p_mark.set_defaults(func=h["mark"])
+
+    p_open = sub.add_parser("open", help="Open the vacancy link in the browser.")
+    p_open.add_argument("id", help="UUID prefix.")
+    if "open" in h:
+        p_open.set_defaults(func=h["open"])
+
+    p_co = sub.add_parser("companies", help="List companies.")
+    p_co.add_argument("--status", help="Filter by status: active / candidate / inactive.")
+    p_co.add_argument("--limit", type=int, default=50)
+    if "companies" in h:
+        p_co.set_defaults(func=h["companies"])
+
+    return parser
+
+
+# Print help and exit BEFORE importing anything that touches the DB or profile.
+from cli_help import wants_help
+if __name__ == "__main__" and wants_help():
+    build_parser().parse_args()
+
 from database_supabase import (
     get_conn,
     load_vacancies,
@@ -143,7 +196,17 @@ def cmd_list(args):
         rows.sort(key=lambda r: (r[1].get("org") or "").lower())
 
     if not rows:
-        print("Nothing found.")
+        if not vacancies:
+            # Empty database (or no rows for this status) — point at the
+            # pipeline's first action instead of a dead end.
+            print("No vacancies yet.")
+            print("  Fetch some first: /jobs-fetch (or python3 scripts/fetch_vacancies.py)")
+            print("  No companies tracked yet? Run /jobs-start to discover the first ones,")
+            print("  or /jobs-add to add a company by name.")
+        else:
+            # Rows exist but every one was filtered out.
+            print("No vacancies match these filters. Loosen --status / --min-score / "
+                  "--tier / --org / --geo, or run /jobs-fetch for fresh listings.")
         return
 
     width = _term_width()
@@ -276,7 +339,13 @@ def cmd_companies(args):
     cur.close()
 
     if not rows:
-        print("Nothing found.")
+        if args.status:
+            print(f"No companies with status '{args.status}'. "
+                  "Drop --status to see all tracked companies.")
+        else:
+            print("No companies tracked yet.")
+            print("  Run /jobs-start to discover your first companies,")
+            print("  or /jobs-add to add a company by name.")
         return
 
     print(_ansi("1", f"{'Company':<32} {'Tier':<5} {'Align':>5}  {'Status':<10} {'Triaged':>10}"))
@@ -290,39 +359,13 @@ def cmd_companies(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="vac", description="KISS vacancy triage from the terminal.")
-    sub = parser.add_subparsers(dest="cmd", required=True)
-
-    p_list = sub.add_parser("list", help="List vacancies with filters.")
-    p_list.add_argument("--status", help="Filter by status: unseen, liked, passed, to_apply…")
-    p_list.add_argument("--min-score", type=int, help="Minimum LLM score.")
-    p_list.add_argument("--tier", help="Filter by company tier (S/A/B/C).")
-    p_list.add_argument("--org", help="Filter by company-name substring.")
-    p_list.add_argument("--limit", type=int, help="How many rows to show.")
-    p_list.add_argument("--sort", choices=["score", "recent", "company"], default="score")
-    p_list.add_argument("--include-candidates", action="store_true", help="Show vacancies from non-approved companies.")
-    p_list.add_argument("--geo", help="Geo buckets, comma-separated: uk,germany,europe,us,cis,other,unknown. Shows vacancies with at least one location in the chosen buckets.")
-    p_list.set_defaults(func=cmd_list)
-
-    p_show = sub.add_parser("show", help="Details of a single vacancy.")
-    p_show.add_argument("id", help="UUID prefix (at least 4 chars).")
-    p_show.add_argument("--full", action="store_true", help="Show full_description.")
-    p_show.set_defaults(func=cmd_show)
-
-    p_mark = sub.add_parser("mark", help="Change a vacancy's status.")
-    p_mark.add_argument("id", help="UUID prefix.")
-    p_mark.add_argument("status", help="New status (liked, passed, to_apply, applied, …)")
-    p_mark.set_defaults(func=cmd_mark)
-
-    p_open = sub.add_parser("open", help="Open the vacancy link in the browser.")
-    p_open.add_argument("id", help="UUID prefix.")
-    p_open.set_defaults(func=cmd_open)
-
-    p_co = sub.add_parser("companies", help="List companies.")
-    p_co.add_argument("--status", help="Filter by status: active / candidate / inactive.")
-    p_co.add_argument("--limit", type=int, default=50)
-    p_co.set_defaults(func=cmd_companies)
-
+    parser = build_parser({
+        "list": cmd_list,
+        "show": cmd_show,
+        "mark": cmd_mark,
+        "open": cmd_open,
+        "companies": cmd_companies,
+    })
     args = parser.parse_args()
     args.func(args)
 

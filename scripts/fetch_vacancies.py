@@ -29,6 +29,44 @@ import subprocess
 import sys
 from datetime import datetime, date, timezone
 
+
+def build_parser() -> argparse.ArgumentParser:
+    """Construct the CLI parser. Defined before the heavy project imports so
+    ``--help`` / ``-h`` prints usage without connecting to the database or
+    loading the user profile (those happen only when a real command runs)."""
+    parser = argparse.ArgumentParser(description="Fetch job vacancies from configured sources")
+    parser.add_argument("--free-only", action="store_true",
+                        help="Only fetch from Greenhouse orgs (no Firecrawl credits)")
+    parser.add_argument("--report-only", action="store_true",
+                        help="Regenerate the dashboard data (public/data.js) from the database")
+    parser.add_argument("--list-manual", action="store_true",
+                        help="Print manual-check companies and exit (no fetching)")
+    parser.add_argument("--companies", type=str, default="",
+                        help="Comma-separated company names (case-insensitive, alias-aware)")
+    parser.add_argument("--strategy", type=str, default="",
+                        help="Fetch only companies using this ATS strategy")
+    parser.add_argument("--force-all", action="store_true",
+                        help="Fetch ALL companies (ignore TTL cooldown)")
+    parser.add_argument("--tier", type=str, default="",
+                        help="Fetch only companies of this calculated tier (S, A, B, C)")
+    parser.add_argument("--boards-only", action="store_true",
+                        help="Fetch only job boards, skip companies")
+    parser.add_argument("--no-boards", action="store_true",
+                        help="Skip job boards, fetch companies only")
+    parser.add_argument("--include-paused", action="store_true",
+                        help="Include paused companies in fetch")
+    parser.add_argument("--auto-score", action="store_true",
+                        help="Auto-run filter + score after fetch (if new vacancies found)")
+    parser.add_argument("--auto-score-limit", type=int, default=50,
+                        help="Max vacancies to auto-score (default: 50)")
+    return parser
+
+
+# Print help and exit BEFORE importing anything that touches the DB or profile.
+from cli_help import wants_help
+if __name__ == "__main__" and wants_help():
+    build_parser().parse_args()
+
 from config import (
     COMPANIES, JOB_BOARDS, REPORT_PATH, VACANCIES_DIR,
     PUBLIC_DIR, FETCH_LOG_DIR, resolve_canonical_name,
@@ -236,31 +274,7 @@ def _filter_companies(args) -> dict:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Fetch job vacancies from configured sources")
-    parser.add_argument("--free-only", action="store_true",
-                        help="Only fetch from Greenhouse orgs (no Firecrawl credits)")
-    parser.add_argument("--report-only", action="store_true",
-                        help="Regenerate HTML report from Supabase")
-    parser.add_argument("--list-manual", action="store_true",
-                        help="Print manual-check companies and exit (no fetching)")
-    parser.add_argument("--companies", type=str, default="",
-                        help="Comma-separated company names (case-insensitive, alias-aware)")
-    parser.add_argument("--strategy", type=str, default="",
-                        help="Fetch only companies using this ATS strategy")
-    parser.add_argument("--force-all", action="store_true",
-                        help="Fetch ALL companies (ignore TTL cooldown)")
-    parser.add_argument("--tier", type=str, default="",
-                        help="Fetch only companies of this calculated tier (S, A, B, C)")
-    parser.add_argument("--boards-only", action="store_true",
-                        help="Fetch only job boards, skip companies")
-    parser.add_argument("--no-boards", action="store_true",
-                        help="Skip job boards, fetch companies only")
-    parser.add_argument("--include-paused", action="store_true",
-                        help="Include paused companies in fetch")
-    parser.add_argument("--auto-score", action="store_true",
-                        help="Auto-run filter + score after fetch (if new vacancies found)")
-    parser.add_argument("--auto-score-limit", type=int, default=50,
-                        help="Max vacancies to auto-score (default: 50)")
+    parser = build_parser()
     args = parser.parse_args()
 
     if args.boards_only and args.no_boards:
@@ -295,7 +309,13 @@ def main():
         if args.boards_only:
             print("\nSkipping companies (--boards-only mode)")
         elif not filtered:
-            print("\nNo companies match the given filters.")
+            if not COMPANIES:
+                print("\nNo companies tracked yet — nothing to fetch.")
+                print("  Run /jobs-start to discover your first companies,")
+                print("  or /jobs-add to add a company by name.")
+            else:
+                print("\nNo companies match these filters. "
+                      "Relax --companies / --strategy / --tier, or drop them to fetch all.")
         else:
             print(f"\nFetching vacancies from {len(filtered)}/{len(COMPANIES)} organizations...\n")
 

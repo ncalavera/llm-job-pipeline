@@ -50,42 +50,42 @@ function renderTriageFunnel(funnelEl, metrics) {
   const stages = [
     {
       key: "base_total",
-      label: "\u0412 \u0431\u0430\u0437\u0435",
+      label: "In database",
       count: metrics.base_total,
-      hint: "\u0432\u0441\u0435\u0433\u043E \u0432\u0430\u043A\u0430\u043D\u0441\u0438\u0439",
+      hint: "all vacancies",
       scrollTo: "",
     },
     {
       key: "liked_queue",
-      label: "\u041B\u0430\u0439\u043A\u043D\u0443\u0442\u043E",
+      label: "Liked",
       count: metrics.liked_queue,
-      hint: "\u043E\u0447\u0435\u0440\u0435\u0434\u044C \u043D\u0430 triage",
+      hint: "queued for triage",
       scrollTo: "liked",
     },
     {
       key: "triaged_total",
-      label: "\u041F\u0440\u043E\u0448\u043B\u0438 /triage",
+      label: "Triaged",
       count: metrics.triaged_total,
-      hint: "review \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D",
+      hint: "review done",
       scrollTo: "to_apply",
     },
     {
       key: "in_work",
-      label: "\u0412 \u0440\u0430\u0431\u043E\u0442\u0435",
+      label: "In progress",
       count: metrics.in_work,
       hint: "apply + research + network",
       scrollTo: "to_apply",
     },
     {
       key: "applied_total",
-      label: "\u041F\u043E\u0434\u0430\u043D\u043E",
+      label: "Applied",
       count: metrics.applied_total,
-      hint: "\u0433\u043E\u0442\u043E\u0432\u044B\u0435 \u0437\u0430\u044F\u0432\u043A\u0438",
+      hint: "submitted applications",
       scrollTo: "applied",
     },
     {
       key: "rejected_total",
-      label: "\u041E\u0442\u043A\u0438\u043D\u0443\u0442\u044B\u0435",
+      label: "Passed",
       count: metrics.rejected_total,
       hint: "catalog + triage",
       scrollTo: "",
@@ -191,7 +191,7 @@ function buildTriageCard(g, col, review) {
       (g.org_color ? g.org_color[0] : "var(--coral)") +
       '" data-company-slug="' +
       escHtml(g.company_slug) +
-      '" title="\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u0430\u0440\u0442\u043E\u0447\u043A\u0443 \u043A\u043E\u043C\u043F\u0430\u043D\u0438\u0438">' +
+      '" title="Open company card">' +
       escHtml(g.org) +
       "</button>"
     : '<div class="pipe-card-org" style="color:' +
@@ -203,7 +203,7 @@ function buildTriageCard(g, col, review) {
   const titleHtml = firstUrl
     ? '<a class="pipe-card-title-link" href="' +
       escHtml(firstUrl) +
-      '" target="_blank" rel="noopener" title="\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0432\u043D\u0435\u0448\u043D\u044E\u044E \u0432\u0430\u043A\u0430\u043D\u0441\u0438\u044E">' +
+      '" target="_blank" rel="noopener" title="Open external vacancy">' +
       escHtml(g.title) +
       "</a>"
     : escHtml(g.title);
@@ -211,7 +211,7 @@ function buildTriageCard(g, col, review) {
   const openLinkHtml = firstUrl
     ? '<div class="pipe-card-actions"><a class="pipe-card-open-link" href="' +
       escHtml(firstUrl) +
-      '" target="_blank" rel="noopener">\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u2197</a></div>'
+      '" target="_blank" rel="noopener">Open \u2197</a></div>'
     : "";
 
   return (
@@ -327,7 +327,7 @@ export function renderPipeline() {
     board.innerHTML =
       '<div class="pipeline-empty">' +
       '<div class="pipeline-empty-icon">\uD83D\uDCCB</div>' +
-      "<p>\u0422\u0440\u0438\u0430\u0436 \u043F\u0443\u0441\u0442. \u041B\u0430\u0439\u043A\u043D\u0438\u0442\u0435 \u0432\u0430\u043A\u0430\u043D\u0441\u0438\u0438 \u0432 \u041A\u0430\u0442\u0430\u043B\u043E\u0433\u0435 \u0438 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 <code>/triage</code>.</p>" +
+      "<p>Triage is empty. Like vacancies in the Catalog and run <code>/triage</code>.</p>" +
       "</div>";
     return;
   }

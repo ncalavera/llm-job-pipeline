@@ -18,6 +18,42 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+MAX_TOKENS = 2000
+BILLING_ABORT_THRESHOLD = 5
+
+# Default parallelism for the API backend.
+MAX_CONCURRENT = 3
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Construct the CLI parser. Defined before the heavy project imports so
+    ``--help`` / ``-h`` prints usage without connecting to the database or
+    loading the user profile (those happen only when a real command runs)."""
+    parser = argparse.ArgumentParser(description="Company scoring")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--api", action="store_true", help="Anthropic API")
+    mode.add_argument("--local", action="store_true", help="JSON → stdout for subagents")
+    mode.add_argument("--save", action="store_true", help="stdin JSON → DB (internal)")
+
+    parser.add_argument("--limit", type=int)
+    parser.add_argument("--company", type=str, help="Specific companies (comma-separated)")
+    parser.add_argument("--model", type=str)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--max-workers", type=int, default=MAX_CONCURRENT)
+    parser.add_argument("--no-auto-review", action="store_true",
+                        help="Skip auto_review_candidates() — scored companies stay 'candidate'")
+    return parser
+
+
+# Print help and exit BEFORE importing anything that touches the DB or profile.
+from cli_help import wants_help
+if __name__ == "__main__" and wants_help():
+    build_parser().parse_args()
+
 # Redirect stdout → stderr during imports so db_conn diagnostics don't pollute
 # JSON output in --prepare mode
 _real_stdout = sys.stdout
@@ -32,16 +68,6 @@ from prompts import (  # noqa: E402
 )
 
 sys.stdout = _real_stdout
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-MAX_TOKENS = 2000
-BILLING_ABORT_THRESHOLD = 5
-
-# Default parallelism for the API backend.
-MAX_CONCURRENT = 3
 
 # Placeholder values to sanitize from LLM output
 _PLACEHOLDER_VALUES = {
@@ -621,21 +647,7 @@ def cmd_api(args):
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Company scoring")
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--api", action="store_true", help="Anthropic API")
-    mode.add_argument("--local", action="store_true", help="JSON → stdout for subagents")
-    mode.add_argument("--save", action="store_true", help="stdin JSON → DB (internal)")
-
-    parser.add_argument("--limit", type=int)
-    parser.add_argument("--company", type=str, help="Specific companies (comma-separated)")
-    parser.add_argument("--model", type=str)
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--max-workers", type=int, default=MAX_CONCURRENT)
-    parser.add_argument("--no-auto-review", action="store_true",
-                        help="Skip auto_review_candidates() — scored companies stay 'candidate'")
-
-    args = parser.parse_args()
+    args = build_parser().parse_args()
 
     if args.api:
         cmd_api(args)

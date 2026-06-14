@@ -5,6 +5,7 @@
 import {
   state,
   API_BASE,
+  config,
   companiesBySlug,
   on,
   emit,
@@ -48,6 +49,17 @@ import { initArchive, renderArchive } from "./modules/archive.js";
 // ---------------------------------------------------------------------------
 
 initUI();
+
+// ---------------------------------------------------------------------------
+// Dashboard style — "illustrated" (default) or "minimal".
+// Drives CSS via body[data-dashboard-style]; baked into data.js by the generator.
+// ---------------------------------------------------------------------------
+
+(function applyDashboardStyle() {
+  var style = (config && config.dashboard_style) || "illustrated";
+  if (style !== "illustrated" && style !== "minimal") style = "illustrated";
+  document.body.dataset.dashboardStyle = style;
+})();
 
 // ---------------------------------------------------------------------------
 // Event wiring — statusChanged triggers save, toast, re-render

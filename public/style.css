@@ -47,6 +47,7 @@ body {
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
   position: relative;
+  overflow-x: hidden; /* guard against horizontal scroll on narrow viewports */
 }
 
 body::after {
@@ -104,26 +105,6 @@ body::after {
   padding: 24px 24px 96px;
   position: relative;
   z-index: 1;
-}
-
-/* --- Scoring feed bar (always visible, compact) --- */
-.scoring-feed-bar {
-  text-align: center;
-  padding: 6px 16px;
-  font-family: "JetBrains Mono", monospace;
-  font-size: var(--text-xs);
-  color: var(--muted);
-  background: var(--surface);
-  border-bottom: 1px solid color-mix(in srgb, var(--text) 6%, transparent);
-}
-
-.feed-count {
-  font-weight: 700;
-  color: var(--emerald);
-}
-
-.feed-entry {
-  white-space: nowrap;
 }
 
 /* --- Filters --- */
@@ -706,8 +687,8 @@ body::after {
   }
 }
 
-/* --- Grim Fandango companion illustrations --- */
-/* Main character: top-right corner */
+/* --- Companion illustrations (decorative; hidden in the minimal style) --- */
+/* Companion: top-right corner */
 .gf-companion {
   position: fixed;
   top: 72px;
@@ -776,6 +757,14 @@ body::after {
   }
 }
 
+/* --- Minimal dashboard style: drop decorative illustrations --- */
+/* Set via document.body.dataset.dashboardStyle = "minimal" on load. */
+body[data-dashboard-style="minimal"] .gf-companion,
+body[data-dashboard-style="minimal"] .gf-accent,
+body[data-dashboard-style="minimal"] .loading-illus {
+  display: none;
+}
+
 /* --- Mode toggle (used in top-nav) --- */
 .mode-toggle {
   display: inline-flex;
@@ -783,6 +772,17 @@ body::after {
   border-radius: 9999px;
   padding: 3px;
   gap: 2px;
+  /* Never push the page wider than the viewport: shrink, then scroll. */
+  max-width: 100%;
+  min-width: 0; /* allow this flex item to shrink below content width */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.mode-toggle::-webkit-scrollbar {
+  display: none;
+}
+.mode-btn {
+  white-space: nowrap;
 }
 
 .mode-btn {
@@ -825,7 +825,6 @@ body::after {
   position: relative;
 }
 
-/* (calavera watermark removed — replaced by Grim Fandango companions) */
 .list-section {
   display: block;
 }
@@ -1318,6 +1317,19 @@ body::after {
 .catalog-empty-icon {
   font-size: var(--text-2xl);
   margin-bottom: 12px;
+}
+
+.catalog-empty-hint {
+  margin-top: 8px;
+  font-size: var(--text-sm);
+  opacity: 0.85;
+}
+.catalog-empty code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.9em;
+  background: var(--surface);
+  padding: 1px 5px;
+  border-radius: 4px;
 }
 
 /* --- Responsive --- */
@@ -3344,13 +3356,13 @@ body::after {
 .catalog-loading.hidden {
   animation: loadingFadeOut 0.4s ease-out forwards;
 }
-.loading-manny {
+.loading-illus {
   width: 180px;
   border-radius: 20px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
   animation:
     gf-float 4s ease-in-out infinite,
-    mannyPulse 2s ease-in-out infinite;
+    loadingPulse 2s ease-in-out infinite;
 }
 .loading-text {
   font-size: var(--text-lg);
@@ -3358,7 +3370,7 @@ body::after {
   font-weight: 500;
   letter-spacing: 0.02em;
 }
-@keyframes mannyPulse {
+@keyframes loadingPulse {
   0%,
   100% {
     filter: drop-shadow(0 0 0px transparent);
@@ -3388,7 +3400,7 @@ body::after {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .loading-manny {
+  .loading-illus {
     animation: none;
   }
   .catalog-loading.hidden {

@@ -635,8 +635,7 @@ function showReviewComplete() {
   if (statsEl) {
     var banner = document.createElement("div");
     banner.className = "ces-review-complete";
-    banner.textContent =
-      "\u2705 \u0412\u0441\u0435 \u043A\u043E\u043C\u043F\u0430\u043D\u0438\u0438 \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D\u044B!";
+    banner.textContent = "\u2705 All companies reviewed!";
     statsEl.parentNode.insertBefore(banner, statsEl.nextSibling);
     setTimeout(function () {
       banner.remove();
@@ -699,7 +698,7 @@ export function renderCompanies() {
 
   if (filtered.length === 0) {
     grid.innerHTML =
-      '<div class="company-empty">\uD83C\uDFE2 \u041D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E</div>';
+      '<div class="company-empty">\uD83C\uDFE2 Nothing found</div>';
     return;
   }
 
@@ -1234,26 +1233,26 @@ function buildVacancyListHtml(c, opts) {
           id +
           "'," +
           mids +
-          ',\'liked\')" title="\u041D\u0440\u0430\u0432\u0438\u0442\u0441\u044F">\uD83D\uDC4D</button>' +
+          ',\'liked\')" title="Like">\uD83D\uDC4D</button>' +
           '<button class="thumb-btn pass" onclick="event.stopPropagation();companyVacancyAction(\'' +
           id +
           "'," +
           mids +
-          ',\'passed\')" title="\u041F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C">\uD83D\uDC4E</button>';
+          ',\'passed\')" title="Pass">\uD83D\uDC4E</button>';
       } else if (status === "liked") {
         actionBtn =
           '<button class="thumb-btn pass" onclick="event.stopPropagation();companyVacancyAction(\'' +
           id +
           "'," +
           mids +
-          ',\'passed\')" title="\u041E\u0442\u043A\u0438\u043D\u0443\u0442\u044C">\uD83D\uDC4E</button>';
+          ',\'passed\')" title="Pass">\uD83D\uDC4E</button>';
       } else {
         actionBtn =
           '<button class="thumb-btn like" onclick="event.stopPropagation();companyVacancyAction(\'' +
           id +
           "'," +
           mids +
-          ',\'liked\')" title="\u0412 \u0438\u0437\u0431\u0440\u0430\u043D\u043D\u043E\u0435">\uD83D\uDC4D</button>';
+          ',\'liked\')" title="Like">\uD83D\uDC4D</button>';
       }
     }
 
@@ -1514,7 +1513,7 @@ function buildVacanciesSection(c) {
     '<div class="cp-status-bar" style="margin-bottom:16px">' +
     '<span class="cp-stat cp-stat-vacancies"><span class="cp-stat-icon">\uD83D\uDCBC</span> ' +
     c.vacancy_count +
-    " \u0432\u0430\u043A\u0430\u043D\u0441\u0438\u0439</span>" +
+    " vacancies</span>" +
     (counts.liked > 0
       ? '<span class="cp-stat cp-stat-liked"><span class="cp-stat-icon">\uD83D\uDC9A</span> ' +
         counts.liked +
@@ -1672,7 +1671,7 @@ function buildCompanyProfilePage(c) {
   var catalogBtn =
     '<button class="company-view-catalog-btn" onclick="viewOrgInCatalog(\'' +
     escHtml(c.name) +
-    "')\">\u2192 \u0412\u0430\u043A\u0430\u043D\u0441\u0438\u0438</button>";
+    "')\">\u2192 Vacancies</button>";
 
   // Review banner for pending companies
   var reviewSt = _getReviewStatus(c);

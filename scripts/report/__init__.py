@@ -1,19 +1,47 @@
-"""Dashboard assembler — generates data.js + index.html shell."""
+"""Dashboard assembler — generates data.js only.
+
+The ``public/index.html`` shell is a static, hand-maintained, version-controlled
+file. Generation NEVER rewrites it (doing so reintroduced stale copy and dirtied
+git on every run). This module only regenerates ``public/data.js``.
+"""
 
 import json
 import os
-import urllib.parse
 
-from .assets import FAVICON_SVG
-from .data_prep import prepare_report_data, prepare_company_data, prepare_triage_data, prepare_scoring_feed, prepare_archived_data
+from .data_prep import prepare_report_data, prepare_company_data, prepare_triage_data, prepare_archived_data
 
 from config import PUBLIC_DIR, resolve_canonical_name
 
 
+# Two supported dashboard styles. Public, owner-agnostic labels only.
+_DASHBOARD_STYLES = ("illustrated", "minimal")
+
+
+def _resolve_dashboard_style() -> str:
+    """Pick the dashboard style: env DASHBOARD_STYLE overrides config default.
+
+    Falls back to ``illustrated`` when unset or invalid.
+    """
+    env = (os.environ.get("DASHBOARD_STYLE") or "").strip().lower()
+    if env in _DASHBOARD_STYLES:
+        return env
+
+    try:
+        import settings
+        cfg = settings.load_defaults().get("dashboard", {})
+        style = str(cfg.get("style", "illustrated")).strip().lower()
+        if style in _DASHBOARD_STYLES:
+            return style
+    except Exception:
+        pass
+    return "illustrated"
+
+
 def generate_dashboard(db: dict = None) -> None:
-    """Generate the vacancy dashboard: data.js + index.html.
+    """Generate the vacancy dashboard data file: ``public/data.js``.
 
     Loads all data from Supabase. db param is accepted but ignored (backward compat).
+    The ``index.html`` shell is static and intentionally NOT written here.
     """
     data = prepare_report_data()
     groups = data["groups"]
@@ -90,6 +118,7 @@ def generate_dashboard(db: dict = None) -> None:
         "config": {
             "last_updated": datetime.now().isoformat(timespec="seconds"),
             "api_base": "",  # Vercel uses relative paths
+            "dashboard_style": _resolve_dashboard_style(),
         },
         "stats": stats,
         "enrichment_stats": enrichment_stats,
@@ -108,188 +137,4 @@ def generate_dashboard(db: dict = None) -> None:
         f.write("// Auto-generated \u2014 DO NOT EDIT\n")
         f.write(f"var VACANCY_DATA = {payload_json};\n")
 
-    # --- Write index.html ---
-    favicon_data_uri = "data:image/svg+xml," + urllib.parse.quote(FAVICON_SVG.strip())
-
-    total_roles = stats["total_roles"]
-    relevant = stats["relevant"]
-    with_comp = stats["with_comp"]
-    europe_count = stats["europe_count"]
-    last_updated = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-    # --- Scoring feed (compact horizontal bar) ---
-    scoring_feed = prepare_scoring_feed()
-    scoring_feed_html = ""
-    if scoring_feed:
-        items = " &middot; ".join(
-            f'<span class="feed-entry"><span class="feed-count">+{s["count"]}</span> ({s["display"]})</span>'
-            for s in scoring_feed
-        )
-        scoring_feed_html = f'\n<div class="scoring-feed-bar">&#9889; {items}</div>'
-
-    html = f'''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Job Vacancy Dashboard</title>
-<link rel="icon" type="image/svg+xml" href="{favicon_data_uri}">
-<link href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
-</head>
-<body>
-<nav class="top-nav">
-  <div class="top-nav-brand">Job Vacancies</div>
-  <div class="mode-toggle">
-    <button class="mode-btn" id="modeCompanies" onclick="switchMode('companies')">&#9881; Companies</button>
-    <button class="mode-btn" id="modeCatalog" onclick="switchMode('catalog')">&#9636; Vacancies</button>
-    <button class="mode-btn" id="modePipeline" onclick="switchMode('pipeline')">&#9654; Triage</button>
-    <button class="mode-btn" id="modeStats" onclick="switchMode('stats')">&#128205; Geo</button>
-    <button class="mode-btn" id="modeArchive" onclick="switchMode('archive')">&#128230; Archive</button>
-  </div>
-  <div class="top-nav-right">
-    <span class="hero-date" id="heroDate">Updated: {last_updated}</span>
-  </div>
-</nav>{scoring_feed_html}
-
-<div class="container">
-
-  <div id="syncIndicator" class="sync-indicator"></div>
-
-  <!-- === CATALOG MODE === -->
-  <div class="catalog-section active" id="catalogSection">
-
-    <div class="catalog-loading" id="catalogLoading">
-      <img src="images/illus-catalog.png" alt="Manny reviews vacancies" class="loading-manny">
-      <p class="loading-text">Sorting vacancies…</p>
-    </div>
-
-    <div class="gf-companion">
-      <img src="images/illus-catalog.png" alt="Manny reviews vacancies">
-    </div>
-    <div class="gf-accent">
-      <img src="images/accent-catalog.png" alt="">
-    </div>
-
-    <div class="basket-tabs">
-      <button class="basket-tab" data-basket="liked" onclick="switchBasket(this)">
-        <span class="basket-dot"></span>
-        Liked
-        <span class="basket-count" id="countLiked">0</span>
-      </button>
-      <button class="basket-tab active" data-basket="unseen" onclick="switchBasket(this)">
-        <span class="basket-dot"></span>
-        Unreviewed
-        <span class="basket-count" id="countUnseen">0</span>
-      </button>
-      <button class="basket-tab" data-basket="passed" onclick="switchBasket(this)">
-        <span class="basket-dot"></span>
-        Passed
-        <span class="basket-count" id="countPassed">0</span>
-      </button>
-    </div>
-
-    <div class="catalog-filters">
-      <input type="text" class="catalog-search" id="catalogSearch" placeholder="Search by title, organization, location..." oninput="renderCatalog()">
-      <select class="catalog-org-filter" id="catalogOrgFilter" onchange="renderCatalog()">
-        <option value="">All companies</option>
-      </select>
-      <div class="catalog-loc-chips">
-        <button class="chip" data-cloc="europe" onclick="toggleCatalogLoc(this)">Europe</button>
-        <button class="chip" data-cloc="us" onclick="toggleCatalogLoc(this)">US</button>
-        <button class="chip" data-cloc="remote" onclick="toggleCatalogLoc(this)">Remote</button>
-        <button class="chip" data-cloc="other" onclick="toggleCatalogLoc(this)">Other</button>
-      </div>
-      <button class="chip catalog-sort-btn active" onclick="toggleCatalogSort(this)">Score&#160;&#8595;</button>
-    </div>
-
-    <div class="catalog-results-count" id="catalogResultsCount"></div>
-    <div class="catalog-grid" id="catalogGrid"></div>
-
-  </div><!-- /catalog-section -->
-
-  <!-- === COMPANIES MODE === -->
-  <div class="companies-section" id="companiesSection">
-    <div class="gf-companion">
-      <img src="images/illus-companies.png" alt="Glottis tunes the engine">
-    </div>
-    <div class="gf-accent">
-      <img src="images/accent-companies.png" alt="">
-    </div>
-    <div class="company-sub-tabs" id="companySubTabs">
-      <button class="company-sub-tab active" data-subtab="approved" onclick="switchCompanySubTab('approved')">Approved</button>
-      <button class="company-sub-tab" data-subtab="pending" onclick="switchCompanySubTab('pending')">Pending Review</button>
-      <button class="company-sub-tab" data-subtab="archived" onclick="switchCompanySubTab('archived')">Archived</button>
-    </div>
-    <div class="companies-filters">
-      <input type="text" class="catalog-search" id="companySearch" placeholder="Search by company, description, location..." oninput="renderCompanies()">
-      <select class="catalog-org-filter" id="companyTierFilter" onchange="renderCompanies()">
-        <option value="">All tiers</option>
-        <option value="S">S — Strategic</option>
-        <option value="A">A — Strong Fit</option>
-        <option value="B">B — Monitor</option>
-        <option value="C">C — Low Priority</option>
-        <option value="__unscored">— Unscored</option>
-      </select>
-      <div class="company-sort-chips">
-        <button class="chip chip-sort active" data-csort="liked" onclick="toggleCompanySort(this)">Liked &#8595;</button>
-        <button class="chip chip-sort" data-csort="score" onclick="toggleCompanySort(this)">Score</button>
-        <button class="chip chip-sort" data-csort="interest" onclick="toggleCompanySort(this)">Interest</button>
-      </div>
-    </div>
-    <div class="company-enrichment-stats" id="companyEnrichmentStats"></div>
-    <div class="ces-shown" id="companyShownCount"></div>
-    <div class="companies-grid" id="companiesGrid"></div>
-  </div><!-- /companies-section -->
-
-  <!-- === PIPELINE MODE === -->
-  <div class="pipeline-section" id="pipelineSection">
-    <div class="gf-companion">
-      <img src="images/illus-pipeline.png" alt="Number Nine Express">
-    </div>
-    <div class="gf-accent">
-      <img src="images/accent-pipeline.png" alt="">
-    </div>
-    <div class="triage-funnel" id="triageFunnel"></div>
-    <div class="triage-board-controls" id="triageBoardControls"></div>
-    <div class="pipeline-board" id="pipelineBoard"></div>
-  </div>
-
-  <!-- === STATS MODE === -->
-  <div class="stats-section" id="statsSection"></div>
-
-  <!-- === ARCHIVE MODE === -->
-  <div class="archive-section" id="archiveSection">
-    <div class="gf-companion">
-      <img src="images/illus-archive.png" alt="Clayman at the archive">
-    </div>
-    <div class="gf-accent">
-      <img src="images/accent-archive.png" alt="">
-    </div>
-    <div class="archive-intro">
-      <h2 class="archive-title">&#128230; Vacancy archive</h2>
-      <p class="archive-sub">Older vacancies from before the search restart. View only.</p>
-    </div>
-    <div class="catalog-filters">
-      <input type="text" class="catalog-search" id="archiveSearch" placeholder="Search by title, organization, location..." oninput="renderArchive()">
-      <select class="catalog-org-filter" id="archiveOrgFilter" onchange="renderArchive()">
-        <option value="">All companies</option>
-      </select>
-    </div>
-    <div class="catalog-results-count" id="archiveResultsCount"></div>
-    <div class="catalog-grid" id="archiveGrid"></div>
-  </div><!-- /archive-section -->
-
-  <!-- === COMPANY PROFILE PAGE === -->
-  <div class="company-profile-page" id="companyProfile"></div>
-
-</div>
-
-<script src="data.js"></script>
-<script type="module" src="app.js"></script>
-</body>
-</html>'''
-
-    html_path = PUBLIC_DIR / "index.html"
-    with open(html_path, "w", encoding="utf-8") as f:
-        f.write(html)
+    # index.html is a static, hand-maintained file — intentionally NOT generated.

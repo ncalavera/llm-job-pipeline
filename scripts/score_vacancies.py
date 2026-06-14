@@ -17,6 +17,56 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+MAX_TOKENS = 1024
+PROMPT_VERSION = "v4.0_2026_pure_fit"
+BILLING_ABORT_THRESHOLD = 5
+
+# Default parallelism for the local subagent orchestrator.
+MAX_CONCURRENT = 3
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Construct the CLI parser. Defined before the heavy project imports so
+    ``--help`` / ``-h`` can print usage without connecting to the database or
+    loading the user profile (those happen only when a real command runs)."""
+    parser = argparse.ArgumentParser(description="Vacancy scoring")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--local", action="store_true", help="JSON → stdout for subagents (default)")
+    mode.add_argument("--save", action="store_true", help="stdin JSON → DB (internal)")
+
+    parser.add_argument("--limit", type=int)
+    parser.add_argument("--offset", type=int, default=0)
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--include-passed",
+        action="store_true",
+        help="Score vacancies even if status='passed' or 'skipped' (default: skip them)",
+    )
+    parser.add_argument(
+        "--no-candidates",
+        action="store_true",
+        help="Do NOT pull strong vacancies from candidate (unreviewed) companies "
+             "(default: include them, capped per run)",
+    )
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--max-workers", type=int, default=MAX_CONCURRENT)
+    parser.add_argument(
+        "--archive", action="store_true",
+        help="With --save: auto-archive unseen vacancies scoring below "
+             "LLM_SCORE_THRESHOLD after saving (default: archival stays paused)",
+    )
+    return parser
+
+
+# Print help and exit BEFORE importing anything that touches the DB or profile.
+from cli_help import wants_help
+if __name__ == "__main__" and wants_help():
+    build_parser().parse_args()
+
 # Redirect stdout → stderr during imports so db_conn diagnostics don't pollute
 # JSON output in --local mode
 _real_stdout = sys.stdout
@@ -28,17 +78,6 @@ from prompts import VACANCY_SCORING_PROMPT as SYSTEM_PROMPT  # noqa: E402
 from prompts import VACANCY_SCORING_USER_TEMPLATE as USER_TEMPLATE  # noqa: E402
 
 sys.stdout = _real_stdout
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-MAX_TOKENS = 1024
-PROMPT_VERSION = "v4.0_2026_pure_fit"
-BILLING_ABORT_THRESHOLD = 5
-
-# Default parallelism for the local subagent orchestrator.
-MAX_CONCURRENT = 3
 
 
 # ---------------------------------------------------------------------------
@@ -428,34 +467,7 @@ def cmd_save(_args):
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Vacancy scoring")
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--local", action="store_true", help="JSON → stdout for subagents (default)")
-    mode.add_argument("--save", action="store_true", help="stdin JSON → DB (internal)")
-
-    parser.add_argument("--limit", type=int)
-    parser.add_argument("--offset", type=int, default=0)
-    parser.add_argument("--force", action="store_true")
-    parser.add_argument(
-        "--include-passed",
-        action="store_true",
-        help="Score vacancies even if status='passed' or 'skipped' (default: skip them)",
-    )
-    parser.add_argument(
-        "--no-candidates",
-        action="store_true",
-        help="Do NOT pull strong vacancies from candidate (unreviewed) companies "
-             "(default: include them, capped per run)",
-    )
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--max-workers", type=int, default=MAX_CONCURRENT)
-    parser.add_argument(
-        "--archive", action="store_true",
-        help="With --save: auto-archive unseen vacancies scoring below "
-             "LLM_SCORE_THRESHOLD after saving (default: archival stays paused)",
-    )
-
-    args = parser.parse_args()
+    args = build_parser().parse_args()
 
     # Always announce the backend on stderr (safe even in --local mode where
     # stdout carries pure JSON for the subagents).

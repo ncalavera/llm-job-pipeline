@@ -5,6 +5,7 @@
 import {
   state,
   groups,
+  stats,
   STATUS_BASKET,
   getGroupStatus,
   isGroupCompanyApproved,
@@ -139,6 +140,23 @@ export function renderCatalog() {
     filtered.length + " of " + inBasket.length + " vacancies";
 
   if (filtered.length === 0) {
+    const hasFilters = query || orgFilter || state.activeCatalogLocs.size > 0;
+    // Fetched-but-unscored: the DB has vacancies, but none are scored yet, so the
+    // dashboard (which only shows scored roles) looks empty. Tell the user to run
+    // scoring next \u2014 distinct from the truly-empty "no vacancies at all" case.
+    const unscored = (stats && stats.unscored_count) || 0;
+    if (!hasFilters && groups.length === 0 && unscored > 0) {
+      grid.innerHTML =
+        '<div class="catalog-empty"><div class="catalog-empty-icon">\u23F3</div>' +
+        "<strong>" +
+        unscored +
+        (unscored === 1 ? " vacancy" : " vacancies") +
+        " fetched, none scored yet.</strong>" +
+        '<div class="catalog-empty-hint">Run scoring next ' +
+        "(<code>/jobs-score</code>) to rank them \u2014 scored roles appear here.</div>" +
+        "</div>";
+      return;
+    }
     const labels = {
       liked: "liked",
       unseen: "unreviewed",
@@ -146,9 +164,11 @@ export function renderCatalog() {
     };
     grid.innerHTML =
       '<div class="catalog-empty"><div class="catalog-empty-icon">\uD83D\uDDC2</div>' +
-      (query || orgFilter || state.activeCatalogLocs.size > 0
+      (hasFilters
         ? "Nothing matches the filters"
-        : "No " + labels[state.currentBasket] + " vacancies") +
+        : groups.length === 0
+          ? "No vacancies yet. Fetch some first (<code>/jobs-fetch</code>)."
+          : "No " + labels[state.currentBasket] + " vacancies") +
       "</div>";
     return;
   }

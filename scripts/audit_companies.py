@@ -23,6 +23,29 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Construct the CLI parser. Defined before the heavy project imports so
+    ``--help`` / ``-h`` prints usage without connecting to the database or
+    loading the user profile (those happen only when a real command runs)."""
+    parser = argparse.ArgumentParser(description="Company registry audit")
+    parser.add_argument("--fix", action="store_true",
+                        help="Auto-remediate detected issues")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Show what --fix would do without executing")
+    parser.add_argument("--no-desc-quality", action="store_true",
+                        help="Skip description quality audit (faster)")
+    parser.add_argument("--cleanup-unseen", action="store_true",
+                        help="Archive unseen vacancies from inactive companies")
+    return parser
+
+
+# Print help and exit BEFORE importing anything that touches the DB or profile.
+from cli_help import wants_help
+if __name__ == "__main__" and wants_help():
+    build_parser().parse_args()
+
 from company_registry import (
     COMPANIES,
     _ALL_KNOWN_NAMES,
@@ -579,16 +602,7 @@ def _fix_issues(audit_result: dict, dry_run: bool = False) -> None:
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Company registry audit")
-    parser.add_argument("--fix", action="store_true",
-                        help="Auto-remediate detected issues")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Show what --fix would do without executing")
-    parser.add_argument("--no-desc-quality", action="store_true",
-                        help="Skip description quality audit (faster)")
-    parser.add_argument("--cleanup-unseen", action="store_true",
-                        help="Archive unseen vacancies from inactive companies")
-    args = parser.parse_args()
+    args = build_parser().parse_args()
 
     print("Running company registry audit (Supabase-only)...", flush=True)
     audit_result = audit_all_companies()

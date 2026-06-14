@@ -19,6 +19,26 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+
+def build_parser():
+    """Construct the CLI parser. Defined before the heavy project imports so
+    ``--help`` / ``-h`` prints usage without connecting to the database or
+    loading the user profile (those happen only when a real command runs)."""
+    import argparse
+    parser = argparse.ArgumentParser(description="Fetch company data via Firecrawl")
+    parser.add_argument("--social", action="store_true",
+                        help="Fetch social signals instead of about pages")
+    parser.add_argument("--limit", type=int)
+    parser.add_argument("--company", type=str, help="Specific companies (comma-separated)")
+    parser.add_argument("--force", action="store_true", help="Re-scrape cached companies")
+    return parser
+
+
+# Print help and exit BEFORE importing anything that touches the DB or profile.
+from cli_help import wants_help
+if __name__ == "__main__" and wants_help():
+    build_parser().parse_args()
+
 from score_companies import _get_main_repo_root, SCRAPE_CACHE_PATH
 
 # ---------------------------------------------------------------------------
@@ -435,16 +455,7 @@ def cmd_social(args):
 # ---------------------------------------------------------------------------
 
 def main():
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Fetch company data via Firecrawl")
-    parser.add_argument("--social", action="store_true",
-                        help="Fetch social signals instead of about pages")
-    parser.add_argument("--limit", type=int)
-    parser.add_argument("--company", type=str, help="Specific companies (comma-separated)")
-    parser.add_argument("--force", action="store_true", help="Re-scrape cached companies")
-
-    args = parser.parse_args()
+    args = build_parser().parse_args()
 
     if args.social:
         cmd_social(args)

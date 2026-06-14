@@ -661,7 +661,7 @@ export function renderLocationChips(chips, opts) {
     '<span class="loc-overflow-wrap">' +
     '<button class="loc-more-btn" onclick="event.stopPropagation();this.parentElement.classList.toggle(\'expanded\')">+' +
     remaining +
-    " \u0435\u0449\u0451</button>" +
+    " more</button>" +
     '<span class="loc-overflow-chips">' +
     hidden +
     "</span></span>"
@@ -700,15 +700,15 @@ export function formatDeadlineHtml(deadline, cssPrefix) {
     month: "short",
     year: "numeric",
   });
-  let label = "\u23F0 \u0414\u0435\u0434\u043B\u0430\u0439\u043D: " + dateStr;
+  let label = "\u23F0 Deadline: " + dateStr;
   if (isExpired) {
-    label += " (\u0438\u0441\u0442\u0451\u043A)";
+    label += " (expired)";
   } else if (diffDays === 0) {
-    label += " (\u0441\u0435\u0433\u043E\u0434\u043D\u044F!)";
+    label += " (today!)";
   } else if (diffDays === 1) {
-    label += " (\u0437\u0430\u0432\u0442\u0440\u0430!)";
+    label += " (tomorrow!)";
   } else if (diffDays <= 7) {
-    label += " (\u0447\u0435\u0440\u0435\u0437 " + diffDays + " \u0434.)";
+    label += " (in " + diffDays + "d)";
   }
   const cls = isExpired ? "expired" : "active";
   return (
@@ -952,7 +952,7 @@ export function initUI() {
   const scrollTopBtn = document.createElement("button");
   scrollTopBtn.className = "scroll-top-btn";
   scrollTopBtn.innerHTML = "&#8679;";
-  scrollTopBtn.title = "\u041D\u0430\u0432\u0435\u0440\u0445";
+  scrollTopBtn.title = "Back to top";
   scrollTopBtn.addEventListener("click", function () {
     window.scrollTo({ top: 0, behavior: "smooth" });
   });
@@ -972,10 +972,8 @@ export function initUI() {
 
 export function showToast(status) {
   const messages = {
-    liked:
-      "\u2705 \u0414\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u043E \u0432 \u0438\u0437\u0431\u0440\u0430\u043D\u043D\u043E\u0435",
-    passed:
-      "\uD83D\uDC4E \u041F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E",
+    liked: "\u2705 Added to favorites",
+    passed: "\uD83D\uDC4E Skipped",
   };
   const msg = messages[status];
   if (!msg || !toastEl) return;

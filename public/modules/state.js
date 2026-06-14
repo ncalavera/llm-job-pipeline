@@ -66,29 +66,28 @@ export const STATUS_BASKET = {
 export const TRIAGE_COLUMNS = [
   {
     key: "liked",
-    label: "\u041B\u0430\u0439\u043A\u043D\u0443\u0442\u043E",
+    label: "Liked",
     color: "var(--gold)",
     compact: true,
   },
   {
     key: "to_apply",
-    label: "\u041F\u043E\u0434\u0430\u0447\u0430",
+    label: "To apply",
     color: "var(--emerald)",
   },
   {
     key: "to_research",
-    label:
-      "\u0418\u0441\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u043D\u0438\u0435",
+    label: "Research",
     color: "var(--amber)",
   },
   {
     key: "to_network",
-    label: "\u041D\u0435\u0442\u0432\u043E\u0440\u043A\u0438\u043D\u0433",
+    label: "Networking",
     color: "var(--lavender)",
   },
   {
     key: "applied",
-    label: "\u041F\u043E\u0434\u0430\u043D\u043E",
+    label: "Applied",
     color: "var(--coral)",
   },
   { key: "skipped", label: "Skipped", color: "var(--muted)" },

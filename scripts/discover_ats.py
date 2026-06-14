@@ -28,6 +28,31 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
+def build_parser() -> argparse.ArgumentParser:
+    """Construct the CLI parser. Defined before the heavy project imports so
+    ``--help`` / ``-h`` prints usage without connecting to the database or
+    loading the user profile (those happen only when a real command runs)."""
+    parser = argparse.ArgumentParser(description="Discover ATS types on career pages")
+    parser.add_argument("--html-scan", action="store_true",
+                        help="Scrape HTML to detect embedded ATS (more thorough than map)")
+    parser.add_argument("--all-tiers", action="store_true",
+                        help="Include all tiers (default: S+A only)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Show targets without API calls")
+    parser.add_argument("--company", type=str,
+                        help="Single company to check")
+    parser.add_argument("--unsourced", action="store_true",
+                        help="Scan active companies without fetch strategy (need ATS detection)")
+    parser.add_argument("--apply", action="store_true",
+                        help="Apply discovered ATS strategies to DB (default: report only)")
+    return parser
+
+
+# Print help and exit BEFORE importing anything that touches the DB or profile.
+from cli_help import wants_help
+if __name__ == "__main__" and wants_help():
+    build_parser().parse_args()
+
 from config import COMPANIES, get_firecrawl_client, resolve_canonical_name
 
 # ---------------------------------------------------------------------------
@@ -696,20 +721,7 @@ def _print_summary(scan_results: list[dict]) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Discover ATS types on career pages")
-    parser.add_argument("--html-scan", action="store_true",
-                        help="Scrape HTML to detect embedded ATS (more thorough than map)")
-    parser.add_argument("--all-tiers", action="store_true",
-                        help="Include all tiers (default: S+A only)")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Show targets without API calls")
-    parser.add_argument("--company", type=str,
-                        help="Single company to check")
-    parser.add_argument("--unsourced", action="store_true",
-                        help="Scan active companies without fetch strategy (need ATS detection)")
-    parser.add_argument("--apply", action="store_true",
-                        help="Apply discovered ATS strategies to DB (default: report only)")
-    args = parser.parse_args()
+    args = build_parser().parse_args()
 
     targets = _build_targets(args)
     if not targets:

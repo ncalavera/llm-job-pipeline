@@ -20,9 +20,6 @@ import os
 # Dashboard timezone — used for grouping scoring sessions and rendering dates.
 # Override by setting DASHBOARD_TZ env var (e.g. "Europe/Berlin", "UTC").
 DASHBOARD_TZ = ZoneInfo(os.environ.get("DASHBOARD_TZ", "UTC"))
-_MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-_SESSION_GAP_MINUTES = 30
 
 # A candidate company with a vacancy scoring this high gets a 🔥 badge and
 # floats to the top of Pending Review so it doesn't rot unreviewed.
@@ -45,56 +42,19 @@ def _deadline_soon_label(deadline_iso: str) -> str:
     return ""
 
 
-def prepare_scoring_feed() -> list[dict]:
-    """Cluster scored vacancies by llm_scored_at into sessions (30-min gap).
+def _count_unscored(all_vacs: dict) -> int:
+    """Count vacancies that are genuinely awaiting scoring.
 
-    Returns list of up to 5 most recent sessions:
-      [{"display": "15 Mar", "count": 23}, ...]
+    Only still-untriaged (status "unseen") rows that lack a score count — so
+    already-passed/skipped/liked vacancies (which a user has already acted on
+    and will never be re-scored) don't inflate the dashboard's
+    "N fetched, none scored yet" hint.
     """
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT llm_scored_at FROM vacancy
-        WHERE llm_scored_at IS NOT NULL
-        ORDER BY llm_scored_at DESC
-    """)
-    rows = cur.fetchall()
-    cur.close()
-    if not rows:
-        return []
-
-    # Cluster by 30-min gap (rows already DESC by time)
-    sessions = []
-    current_count = 1
-    current_latest = rows[0][0]
-
-    for i in range(1, len(rows)):
-        gap = (rows[i - 1][0] - rows[i][0]).total_seconds() / 60
-        if gap > _SESSION_GAP_MINUTES:
-            sessions.append({"time": current_latest, "count": current_count})
-            current_count = 0
-            current_latest = rows[i][0]
-        current_count += 1
-    sessions.append({"time": current_latest, "count": current_count})
-
-    # Take top 5, convert to dashboard timezone, format for display
-    from datetime import datetime
-    now_local = datetime.now(DASHBOARD_TZ)
-    today_local = now_local.date()
-
-    result = []
-    for s in sessions[:5]:
-        t = s["time"].astimezone(DASHBOARD_TZ)
-        # Smart dates: today = time only, older = date only
-        if t.date() == today_local:
-            display = t.strftime("%H:%M")
-        else:
-            display = f"{t.day} {_MONTH_ABBR[t.month - 1]}"
-        result.append({
-            "display": display,
-            "count": s["count"],
-        })
-    return result
+    return sum(
+        1 for v in all_vacs.values()
+        if (v.get("llm_score") is None or v.get("llm_score", -1) < 0)
+        and (v.get("status") or "unseen") == "unseen"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +255,10 @@ def prepare_report_data(db: dict = None) -> dict:
     # Exclude unscored vacancies from dashboard — they appear after /score
     vacancies = [v for v in all_vacs.values()
                  if v.get("llm_score") is not None and v.get("llm_score", -1) >= 0]
+    # Fetched-but-not-yet-scored vacancies. Used by the dashboard to show a
+    # "run scoring next" empty state instead of a blank, unexplained screen.
+    total_in_db = len(all_vacs)
+    unscored_count = _count_unscored(all_vacs)
 
     # --- Build org color map (needed before building groups) ---
     all_orgs = sorted(set(v["org"] for v in vacancies))
@@ -335,6 +299,8 @@ def prepare_report_data(db: dict = None) -> dict:
             "with_comp": with_comp,
             "europe_count": europe_count,
             "relevant": relevant,
+            "total_in_db": total_in_db,
+            "unscored_count": unscored_count,
         },
     }
 

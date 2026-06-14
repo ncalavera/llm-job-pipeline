@@ -13,6 +13,24 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+
+def build_parser():
+    """Construct the CLI parser. Defined before the heavy project imports so
+    ``--help`` / ``-h`` prints usage without connecting to the database or
+    loading the user profile (those happen only when a real command runs)."""
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--limit", type=int, default=0)
+    return parser
+
+
+# Print help and exit BEFORE importing anything that touches the DB or profile.
+from cli_help import wants_help
+if __name__ == "__main__" and wants_help():
+    build_parser().parse_args()
+
 from config import COMPANIES, PROJECT_ROOT, get_firecrawl_client, resolve_canonical_name
 
 # Job board / aggregator domains to skip in search results
@@ -153,11 +171,7 @@ def _save_found_urls(entries: list[dict]):
 
 
 def main():
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--limit", type=int, default=0)
-    args = parser.parse_args()
+    args = build_parser().parse_args()
 
     companies = _load_companies_to_find()
     if args.limit:
