@@ -1,23 +1,30 @@
 """Guard test — the permanent regression net for a PUBLIC, owner-agnostic repo.
 
-Fails if any of the following creep back into the codebase:
+This file is itself PUBLIC, so it must not embed any maintainer-private strings
+(names, handles, infra, owner orgs). It therefore splits into two layers:
 
-  1. Owner identity (names, handles, infra, private repo/DB ids).
-  2. Owner-specific organisations used as hardcoded data or fixtures.
-  3. Internal issue / ticket references (DHA-NNN, (#NNN), issue #NNN).
-  4. Owner-narration phrasing in comments ("the owner", "used to be", …).
-  5. Deleted owner-data constants (the Devex / Impactpool-EU / prestige /
-     manual-allowlist / animal-welfare / relevance families).
-  6. A non-empty literal ``board_blacklist=[...]`` inside scripts/*.py
-     (boards must ship neutral; exclusion is user opt-in via the profile).
-  7. Universal junk that is actually discipline / format / career-stage
-     flavored (bootcamp, fellowship, internship, volunteer, …) — those are
-     the USER's optional taste, never a shipped default.
+GENERIC guards (always run, contain zero private tokens — they describe SHAPES
+that should never appear in ANY public fork):
+  - Internal issue / ticket references (DHA-NNN, (#NNN), issue #NNN).
+  - Owner-narration phrasing in comments ("the owner", "used to be", …).
+  - Deleted owner-data constant *name shapes* (Devex / Impactpool-EU / prestige
+    / manual-allowlist / animal-welfare / relevance families).
+  - A non-empty literal ``board_blacklist=[...]`` inside scripts/*.py
+    (boards must ship neutral; exclusion is user opt-in via the profile).
+  - Universal junk that is actually discipline / format / career-stage flavored
+    (bootcamp, fellowship, internship, volunteer, …).
+  - Geography proper nouns welded into code (def names / category keys / branch
+    literals).
 
-The intent: a grep for owner identity, owner orgs, ticket ids and the deleted
-constant names across the public surface returns NOTHING.
+PRIVATE guards (owner identity, owner orgs, owner infra/branding) — the literal
+tokens live ONLY in an optional, gitignored local file
+``tests/private_patterns.local.json`` (template:
+``private_patterns.local.example.json``). The public test LOADS that file if
+present and SKIPS the private checks if absent, so the public repo never ships
+the maintainer's private strings while the maintainer can still scan locally.
 """
 
+import json
 import re
 from pathlib import Path
 
@@ -72,36 +79,70 @@ def _scan(files, pattern: re.Pattern) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# 1. Owner identity
+# Optional, gitignored local private-pattern source.
+#
+# Keeps maintainer-private literals (identity / orgs / infra) OUT of this public
+# file. Present → the private checks run against it; absent → they skip.
 # ---------------------------------------------------------------------------
 
-OWNER_IDENTITY = re.compile(
-    r"nikita|solov|ndsolovev|wajbrmky|nikitasdaysbot|hetzner|"
-    r"dharma-initiative|job-search-2026",
-    re.IGNORECASE,
-)
+PRIVATE_PATTERNS_FILE = TESTS / "private_patterns.local.json"
 
+
+def _load_private_patterns() -> dict:
+    if not PRIVATE_PATTERNS_FILE.exists():
+        return {}
+    try:
+        return json.loads(PRIVATE_PATTERNS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _private_check(name: str) -> tuple[re.Pattern | None, re.Pattern | None]:
+    """Compile the (case-insensitive, case-sensitive) regexes for one private
+    check from the local file. Returns (None, None) when the file or the check's
+    patterns are absent, so the caller can skip cleanly."""
+    data = _load_private_patterns()
+    spec = data.get(name)
+    if not isinstance(spec, dict):
+        return None, None
+    ci_alts = [a for a in spec.get("ci", []) if a]
+    cs_alts = [a for a in spec.get("cs", []) if a]
+    ci = re.compile("|".join(ci_alts), re.IGNORECASE) if ci_alts else None
+    cs = re.compile("|".join(cs_alts)) if cs_alts else None
+    return ci, cs
+
+
+def _run_private_check(name: str, files, label: str):
+    ci, cs = _private_check(name)
+    if ci is None and cs is None:
+        pytest.skip(
+            f"no local private patterns for {name!r} "
+            f"(create tests/private_patterns.local.json from the .example.json "
+            f"to enable the maintainer-only {label} scan)"
+        )
+    hits: list[str] = []
+    if ci is not None:
+        hits += _scan(files, ci)
+    if cs is not None:
+        hits += _scan(files, cs)
+    assert not hits, f"{label} leaked:\n" + "\n".join(hits)
+
+
+# ---------------------------------------------------------------------------
+# 1. Owner identity  (PRIVATE — patterns loaded from the optional local file)
+# ---------------------------------------------------------------------------
 
 def test_no_owner_identity():
-    hits = _scan(_text_files(), OWNER_IDENTITY)
-    assert not hits, "Owner identity leaked:\n" + "\n".join(hits)
+    _run_private_check("owner_identity", _text_files(), "Owner identity")
 
 
 # ---------------------------------------------------------------------------
-# 2. Owner-specific organisations
+# 2. Owner-specific organisations  (PRIVATE — optional local file)
 # ---------------------------------------------------------------------------
-
-OWNER_ORGS = re.compile(
-    r"\bfundraiseup\b|\blongview\b|\bamnesty\b|good food institute|"
-    r"wellcome trust|centre for effective altruism|\bGFI\b|\bMiro\b",
-    re.IGNORECASE,
-)
-
 
 def test_no_owner_orgs():
     # Scan code, tests, the public dashboard HTML and .claude command docs.
-    hits = _scan(_text_files(), OWNER_ORGS)
-    assert not hits, "Owner org names leaked:\n" + "\n".join(hits)
+    _run_private_check("owner_orgs", _text_files(), "Owner org names")
 
 
 # ---------------------------------------------------------------------------
@@ -319,12 +360,13 @@ def test_no_geo_proper_noun_in_branch_literals():
 
 
 # ---------------------------------------------------------------------------
-# 9. Owner-infra / owner-shell / owner-locale traces.
+# 9. Owner-infra / owner-shell / owner-locale traces.  (PRIVATE — optional file)
 #
 # A public repo must not document or reference the maintainer's private infra
-# (OpenClaw SSH service), branded project copy ("Mission-Driven", "Job Search
-# 2026"), the maintainer's shell bootstrap ("source ~/.zshrc"), or a hardcoded
-# locale ("ru-RU"). These leak the owner and break a clean public setup.
+# (a private SSH service), branded project copy, the maintainer's shell
+# bootstrap, or a hardcoded locale — these leak the owner and break a clean
+# public setup. The literal tokens live ONLY in the optional local file under
+# the "owner_infra" check, so this public guard names none of them.
 #
 # Scanned surface: scripts/, tests/, all of .claude/, docs/index.html, and the
 # root README / INSTALL / AGENTS docs. (Other agents own the non-python
@@ -362,24 +404,14 @@ def _owner_trace_files() -> list[Path]:
     return out
 
 
-# Owner-infra / owner-branding tokens. Case sensitivity is chosen per token:
-#   - "openclaw"          : case-insensitive (private SSH service, any casing).
-#   - "Mission-Driven"    : case-SENSITIVE owner branding — lowercase
-#                           "mission-driven" is legitimate prose in a job posting.
-#   - "Job Search 2026"   : case-sensitive owner project name.
-#   - "source ~/.zshrc"   : the maintainer's shell bootstrap.
-#   - "ru-RU"             : a hardcoded locale (the pipeline ships language-neutral).
-_OWNER_TRACE_CI = re.compile(r"openclaw", re.IGNORECASE)
-_OWNER_TRACE_CS = re.compile(
-    r"Mission-Driven|Job Search 2026|source ~/\.zshrc|ru-RU"
-)
+# Owner-infra / owner-branding tokens are PRIVATE and live only in the optional
+# local file under the "owner_infra" check. Case sensitivity is preserved there
+# via the ci/cs split: identity-like tokens go in "ci" (matched any casing),
+# while branding whose lowercase form is legitimate prose goes in "cs" (matched
+# case-sensitively). The public test ships no such literal.
 
 
 def test_no_owner_infra_or_branding_traces():
-    files = _owner_trace_files()
-    hits = _scan(files, _OWNER_TRACE_CI) + _scan(files, _OWNER_TRACE_CS)
-    assert not hits, (
-        "Owner infra / branding / shell / locale trace leaked "
-        "(openclaw / Mission-Driven / Job Search 2026 / source ~/.zshrc / "
-        "ru-RU):\n" + "\n".join(hits)
+    _run_private_check(
+        "owner_infra", _owner_trace_files(), "Owner infra / branding / shell / locale trace"
     )

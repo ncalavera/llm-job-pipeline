@@ -68,3 +68,35 @@ def test_no_profile_at_all_raises(monkeypatch, tmp_path):
     monkeypatch.setattr(prompts, "EXAMPLE_PROFILE_PATH", tmp_path / "nope.example.md")
     with pytest.raises(FileNotFoundError):
         prompts._load_user_profile()
+
+
+def test_cache_invalidates_on_edit(monkeypatch, tmp_path):
+    """Editing the profile (new mtime) must be picked up on the next load, not
+    served stale from the parse cache (matters for long-lived processes)."""
+    import os
+    prompts.clear_profile_cache()
+    profile = tmp_path / "p.md"
+    profile.write_text("## TARGET_ROLES\n\nEngineer\n", encoding="utf-8")
+    monkeypatch.setenv("USER_PROFILE_PATH", str(profile))
+
+    first = prompts._load_user_profile()
+    assert first["TARGET_ROLES"] == "Engineer"
+
+    # Edit in place and force a newer mtime (fs resolution can be coarse).
+    profile.write_text("## TARGET_ROLES\n\nDesigner\n", encoding="utf-8")
+    st = profile.stat()
+    os.utime(profile, (st.st_atime + 10, st.st_mtime + 10))
+
+    second = prompts._load_user_profile()
+    assert second["TARGET_ROLES"] == "Designer", "edit must invalidate the cache"
+
+
+def test_clear_profile_cache(monkeypatch, tmp_path):
+    """clear_profile_cache() empties the cache so the next load re-reads."""
+    profile = tmp_path / "p.md"
+    profile.write_text("## USER_PROFILE\n\nX\n", encoding="utf-8")
+    monkeypatch.setenv("USER_PROFILE_PATH", str(profile))
+    prompts._load_user_profile()
+    assert prompts._profile_cache  # populated
+    prompts.clear_profile_cache()
+    assert prompts._profile_cache == {}
