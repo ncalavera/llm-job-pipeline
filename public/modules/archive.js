@@ -10,6 +10,7 @@ import {
   llmScoreBadge,
   relativeTime,
 } from "./helpers.js";
+import { T } from "./i18n.js";
 
 let archiveInited = false;
 
@@ -64,8 +65,8 @@ export function renderArchive() {
     grid.innerHTML =
       '<div class="catalog-empty"><div class="catalog-empty-icon">🗂</div>' +
       (query || orgFilter
-        ? "Nothing matches the filters"
-        : "The archive is empty") +
+        ? T("archive_no_match", "Nothing matches the filters")
+        : T("archive_empty", "The archive is empty")) +
       "</div>";
     return;
   }

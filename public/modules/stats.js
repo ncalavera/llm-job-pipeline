@@ -11,11 +11,12 @@ import {
   isGroupCompanyApproved,
 } from "./state.js";
 import { escHtml, getFlagForChip } from "./helpers.js";
+import { T } from "./i18n.js";
 
 const REMOTE_KEY = "__remote_unknown";
 const HELP_TEXT =
   "A vacancy with N locations is counted N times — the table shows role availability by city.";
-const REMOTE_LABEL = "Remote / Unknown";
+const REMOTE_LABEL = T("geo_remote_unknown", "Remote / Unknown");
 const COUNTRY_ONLY_LABEL = "(whole country)";
 const EMPTY_LABEL = "🏢 No data";
 
@@ -131,11 +132,11 @@ export function sortStatsTable(col) {
 // ---------------------------------------------------------------------------
 
 const COLUMNS = [
-  { key: "city", label: "City" },
-  { key: "country", label: "Country" },
-  { key: "count", label: "Count" },
-  { key: "liked", label: "Liked" },
-  { key: "score", label: "Mean score" },
+  { key: "city", label: T("geo_city", "City") },
+  { key: "country", label: T("geo_country", "Country") },
+  { key: "count", label: T("geo_count", "Count") },
+  { key: "liked", label: T("geo_liked", "Liked") },
+  { key: "score", label: T("geo_mean_score", "Mean score") },
 ];
 
 function thHtml(col, label, sortCol, sortAsc) {

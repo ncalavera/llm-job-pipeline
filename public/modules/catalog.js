@@ -21,6 +21,7 @@ import {
   isVacancyExpired,
   hardReqHtml,
 } from "./helpers.js";
+import { T } from "./i18n.js";
 
 // ---------------------------------------------------------------------------
 // Basket tabs
@@ -68,8 +69,8 @@ export function toggleCatalogLoc(btn) {
 export function toggleCatalogSort(btn) {
   state.catalogSortDesc = !state.catalogSortDesc;
   btn.textContent = state.catalogSortDesc
-    ? "Score\u00A0\u2193"
-    : "Score\u00A0\u2191";
+    ? T("sort_score", "Score") + "\u00A0\u2193"
+    : T("sort_score", "Score") + "\u00A0\u2191";
   renderCatalog();
 }
 
@@ -157,18 +158,22 @@ export function renderCatalog() {
         "</div>";
       return;
     }
-    const labels = {
-      liked: "liked",
-      unseen: "unreviewed",
-      passed: "passed",
+    const basketLabels = {
+      liked: T("basket_liked", "Liked"),
+      unseen: T("basket_unreviewed", "Unreviewed"),
+      passed: T("basket_passed", "Passed"),
     };
+    var basketEmpty =
+      (basketLabels[state.currentBasket] || "") +
+      " \u2014 " +
+      T("catalog_basket_empty", "no vacancies");
     grid.innerHTML =
       '<div class="catalog-empty"><div class="catalog-empty-icon">\uD83D\uDDC2</div>' +
       (hasFilters
-        ? "Nothing matches the filters"
+        ? T("catalog_no_match", "Nothing matches the filters")
         : groups.length === 0
-          ? "No vacancies yet. Fetch some first (<code>/jobs-fetch</code>)."
-          : "No " + labels[state.currentBasket] + " vacancies") +
+          ? T("catalog_empty", "No vacancies yet. Fetch some first.")
+          : basketEmpty) +
       "</div>";
     return;
   }
@@ -265,11 +270,11 @@ function buildCatalogCard(g) {
   }
 
   const regionLabels = {
-    europe: "Europe",
-    americas: "Americas",
-    remote: "Remote",
-    asia: "Asia",
-    africa: "Africa",
+    europe: T("region_europe", "Europe"),
+    americas: T("region_americas", "Americas"),
+    remote: T("region_remote", "Remote"),
+    asia: T("region_asia", "Asia"),
+    africa: T("region_africa", "Africa"),
   };
   const regionCls = {
     europe: "region-europe",
@@ -338,7 +343,9 @@ function buildCatalogCard(g) {
       g.full_description.length > summaryText.length + 50) ||
     g.llm_reasoning;
   const expandBtn = hasExpandContent
-    ? '<button class="expand-btn" onclick="event.stopPropagation();toggleCatalogExpand(this)">Details</button>'
+    ? '<button class="expand-btn" onclick="event.stopPropagation();toggleCatalogExpand(this)">' +
+      escHtml(T("catalog_details", "Details")) +
+      "</button>"
     : "";
   let expandParts = [];
   if (g.llm_reasoning) {
@@ -434,5 +441,7 @@ export function toggleCatalogExpand(btn) {
   const desc = card.querySelector(".catalog-full-desc");
   if (!desc) return;
   const expanded = desc.classList.toggle("expanded");
-  btn.textContent = expanded ? "Collapse" : "Details";
+  btn.textContent = expanded
+    ? T("catalog_collapse", "Collapse")
+    : T("catalog_details", "Details");
 }

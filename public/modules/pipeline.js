@@ -20,6 +20,7 @@ import {
   getTriageDedupeKey,
   isVacancyExpired,
 } from "./helpers.js";
+import { T } from "./i18n.js";
 
 // ---------------------------------------------------------------------------
 // Triage helpers
@@ -50,42 +51,42 @@ function renderTriageFunnel(funnelEl, metrics) {
   const stages = [
     {
       key: "base_total",
-      label: "In database",
+      label: T("funnel_in_database", "In database"),
       count: metrics.base_total,
       hint: "all vacancies",
       scrollTo: "",
     },
     {
       key: "liked_queue",
-      label: "Liked",
+      label: T("funnel_liked", "Liked"),
       count: metrics.liked_queue,
       hint: "queued for triage",
       scrollTo: "liked",
     },
     {
       key: "triaged_total",
-      label: "Triaged",
+      label: T("funnel_triaged", "Triaged"),
       count: metrics.triaged_total,
       hint: "review done",
       scrollTo: "to_apply",
     },
     {
       key: "in_work",
-      label: "In progress",
+      label: T("funnel_in_progress", "In progress"),
       count: metrics.in_work,
       hint: "apply + research + network",
       scrollTo: "to_apply",
     },
     {
       key: "applied_total",
-      label: "Applied",
+      label: T("funnel_applied", "Applied"),
       count: metrics.applied_total,
       hint: "submitted applications",
       scrollTo: "applied",
     },
     {
       key: "rejected_total",
-      label: "Passed",
+      label: T("funnel_passed", "Passed"),
       count: metrics.rejected_total,
       hint: "catalog + triage",
       scrollTo: "",
