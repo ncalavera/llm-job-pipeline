@@ -24,31 +24,31 @@
           id="modeCompanies"
           onclick="switchMode('companies')"
         >
-          &#9881; Companies
+          &#9881; <span data-i18n="tab_companies">Companies</span>
         </button>
         <button
           class="mode-btn"
           id="modeCatalog"
           onclick="switchMode('catalog')"
         >
-          &#9636; Vacancies
+          &#9636; <span data-i18n="tab_vacancies">Vacancies</span>
         </button>
         <button
           class="mode-btn"
           id="modePipeline"
           onclick="switchMode('pipeline')"
         >
-          &#9654; Triage
+          &#9654; <span data-i18n="tab_triage">Triage</span>
         </button>
         <button class="mode-btn" id="modeStats" onclick="switchMode('stats')">
-          &#128205; Geo
+          &#128205; <span data-i18n="tab_geo">Geo</span>
         </button>
         <button
           class="mode-btn"
           id="modeArchive"
           onclick="switchMode('archive')"
         >
-          &#128230; Archive
+          &#128230; <span data-i18n="tab_archive">Archive</span>
         </button>
       </div>
       <div class="top-nav-right">
@@ -64,20 +64,28 @@
         <div class="catalog-loading" id="catalogLoading">
           <img
             src="images/illus-catalog.png"
+            data-img="illus-catalog"
             alt="Illustration of a figure reviewing job listings"
             class="loading-illus"
           />
-          <p class="loading-text">Sorting vacancies…</p>
+          <p class="loading-text" data-i18n="loading_vacancies">
+            Sorting vacancies…
+          </p>
         </div>
 
         <div class="gf-companion">
           <img
             src="images/illus-catalog.png"
+            data-img="illus-catalog"
             alt="Illustration of a figure reviewing job listings"
           />
         </div>
         <div class="gf-accent">
-          <img src="images/accent-catalog.png" alt="" />
+          <img
+            src="images/accent-catalog.png"
+            data-img="accent-catalog"
+            alt=""
+          />
         </div>
 
         <div class="basket-tabs">
@@ -87,7 +95,7 @@
             onclick="switchBasket(this)"
           >
             <span class="basket-dot"></span>
-            Liked
+            <span data-i18n="basket_liked">Liked</span>
             <span class="basket-count" id="countLiked">0</span>
           </button>
           <button
@@ -96,7 +104,7 @@
             onclick="switchBasket(this)"
           >
             <span class="basket-dot"></span>
-            Unreviewed
+            <span data-i18n="basket_unreviewed">Unreviewed</span>
             <span class="basket-count" id="countUnseen">0</span>
           </button>
           <button
@@ -105,7 +113,7 @@
             onclick="switchBasket(this)"
           >
             <span class="basket-dot"></span>
-            Passed
+            <span data-i18n="basket_passed">Passed</span>
             <span class="basket-count" id="countPassed">0</span>
           </button>
         </div>
@@ -116,6 +124,7 @@
             class="catalog-search"
             id="catalogSearch"
             placeholder="Search by title, organization, location..."
+            data-i18n-ph="search_vacancies_ph"
             oninput="renderCatalog()"
           />
           <select
@@ -123,13 +132,14 @@
             id="catalogOrgFilter"
             onchange="renderCatalog()"
           >
-            <option value="">All companies</option>
+            <option value="" data-i18n="all_companies">All companies</option>
           </select>
           <div class="catalog-loc-chips">
             <button
               class="chip"
               data-cloc="europe"
               onclick="toggleCatalogLoc(this)"
+              data-i18n="loc_europe"
             >
               Europe
             </button>
@@ -137,6 +147,7 @@
               class="chip"
               data-cloc="us"
               onclick="toggleCatalogLoc(this)"
+              data-i18n="loc_us"
             >
               US
             </button>
@@ -144,6 +155,7 @@
               class="chip"
               data-cloc="remote"
               onclick="toggleCatalogLoc(this)"
+              data-i18n="loc_remote"
             >
               Remote
             </button>
@@ -151,6 +163,7 @@
               class="chip"
               data-cloc="other"
               onclick="toggleCatalogLoc(this)"
+              data-i18n="loc_other"
             >
               Other
             </button>
@@ -159,7 +172,7 @@
             class="chip catalog-sort-btn active"
             onclick="toggleCatalogSort(this)"
           >
-            Score&#160;&#8595;
+            <span data-i18n="sort_score">Score</span>&#160;&#8595;
           </button>
         </div>
 
@@ -173,17 +186,23 @@
         <div class="gf-companion">
           <img
             src="images/illus-companies.png"
+            data-img="illus-companies"
             alt="Illustration of companies being reviewed"
           />
         </div>
         <div class="gf-accent">
-          <img src="images/accent-companies.png" alt="" />
+          <img
+            src="images/accent-companies.png"
+            data-img="accent-companies"
+            alt=""
+          />
         </div>
         <div class="company-sub-tabs" id="companySubTabs">
           <button
             class="company-sub-tab active"
             data-subtab="approved"
             onclick="switchCompanySubTab('approved')"
+            data-i18n="subtab_approved"
           >
             Approved
           </button>
@@ -191,6 +210,7 @@
             class="company-sub-tab"
             data-subtab="pending"
             onclick="switchCompanySubTab('pending')"
+            data-i18n="subtab_pending"
           >
             Pending Review
           </button>
@@ -198,6 +218,7 @@
             class="company-sub-tab"
             data-subtab="archived"
             onclick="switchCompanySubTab('archived')"
+            data-i18n="subtab_archived"
           >
             Archived
           </button>
@@ -208,6 +229,7 @@
             class="catalog-search"
             id="companySearch"
             placeholder="Search by company, description, location..."
+            data-i18n-ph="search_companies_ph"
             oninput="renderCompanies()"
           />
           <select
@@ -215,12 +237,14 @@
             id="companyTierFilter"
             onchange="renderCompanies()"
           >
-            <option value="">All tiers</option>
-            <option value="S">S — Strategic</option>
-            <option value="A">A — Strong Fit</option>
-            <option value="B">B — Monitor</option>
-            <option value="C">C — Low Priority</option>
-            <option value="__unscored">— Unscored</option>
+            <option value="" data-i18n="all_tiers">All tiers</option>
+            <option value="S" data-i18n="tier_s">S — Strategic</option>
+            <option value="A" data-i18n="tier_a">A — Strong Fit</option>
+            <option value="B" data-i18n="tier_b">B — Monitor</option>
+            <option value="C" data-i18n="tier_c">C — Low Priority</option>
+            <option value="__unscored" data-i18n="tier_unscored">
+              — Unscored
+            </option>
           </select>
           <div class="company-sort-chips">
             <button
@@ -228,12 +252,13 @@
               data-csort="liked"
               onclick="toggleCompanySort(this)"
             >
-              Liked &#8595;
+              <span data-i18n="csort_liked">Liked</span> &#8595;
             </button>
             <button
               class="chip chip-sort"
               data-csort="score"
               onclick="toggleCompanySort(this)"
+              data-i18n="csort_score"
             >
               Score
             </button>
@@ -241,6 +266,7 @@
               class="chip chip-sort"
               data-csort="interest"
               onclick="toggleCompanySort(this)"
+              data-i18n="csort_interest"
             >
               Interest
             </button>
@@ -257,11 +283,16 @@
         <div class="gf-companion">
           <img
             src="images/illus-pipeline.png"
+            data-img="illus-pipeline"
             alt="Illustration of the triage pipeline"
           />
         </div>
         <div class="gf-accent">
-          <img src="images/accent-pipeline.png" alt="" />
+          <img
+            src="images/accent-pipeline.png"
+            data-img="accent-pipeline"
+            alt=""
+          />
         </div>
         <div class="triage-funnel" id="triageFunnel"></div>
         <div class="triage-board-controls" id="triageBoardControls"></div>
@@ -276,15 +307,22 @@
         <div class="gf-companion">
           <img
             src="images/illus-archive.png"
+            data-img="illus-archive"
             alt="Illustration of the vacancy archive"
           />
         </div>
         <div class="gf-accent">
-          <img src="images/accent-archive.png" alt="" />
+          <img
+            src="images/accent-archive.png"
+            data-img="accent-archive"
+            alt=""
+          />
         </div>
         <div class="archive-intro">
-          <h2 class="archive-title">&#128230; Vacancy archive</h2>
-          <p class="archive-sub">
+          <h2 class="archive-title">
+            &#128230; <span data-i18n="archive_title">Vacancy archive</span>
+          </h2>
+          <p class="archive-sub" data-i18n="archive_sub">
             Vacancies archived from earlier runs. View only.
           </p>
         </div>
@@ -294,6 +332,7 @@
             class="catalog-search"
             id="archiveSearch"
             placeholder="Search by title, organization, location..."
+            data-i18n-ph="search_vacancies_ph"
             oninput="renderArchive()"
           />
           <select
@@ -301,7 +340,7 @@
             id="archiveOrgFilter"
             onchange="renderArchive()"
           >
-            <option value="">All companies</option>
+            <option value="" data-i18n="all_companies">All companies</option>
           </select>
         </div>
         <div class="catalog-results-count" id="archiveResultsCount"></div>

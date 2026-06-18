@@ -31,6 +31,7 @@ import {
   isVacancyExpired,
 } from "./helpers.js";
 import { saveCompanyReview, showSyncStatus } from "./api.js";
+import { T } from "./i18n.js";
 
 // ---------------------------------------------------------------------------
 // Companies table — init, render, sort, filter
@@ -325,11 +326,21 @@ function _getColumns() {
   // approved (default)
   return [
     { key: "name", label: "Company", sortable: true, cls: "ct-col-name" },
-    { key: "tier", label: "Tier", sortable: true, cls: "ct-col-tier" },
+    {
+      key: "tier",
+      label: T("col_tier", "Tier"),
+      sortable: true,
+      cls: "ct-col-tier",
+    },
     { key: "fit", label: "Fit", sortable: true, cls: "ct-col-fit" },
     { key: "mpa", label: "MPA", sortable: true, cls: "ct-col-mpa" },
     { key: "vacancies", label: "Vacancies", sortable: true, cls: "ct-col-vac" },
-    { key: "liked", label: "Liked", sortable: true, cls: "ct-col-liked" },
+    {
+      key: "liked",
+      label: T("col_liked", "Liked"),
+      sortable: true,
+      cls: "ct-col-liked",
+    },
     { key: "new", label: "New", sortable: true, cls: "ct-col-new" },
     {
       key: "freshness",
@@ -340,7 +351,7 @@ function _getColumns() {
     { key: "offices", label: "Location", sortable: false, cls: "ct-col-loc" },
     {
       key: "monitoring",
-      label: "Monitoring",
+      label: T("col_monitoring", "Monitoring"),
       sortable: true,
       cls: "ct-col-monitoring",
     },
