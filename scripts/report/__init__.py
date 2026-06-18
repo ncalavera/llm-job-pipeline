@@ -28,13 +28,49 @@ def _resolve_dashboard_style() -> str:
 
     try:
         import settings
-        cfg = settings.load_defaults().get("dashboard", {})
+        cfg = settings.dashboard()
         style = str(cfg.get("style", "illustrated")).strip().lower()
         if style in _DASHBOARD_STYLES:
             return style
     except Exception:
         pass
     return "illustrated"
+
+
+def _resolve_language() -> str:
+    """Pick the dashboard language: env DASHBOARD_LANGUAGE overrides config.
+
+    Falls back to ``en`` when unset or not bundled.
+    """
+    import i18n
+    available = set(i18n.available_languages())
+    env = (os.environ.get("DASHBOARD_LANGUAGE") or "").strip().lower()
+    if env in available:
+        return env
+    try:
+        import settings
+        lang = str(settings.dashboard().get("language", "en")).strip().lower()
+        if lang in available:
+            return lang
+    except Exception:
+        pass
+    return i18n.DEFAULT_LANGUAGE
+
+
+def _resolve_pack() -> str:
+    """Pick the illustration pack: env DASHBOARD_PACK overrides config default.
+
+    Falls back to ``default`` when unset. Any non-empty name is accepted (the
+    pack's images are resolved from ``images/<pack>/`` at render time).
+    """
+    env = (os.environ.get("DASHBOARD_PACK") or "").strip()
+    if env:
+        return env
+    try:
+        import settings
+        return str(settings.dashboard().get("illustration_pack", "default")).strip() or "default"
+    except Exception:
+        return "default"
 
 
 def generate_dashboard(db: dict = None) -> None:
@@ -112,6 +148,12 @@ def generate_dashboard(db: dict = None) -> None:
         g["company_slug"] = slug_lookup.get(canonical)
         g["company_name"] = canonical if slug_lookup.get(canonical) else None
 
+    # --- Resolve presentation knobs (env overrides config) ---
+    import i18n
+    from .packs import pack_images
+    language = _resolve_language()
+    pack = _resolve_pack()
+
     # --- Build VACANCY_DATA payload for JS ---
     from datetime import datetime
     vacancy_data = {
@@ -119,6 +161,10 @@ def generate_dashboard(db: dict = None) -> None:
             "last_updated": datetime.now().isoformat(timespec="seconds"),
             "api_base": "",  # Vercel uses relative paths
             "dashboard_style": _resolve_dashboard_style(),
+            "language": language,
+            "i18n": i18n.strings(language),
+            "pack": pack,
+            "pack_images": pack_images(pack),
         },
         "stats": stats,
         "enrichment_stats": enrichment_stats,

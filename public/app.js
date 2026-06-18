@@ -12,6 +12,7 @@ import {
   scheduleRender,
 } from "./modules/state.js";
 import { initUI, showToast } from "./modules/helpers.js";
+import { applyI18n, T } from "./modules/i18n.js";
 import { initApi, loadFromServer, loadCompanyStatuses } from "./modules/api.js";
 import {
   initCatalog,
@@ -49,6 +50,13 @@ import { initArchive, renderArchive } from "./modules/archive.js";
 // ---------------------------------------------------------------------------
 
 initUI();
+
+// ---------------------------------------------------------------------------
+// Language + illustration pack — apply the baked strings and pack images to the
+// static shell before anything renders.
+// ---------------------------------------------------------------------------
+
+applyI18n();
 
 // ---------------------------------------------------------------------------
 // Dashboard style — "illustrated" (default) or "minimal".
@@ -175,20 +183,27 @@ function switchMode(mode) {
 (function updateHeroDate() {
   var el = document.getElementById("heroDate");
   if (!el) return;
-  var raw = el.textContent.replace("Updated: ", "").trim();
-  if (!raw || raw === "\u2014") return;
+  var prefix = T("updated_prefix", "Updated:");
+  // Date source: any text already in the span, else the baked config timestamp.
+  var raw = el.textContent.replace(prefix, "").replace("Updated:", "").trim();
+  if (!raw || raw === "\u2014") {
+    raw = (config && config.last_updated) || "";
+  }
+  if (!raw) return;
+  var locale = (config && config.language) === "ru" ? "ru-RU" : "en-US";
   try {
     var d = new Date(raw);
     if (!isNaN(d.getTime())) {
       el.textContent =
-        "Updated: " +
-        d.toLocaleDateString("en-US", {
+        prefix +
+        " " +
+        d.toLocaleDateString(locale, {
           day: "numeric",
           month: "long",
           year: "numeric",
         }) +
         ", " +
-        d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+        d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
     }
   } catch (e) {
     /* ignore parse errors */

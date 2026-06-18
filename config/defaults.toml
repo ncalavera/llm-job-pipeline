@@ -25,6 +25,18 @@
 # falls back to "illustrated".
 style = "illustrated"
 
+# UI language of the generated dashboard chrome (tabs, chips, placeholders,
+# buttons, empty states). Bundled translations live in scripts/i18n.py.
+# Shipped values: "en" (default), "ru". Env DASHBOARD_LANGUAGE overrides this.
+# An unknown value falls back to "en".
+language = "en"
+
+# Illustration pack for the companion/accent images on each tab. "default" uses
+# the generic art committed under public/images/. Any other name resolves its
+# images from public/images/<pack>/ — a directory you can keep local-only
+# (gitignored) for personal art. Env DASHBOARD_PACK overrides this.
+illustration_pack = "default"
+
 # ===========================================================================
 # Numeric thresholds — scoring, tiers, auto-archive, auto-review.
 # ===========================================================================

@@ -118,6 +118,25 @@ def thresholds() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Dashboard presentation knobs
+# ---------------------------------------------------------------------------
+
+def dashboard() -> dict:
+    """Dashboard presentation knobs (env vars override at the call site).
+
+    Keys: style ("illustrated"|"minimal"), language ("en"|"ru"|...),
+    illustration_pack (pack name, "default" = committed generic art).
+    Neutral fallbacks so a missing section degrades to English + default pack.
+    """
+    sec = _section("dashboard")
+    return {
+        "style": str(sec.get("style", "illustrated")),
+        "language": str(sec.get("language", "en")),
+        "illustration_pack": str(sec.get("illustration_pack", "default")),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Junk / blacklist data
 # ---------------------------------------------------------------------------
 
