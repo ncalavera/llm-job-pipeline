@@ -262,93 +262,133 @@ function _getColumns() {
     return [
       {
         key: "name",
-        label: "Company",
+        label: T("col_company", "Company"),
         sortable: true,
         cls: "ct-col-name ct-col-name--pending",
       },
       {
         key: "category",
-        label: "Category",
+        label: T("col_category", "Category"),
         sortable: false,
         cls: "ct-col-cat ct-col-cat--pending",
       },
       {
         key: "fit",
-        label: "Fit",
+        label: T("col_fit", "Fit"),
         sortable: true,
         cls: "ct-col-fit ct-col-fit--pending",
       },
       {
         key: "vacancies",
-        label: "Vacancies",
+        label: T("col_vacancies", "Vacancies"),
         sortable: true,
         cls: "ct-col-vac ct-col-vac--pending",
       },
       {
         key: "offices",
-        label: "Location",
+        label: T("col_location", "Location"),
         sortable: false,
         cls: "ct-col-loc ct-col-loc--pending",
       },
-      { key: "source", label: "Source", sortable: false, cls: "ct-col-source" },
-      { key: "review", label: "Review", sortable: false, cls: "ct-col-review" },
+      {
+        key: "source",
+        label: T("col_source", "Source"),
+        sortable: false,
+        cls: "ct-col-source",
+      },
+      {
+        key: "review",
+        label: T("col_review_hdr", "Review"),
+        sortable: false,
+        cls: "ct-col-review",
+      },
     ];
   }
   if (subTab === "archived") {
     return [
       {
         key: "name",
-        label: "Company",
+        label: T("col_company", "Company"),
         sortable: true,
         cls: "ct-col-name ct-col-name--archived",
       },
       {
         key: "category",
-        label: "Category",
+        label: T("col_category", "Category"),
         sortable: false,
         cls: "ct-col-cat ct-col-cat--archived",
       },
       {
         key: "fit",
-        label: "Fit",
+        label: T("col_fit", "Fit"),
         sortable: true,
         cls: "ct-col-fit ct-col-fit--archived",
       },
       {
         key: "offices",
-        label: "Location",
+        label: T("col_location", "Location"),
         sortable: false,
         cls: "ct-col-loc ct-col-loc--archived",
       },
-      { key: "reason", label: "Reason", sortable: false, cls: "ct-col-reason" },
+      {
+        key: "reason",
+        label: T("col_reason", "Reason"),
+        sortable: false,
+        cls: "ct-col-reason",
+      },
     ];
   }
   // approved (default)
   return [
-    { key: "name", label: "Company", sortable: true, cls: "ct-col-name" },
+    {
+      key: "name",
+      label: T("col_company", "Company"),
+      sortable: true,
+      cls: "ct-col-name",
+    },
     {
       key: "tier",
       label: T("col_tier", "Tier"),
       sortable: true,
       cls: "ct-col-tier",
     },
-    { key: "fit", label: "Fit", sortable: true, cls: "ct-col-fit" },
+    {
+      key: "fit",
+      label: T("col_fit", "Fit"),
+      sortable: true,
+      cls: "ct-col-fit",
+    },
     { key: "mpa", label: "MPA", sortable: true, cls: "ct-col-mpa" },
-    { key: "vacancies", label: "Vacancies", sortable: true, cls: "ct-col-vac" },
+    {
+      key: "vacancies",
+      label: T("col_vacancies", "Vacancies"),
+      sortable: true,
+      cls: "ct-col-vac",
+    },
     {
       key: "liked",
       label: T("col_liked", "Liked"),
       sortable: true,
       cls: "ct-col-liked",
     },
-    { key: "new", label: "New", sortable: true, cls: "ct-col-new" },
+    {
+      key: "new",
+      label: T("col_new", "New"),
+      sortable: true,
+      cls: "ct-col-new",
+    },
     {
       key: "freshness",
-      label: "Freshness",
+      label: T("col_freshness", "Freshness"),
       sortable: true,
       cls: "ct-col-freshness",
     },
-    { key: "offices", label: "Location", sortable: false, cls: "ct-col-loc" },
+    {
+      key: "offices",
+      label: T("col_location", "Location"),
+      sortable: false,
+      cls: "ct-col-loc",
+    },
     {
       key: "monitoring",
       label: T("col_monitoring", "Monitoring"),
@@ -385,12 +425,17 @@ function _renderStatsCards(unfilteredByCard, filtered) {
 
     // Subtitle for "Needs attention"
     var actionParts = [];
-    if (staleCount > 0) actionParts.push(staleCount + " stale");
-    if (errorCount > 0) actionParts.push(errorCount + " errors");
+    if (staleCount > 0)
+      actionParts.push(staleCount + " " + T("stat_stale_suffix", "stale"));
+    if (errorCount > 0)
+      actionParts.push(errorCount + " " + T("stat_errors_suffix", "errors"));
     var actionSub = actionParts.join(" \u00B7 ") || "\u2014";
 
     // Subtitle for "With new"
-    var newSub = withNew > 0 ? withNew + " unreviewed" : "\u2014";
+    var newSub =
+      withNew > 0
+        ? withNew + " " + T("stat_unreviewed_suffix", "unreviewed")
+        : "\u2014";
 
     statsEl.innerHTML =
       '<div class="ces-card ces-card--approved ces-card--clickable' +
@@ -399,7 +444,9 @@ function _renderStatsCards(unfilteredByCard, filtered) {
       '<span class="ces-number">' +
       total +
       "</span>" +
-      '<span class="ces-label">Total</span>' +
+      '<span class="ces-label">' +
+      escHtml(T("stat_total", "Total")) +
+      "</span>" +
       '<span class="ces-sub">\u00A0</span>' +
       "</div>" +
       '<div class="ces-card ces-card--new ces-card--clickable' +
@@ -408,7 +455,9 @@ function _renderStatsCards(unfilteredByCard, filtered) {
       '<span class="ces-number">' +
       withNew +
       "</span>" +
-      '<span class="ces-label">With new</span>' +
+      '<span class="ces-label">' +
+      escHtml(T("stat_with_new", "With new")) +
+      "</span>" +
       '<span class="ces-sub">' +
       escHtml(newSub) +
       "</span>" +
@@ -419,7 +468,9 @@ function _renderStatsCards(unfilteredByCard, filtered) {
       '<span class="ces-number">' +
       needAction +
       "</span>" +
-      '<span class="ces-label">Needs attention</span>' +
+      '<span class="ces-label">' +
+      escHtml(T("stat_needs_attention", "Needs attention")) +
+      "</span>" +
       '<span class="ces-sub">' +
       escHtml(actionSub) +
       "</span>" +
@@ -435,13 +486,17 @@ function _renderStatsCards(unfilteredByCard, filtered) {
       '<span class="ces-number">' +
       pendingCount +
       "</span>" +
-      '<span class="ces-label">Pending</span>' +
+      '<span class="ces-label">' +
+      escHtml(T("stat_pending", "Pending")) +
+      "</span>" +
       "</div>" +
       '<div class="ces-card ces-card--approved">' +
       '<span class="ces-number">' +
       enrichedCount +
       "</span>" +
-      '<span class="ces-label">Enriched</span>' +
+      '<span class="ces-label">' +
+      escHtml(T("stat_enriched", "Enriched")) +
+      "</span>" +
       "</div>";
   } else {
     // archived
@@ -450,7 +505,9 @@ function _renderStatsCards(unfilteredByCard, filtered) {
       '<span class="ces-number">' +
       filtered.length +
       "</span>" +
-      '<span class="ces-label">Rejected</span>' +
+      '<span class="ces-label">' +
+      escHtml(T("stat_rejected", "Rejected")) +
+      "</span>" +
       "</div>";
   }
 }
@@ -468,7 +525,7 @@ function _getMonitoringStatus(c) {
   ) {
     return {
       level: "error",
-      label: "Fetch error",
+      label: T("mon_error", "Fetch error"),
       dotCls: "mon-dot--error",
       tooltip: c.fetch_status,
     };
@@ -476,7 +533,7 @@ function _getMonitoringStatus(c) {
   if (c.fetch_status === "no_data") {
     return {
       level: "nodata",
-      label: "No data",
+      label: T("mon_no_data", "No data"),
       dotCls: "mon-dot--nodata",
       tooltip: "Fetch succeeded, but no vacancies found",
     };
@@ -484,7 +541,7 @@ function _getMonitoringStatus(c) {
   if (c.is_manual_check) {
     return {
       level: "manual",
-      label: "Manual",
+      label: T("mon_manual", "Manual"),
       dotCls: "mon-dot--manual",
       tooltip: "Manual check",
     };
@@ -492,7 +549,7 @@ function _getMonitoringStatus(c) {
   if (c.needs_source || !c.strategy) {
     return {
       level: "nosource",
-      label: "No source",
+      label: T("mon_no_source", "No source"),
       dotCls: "mon-dot--nosource",
       tooltip: "Source not configured",
     };
@@ -500,7 +557,7 @@ function _getMonitoringStatus(c) {
   if (!c.last_fetched) {
     return {
       level: "never",
-      label: "Never run",
+      label: T("mon_never", "Never run"),
       dotCls: "mon-dot--never",
       tooltip: "Fetch never run",
     };
@@ -510,14 +567,14 @@ function _getMonitoringStatus(c) {
   if (daysSince > 7) {
     return {
       level: "stale",
-      label: daysSince + "d ago",
+      label: T("mon_days_ago", "{n}d ago").replace("{n}", daysSince),
       dotCls: "mon-dot--stale",
       tooltip: "Last fetch " + daysSince + " days ago",
     };
   }
   return {
     level: "ok",
-    label: "Working",
+    label: T("mon_working", "Working"),
     dotCls: "mon-dot--ok",
     tooltip: "Last fetch " + _daysSince(c.last_fetched) + "d ago",
   };
@@ -575,15 +632,26 @@ var MON_CHIP_ORDER = [
   "manual",
   "ok",
 ];
-var MON_CHIP_LABELS = {
-  error: "Errors",
-  stale: "Stale",
-  never: "Never run",
-  nosource: "No source",
-  nodata: "No data",
-  manual: "Manual",
-  ok: "OK",
-};
+function _monChipLabel(level) {
+  switch (level) {
+    case "error":
+      return T("monchip_error", "Errors");
+    case "stale":
+      return T("monchip_stale", "Stale");
+    case "never":
+      return T("monchip_never", "Never run");
+    case "nosource":
+      return T("monchip_nosource", "No source");
+    case "nodata":
+      return T("monchip_nodata", "No data");
+    case "manual":
+      return T("monchip_manual", "Manual");
+    case "ok":
+      return T("monchip_ok", "OK");
+    default:
+      return level;
+  }
+}
 
 function _renderMonitoringChips(baseList) {
   var container = document.getElementById("monitoringChips");
@@ -630,7 +698,7 @@ function _renderMonitoringChips(baseList) {
       '"></span>' +
       count +
       " " +
-      escHtml(MON_CHIP_LABELS[level]) +
+      escHtml(_monChipLabel(level)) +
       "</span>";
   }
   html += "</div>";
