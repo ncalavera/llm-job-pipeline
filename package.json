@@ -1,0 +1,11 @@
+{
+  "name": "job-search-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@supabase/supabase-js": "^2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

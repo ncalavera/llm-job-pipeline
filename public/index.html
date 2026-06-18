@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Job Vacancy Dashboard</title>
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22sk%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23F5F0E8%22/%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23EDE5D8%22/%3E%0A%20%20%20%20%3C/linearGradient%3E%0A%20%20%3C/defs%3E%0A%20%20%3C%21--%20skull%20shape%20--%3E%0A%20%20%3Cpath%20d%3D%22M16%202C9.5%202%205%207%205%2013c0%203.5%201.2%205.8%203%207.5V24c0%201%20.8%202%202%202h1v2.5c0%20.8.7%201.5%201.5%201.5h1c.8%200%201.5-.7%201.5-1.5V26h2v2.5c0%20.8.7%201.5%201.5%201.5h1c.8%200%201.5-.7%201.5-1.5V26h1c1.2%200%202-1%202-2v-3.5c1.8-1.7%203-4%203-7.5C27%207%2022.5%202%2016%202z%22%20fill%3D%22url%28%23sk%29%22%20stroke%3D%22%23C2522A%22%20stroke-width%3D%221%22/%3E%0A%20%20%3C%21--%20left%20eye%20--%3E%0A%20%20%3Cellipse%20cx%3D%2212%22%20cy%3D%2213%22%20rx%3D%222.8%22%20ry%3D%223%22%20fill%3D%22%23C2522A%22/%3E%0A%20%20%3Cellipse%20cx%3D%2212%22%20cy%3D%2212.5%22%20rx%3D%221.2%22%20ry%3D%221.4%22%20fill%3D%22%23F5F0E8%22/%3E%0A%20%20%3C%21--%20right%20eye%20--%3E%0A%20%20%3Cellipse%20cx%3D%2220%22%20cy%3D%2213%22%20rx%3D%222.8%22%20ry%3D%223%22%20fill%3D%22%23C2522A%22/%3E%0A%20%20%3Cellipse%20cx%3D%2220%22%20cy%3D%2212.5%22%20rx%3D%221.2%22%20ry%3D%221.4%22%20fill%3D%22%23F5F0E8%22/%3E%0A%20%20%3C%21--%20nose%20--%3E%0A%20%20%3Cpath%20d%3D%22M15%2017.5l1-2%201%202z%22%20fill%3D%22%23C2522A%22/%3E%0A%20%20%3C%21--%20teeth%20--%3E%0A%20%20%3Crect%20x%3D%2212%22%20y%3D%2220%22%20width%3D%221.5%22%20height%3D%222%22%20rx%3D%22.3%22%20fill%3D%22%23C2522A%22/%3E%0A%20%20%3Crect%20x%3D%2214.5%22%20y%3D%2220%22%20width%3D%221.5%22%20height%3D%222%22%20rx%3D%22.3%22%20fill%3D%22%23C2522A%22/%3E%0A%20%20%3Crect%20x%3D%2217%22%20y%3D%2220%22%20width%3D%221.5%22%20height%3D%222%22%20rx%3D%22.3%22%20fill%3D%22%23C2522A%22/%3E%0A%20%20%3C%21--%20forehead%20flower%20--%3E%0A%20%20%3Ccircle%20cx%3D%2216%22%20cy%3D%227.5%22%20r%3D%221.6%22%20fill%3D%22%23F97316%22%20opacity%3D%22.85%22/%3E%0A%20%20%3Ccircle%20cx%3D%2216%22%20cy%3D%227.5%22%20r%3D%22.6%22%20fill%3D%22%23D97706%22/%3E%0A%20%20%3C%21--%20brow%20decorations%20--%3E%0A%20%20%3Ccircle%20cx%3D%229.5%22%20cy%3D%229%22%20r%3D%22.7%22%20fill%3D%22%23F97316%22%20opacity%3D%22.6%22/%3E%0A%20%20%3Ccircle%20cx%3D%2222.5%22%20cy%3D%229%22%20r%3D%22.7%22%20fill%3D%22%23F97316%22%20opacity%3D%22.6%22/%3E%0A%3C/svg%3E"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <nav class="top-nav">
+      <div class="top-nav-brand">Job Search Pipeline</div>
+      <div class="mode-toggle">
+        <button
+          class="mode-btn"
+          id="modeCompanies"
+          onclick="switchMode('companies')"
+        >
+          &#9881; Companies
+        </button>
+        <button
+          class="mode-btn"
+          id="modeCatalog"
+          onclick="switchMode('catalog')"
+        >
+          &#9636; Vacancies
+        </button>
+        <button
+          class="mode-btn"
+          id="modePipeline"
+          onclick="switchMode('pipeline')"
+        >
+          &#9654; Triage
+        </button>
+        <button class="mode-btn" id="modeStats" onclick="switchMode('stats')">
+          &#128205; Geo
+        </button>
+        <button
+          class="mode-btn"
+          id="modeArchive"
+          onclick="switchMode('archive')"
+        >
+          &#128230; Archive
+        </button>
+      </div>
+      <div class="top-nav-right">
+        <span class="hero-date" id="heroDate"></span>
+      </div>
+    </nav>
+
+    <div class="container">
+      <div id="syncIndicator" class="sync-indicator"></div>
+
+      <!-- === CATALOG MODE === -->
+      <div class="catalog-section active" id="catalogSection">
+        <div class="catalog-loading" id="catalogLoading">
+          <img
+            src="images/illus-catalog.png"
+            alt="Illustration of a figure reviewing job listings"
+            class="loading-illus"
+          />
+          <p class="loading-text">Sorting vacancies…</p>
+        </div>
+
+        <div class="gf-companion">
+          <img
+            src="images/illus-catalog.png"
+            alt="Illustration of a figure reviewing job listings"
+          />
+        </div>
+        <div class="gf-accent">
+          <img src="images/accent-catalog.png" alt="" />
+        </div>
+
+        <div class="basket-tabs">
+          <button
+            class="basket-tab"
+            data-basket="liked"
+            onclick="switchBasket(this)"
+          >
+            <span class="basket-dot"></span>
+            Liked
+            <span class="basket-count" id="countLiked">0</span>
+          </button>
+          <button
+            class="basket-tab active"
+            data-basket="unseen"
+            onclick="switchBasket(this)"
+          >
+            <span class="basket-dot"></span>
+            Unreviewed
+            <span class="basket-count" id="countUnseen">0</span>
+          </button>
+          <button
+            class="basket-tab"
+            data-basket="passed"
+            onclick="switchBasket(this)"
+          >
+            <span class="basket-dot"></span>
+            Passed
+            <span class="basket-count" id="countPassed">0</span>
+          </button>
+        </div>
+
+        <div class="catalog-filters">
+          <input
+            type="text"
+            class="catalog-search"
+            id="catalogSearch"
+            placeholder="Search by title, organization, location..."
+            oninput="renderCatalog()"
+          />
+          <select
+            class="catalog-org-filter"
+            id="catalogOrgFilter"
+            onchange="renderCatalog()"
+          >
+            <option value="">All companies</option>
+          </select>
+          <div class="catalog-loc-chips">
+            <button
+              class="chip"
+              data-cloc="europe"
+              onclick="toggleCatalogLoc(this)"
+            >
+              Europe
+            </button>
+            <button
+              class="chip"
+              data-cloc="us"
+              onclick="toggleCatalogLoc(this)"
+            >
+              US
+            </button>
+            <button
+              class="chip"
+              data-cloc="remote"
+              onclick="toggleCatalogLoc(this)"
+            >
+              Remote
+            </button>
+            <button
+              class="chip"
+              data-cloc="other"
+              onclick="toggleCatalogLoc(this)"
+            >
+              Other
+            </button>
+          </div>
+          <button
+            class="chip catalog-sort-btn active"
+            onclick="toggleCatalogSort(this)"
+          >
+            Score&#160;&#8595;
+          </button>
+        </div>
+
+        <div class="catalog-results-count" id="catalogResultsCount"></div>
+        <div class="catalog-grid" id="catalogGrid"></div>
+      </div>
+      <!-- /catalog-section -->
+
+      <!-- === COMPANIES MODE === -->
+      <div class="companies-section" id="companiesSection">
+        <div class="gf-companion">
+          <img
+            src="images/illus-companies.png"
+            alt="Illustration of companies being reviewed"
+          />
+        </div>
+        <div class="gf-accent">
+          <img src="images/accent-companies.png" alt="" />
+        </div>
+        <div class="company-sub-tabs" id="companySubTabs">
+          <button
+            class="company-sub-tab active"
+            data-subtab="approved"
+            onclick="switchCompanySubTab('approved')"
+          >
+            Approved
+          </button>
+          <button
+            class="company-sub-tab"
+            data-subtab="pending"
+            onclick="switchCompanySubTab('pending')"
+          >
+            Pending Review
+          </button>
+          <button
+            class="company-sub-tab"
+            data-subtab="archived"
+            onclick="switchCompanySubTab('archived')"
+          >
+            Archived
+          </button>
+        </div>
+        <div class="companies-filters">
+          <input
+            type="text"
+            class="catalog-search"
+            id="companySearch"
+            placeholder="Search by company, description, location..."
+            oninput="renderCompanies()"
+          />
+          <select
+            class="catalog-org-filter"
+            id="companyTierFilter"
+            onchange="renderCompanies()"
+          >
+            <option value="">All tiers</option>
+            <option value="S">S — Strategic</option>
+            <option value="A">A — Strong Fit</option>
+            <option value="B">B — Monitor</option>
+            <option value="C">C — Low Priority</option>
+            <option value="__unscored">— Unscored</option>
+          </select>
+          <div class="company-sort-chips">
+            <button
+              class="chip chip-sort active"
+              data-csort="liked"
+              onclick="toggleCompanySort(this)"
+            >
+              Liked &#8595;
+            </button>
+            <button
+              class="chip chip-sort"
+              data-csort="score"
+              onclick="toggleCompanySort(this)"
+            >
+              Score
+            </button>
+            <button
+              class="chip chip-sort"
+              data-csort="interest"
+              onclick="toggleCompanySort(this)"
+            >
+              Interest
+            </button>
+          </div>
+        </div>
+        <div class="company-enrichment-stats" id="companyEnrichmentStats"></div>
+        <div class="ces-shown" id="companyShownCount"></div>
+        <div class="companies-grid" id="companiesGrid"></div>
+      </div>
+      <!-- /companies-section -->
+
+      <!-- === PIPELINE MODE === -->
+      <div class="pipeline-section" id="pipelineSection">
+        <div class="gf-companion">
+          <img
+            src="images/illus-pipeline.png"
+            alt="Illustration of the triage pipeline"
+          />
+        </div>
+        <div class="gf-accent">
+          <img src="images/accent-pipeline.png" alt="" />
+        </div>
+        <div class="triage-funnel" id="triageFunnel"></div>
+        <div class="triage-board-controls" id="triageBoardControls"></div>
+        <div class="pipeline-board" id="pipelineBoard"></div>
+      </div>
+
+      <!-- === STATS MODE === -->
+      <div class="stats-section" id="statsSection"></div>
+
+      <!-- === ARCHIVE MODE === -->
+      <div class="archive-section" id="archiveSection">
+        <div class="gf-companion">
+          <img
+            src="images/illus-archive.png"
+            alt="Illustration of the vacancy archive"
+          />
+        </div>
+        <div class="gf-accent">
+          <img src="images/accent-archive.png" alt="" />
+        </div>
+        <div class="archive-intro">
+          <h2 class="archive-title">&#128230; Vacancy archive</h2>
+          <p class="archive-sub">
+            Vacancies archived from earlier runs. View only.
+          </p>
+        </div>
+        <div class="catalog-filters">
+          <input
+            type="text"
+            class="catalog-search"
+            id="archiveSearch"
+            placeholder="Search by title, organization, location..."
+            oninput="renderArchive()"
+          />
+          <select
+            class="catalog-org-filter"
+            id="archiveOrgFilter"
+            onchange="renderArchive()"
+          >
+            <option value="">All companies</option>
+          </select>
+        </div>
+        <div class="catalog-results-count" id="archiveResultsCount"></div>
+        <div class="catalog-grid" id="archiveGrid"></div>
+      </div>
+      <!-- /archive-section -->
+
+      <!-- === COMPANY PROFILE PAGE === -->
+      <div class="company-profile-page" id="companyProfile"></div>
+    </div>
+
+    <script src="data.js"></script>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

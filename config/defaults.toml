@@ -1,0 +1,350 @@
+# defaults.toml — tool mechanics + neutral "goldilocks" defaults.
+#
+# This file holds every tunable list, threshold, keyword, geo mapping and board
+# definition the pipeline reads. Changing behavior means editing THIS file (or
+# your config/user_profile.md), never editing Python. The loader is
+# scripts/settings.py; scripts/config.py re-exports the same names it always did.
+#
+# Goldilocks rule: values here are neutral and owner-agnostic — they work for
+# any job-seeker. Personal taste (target roles, excluded disciplines, excluded
+# geographies) belongs in config/user_profile.md, NOT here. Every per-board
+# `board_blacklist` ships empty; region keyword buckets ship empty; only
+# universal non-job junk (talent pools, bootcamps, …) is filtered by default.
+#
+# Missing file / section / key is tolerated: the loader falls back to a
+# documented neutral default and never crashes.
+
+# ===========================================================================
+# Dashboard — visual style of the generated public dashboard.
+# ===========================================================================
+[dashboard]
+# Two styles only:
+#   "illustrated" — full visuals: companion + accent illustrations (default).
+#   "minimal"     — hides decorative illustrations for a clean, plain look.
+# Env DASHBOARD_STYLE=illustrated|minimal overrides this. Any other value
+# falls back to "illustrated".
+style = "illustrated"
+
+# ===========================================================================
+# Numeric thresholds — scoring, tiers, auto-archive, auto-review.
+# ===========================================================================
+[thresholds]
+# Vacancies scored below this are auto-archived (only unseen ones; user
+# decisions like liked/passed are kept). Env LLM_SCORE_THRESHOLD overrides.
+# Set to 0 to disable auto-archive entirely.
+llm_score_threshold = 20
+
+# Score → tier cut-offs (highest first). S = best fit. Used by the dashboard /
+# tier helpers; not a geography or discipline preference.
+tier_s = 65
+tier_a = 50
+tier_b = 35
+tier_c = 0
+
+# Composite company-ranking weights (alignment vs. any boost). Neutral split.
+composite_alignment_weight = 0.70
+composite_boost_weight = 0.30
+
+[thresholds.auto_review]
+# Opt-in: auto-promote/reject candidate companies by alignment_score. Disabled
+# by default (a human approves companies). Env AUTO_REVIEW_CANDIDATES=1 enables;
+# AUTO_REVIEW_APPROVE / AUTO_REVIEW_REJECT override the numbers.
+enabled = false
+approve = 60
+reject = 25
+
+# ===========================================================================
+# Universal junk — non-vacancy postings nobody is searching for.
+#
+# Contains NO geography and NO job discipline (no "engineer", "sales", …) —
+# those are personal and live in user_profile.md's exclude_title_keywords.
+# Safe to apply for everyone: these are simply not real open roles.
+# ===========================================================================
+[junk]
+# Word-boundary matches against lower(title). ONLY speculative / evergreen
+# "pipeline" entries that are not a specific open role at all. Nothing tied to
+# discipline, seniority, career stage, format, geography or sector ships here:
+# a student wants fellowships and internships; some people want to volunteer for
+# experience; a career-changer wants a bootcamp. Those are personal taste →
+# user_profile.md's exclude_title_keywords (empty by default). The test
+# "imagine a student, a career-changer, anyone — would someone want this?" must
+# be NO for every entry below.
+words = [
+    "expression of interest", "talent pool", "general application",
+    "talent community", "speculative application", "future opportunities",
+    "open application", "talent network", "join our talent",
+]
+
+# Substring (stem) matches — no word boundaries. Ships EMPTY on purpose.
+#
+# Format- or discipline-flavored words (bootcamp, course, summer school,
+# fellowship, internship, "training on", …) are NOT universal junk: a "Data
+# Science Bootcamp" instructor or a paid fellowship can be a real role. Whether
+# to drop them is personal taste → user_profile.md's exclude_title_keywords.
+# Universal junk (the `words` list above) holds ONLY markers meaning "no
+# concrete single role here at all" (talent pool, expression of interest,
+# general/open/speculative application, talent network/community, volunteer
+# call). Keep this list empty unless a future pattern is a non-job for everyone.
+substr = []
+
+# Description-level kill phrases (substring vs. full_description). Kept narrow —
+# visa/citizenship boilerplate only — to avoid false positives.
+desc_substr = [
+    "visa sponsorship not available",
+    "must be a us citizen",
+    "must be us citizen",
+]
+
+# ===========================================================================
+# Region keyword buckets — used only to stamp the display-only `region` field.
+# Ship EMPTY so NO geography is privileged as a "good region" by default.
+# Geography preference comes from user_profile.md's exclude_countries.
+# ===========================================================================
+[regions]
+europe = []
+us = []
+remote = []
+
+# ===========================================================================
+# Geo classification DATA (the logic lives in scripts/geo.py).
+# These are universal structural maps: which country/city sits in which bucket.
+# No bucket is anyone's "home" — they are neutral structural labels.
+# ===========================================================================
+[geo.countries]
+uk = ["united kingdom", "uk", "great britain", "england", "scotland", "wales"]
+de = ["germany", "deutschland"]
+europe = [
+    "ireland", "france", "netherlands", "belgium", "luxembourg",
+    "spain", "portugal", "italy", "austria", "switzerland",
+    "poland", "czech republic", "czechia", "slovakia", "hungary",
+    "denmark", "sweden", "norway", "finland", "iceland",
+    "estonia", "latvia", "lithuania", "greece", "croatia",
+    "slovenia", "romania", "bulgaria", "cyprus", "malta",
+    "liechtenstein", "monaco",
+]
+us = ["united states", "usa", "us", "u.s.", "u.s.a.", "canada"]
+# Recognized-but-not-target countries → "other". No special carve-out.
+other = [
+    "russia", "russian federation", "belarus", "georgia", "armenia",
+    "azerbaijan", "kazakhstan", "uzbekistan", "kyrgyzstan", "tajikistan",
+    "turkmenistan", "moldova",
+    "turkey", "israel", "uae", "united arab emirates", "saudi arabia",
+    "egypt", "jordan", "iraq", "lebanon", "qatar", "kuwait", "bahrain",
+    "india", "china", "japan", "singapore", "south korea", "korea",
+    "thailand", "vietnam", "indonesia", "malaysia", "philippines",
+    "pakistan", "bangladesh", "hong kong", "taiwan",
+    "kenya", "south africa", "nigeria", "ghana", "ethiopia", "tanzania",
+    "uganda", "morocco", "tunisia", "senegal", "rwanda", "zambia",
+    "australia", "new zealand",
+    "brazil", "mexico", "argentina", "chile", "colombia", "peru",
+]
+
+[geo.cities]
+uk = ["london", "oxford", "cambridge", "edinburgh", "manchester",
+      "bristol", "glasgow", "birmingham", "leeds", "cardiff", "belfast"]
+de = ["berlin", "munich", "münchen", "frankfurt", "hamburg",
+      "cologne", "köln", "stuttgart", "düsseldorf", "leipzig"]
+europe = [
+    "paris", "amsterdam", "lisbon", "dublin", "geneva", "zurich", "zürich",
+    "brussels", "stockholm", "oslo", "vienna", "wien", "madrid", "barcelona",
+    "rome", "milan", "warsaw", "prague", "copenhagen", "helsinki",
+    "tallinn", "riga", "vilnius", "athens", "budapest", "lyon", "porto",
+    "rotterdam", "the hague", "luxembourg", "basel", "bern", "antwerp",
+]
+us = [
+    "new york", "nyc", "san francisco", "washington", "seattle", "boston",
+    "chicago", "austin", "los angeles", "redwood city", "berkeley",
+    "houston", "denver", "atlanta", "miami", "minneapolis", "reston",
+    "bay area", "palo alto", "mountain view", "toronto", "vancouver",
+]
+other = [
+    "tbilisi", "yerevan", "baku", "almaty", "tashkent", "minsk", "moscow",
+    "saint petersburg", "st petersburg", "nur-sultan", "astana", "bishkek",
+    "dushanbe", "ashgabat", "chisinau", "batumi",
+    "istanbul", "ankara", "tel aviv", "dubai", "abu dhabi", "cairo",
+    "amman", "baghdad", "beirut", "riyadh", "doha",
+    "mumbai", "delhi", "bangalore", "bengaluru", "hyderabad", "chennai",
+    "beijing", "shanghai", "tokyo", "seoul", "bangkok", "jakarta",
+    "manila", "kuala lumpur", "karachi", "dhaka", "hong kong", "taipei",
+    "nairobi", "cape town", "johannesburg", "lagos", "accra", "addis ababa",
+    "kampala", "casablanca", "dakar", "kigali",
+    "sydney", "melbourne",
+    "são paulo", "sao paulo", "rio de janeiro", "mexico city",
+    "buenos aires", "santiago", "bogota", "bogotá", "lima",
+]
+
+# city → country, used by database_supabase.parse_location() to fill `country`
+# from a free-text location. Structural, owner-agnostic.
+[geo.city_country]
+"berlin" = "Germany"
+"munich" = "Germany"
+"hamburg" = "Germany"
+"london" = "United Kingdom"
+"manchester" = "United Kingdom"
+"paris" = "France"
+"amsterdam" = "Netherlands"
+"barcelona" = "Spain"
+"madrid" = "Spain"
+"lisbon" = "Portugal"
+"porto" = "Portugal"
+"rome" = "Italy"
+"milan" = "Italy"
+"stockholm" = "Sweden"
+"copenhagen" = "Denmark"
+"oslo" = "Norway"
+"helsinki" = "Finland"
+"dublin" = "Ireland"
+"vienna" = "Austria"
+"zurich" = "Switzerland"
+"geneva" = "Switzerland"
+"brussels" = "Belgium"
+"warsaw" = "Poland"
+"prague" = "Czech Republic"
+"budapest" = "Hungary"
+"tallinn" = "Estonia"
+"riga" = "Latvia"
+"vilnius" = "Lithuania"
+"new york" = "United States"
+"san francisco" = "United States"
+"seattle" = "United States"
+"austin" = "United States"
+"boston" = "United States"
+"chicago" = "United States"
+"toronto" = "Canada"
+"vancouver" = "Canada"
+"sydney" = "Australia"
+"melbourne" = "Australia"
+"singapore" = "Singapore"
+"tokyo" = "Japan"
+"nairobi" = "Kenya"
+"cape town" = "South Africa"
+"tel aviv" = "Israel"
+"dubai" = "UAE"
+
+# work-mode keyword detection for parse_location().
+[geo.work_mode]
+remote = ["remote", "anywhere", "worldwide", "global", "distributed",
+          "work from home", "wfh", "fully remote", "home-based"]
+hybrid = ["hybrid", "flexible"]
+
+# alias → canonical country name. Lets EXACT country exclusion treat synonyms of
+# the SAME country as one (e.g. "usa" / "us" / "u.s." → "united states"), while
+# keeping DIFFERENT countries distinct (excluding "canada" must NOT drop the US).
+# Owner-agnostic structural data — extend for your own naming.
+[geo.country_aliases]
+"usa" = "united states"
+"us" = "united states"
+"u.s." = "united states"
+"u.s.a." = "united states"
+"united states of america" = "united states"
+"uk" = "united kingdom"
+"u.k." = "united kingdom"
+"great britain" = "united kingdom"
+"england" = "united kingdom"
+"scotland" = "united kingdom"
+"wales" = "united kingdom"
+"deutschland" = "germany"
+"czechia" = "czech republic"
+"uae" = "united arab emirates"
+"korea" = "south korea"
+"russian federation" = "russia"
+
+# ===========================================================================
+# Parsing heuristics — pure extraction hints (NOT filters).
+# ===========================================================================
+[parsing]
+# Cities the markdown location-extractor looks for near a job link to pull a
+# location substring out of free text. This only EXTRACTS a value; it never
+# drops a job. Broaden it for your own geographies as needed.
+location_hint_cities = [
+    "Berlin", "London", "Lisbon", "Munich", "Paris", "Geneva", "Amsterdam",
+    "Brussels", "Dublin", "New York", "Washington", "San Francisco", "NYC",
+    "DC", "UK", "Germany", "Portugal", "US", "USA", "Europe", "EMEA", "Remote",
+]
+
+# ===========================================================================
+# Telegram digest — defaults for the optional daily digest. Env vars still win
+# (DIGEST_HOT_SCORE, DIGEST_DEADLINE_SOON_DAYS, DIGEST_LIMIT, DIGEST_MIN_SCORE).
+# ===========================================================================
+[digest]
+hot_vacancy_score = 55
+deadline_soon_days = 7
+default_limit = 5
+default_min_score = 40
+summary_fallback_chars = 600
+summary_max_chars = 1500
+message_max_chars = 4000
+
+# ===========================================================================
+# Job board aggregators — OPT-IN via the JOB_BOARDS env var (default: none).
+# Each board's `board_blacklist` ships EMPTY: discipline/geo exclusion is the
+# user's choice via user_profile.md's exclude_title_keywords, not baked here.
+# Public board credentials (e.g. 80k Hours' Algolia keys) are embedded from the
+# board's own public site search.
+# ===========================================================================
+[boards.80k_hours]
+strategy = "algolia_api"
+name = "80,000 Hours"
+url = "https://jobs.80000hours.org"
+algolia_app_id = "W6KM1UDIB3"
+algolia_api_key = "d1d7f2c8696e7b36837d5ed337c4a319"
+algolia_index = "jobs_prod_super_ranked"
+board_blacklist = []
+ttl_days = 3
+tier = "B"
+free = true
+
+[boards.reliefweb]
+strategy = "reliefweb_api"
+name = "ReliefWeb"
+url = "https://reliefweb.int/jobs"
+board_blacklist = []
+ttl_days = 3
+tier = "B"
+free = true
+
+[boards.arbeitnow]
+strategy = "arbeitnow_api"
+name = "Arbeitnow"
+url = "https://www.arbeitnow.com"
+pages = 3
+board_blacklist = []
+ttl_days = 3
+tier = "B"
+free = true
+
+[boards.remotive]
+strategy = "remotive_api"
+name = "Remotive"
+url = "https://remotive.com"
+board_blacklist = []
+ttl_days = 3
+tier = "B"
+free = true
+
+[boards.weworkremotely]
+strategy = "wwr_rss"
+name = "We Work Remotely"
+url = "https://weworkremotely.com"
+# WWR has no single "all jobs" feed — one RSS feed per category — so the neutral
+# default is ALL public categories. Narrow with WWR_CATEGORIES (comma list).
+default_categories = [
+    "product", "full-stack-programming", "front-end-programming",
+    "back-end-programming", "software-developer", "design",
+    "devops-sysadmin", "management-and-finance", "customer-support",
+    "sales-and-marketing", "all-other",
+]
+board_blacklist = []
+ttl_days = 3
+tier = "B"
+free = true
+
+[boards.hn_whoishiring]
+strategy = "hn_whoishiring"
+name = "HN Who is hiring"
+url = "https://news.ycombinator.com/submitted?id=whoishiring"
+board_blacklist = []
+# The thread is monthly — a 30-day TTL stops daily refetches.
+ttl_days = 30
+tier = "C"
+free = true

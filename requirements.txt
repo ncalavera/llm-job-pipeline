@@ -1,0 +1,8 @@
+anthropic>=0.40
+psycopg2-binary>=2.9
+requests>=2.31
+beautifulsoup4>=4.12
+python-dateutil>=2.8
+
+# Optional — only needed if you use the Firecrawl enrichment path.
+firecrawl-py>=2.0
