@@ -241,13 +241,18 @@ window.renderArchive = renderArchive;
 initApi();
 
 function initDefault() {
-  // Hide loading screen with fade-out animation
+  // Hide loading screen with fade-out animation. The loader lives inside the
+  // (hidden by default) catalog section, so its CSS animation may never run and
+  // "animationend" may never fire — guard with a timeout that removes it
+  // unconditionally, otherwise the "Sorting vacancies…" overlay stays stuck.
   var loadingEl = document.getElementById("catalogLoading");
   if (loadingEl) {
     loadingEl.classList.add("hidden");
-    loadingEl.addEventListener("animationend", function () {
-      loadingEl.remove();
-    });
+    var removeLoader = function () {
+      if (loadingEl && loadingEl.parentNode) loadingEl.remove();
+    };
+    loadingEl.addEventListener("animationend", removeLoader);
+    setTimeout(removeLoader, 500);
   }
 
   var initSlug = getCompanySlugFromUrl();

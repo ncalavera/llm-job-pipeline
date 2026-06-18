@@ -3026,6 +3026,13 @@ body[data-dashboard-style="minimal"] .loading-illus {
   display: block;
   position: relative;
 }
+.archive-section {
+  display: none;
+}
+.archive-section.active {
+  display: block;
+  position: relative;
+}
 
 .triage-funnel,
 .pipeline-stats {
