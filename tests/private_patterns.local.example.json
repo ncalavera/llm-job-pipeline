@@ -1,0 +1,24 @@
+{
+  "_README": [
+    "Optional, LOCAL-ONLY maintainer scan patterns for the public guard test",
+    "(tests/test_no_hardcoded_data.py). This .example.json is committed as a",
+    "template; copy it to tests/private_patterns.local.json (gitignored via",
+    "*.local.json) and fill in your own private tokens. The public test loads",
+    "the .local.json if present and SKIPS the private-pattern checks if absent,",
+    "so no maintainer-private strings ever ship in the public repo.",
+    "",
+    "Each check has two lists of regex alternatives:",
+    "  'ci' — scanned case-INSENSITIVELY (identity tokens, infra names).",
+    "  'cs' — scanned case-SENSITIVELY (branding like 'Mission-Driven', where",
+    "         lowercase prose is legitimate and must not false-positive).",
+    "Both lists are OR-joined and scanned across the public surface (scripts/,",
+    "tests/, all of .claude/, docs/index.html, and the root onboarding docs).",
+    "A hit fails the test. Leave both lists empty to disable a check.",
+    "",
+    "DO NOT put real private tokens in THIS example file — keep them only in",
+    "the gitignored .local.json copy."
+  ],
+  "owner_identity": { "ci": [], "cs": [] },
+  "owner_orgs": { "ci": [], "cs": [] },
+  "owner_infra": { "ci": [], "cs": [] }
+}

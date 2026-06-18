@@ -1,0 +1,41 @@
+# Secrets
+.env
+.env.local
+config/user_profile.md
+.claude-session-acceptance.md
+
+# Local data — never commit personal vacancy/company data
+vacancies/
+.firecrawl/
+public/data.js
+!public/data.js.example
+
+# Local SQLite database (easy mode) — never commit personal data
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# OS / editor
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+.vercel
+.next/
+
+# Local dashboards & reports
+REPORT-*.html
+REPORT-*.md
+*.local.json
