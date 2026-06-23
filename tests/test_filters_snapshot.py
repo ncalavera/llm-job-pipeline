@@ -6,8 +6,8 @@ at FOUR entry points. It must be GREEN on the current code and stay GREEN,
 unchanged, after the refactor moves the filter helpers into scripts/filters.py.
 
 Entry points:
-  1. merge_vacancies        (database_supabase) — direct ATS write path.
-  2. merge_board_vacancies  (database_supabase) — job-board write path.
+  1. save_vacancies        (database_supabase) — direct ATS write path.
+  2. save_board_vacancies  (database_supabase) — job-board write path.
   3. classify_vacancies     (filter_vacancies)  — read-only /filter triage.
   4. score._load_and_dedup  (score_vacancies)   — pre-score dedup + gate.
 
@@ -189,7 +189,7 @@ def _row_state(db, dedup_hash):
 
 
 # ===========================================================================
-# Entry point 1 + 2 — write paths (merge_vacancies / merge_board_vacancies)
+# Entry point 1 + 2 — write paths (save_vacancies / save_board_vacancies)
 # ===========================================================================
 
 def _run_write_path(tmp_path, monkeypatch, *, board):
@@ -215,9 +215,9 @@ def _run_write_path(tmp_path, monkeypatch, *, board):
                              "tier": "C"}
                 # board path keys org off board name unless org_override given
                 job.setdefault("org_override", entry["org"])
-                db.merge_board_vacancies(board_cfg, [job])
+                db.save_board_vacancies(board_cfg, [job])
             else:
-                db.merge_vacancies(entry["org"], "A", [job])
+                db.save_vacancies(entry["org"], "A", [job])
             db.get_conn().commit()
 
             status_after, last_after = _row_state(db, dedup_hash)

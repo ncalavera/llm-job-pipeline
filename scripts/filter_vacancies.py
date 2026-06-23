@@ -40,8 +40,9 @@ from config import (
 )
 from geo import canonical_country, country_for_location
 from db_backend import RealDictCursor
+import filters
 from database_supabase import (
-    _is_blacklisted, _is_content_junk, load_vacancies,
+    load_vacancies,
     delete_vacancies as db_delete_vacancies,
     get_conn, update_vacancy_fields, make_vacancy_id,
     get_archived_hashes, record_archived_hashes,
@@ -68,21 +69,10 @@ def _strip_html(raw: str) -> str:
     return _MULTI_WS.sub(' ', text).strip()
 
 
-def _get_best_description(vac: dict) -> str:
-    """Get the longest description from vacancy top-level or locations."""
-    best = (vac.get("full_description", "") or "").strip()
-    for loc in vac.get("locations", []):
-        loc_desc = (loc.get("full_description", "") or "").strip()
-        if len(loc_desc) > len(best):
-            best = loc_desc
-    return best
-
-
 # ---------------------------------------------------------------------------
-# Dedup — ported from clean_vacancies.py
+# Dedup — ported from clean_vacancies.py. The cross-board fuzzy matcher itself
+# now lives in scripts/filters.py; the exact-hash cleanup below stays here.
 # ---------------------------------------------------------------------------
-
-from difflib import SequenceMatcher
 
 _FUZZY_THRESHOLD: float = 0.85
 _PROTECTED_STATUSES: frozenset[str] = frozenset({
@@ -267,85 +257,9 @@ def _clean_exact_dupes() -> dict:
 def _find_fuzzy_dupes(vacancies: dict) -> list[dict]:
     """Find fuzzy title duplicates within company groups (cross-board aware).
 
-    Groups vacancies by resolved canonical company name, then compares
-    normalized titles with SequenceMatcher. Returns list of match dicts.
+    Thin wrapper over filters.find_duplicates — the matcher's single home.
     """
-    # Group by canonical company name (cross-board dedup via alias resolution)
-    by_company: dict[str, list[tuple[str, dict]]] = {}
-    for vid, vac in vacancies.items():
-        # Skip protected vacancies
-        if vac.get("status", "unseen") in _PROTECTED_STATUSES:
-            continue
-        org = vac.get("org", "")
-        canonical = resolve_canonical_name(org) if org else org
-        by_company.setdefault(canonical, []).append((vid, vac))
-
-    pairs = []
-    seen_pairs: set[tuple[str, str]] = set()
-
-    for canonical_org, vac_list in by_company.items():
-        if len(vac_list) < 2:
-            continue
-
-        # Pre-compute normalized titles
-        normed = [(_strip_punct(v.get("title") or ""), vid, v) for vid, v in vac_list]
-
-        matcher = SequenceMatcher(None, autojunk=False)
-        for i in range(len(normed)):
-            n_i, id_i, v_i = normed[i]
-            if not n_i:
-                continue
-            matcher.set_seq1(n_i)
-            for j in range(i + 1, len(normed)):
-                n_j, id_j, v_j = normed[j]
-                if not n_j:
-                    continue
-
-                pair_key = tuple(sorted([id_i, id_j]))
-                if pair_key in seen_pairs:
-                    continue
-
-                # Exact normalized match
-                if n_i == n_j:
-                    seen_pairs.add(pair_key)
-                    winner, loser = _pick_winner(
-                        {**v_i, "id": id_i}, {**v_j, "id": id_j}
-                    )
-                    pairs.append({
-                        "id_a": id_i, "id_b": id_j,
-                        "org": canonical_org,
-                        "title_a": v_i.get("title", ""),
-                        "title_b": v_j.get("title", ""),
-                        "norm_title": n_i,
-                        "similarity": 1.0,
-                        "match_type": "normalized_exact",
-                        "source_a": v_i.get("source", ""),
-                        "source_b": v_j.get("source", ""),
-                        "desc_len_a": len(v_i.get("full_description") or ""),
-                        "desc_len_b": len(v_j.get("full_description") or ""),
-                    })
-                    continue
-
-                # Fuzzy match
-                matcher.set_seq2(n_j)
-                ratio = matcher.ratio()
-                if ratio >= _FUZZY_THRESHOLD:
-                    seen_pairs.add(pair_key)
-                    pairs.append({
-                        "id_a": id_i, "id_b": id_j,
-                        "org": canonical_org,
-                        "title_a": v_i.get("title", ""),
-                        "title_b": v_j.get("title", ""),
-                        "norm_title": f"{n_i} / {n_j}",
-                        "similarity": round(ratio, 4),
-                        "match_type": "fuzzy",
-                        "source_a": v_i.get("source", ""),
-                        "source_b": v_j.get("source", ""),
-                        "desc_len_a": len(v_i.get("full_description") or ""),
-                        "desc_len_b": len(v_j.get("full_description") or ""),
-                    })
-
-    return pairs
+    return filters.find_duplicates(vacancies)
 
 
 def _serialize_vacancy(vac: dict) -> dict:
@@ -525,12 +439,12 @@ def classify_vacancies(db: dict = None) -> dict:
         desc_len = _full_description_length(vac)
 
         # Priority 1: title blacklist match
-        if _is_blacklisted(title):
+        if filters.title_words_blacklisted(title):
             categories["delete_blacklist"].append((vid, vac))
             continue
 
         # Priority 2: content junk (reCAPTCHA, donation widgets, error pages)
-        junk_reason = _is_content_junk(vac.get("full_description", ""))
+        junk_reason = filters.is_content_junk(vac.get("full_description", ""))
         if junk_reason:
             vac["_junk_reason"] = junk_reason
             categories["delete_junk"].append((vid, vac))

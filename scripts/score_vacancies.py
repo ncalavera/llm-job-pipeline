@@ -73,7 +73,7 @@ _real_stdout = sys.stdout
 if "--local" in sys.argv or "--save" not in sys.argv:
     sys.stdout = sys.stderr
 
-from config import GLOBAL_BLACKLIST, GLOBAL_BLACKLIST_SUBSTR, GLOBAL_BLACKLIST_DESC_SUBSTR  # noqa: E402
+import filters  # noqa: E402
 from prompts import VACANCY_SCORING_PROMPT as SYSTEM_PROMPT  # noqa: E402
 from prompts import VACANCY_SCORING_USER_TEMPLATE as USER_TEMPLATE  # noqa: E402
 
@@ -103,20 +103,6 @@ def _parse_json(text: str) -> dict:
         except json.JSONDecodeError:
             pass
     return {"error": "JSON parse failed", "raw": text[:500]}
-
-
-def _is_blacklisted(title: str, description: str = "") -> bool:
-    """Check title (GLOBAL_BLACKLIST + SUBSTR) and description (DESC_SUBSTR)."""
-    t = title.lower()
-    if any(kw in t for kw in GLOBAL_BLACKLIST_SUBSTR):
-        return True
-    if any(re.search(r'\b' + re.escape(kw) + r'\b', t) for kw in GLOBAL_BLACKLIST):
-        return True
-    if description:
-        d = description.lower()
-        if any(kw in d for kw in GLOBAL_BLACKLIST_DESC_SUBSTR):
-            return True
-    return False
 
 
 def _sanitize_text(text: str) -> str:
@@ -232,7 +218,8 @@ def _load_and_dedup(*, force=False, include_passed=False,
         )
         # Compute desc up-front so blacklist can check description-level kills.
         desc = rep.get("full_description") or rep.get("snippet") or ""
-        if _is_blacklisted(rep["title"], desc):
+        if (filters.title_words_blacklisted(rep["title"])
+                or filters.description_words_blacklisted(desc)):
             stats["blacklisted"] += 1
             continue
         # Blind vacancy gate — skip if no description AND no snippet

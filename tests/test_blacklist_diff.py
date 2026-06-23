@@ -32,9 +32,23 @@ import pytest
 # ---------------------------------------------------------------------------
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-from database_supabase import _is_blacklisted as dal_impl
-from score_vacancies import _is_blacklisted as score_impl
+import filters
 from config import GLOBAL_BLACKLIST, GLOBAL_BLACKLIST_SUBSTR, GLOBAL_BLACKLIST_DESC_SUBSTR
+
+
+def filters_impl(title: str, description: str = "") -> bool:
+    """The consolidated filters.py implementation, composed exactly as the
+    legacy _is_blacklisted(title, desc) did: title words/stems OR desc phrase."""
+    return (filters.title_words_blacklisted(title)
+            or filters.description_words_blacklisted(description))
+
+
+# The DAL and score modules no longer expose their own blacklist copies after
+# the filters-refactor consolidation — both now delegate to filters.*. The diff
+# corpus below is preserved unchanged; the "dal" and "score" probes simply read
+# the single filters implementation (the composition the old aliases performed).
+dal_impl = filters_impl
+score_impl = filters_impl
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +308,25 @@ def test_all_three_impls_agree(case_id, title, description):
     desc_snip = description[:120]
     assert dal == score == ref, (
         f"[{case_id}] Disagreement: dal={dal}, score={score}, frozen={ref}\n"
+        f"  title={title!r}\n  desc={desc_snip!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Stage 2 (filters-refactor): the consolidated filters.py implementation must
+# match the FROZEN reference for every corpus case. This proves filters ==
+# the old _is_blacklisted, independent of the now-aliased dal/score copies.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("case_id,title,description", _CORPUS, ids=[c[0] for c in _CORPUS])
+def test_filters_matches_frozen_reference(case_id, title, description):
+    """filters.title_words_blacklisted OR description_words_blacklisted must
+    return exactly what the frozen legacy _is_blacklisted returned."""
+    got = filters_impl(title, description)
+    ref = frozen(title, description)
+    desc_snip = description[:120]
+    assert got == ref, (
+        f"[{case_id}] filters != frozen: filters={got}, frozen={ref}\n"
         f"  title={title!r}\n  desc={desc_snip!r}"
     )
 

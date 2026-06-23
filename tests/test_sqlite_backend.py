@@ -132,7 +132,7 @@ def test_registry_loads_company_in_sqlite_mode(dal, monkeypatch):
 
 def test_merge_then_load(dal):
     dal.ensure_company("Acme Robotics", status="active")
-    new = dal.merge_vacancies("Acme Robotics", "A", [_fake_job()])
+    new = dal.save_vacancies("Acme Robotics", "A", [_fake_job()])
     _commit(dal)
     assert new == 1
 
@@ -148,9 +148,9 @@ def test_merge_then_load(dal):
 
 def test_merge_is_idempotent_by_dedup_hash(dal):
     dal.ensure_company("Acme Robotics", status="active")
-    dal.merge_vacancies("Acme Robotics", "A", [_fake_job()])
+    dal.save_vacancies("Acme Robotics", "A", [_fake_job()])
     _commit(dal)
-    again = dal.merge_vacancies("Acme Robotics", "A", [_fake_job()])
+    again = dal.save_vacancies("Acme Robotics", "A", [_fake_job()])
     _commit(dal)
     assert again == 0
     assert len(dal.load_vacancies()) == 1
@@ -158,8 +158,8 @@ def test_merge_is_idempotent_by_dedup_hash(dal):
 
 def test_merge_second_location_merges_into_one_row(dal):
     dal.ensure_company("Acme Robotics", status="active")
-    dal.merge_vacancies("Acme Robotics", "A", [_fake_job(city="Berlin, Germany")])
-    dal.merge_vacancies("Acme Robotics", "A", [_fake_job(city="London, UK")])
+    dal.save_vacancies("Acme Robotics", "A", [_fake_job(city="Berlin, Germany")])
+    dal.save_vacancies("Acme Robotics", "A", [_fake_job(city="London, UK")])
     _commit(dal)
     vacs = dal.load_vacancies()
     assert len(vacs) == 1
@@ -173,7 +173,7 @@ def test_merge_second_location_merges_into_one_row(dal):
 
 def test_status_update_and_readback(dal):
     dal.ensure_company("Acme Robotics", status="active")
-    dal.merge_vacancies("Acme Robotics", "A", [_fake_job()])
+    dal.save_vacancies("Acme Robotics", "A", [_fake_job()])
     _commit(dal)
     vid = next(iter(dal.load_vacancies()))
 
@@ -191,7 +191,7 @@ def test_status_update_and_readback(dal):
 
 def test_scoring_roundtrip(dal):
     dal.ensure_company("Acme Robotics", status="active")
-    dal.merge_vacancies("Acme Robotics", "A", [_fake_job()])
+    dal.save_vacancies("Acme Robotics", "A", [_fake_job()])
     _commit(dal)
     vid = next(iter(dal.load_vacancies()))
 
@@ -219,7 +219,7 @@ def test_archived_hash_roundtrip(dal):
 
 def test_gone_from_source_archives_unseen(dal):
     dal.ensure_company("Acme Robotics", status="active")
-    dal.merge_vacancies("Acme Robotics", "A", [
+    dal.save_vacancies("Acme Robotics", "A", [
         _fake_job(title="Head of Community"),
         _fake_job(title="Programme Lead"),
     ])
@@ -240,7 +240,7 @@ def test_gone_from_source_archives_unseen(dal):
 
 def test_delete_vacancies_by_uuid_list(dal):
     dal.ensure_company("Acme Robotics", status="active")
-    dal.merge_vacancies("Acme Robotics", "A", [
+    dal.save_vacancies("Acme Robotics", "A", [
         _fake_job(title="Role One"),
         _fake_job(title="Role Two"),
     ])
@@ -272,7 +272,7 @@ def test_auto_review_candidates(dal):
 
 def test_candidate_company_vacancies_hidden_until_active(dal):
     dal.ensure_company("Pending Co", status="candidate")
-    dal.merge_vacancies("Pending Co", "B", [_fake_job(title="Mystery Role")])
+    dal.save_vacancies("Pending Co", "B", [_fake_job(title="Mystery Role")])
     _commit(dal)
     # Default load shows only active companies.
     assert dal.load_vacancies() == {}
@@ -307,14 +307,14 @@ def test_enrichment_roundtrip(dal):
 
 def test_validate_db_clean(dal):
     dal.ensure_company("Acme Robotics", status="active")
-    dal.merge_vacancies("Acme Robotics", "A", [_fake_job()])
+    dal.save_vacancies("Acme Robotics", "A", [_fake_job()])
     _commit(dal)
     assert dal.validate_db() == []
 
 
 def test_pass_expired_vacancies(dal):
     dal.ensure_company("Acme Robotics", status="active")
-    dal.merge_vacancies("Acme Robotics", "A", [_fake_job()])
+    dal.save_vacancies("Acme Robotics", "A", [_fake_job()])
     _commit(dal)
     vid = next(iter(dal.load_vacancies()))
     # Force a past deadline on the unseen vacancy.
@@ -337,8 +337,8 @@ def test_pass_expired_vacancies(dal):
 def test_board_company_is_active_in_sqlite(dal):
     """A company auto-created by the board/ATS path (default 'candidate') lands
     'active' in SQLite mode, so its vacancies are visible without approval."""
-    # merge_vacancies auto-creates the unknown org via ensure_company(candidate).
-    new = dal.merge_vacancies("Newly Discovered Org", "B", [_fake_job()])
+    # save_vacancies auto-creates the unknown org via ensure_company(candidate).
+    new = dal.save_vacancies("Newly Discovered Org", "B", [_fake_job()])
     _commit(dal)
     assert new == 1
 

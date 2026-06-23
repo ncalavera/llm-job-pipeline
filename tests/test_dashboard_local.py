@@ -105,7 +105,7 @@ def _post(base, path, payload):
 
 def _seed_vacancy(dal, org="Acme Robotics", title="Head of Community"):
     dal.ensure_company(org, status="active")
-    dal.merge_vacancies(org, "A", [{
+    dal.save_vacancies(org, "A", [{
         "title": title,
         "snippet": "Lead community efforts.",
         "full_description": "Lead our global community programme. " * 8,
