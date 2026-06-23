@@ -82,9 +82,10 @@ reject = 25
 # "imagine a student, a career-changer, anyone — would someone want this?" must
 # be NO for every entry below.
 words = [
-    "expression of interest", "talent pool", "general application",
-    "talent community", "speculative application", "future opportunities",
-    "open application", "talent network", "join our talent",
+    "expression of interest", "expressions of interest", "talent pool",
+    "general application", "talent community", "speculative application",
+    "future opportunities", "open application", "talent network",
+    "join our talent",
 ]
 
 # Substring (stem) matches — no word boundaries. Ships EMPTY on purpose.

@@ -123,17 +123,17 @@ def find_duplicates(vacancies: list[dict]) -> ...      # парный fuzzy, ч�
 - [x] Все существующие тесты зелёные (`pytest`, pythonpath=scripts, SQLite): 603 passed, 11 skipped.
 
 ### Блок 2 — backtest на текущей базе
-- [ ] Прогон `classify_vacancy` по всей базе; отчёт «что выкинули бы».
-- [ ] Ни одна вакансия со статусом из защищённого набора не получает причину-«выкинуть».
+- [x] Прогон `classify_vacancy` по всей базе (1871 вакансия, прод, read-only): 98.5% `ready`, 20 `wrong_role` (все настоящие не-вакансии), 9 `no_description`, 0 `not_a_job`. Гео выключен (профиль без EXCLUDE_COUNTRIES). Поправка плана про `light=True` неверна — в light нет `full_description`, classify дал бы всем `no_description`; backtest гнался полной загрузкой.
+- [x] Защищённые статусы: потерь нет (`/jobs-filter` проверяет статус до classify). Единственный незаархивированный кейс на разбор в блоке 3/4 — `GiveWell — Talent Pool` [liked] → `wrong_role`.
 
 ### Блок 3 — учёба субагентом
-- [ ] Разбор лайкнутых (`to_apply`/`liked`/`to_research`/`to_network`) против **только явных** `passed` (руками).
-- [ ] Opus, 1 вакансия = 1 агент (без батчинга — задокументированные грабли пере-оценки +20-50). Отдельный шаг, не внутри `classify_vacancy`.
-- [ ] Предложения новых правил/слов с обоснованием на данных.
+- [x] Разбор 100 решений (17 лайкнутых/applied + 83 passed, стратифицировано по баллам/тирам/компаниям) — Workflow `wf_73fc4c7c-b8d`.
+- [x] Opus, 1 вакансия = 1 агент (без батчинга) + синтез. 10 расхождений.
+- [x] Предложения с обоснованием: фильтры почти не трогать (1 кандидат — множественное «expressions of interest»); главный рычаг — промпт оценки (3 паттерна пере-оценки: program/project-mgmt, product-operations, donor-advisory; 1 паттерн недо-оценки: community-engagement/special-projects). Отчёт в scratchpad/REPORT-block3-learning.md.
 
 ### Блок 4 — ревизия правил (единственное изменение поведения)
-- [ ] Убрать мёртвое/пересекающееся, добавить найденное в блоке 3.
-- [ ] Каждое изменение проверено против eval-набора (блок 5).
+- [~] Найденное в блоке 3 применено (отдельная ветка, не PR блока 1): «expressions of interest» → junk-words (`config/defaults.toml`); промпт `vacancy-scoring.md` — различие people-management vs IC + «престиж орга не компенсирует mismatch». Доменные фильтры (sales/commercial/security/eng/banking…) — в приватный `user_profile.md` (scratchpad/PROFILE-recommendations.md), 0 коллизий с лайкнутыми.
+- [ ] Каждое изменение проверено против eval-набора (блок 5) — ОЖИДАЕТ: eval-набора ещё нет; HARD-фильтры дропают до оценки, прогнать перед боевым применением.
 
 ### Блок 5 — eval-набор
 - [ ] `evals/vacancy_eval_set.jsonl`: лайкнутые + `passed` с метками + поля, что смотрит фильтр.
