@@ -24,12 +24,8 @@ The candidate explicitly does NOT want these roles or signals. Cap score at 15-2
 - Seniority mismatch:
   - Too junior (Intern, Junior, Coordinator, Assistant) → cap at 10-20.
   - Too senior (VP/C-level requiring 15-20+ years when candidate has fewer) → cap at 10-25.
-  - People-management scope: if the role's core mandate is managing or leading a
-    team (hiring, coaching, direct reports) and the candidate's profile signals a
-    preference for an individual-contributor role at this stage → cap at 30-40.
-    Owning strategy, a product, or a portfolio WITHOUT direct reports does NOT
-    trigger this. A prestigious org does NOT offset a seniority/scope mismatch —
-    score the role, not the brand.
+  - A prestigious org does NOT offset a seniority/scope mismatch — score the
+    role, not the brand.
 - Required working language the candidate doesn't speak fluently → -25 to -40.
 - Domain expertise required as core of the role (not supporting skill) when candidate lacks it → cap at 10-20.
 
