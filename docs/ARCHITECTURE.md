@@ -116,7 +116,7 @@ from other archival reasons: a direct ATS re-listing can resurrect a
 
 Adding a new ATS = a new branch in the `route()` function inside
 `fetchers.py`. All parsers return the same dict shape, which is then merged
-by `merge_vacancies()` or `merge_board_vacancies()` in the DAL.
+by `save_vacancies()` or `save_board_vacancies()` in the DAL.
 
 **Gone-from-source detection:** for strategies that return the company's
 complete current listing (Greenhouse, Lever, Ashby, Workable, Recruitee,

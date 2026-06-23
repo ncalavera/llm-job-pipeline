@@ -98,7 +98,7 @@ def find_duplicates(vacancies: list[dict]) -> ...      # парный fuzzy, ч�
 
 ## System-Wide Impact
 
-- **Interaction graph**: `fetch_vacancies.py:407,471` → `save_vacancies`/`save_board_vacancies` → `classify_vacancy` + ворота → INSERT/UPDATE. `/filter` → `classify_vacancy` (read-only отчёт). `/score` → `_load_and_dedup` → LLM.
+- **Interaction graph**: `fetch_vacancies.py:407,471` → `save_vacancies`/`save_board_vacancies` → `classify_vacancy` + ворота → INSERT/UPDATE. `/jobs-filter` → `classify_vacancy` (read-only отчёт). `/jobs-score` → `_load_and_dedup` → LLM.
 - **Два списка чёрного списка нельзя сливать** (задокументированные грабли: ~15% ложных срабатываний — «developer» в теле описания PM-вакансии JetBrains, «ai safety» в Anthropic). Название — полный список, описание — узкие якорные фразы. (см. `job-search-2026/docs/solutions/pipeline-issues/title-vs-description-blacklist-architecture.md`)
 - **Защищённые статусы** `{liked, to_apply, to_research, to_network, applied, archived}` — `classify_vacancy` про статус НЕ знает; статус-политику держит таблица действий каждого шага. Воскрешение archived→unseen в `save_vacancies` сохраняется (не конфликтует, т.к. classify статус не трогает).
 - **`clean_description` без мутации**: возвращает очищенный текст, не переписывает `job` на месте. Порог обновления описания (`new > old+100`) должен видеть тот же текст, что и сейчас.
@@ -108,19 +108,19 @@ def find_duplicates(vacancies: list[dict]) -> ...      # парный fuzzy, ч�
 ## Acceptance Criteria
 
 ### Блок 1 — переделка без изменения поведения
-- [ ] **Двухуровневая логика применена правильно** (см. «Базовая логика»): уровень 1 «известная/новая» — только в `save_vacancies`/`save_board_vacancies`; `/filter` и `score` потребляют `classify_vacancy` (уровень 2) + статус, своих проверок качества не держат. Самодельных проверок качества вне `filters.py` не осталось — проверяется грепом по `_is_blacklisted`/`_is_content_junk`/`_has_enough_content`: 0 определений вне `filters.py`.
-- [ ] `scripts/filters.py` создан; `classify_vacancy` + чистые проверки + ворота перенесены.
-- [ ] Старые сторожа удалены из `database_supabase.py`, `score_vacancies.py` (вторая копия `_is_blacklisted`), `filter_vacancies.py`; все импорты ведут в `filters.py`.
-- [ ] **Диф-тест чёрного списка**: на отобранном наборе названий (~60, с адверсариальными пересечениями + кейсы ложных срабатываний «developer» в теле PM-вакансии JetBrains, «ai safety» в Anthropic) обе старые реализации vs новая дают идентичный результат. Не по живой базе (она недетерминирована, conftest вырезает Supabase), а курируемый корпус в `tests/`. Двухэтапно: «обе старые согласны» (вторую копию заморозить в тесте до удаления) + «новая = старой».
-- [ ] **Тест-снимок «до/после»**: на отобранном наборе (~25 вакансий, по одной на класс поведения, чекинится в `tests/fixtures/`) с замороженными часами (freezegun/monkeypatch `date.today`) старый и новый код дают одинаковый `(stable_key=(org,title) → исход)` для всех четырёх точек. Не по UUID (он случайный) и не по живой базе. Чистую часть (`classify_vacancy` + проверки) гнать параметризованно без DAL, save/score — на SQLite `dal` с замороженными часами. Гео-класс требует профиль с непустым `HARD_FILTERS`, иначе `wrong_location` не сработает.
-- [ ] **Характеризационные тесты на `save_board_vacancies`** (сейчас 0 покрытия) — до переименования.
-- [ ] Счётчики/статистика вывода не изменились.
-- [ ] Переименование протянуто во все точки: `fetch_vacancies.py`, 14 вызовов в тестах, `.agents/skills/source-command-jobs-add/SKILL.md`, `.claude/commands/jobs-add.md`, `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/DATABASE.md`.
-- [ ] **Починена реальная ошибка**: перепутанные аргументы `merge_vacancies(jobs, org_name)` в `source-command-jobs-add/SKILL.md:223` (правильный порядок — `(org_name, tier, jobs)`).
-- [ ] **Починить ошибку `get_archived_hashes()`**: `interval '%s days'` не подставляет число (`%s` внутри строкового литерала) → окно не работает, `/filter` сейчас считает «недавно архивирована» по всем хешам за всю историю. Исправить параметризацию + тест на TTL (хеш 100 дней назад НЕ возвращается, 10 дней назад — возвращается). Это осознанное изменение поведения `/filter` (перестанет лишнее выкидывать), зафиксировать в отчёте. Значение окна (90/180/всё время) — отдельное product-решение блока 4.
-- [ ] Сверить `_ALL_CSV_NAMES` (board-merge :803) — актуально или переименовать в `_ALL_KNOWN_NAMES`.
-- [ ] Навыки `fetch` и `add-source` подчищены на путь `llm-job-pipeline` (переезд).
-- [ ] Все существующие тесты зелёные (`pytest`, pythonpath=scripts, SQLite-бэкенд).
+- [x] **Двухуровневая логика применена правильно** (см. «Базовая логика»): уровень 1 «известная/новая» — только в `save_vacancies`/`save_board_vacancies`; `/filter` и `score` потребляют `classify_vacancy` (уровень 2) + статус, своих проверок качества не держат. Самодельных проверок качества вне `filters.py` не осталось — грепом 0 совпадений `_is_blacklisted`/`_is_content_junk`/`_has_enough_content` в `scripts/` (кроме намеренного DAL-хелпера `_gate_description`, делегирующего в `quality.clean_description`).
+- [x] `scripts/filters.py` создан; `classify_vacancy` + чистые проверки + ворота перенесены.
+- [x] Старые сторожа удалены из `database_supabase.py`, `score_vacancies.py` (вторая копия `_is_blacklisted`), `filter_vacancies.py`; все импорты ведут в `filters.py`. (Исключение: `_gate_description` оставлен как один именованный DAL-мутатор — инлайн в два места размножил бы мутацию; логика чистки единожды в `quality.py`.)
+- [x] **Диф-тест чёрного списка**: `tests/test_blacklist_diff.py`, 55 случаев (адверсариальные + ложные срабатывания «developer»/«ai safety» в теле). Обе старые копии согласны; после консолидации проверка `filters == замороженный старый эталон`.
+- [x] **Тест-снимок «до/после»**: `tests/test_filters_snapshot.py` + `tests/fixtures/filters_snapshot_vacancies.json` (10 вакансий, все 8 категорий + воскрешение + защищённый статус), замороженные часы. Зелёный на старом и новом коде.
+- [x] **Характеризационные тесты на `save_board_vacancies`** (`tests/test_save_board_vacancies_characterization.py`, 10 тестов) — написаны до переименования на старом коде.
+- [x] Счётчики/статистика вывода не изменились (покрыто снимок-тестом).
+- [x] Переименование протянуто: `fetch_vacancies.py`, вызовы в тестах, `.claude/commands/jobs-add.md`, `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/DATABASE.md`, `INSTALL.md`, `INSTALL-EASY.md`. (`.agents/skills/source-command-jobs-add/SKILL.md` в репозитории отсутствует — `.agents/` не в origin.)
+- [x] **Починена реальная ошибка**: в `.claude/commands/jobs-add.md` порядок аргументов `(org_name, tier, jobs)` уже был верным — устарело только имя (→ `save_vacancies`). Файл `source-command-jobs-add/SKILL.md` отсутствует в рабочей копии.
+- [x] **`get_archived_hashes()` — баг НЕ подтверждён**: эмпирически проверено на обоих бэкендах (SQLite-транслятор → `datetime('now','-N days')`; live Postgres: psycopg2 подставляет `%s` внутри литерала, 1768/4550 строк в окне 90д). Окно работает, `/filter` НЕ считает по всей истории. Функция не тронута; добавлен регрессионный TTL-тест `tests/test_archived_hashes_ttl.py` (зелёный на текущем коде). Это была единственная запланированная правка поведения — значит блок 1 = 0 изменений поведения.
+- [x] `_ALL_CSV_NAMES` → переименован в `_ALL_KNOWN_NAMES` (board-merge), значение не менялось.
+- [~] Навыки `fetch` и `add-source` — путей старого проекта в рабочей копии не найдено (`.agents/` отсутствует), править нечего.
+- [x] Все существующие тесты зелёные (`pytest`, pythonpath=scripts, SQLite): 603 passed, 11 skipped.
 
 ### Блок 2 — backtest на текущей базе
 - [ ] Прогон `classify_vacancy` по всей базе; отчёт «что выкинули бы».
@@ -180,32 +180,32 @@ def find_duplicates(vacancies: list[dict]) -> ...      # парный fuzzy, ч�
 - **`filter_reason` столбец — отложить из блока 1.** Многописательный производный столбец, который устаревает (роль `no_description` → `ready` после дозагрузки, а столбец врёт). Если нужна видимость — отдельным изменением: пишет только `/filter`, честное имя `filter_report_reason` + `filter_report_at`, «на момент последнего прогона фильтра».
 
 ### Защита от циклического импорта (критерий блока 1)
-- [ ] `filters.py` НЕ импортирует `database_supabase`/`db_conn`/`db_backend`. `get_archived_hashes()` остаётся в `database_supabase`; вызывающие (`save_board_vacancies`, `/filter`) грузят set сами и передают в `filters.is_recently_archived(archived_hashes, dedup_hash)`. Проверка: `grep -n "^from database_supabase\|^from db_conn\|^from db_backend" scripts/filters.py` → 0.
-- [ ] Граф после рефактора: `filters → config, quality` (и больше ничего из DAL). `database_supabase → … filters`. `filter_vacancies/score/enrich_blind/fetchers → filters`.
+- [x] `filters.py` НЕ импортирует `database_supabase`/`db_conn`/`db_backend`. `get_archived_hashes()` остаётся в `database_supabase`; вызывающие (`save_board_vacancies`, `/filter`) грузят set сами и передают в `filters.is_recently_archived(archived_hashes, dedup_hash)`. Проверка: `grep -n "^from database_supabase\|^from db_conn\|^from db_backend" scripts/filters.py` → 0.
+- [x] Граф после рефактора: `filters → config, quality` (и больше ничего из DAL). `database_supabase → … filters`. `filter_vacancies/score/enrich_blind/fetchers → filters`.
 
 ### Полный список точек `_is_blacklisted` (было занижено)
-- [ ] 4 файла, не 2: определения `database_supabase.py:118`, `score_vacancies.py:108`; импортируют `enrich_blind_vacancies.py:32`, `fetchers.py:1317` (ленивый импорт). Все перецепить на `filters.py`.
+- [x] 4 файла, не 2: определения `database_supabase.py:118`, `score_vacancies.py:108`; импортируют `enrich_blind_vacancies.py:32`, `fetchers.py:1317` (ленивый импорт). Все перецепить на `filters.py`.
 
 ### Производительность
-- [ ] **Убрать N+1**: `_is_recently_archived(cur, dedup_hash)` в циклах `merge_vacancies:655` и `merge_board_vacancies:817` — по запросу на вакансию (таблица `archived_hash` ~4550 строк). Вынести `get_archived_hashes()` ОДИН раз до цикла, передавать set. Экономит 150-1500 мс на сбор.
-- [ ] **Чёрный список** в `filters.py` компилировать `_TITLE_BLACKLIST_PATTERN` на уровне модуля (как `database_supabase`), не в функции. Цикл `re.search` per-keyword из `score` удалить.
+- [x] **Убрать N+1**: `_is_recently_archived(cur, dedup_hash)` в циклах `merge_vacancies:655` и `merge_board_vacancies:817` — по запросу на вакансию (таблица `archived_hash` ~4550 строк). Вынести `get_archived_hashes()` ОДИН раз до цикла, передавать set. Экономит 150-1500 мс на сбор.
+- [x] **Чёрный список** в `filters.py` компилировать `_TITLE_BLACKLIST_PATTERN` на уровне модуля (как `database_supabase`), не в функции. Цикл `re.search` per-keyword из `score` удалить.
 - [ ] **Backtest** (блок 2) гнать `load_vacancies(light=True)` — в базе ~1871 вакансия. Сперва проверить, что `_VACANCY_LIGHT_COLUMNS` включает `snippet` и `dedup_hash`, иначе проверки junk/rearchived деградируют.
 
 ### Тесты-страховки (критические, сейчас нет — silent-failure)
-- [ ] **Защищённый статус первым**: `liked`-вакансия с чёрным названием → НЕ попадает ни в один delete-исход (highest-stakes потеря данных).
-- [ ] **save не выкидывает тонкие/гео**: job с `0<desc<100` и job с гео-исключением → обе строки в базе после `save_vacancies` (сегодняшний контракт).
-- [ ] **classify на минимальной строке**: `{"title": "X"}` без `locations`/`full_description`/`status` → возвращает причину, не падает (легаси-строки).
-- [ ] **TTL архива**: см. правку `get_archived_hashes` выше.
-- [ ] **clean_description без мутации, но вызывающий присвоил**: сохранённое описание == очищенному; кейс с cookie-баннером, пересекающим порог +100.
-- [ ] **`save_board_vacancies` — 9 характеризационных тестов ДО переименования** (сейчас 0 покрытия): batch-дедуп по `external_id`; inactive-company skip; `_ALL_CSV_NAMES` ветка статуса (unknown→AUTO_DISCOVERED, known→active, `[via …`→active); `include_gone=True` (контраст с save_vacancies `False`); воскрешение; merge локаций (у досок нет url-refresh ветки — зафиксировать асимметрию); boilerplate-gate считает, но не выкидывает.
+- [x] **Защищённый статус первым**: `liked`-вакансия с чёрным названием → НЕ попадает ни в один delete-исход (highest-stakes потеря данных).
+- [x] **save не выкидывает тонкие/гео**: job с `0<desc<100` и job с гео-исключением → обе строки в базе после `save_vacancies` (сегодняшний контракт).
+- [x] **classify на минимальной строке**: `{"title": "X"}` без `locations`/`full_description`/`status` → возвращает причину, не падает (легаси-строки).
+- [x] **TTL архива**: см. правку `get_archived_hashes` выше.
+- [x] **clean_description без мутации, но вызывающий присвоил**: сохранённое описание == очищенному; кейс с cookie-баннером, пересекающим порог +100.
+- [x] **`save_board_vacancies` — 9 характеризационных тестов ДО переименования** (сейчас 0 покрытия): batch-дедуп по `external_id`; inactive-company skip; `_ALL_CSV_NAMES` ветка статуса (unknown→AUTO_DISCOVERED, known→active, `[via …`→active); `include_gone=True` (контраст с save_vacancies `False`); воскрешение; merge локаций (у досок нет url-refresh ветки — зафиксировать асимметрию); boilerplate-gate считает, но не выкидывает.
 
 ### Мелкая чистка (минимальная, в тот же проход)
-- [ ] Удалить мёртвую `_get_best_description` (`filter_vacancies.py:71`, не вызывается).
+- [x] Удалить мёртвую `_get_best_description` (`filter_vacancies.py:71`, не вызывается).
 - [ ] `is_content_junk`: ветка `<50 chars → navigation_snippet` дублирует `_has_enough_content(min_chars=50)`. Для блока 1 (без изменения поведения) оставить как есть; пометить для блока 4. Словарь вердиктов выровнять на `quality.py` (`nav_junk`, не `navigation_snippet`) только если не меняет счётчики.
-- [ ] `_ALL_CSV_NAMES` — это load-bearing ветка статуса компании (board-merge :803), не косметика. Переименовать в `_ALL_KNOWN_NAMES`, значение не менять, покрыть тестом (см. характеризационные).
+- [x] `_ALL_CSV_NAMES` — это load-bearing ветка статуса компании (board-merge :803), не косметика. Переименовать в `_ALL_KNOWN_NAMES`, значение не менять, покрыть тестом (см. характеризационные).
 
 ### Уточнение по resurrection
-- [ ] Снимок-тест обязан покрыть взаимодействие: строка одновременно `status=archived` И хеш в недавнем архиве. `save_vacancies` воскрешает archived→unseen (без окна), а `is_recently_archived` блокирует по 90-дневному окну — два разных механизма на одно событие. Асимметрия `include_gone` (direct=False, board=True) — не потерять.
+- [x] Снимок-тест обязан покрыть взаимодействие: строка одновременно `status=archived` И хеш в недавнем архиве. `save_vacancies` воскрешает archived→unseen (без окна), а `is_recently_archived` блокирует по 90-дневному окну — два разных механизма на одно событие. Асимметрия `include_gone` (direct=False, board=True) — не потерять.
 
 ## Next Steps
 → `/ce:work` (свежая сессия, отдельная рабочая копия). Порядок внутри блока 1: сперва характеризационные тесты + снимок-тест на СТАРОМ коде (зелёные) → потом перенос в `filters.py` → снимок остаётся зелёным.
