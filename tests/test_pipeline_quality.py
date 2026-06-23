@@ -236,8 +236,10 @@ class TestBlacklistJunkMatched:
 
     @pytest.fixture(autouse=True)
     def import_blacklist(self):
-        from score_vacancies import _is_blacklisted
-        self._is_blacklisted = _is_blacklisted
+        import filters
+        self._is_blacklisted = lambda title, desc="": (
+            filters.title_words_blacklisted(title)
+            or filters.description_words_blacklisted(desc))
 
     def test_talent_pool(self):
         assert self._is_blacklisted("Talent Pool — Future Roles") is True
@@ -266,8 +268,10 @@ class TestBlacklistFormatWordsNotJunk:
 
     @pytest.fixture(autouse=True)
     def import_blacklist(self):
-        from score_vacancies import _is_blacklisted
-        self._is_blacklisted = _is_blacklisted
+        import filters
+        self._is_blacklisted = lambda title, desc="": (
+            filters.title_words_blacklisted(title)
+            or filters.description_words_blacklisted(desc))
 
     def test_bootcamp_not_junk(self):
         # "Data Science Bootcamp" instructor is a real job
@@ -296,8 +300,10 @@ class TestBlacklistLegitNotMatched:
 
     @pytest.fixture(autouse=True)
     def import_blacklist(self):
-        from score_vacancies import _is_blacklisted
-        self._is_blacklisted = _is_blacklisted
+        import filters
+        self._is_blacklisted = lambda title, desc="": (
+            filters.title_words_blacklisted(title)
+            or filters.description_words_blacklisted(desc))
 
     def test_program_director_not_blacklisted(self):
         assert self._is_blacklisted("Program Director") is False

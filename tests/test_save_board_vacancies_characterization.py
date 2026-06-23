@@ -1,4 +1,4 @@
-"""Characterization tests for ``merge_board_vacancies`` (database_supabase.py).
+"""Characterization tests for ``save_board_vacancies`` (database_supabase.py).
 
 These pin the CURRENT behaviour of the job-board merge path so a later refactor
 can lean on them as a safety net. They assert what the code does TODAY, not what
@@ -9,10 +9,12 @@ Harness mirrors tests/test_e2e_pipeline.py: conftest clears SUPABASE_DB_URL, eac
 test points JOBSEARCH_DB_PATH at its own temp SQLite file and reloads the
 backend/registry/DAL chain so it runs entirely on local SQLite (never Postgres).
 
-Order of gates inside merge_board_vacancies (load-bearing for these tests):
-    _gate_description → _is_blacklisted(title) → _has_enough_content
-    → _is_content_junk → external_id batch-dedup → resolve/ensure company
-    → inactive-company skip → _is_recently_archived → locations merge / insert
+Order of gates inside save_board_vacancies (load-bearing for these tests):
+    _gate_description → filters.title_words_blacklisted(title)
+    → filters.has_enough_content → filters.is_content_junk
+    → external_id batch-dedup → resolve/ensure company → inactive-company skip
+    → filters.is_recently_archived (vs get_archived_hashes(include_gone=True))
+    → locations merge / insert
 """
 
 import importlib
@@ -114,7 +116,7 @@ def test_batch_dedup_by_external_id(dal):
         _job("Dup Role A", org="DupCo", external_id="EXT-1"),
         _job("Dup Role B", org="DupCo", external_id="EXT-1"),
     ]
-    new = dal.merge_board_vacancies(_board("DupCo"), jobs)
+    new = dal.save_board_vacancies(_board("DupCo"), jobs)
     dal.get_conn().commit()
 
     assert new == 1
@@ -138,7 +140,7 @@ def test_inactive_company_skipped(dal):
     dal.get_conn().commit()
     cur.close()
 
-    new = dal.merge_board_vacancies(_board("InactiveCo"),
+    new = dal.save_board_vacancies(_board("InactiveCo"),
                                     [_job("Inactive Role", org="InactiveCo")])
     dal.get_conn().commit()
 
@@ -155,7 +157,7 @@ def test_unknown_company_created_active_in_sqlite(dal):
     status=AUTO_DISCOVERED_STATUS, which is 'active' on the SQLite backend.
     """
     assert dal.AUTO_DISCOVERED_STATUS == "active"  # SQLite branch
-    new = dal.merge_board_vacancies(_board("BrandNewCo"), [_job("New Role")])
+    new = dal.save_board_vacancies(_board("BrandNewCo"), [_job("New Role")])
     dal.get_conn().commit()
     assert new == 1
     cur = dal.get_conn().cursor()
@@ -177,7 +179,7 @@ def test_via_prefixed_company_created_active(dal):
     """
     assert dal._ALL_CSV_NAMES == set() or len(dal._ALL_CSV_NAMES) == 0
     via_org = "[via SomeBoard] Imaginary Org"
-    new = dal.merge_board_vacancies(_board("ViaBoard"),
+    new = dal.save_board_vacancies(_board("ViaBoard"),
                                     [_job("Via Role", org=via_org)])
     dal.get_conn().commit()
     assert new == 1
@@ -196,7 +198,7 @@ def test_gone_from_source_hash_skips_board_merge(dal):
     """Board merge calls _is_recently_archived WITHOUT include_gone=False, so a
     recent 'gone_from_source' archived_hash DOES suppress the row.
 
-    Contrast: the ATS path (merge_vacancies) passes include_gone=False and would
+    Contrast: the ATS path (save_vacancies) passes include_gone=False and would
     let such a posting through. This test pins the board-path asymmetry.
     """
     _seed_company(dal, "GoneCo")
@@ -207,14 +209,13 @@ def test_gone_from_source_hash_skips_board_merge(dal):
     dal.get_conn().commit()
     cur.close()
 
-    # Sanity-check the two readings of the same hash.
-    probe = dal.get_conn().cursor(cursor_factory=dal.RealDictCursor)
-    assert dal._is_recently_archived(probe, dedup_hash) is True            # board
-    assert dal._is_recently_archived(probe, dedup_hash,
-                                     include_gone=False) is False          # ATS
-    probe.close()
+    # Sanity-check the two readings of the same hash via the archived-hash sets.
+    board_set = dal.get_archived_hashes(include_gone=True)   # board lag protection
+    ats_set = dal.get_archived_hashes(include_gone=False)    # direct-ATS resurrection
+    assert dedup_hash in board_set                           # board path suppresses
+    assert dedup_hash not in ats_set                         # ATS path lets it through
 
-    new = dal.merge_board_vacancies(_board("GoneCo"),
+    new = dal.save_board_vacancies(_board("GoneCo"),
                                     [_job("Gone Role", org="GoneCo")])
     dal.get_conn().commit()
 
@@ -231,7 +232,7 @@ def test_resurrect_archived_vacancy(dal):
     org+title is merged again (resurrected counter).
     """
     _seed_company(dal, "ResCo")
-    dal.merge_board_vacancies(_board("ResCo"), [_job("Res Role", org="ResCo")])
+    dal.save_board_vacancies(_board("ResCo"), [_job("Res Role", org="ResCo")])
     dal.get_conn().commit()
     dedup_hash = dal.make_vacancy_id("ResCo", "Res Role")
 
@@ -241,7 +242,7 @@ def test_resurrect_archived_vacancy(dal):
     dal.get_conn().commit()
     cur.close()
 
-    dal.merge_board_vacancies(_board("ResCo"), [_job("Res Role", org="ResCo")])
+    dal.save_board_vacancies(_board("ResCo"), [_job("Res Role", org="ResCo")])
     dal.get_conn().commit()
 
     assert _vacancy_row(dal, dedup_hash)["status"] == "unseen"
@@ -255,19 +256,19 @@ def test_location_merge_adds_new_key_but_no_url_refresh(dal):
     """Re-merging the same org+title:
       - a NEW location key is appended to locations[],
       - a repeat of an EXISTING loc_key with a changed url is a no-op for that
-        entry's url (board merge has no url-refresh branch, unlike merge_vacancies).
+        entry's url (board merge has no url-refresh branch, unlike save_vacancies).
     """
     _seed_company(dal, "LocCo")
     dedup_hash = dal.make_vacancy_id("LocCo", "Loc Role")
 
-    dal.merge_board_vacancies(_board("LocCo"),
+    dal.save_board_vacancies(_board("LocCo"),
                               [_job("Loc Role", org="LocCo",
                                     city="Berlin, Germany", url="https://orig.test")])
     dal.get_conn().commit()
     assert len(_locations(_vacancy_row(dal, dedup_hash))) == 1
 
     # New city → second location appended.
-    dal.merge_board_vacancies(_board("LocCo"),
+    dal.save_board_vacancies(_board("LocCo"),
                               [_job("Loc Role", org="LocCo",
                                     city="London, United Kingdom",
                                     url="https://second.test")])
@@ -275,7 +276,7 @@ def test_location_merge_adds_new_key_but_no_url_refresh(dal):
     assert len(_locations(_vacancy_row(dal, dedup_hash))) == 2
 
     # Same loc_key (Berlin) with a CHANGED url → no new entry, url NOT updated.
-    dal.merge_board_vacancies(_board("LocCo"),
+    dal.save_board_vacancies(_board("LocCo"),
                               [_job("Loc Role", org="LocCo",
                                     city="Berlin, Germany",
                                     url="https://CHANGED.test")])
@@ -305,7 +306,7 @@ def test_cookie_wall_blanks_description_but_inserts_row(dal):
     assert clean_description(cookie)[1] == "cookie_wall"
 
     _seed_company(dal, "CookieCo")
-    new = dal.merge_board_vacancies(
+    new = dal.save_board_vacancies(
         _board("CookieCo"),
         [_job("Cookie Role", org="CookieCo",
               snippet="A genuine snippet long enough to clear the content gate.",
@@ -325,21 +326,22 @@ def test_cookie_wall_blanks_description_but_inserts_row(dal):
 
 def test_recaptcha_junk_skipped(dal):
     """A short (<300 chars) recaptcha-only description is flagged
-    'recaptcha_only' by _is_content_junk and the row is skipped.
+    'recaptcha_only' by filters.is_content_junk and the row is skipped.
 
-    The description is 50–299 chars so _has_enough_content (which runs first)
+    The description is 50–299 chars so filters.has_enough_content (which runs first)
     passes on the description alone; with no snippet/url the junk gate is what
     drops it.
     """
+    import filters
     desc = "Please complete the recaptcha to continue with your application now ok"
     assert 50 <= len(desc) < 300
-    assert dal._is_content_junk(desc) == "recaptcha_only"
+    assert filters.is_content_junk(desc) == "recaptcha_only"
 
     _seed_company(dal, "JunkCo")
     job = _job("Junk Role", org="JunkCo", snippet="", url=None, desc=desc)
-    assert dal._has_enough_content(job) is True  # desc alone clears the length gate
+    assert filters.has_enough_content(job) is True  # desc alone clears the length gate
 
-    new = dal.merge_board_vacancies(_board("JunkCo"), [job])
+    new = dal.save_board_vacancies(_board("JunkCo"), [job])
     dal.get_conn().commit()
 
     assert new == 0
@@ -354,14 +356,15 @@ def test_blacklisted_title_skipped(dal):
     """A title containing a GLOBAL_BLACKLIST word is dropped (continue) before
     company resolution; nothing is inserted.
     """
+    import filters
     from config import GLOBAL_BLACKLIST
     assert GLOBAL_BLACKLIST, "blacklist must be non-empty for this test"
     word = GLOBAL_BLACKLIST[0]  # e.g. 'expression of interest'
     title = f"Senior {word.title()} Specialist"
-    assert dal._is_blacklisted(title) is True
+    assert filters.title_words_blacklisted(title) is True
 
     _seed_company(dal, "BlackCo")
-    new = dal.merge_board_vacancies(_board("BlackCo"),
+    new = dal.save_board_vacancies(_board("BlackCo"),
                                     [_job(title, org="BlackCo")])
     dal.get_conn().commit()
 

@@ -11,7 +11,7 @@ This file fills the GAPS those leave open:
     re-enters the live catalog.
   * Direct-ATS resurrection: a vacancy archived as gone-from-source that the
     company's OWN ATS re-lists is resurrected to 'unseen' on the next
-    merge_vacancies (include_gone=False path).
+    save_vacancies (include_gone=False path).
   * Job-board cooldown: a board re-import of a gone-from-source posting is
     SKIPPED within the TTL cooldown (include_gone=True path), so a lagging board
     can't undo the source's closure.
@@ -70,7 +70,7 @@ def _commit(db):
 
 def test_restore_archived_vacancy_to_unseen(dal):
     dal.ensure_company("Acme Robotics", status="active")
-    dal.merge_vacancies("Acme Robotics", "A", [_job("Programme Lead")])
+    dal.save_vacancies("Acme Robotics", "A", [_job("Programme Lead")])
     _commit(dal)
     vid = _id_by_title(dal, "Programme Lead")
 
@@ -97,7 +97,7 @@ def test_restore_archived_vacancy_to_unseen(dal):
 
 def test_archive_gone_skips_decided_status(dal):
     dal.ensure_company("Acme Robotics", status="active")
-    dal.merge_vacancies("Acme Robotics", "A", [
+    dal.save_vacancies("Acme Robotics", "A", [
         _job("Liked Role"), _job("Unseen Role"),
     ])
     _commit(dal)
@@ -123,7 +123,7 @@ def test_archive_gone_skips_decided_status(dal):
 
 def test_direct_refetch_resurrects_gone_role(dal):
     dal.ensure_company("Acme Robotics", status="active")
-    dal.merge_vacancies("Acme Robotics", "A", [_job("Programme Lead")])
+    dal.save_vacancies("Acme Robotics", "A", [_job("Programme Lead")])
     _commit(dal)
     vid = _id_by_title(dal, "Programme Lead")
 
@@ -134,7 +134,7 @@ def test_direct_refetch_resurrects_gone_role(dal):
 
     # The company's OWN ATS lists it again → merge resurrects it to unseen
     # (include_gone=False ignores the gone_from_source cooldown for the source).
-    new = dal.merge_vacancies("Acme Robotics", "A", [_job("Programme Lead")])
+    new = dal.save_vacancies("Acme Robotics", "A", [_job("Programme Lead")])
     _commit(dal)
     # Not counted as new (same dedup_hash, existing row), but un-archived.
     assert new == 0
@@ -150,7 +150,7 @@ def test_score_below_threshold_hash_blocks_remerge(dal):
     is within the TTL cooldown, so a fresh merge of the same role is skipped —
     the score-archive flow's data guarantee."""
     dal.ensure_company("Acme Robotics", status="active")
-    dal.merge_vacancies("Acme Robotics", "A", [_job("Low Score Role")])
+    dal.save_vacancies("Acme Robotics", "A", [_job("Low Score Role")])
     _commit(dal)
     vid = _id_by_title(dal, "Low Score Role")
     h = dal.load_vacancies()[vid]["dedup_hash"]
@@ -163,7 +163,7 @@ def test_score_below_threshold_hash_blocks_remerge(dal):
     assert dal.load_vacancies() == {}
 
     # Re-merge the same role: blocked by the cooldown (recently archived).
-    new = dal.merge_vacancies("Acme Robotics", "A", [_job("Low Score Role")])
+    new = dal.save_vacancies("Acme Robotics", "A", [_job("Low Score Role")])
     _commit(dal)
     assert new == 0
     assert dal.load_vacancies() == {}

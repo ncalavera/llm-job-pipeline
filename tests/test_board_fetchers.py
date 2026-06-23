@@ -518,7 +518,7 @@ def test_board_merge_rejects_quality_gate_junk(sqlite_dal):
         "org_url": "https://www.arbeitnow.com",
     }
 
-    new_count = db.merge_board_vacancies(
+    new_count = db.save_board_vacancies(
         board_cfg, [good, error_page, donation_widget])
     db.get_conn().commit()
 
@@ -559,7 +559,7 @@ def test_board_merge_sets_remote_work_mode(sqlite_dal):
         "org_override": "Remote Co",
         "org_url": "https://remotive.com",
     }
-    assert db.merge_board_vacancies(board_cfg, [job]) == 1
+    assert db.save_board_vacancies(board_cfg, [job]) == 1
     db.get_conn().commit()
     v = next(iter(db.load_vacancies(include_candidate_companies=True).values()))
     assert v["locations"][0]["work_mode"] == "remote"

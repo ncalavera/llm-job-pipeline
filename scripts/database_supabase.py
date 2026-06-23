@@ -14,12 +14,12 @@ from dateutil import parser as dateutil_parser
 
 from company_registry import (
     COMPANIES,
+    _ALL_KNOWN_NAMES,
     _ALL_KNOWN_NAMES as _ALL_CSV_NAMES,
     resolve_canonical_name,
 )
 import settings
 from config import (
-    GLOBAL_BLACKLIST, GLOBAL_BLACKLIST_SUBSTR, GLOBAL_BLACKLIST_DESC_SUBSTR,
     LLM_SCORE_THRESHOLD,
     VACANCIES_DIR,
 )
@@ -27,6 +27,14 @@ from config import (
 # Supabase (psycopg2) and the local SQLite backend without importing psycopg2.
 from db_backend import IS_SQLITE, Json, RealDictCursor
 from db_conn import get_conn, close_conn
+import filters
+# filters caches the blacklist (a compiled alternation pattern) from config at
+# its own import time. When the pipeline reloads config under a new profile it
+# also reloads this module; mirror that here so the cached pattern rebinds to
+# the fresh blacklist (matches the pre-refactor behaviour, when the pattern
+# lived in this module and was rebuilt on every reload).
+import importlib as _importlib
+_importlib.reload(filters)
 from quality import clean_description
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -105,57 +113,27 @@ def parse_location(location_str: str) -> dict:
     return {"work_mode": work_mode, "region": region, "country": country, "city": city}
 
 
-# Pre-compiled blacklist: single alternation regex, sorted by length desc to prevent
-# shorter substrings matching prematurely. Compiled once at module load (~10-50x faster
-# than iterating 400+ individual re.search() calls per vacancy).
-_BLACKLIST_PATTERN = re.compile(
-    r'\b(?:' + '|'.join(
-        re.escape(kw) for kw in sorted(GLOBAL_BLACKLIST, key=len, reverse=True)
-    ) + r')\b',
-    re.IGNORECASE
-)
+# ---------------------------------------------------------------------------
+# Content filters live in scripts/filters.py — the save_* paths call
+# filters.title_words_blacklisted / is_content_junk / has_enough_content
+# directly (single home, no DAL-local aliases).
+# ---------------------------------------------------------------------------
 
-def _is_blacklisted(title: str, description: str = "") -> bool:
-    t = title.lower()
-    if any(kw in t for kw in GLOBAL_BLACKLIST_SUBSTR):
-        return True
-    if _BLACKLIST_PATTERN.search(t):
-        return True
-    # Description-level kill phrases — narrow, conservative list (visa/citizenship
-    # only). A full title blacklist applied to descriptions causes false
-    # positives (a discipline word in a JD body that is not the role itself).
-    if description:
-        d = description.lower()
-        if any(kw in d for kw in GLOBAL_BLACKLIST_DESC_SUBSTR):
-            return True
-    return False
-
-
-def _is_content_junk(description: str) -> str | None:
-    """Detect non-vacancy content. Returns reason string or None."""
-    if not description:
-        return None
-    d = description[:500].lower()
-    if 'recaptcha' in d and len(description) < 300:
-        return "recaptcha_only"
-    if any(p in d for p in ['every.org', 'donate to a fund', 'make a donation']):
-        return "donation_widget"
-    if any(p in d for p in ['404 not found', 'page not found', 'error 404',
-                             'access denied', 'cannot be displayed']):
-        return "error_page"
-    if len(description.strip()) < 50:
-        return "navigation_snippet"
-    return None
+ARCHIVE_TTL_DAYS = 90
 
 
 def _gate_description(job: dict) -> str | None:
     """Run job['full_description'] through the quality gate, in place.
 
+    Delegates the cleaning logic to quality.clean_description (single home); this
+    DAL-local helper only applies the verdict to the job dict so both save_*
+    paths share one mutator instead of inlining the same three lines twice.
+
     Strips a leading cookie banner; blanks the field when the text is pure
     boilerplate (cookie wall, error page, nav chrome). Returns the reject
     verdict ("cookie_wall"/"error_page"/"nav_junk") when boilerplate was
     dropped, else None. A merely short/empty description is left as-is — the
-    existing snippet/URL fallback in _has_enough_content still applies.
+    snippet/URL fallback in filters.has_enough_content still applies.
     """
     raw = job.get("full_description") or ""
     if not raw.strip():
@@ -167,24 +145,6 @@ def _gate_description(job: dict) -> str | None:
     if cleaned is not None:
         job["full_description"] = cleaned
     return None
-
-
-ARCHIVE_TTL_DAYS = 90
-
-
-def _is_recently_archived(cur, dedup_hash: str, include_gone: bool = True) -> bool:
-    """Check if dedup_hash was archived within TTL cooldown.
-
-    include_gone=False ignores 'gone_from_source' records: the company's own
-    ATS re-listing a role is ground truth that it reopened, while lagging job
-    boards (include_gone=True) must not resurrect a posting the source closed.
-    """
-    query = ("SELECT 1 FROM archived_hash WHERE dedup_hash = %s "
-             "AND archived_at > now() - interval '90 days'")
-    if not include_gone:
-        query += " AND reason IS DISTINCT FROM 'gone_from_source'"
-    cur.execute(query, (dedup_hash,))
-    return cur.fetchone() is not None
 
 
 def _sanitize_title(title: str) -> str:
@@ -201,16 +161,6 @@ def _sanitize_title(title: str) -> str:
     title = re.sub(r'</(?:strong|em|b|i|span)>', '', title, flags=re.IGNORECASE)
     title = re.sub(r'  +', ' ', title)                          # collapse double spaces
     return title.strip()
-
-
-def _has_enough_content(job: dict, min_chars: int = 50) -> bool:
-    desc = job.get("full_description", "") or ""
-    snip = job.get("snippet", "") or ""
-    if len(desc.strip()) >= min_chars or len(snip.strip()) >= min_chars:
-        return True
-    if job.get("url", "").strip():
-        return True
-    return False
 
 
 def make_vacancy_id(org: str, title: str, location: str = "") -> str:
@@ -288,7 +238,7 @@ def resolve_company_id(org_name: str):
 #: ACTIVE, not 'candidate' — there is no dashboard review step to approve them,
 #: so the candidate gate would blackhole every board company (filter/score/
 #: dashboard only count active ones → "Ready to score: 0", empty dashboard). Full
-#: mode (Supabase) keeps the candidate→review gate. See merge_vacancies / the
+#: mode (Supabase) keeps the candidate→review gate. See save_vacancies / the
 #: board ingestion path.
 AUTO_DISCOVERED_STATUS = "active" if IS_SQLITE else "candidate"
 
@@ -298,7 +248,7 @@ def ensure_company(org_name: str, status: str = "candidate"):
 
     ``status`` is honoured verbatim — callers that want a candidate get one. The
     board/ATS auto-discovery path passes ``AUTO_DISCOVERED_STATUS`` so it lands
-    active in simple mode (see merge_vacancies).
+    active in simple mode (see save_vacancies).
     """
     cid = resolve_company_id(org_name)
     if cid is not None:
@@ -615,8 +565,8 @@ def _strip_nul_bytes(job: dict) -> None:
             job[k] = v.replace("\x00", "")
 
 
-def merge_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
-    """Merge fetched jobs into Supabase. Returns count of new vacancies.
+def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
+    """Save fetched jobs into the DB. Returns count of new vacancies.
 
     Same role (org + title) at different locations → one entry with locations[].
     """
@@ -628,6 +578,10 @@ def merge_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     new_count = 0
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    # Direct ATS path: exclude 'gone_from_source' tombstones so the company's
+    # own re-listing resurrects the role. Loaded once (not per row).
+    archived_hashes = get_archived_hashes(include_gone=False)
 
     skipped_archived = 0
     skipped_junk = 0
@@ -641,18 +595,18 @@ def merge_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
         if _gate_description(job):
             skipped_boilerplate += 1
         title = _sanitize_title(job.get("title", ""))
-        if _is_blacklisted(title):
+        if filters.title_words_blacklisted(title):
             continue
-        if not _has_enough_content(job):
+        if not filters.has_enough_content(job):
             continue
-        junk_reason = _is_content_junk(job.get("full_description", ""))
+        junk_reason = filters.is_content_junk(job.get("full_description", ""))
         if junk_reason:
             skipped_junk += 1
             continue
 
         dedup_hash = make_vacancy_id(org_name, title)
 
-        if _is_recently_archived(cur, dedup_hash, include_gone=False):
+        if filters.is_recently_archived(archived_hashes, dedup_hash):
             skipped_archived += 1
             continue
 
@@ -750,8 +704,8 @@ def merge_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     return new_count
 
 
-def merge_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
-    """Merge job board results into Supabase. Returns count of new vacancies.
+def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
+    """Save job board results into the DB. Returns count of new vacancies.
 
     Unknown orgs → ensure_company(status='candidate'). Skips inactive companies.
     """
@@ -762,6 +716,10 @@ def merge_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
     new_count = 0
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    # Board path: full archived set (include_gone=True) so a lagging feed cannot
+    # resurrect a posting the source already closed. Loaded once (not per row).
+    archived_hashes = get_archived_hashes(include_gone=True)
 
     seen_ext_ids: set[str] = set()
 
@@ -778,11 +736,11 @@ def merge_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
         if _gate_description(job):
             skipped_boilerplate += 1
         title = _sanitize_title(job.get("title", ""))
-        if _is_blacklisted(title):
+        if filters.title_words_blacklisted(title):
             continue
-        if not _has_enough_content(job):
+        if not filters.has_enough_content(job):
             continue
-        junk_reason = _is_content_junk(job.get("full_description", ""))
+        junk_reason = filters.is_content_junk(job.get("full_description", ""))
         if junk_reason:
             skipped_junk += 1
             continue
@@ -800,7 +758,7 @@ def merge_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
         # Resolve or create company
         company_id = resolve_company_id(org)
         if company_id is None:
-            if org not in _ALL_CSV_NAMES and not org.startswith("[via "):
+            if org not in _ALL_KNOWN_NAMES and not org.startswith("[via "):
                 company_id = ensure_company(org, status=AUTO_DISCOVERED_STATUS)
             else:
                 company_id = ensure_company(org, status="active")
@@ -814,7 +772,7 @@ def merge_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
 
         dedup_hash = make_vacancy_id(org, title)
 
-        if _is_recently_archived(cur, dedup_hash):
+        if filters.is_recently_archived(archived_hashes, dedup_hash):
             skipped_archived += 1
             continue
         loc_entry = _make_location_entry(job)
@@ -1162,14 +1120,23 @@ def mark_board_fetched(board_id: str):
 # Archive hash dedup
 # ---------------------------------------------------------------------------
 
-def get_archived_hashes(ttl_days: int = ARCHIVE_TTL_DAYS) -> set[str]:
-    """Return dedup_hashes archived within TTL. Used by filter_vacancies for reporting."""
+def get_archived_hashes(ttl_days: int = ARCHIVE_TTL_DAYS, *,
+                        include_gone: bool = True) -> set[str]:
+    """Return dedup_hashes archived within TTL.
+
+    include_gone=False excludes 'gone_from_source' tombstones, matching the
+    direct-ATS resurrection rule (the company's own ATS re-listing is ground
+    truth that a role reopened, so a gone-from-source archive must not block
+    it). Boards pass include_gone=True (full set) so lagging feeds cannot
+    resurrect a posting the source closed.
+    """
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(
-        "SELECT dedup_hash FROM archived_hash WHERE archived_at > now() - interval '%s days'",
-        (ttl_days,),
-    )
+    query = ("SELECT dedup_hash FROM archived_hash "
+             "WHERE archived_at > now() - interval '%s days'")
+    if not include_gone:
+        query += " AND reason IS DISTINCT FROM 'gone_from_source'"
+    cur.execute(query, (ttl_days,))
     result = {r[0] for r in cur.fetchall()}
     cur.close()
     return result
@@ -1199,7 +1166,8 @@ def archive_gone_vacancies(org_name: str, fetched_jobs: list[dict]) -> int:
     is not in the fresh fetch was closed at the source. Decided statuses
     (liked, to_apply, applied, ...) are never touched. Hashes are recorded as
     'gone_from_source' so lagging job boards can't re-import the dead posting,
-    while a direct re-listing still resurrects it (see _is_recently_archived).
+    while a direct re-listing still resurrects it (the save_* paths filter via
+    filters.is_recently_archived against get_archived_hashes(include_gone=...)).
 
     Caller must guarantee the fetch succeeded and the strategy returns the
     company's complete listing — an empty list from a partial/failed fetch

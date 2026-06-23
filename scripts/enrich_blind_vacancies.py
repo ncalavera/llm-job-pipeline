@@ -23,13 +23,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import requests
 
-from config import get_firecrawl_client, GLOBAL_BLACKLIST, GLOBAL_BLACKLIST_SUBSTR
+from config import get_firecrawl_client
 from fetchers import (_fetch_unops_job_detail, _html_to_markdown,
                       _html_to_text, _LOCAL_UA)
 from quality import (_COOKIE_BANNER_RE, COOKIE_MIN_REMAINDER,
                      COOKIE_SCORE_POLLUTION, _find_cookie_banner_end,
                      is_cookie_boilerplate, strip_cookie_boilerplate)
-from score_vacancies import _is_blacklisted
+import filters
 from filter_vacancies import _all_locations_excluded
 
 
@@ -164,7 +164,7 @@ def main():
         desc = (vac.get("full_description") or "").strip()
         if len(desc) >= 100:
             continue
-        if _is_blacklisted(vac.get("title", "")):
+        if filters.title_words_blacklisted(vac.get("title", "")):
             skipped_blacklist += 1
             continue
         if _all_locations_excluded(vac):

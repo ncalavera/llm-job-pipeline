@@ -85,8 +85,8 @@ from fetchers import (
     get_scrape_statuses,
 )
 from database_supabase import (
-    get_conn, merge_vacancies, archive_gone_vacancies,
-    should_fetch_board, mark_board_fetched, merge_board_vacancies,
+    get_conn, save_vacancies, archive_gone_vacancies,
+    should_fetch_board, mark_board_fetched, save_board_vacancies,
     update_source_tracking, load_vacancies, print_reconciliation_report,
     pass_expired_vacancies,
 )
@@ -404,7 +404,7 @@ def main():
                 if excluded:
                     print(f"  [{org_name}] department filter: {excluded}/{before} excluded, {len(jobs)} remaining")
 
-            new_count = merge_vacancies(org_name, tier, jobs)
+            new_count = save_vacancies(org_name, tier, jobs)
             update_source_tracking(org_name, tier, strategy, new_count, fetch_status)
             total_new += new_count
             if new_count > 0:
@@ -468,7 +468,7 @@ def main():
                 # Save raw fetch log
                 _save_fetch_log(f"{strategy}_{board_id}", jobs, board_fetch_status)
 
-                new_count = merge_board_vacancies(board_cfg, jobs)
+                new_count = save_board_vacancies(board_cfg, jobs)
                 update_source_tracking(
                     board_name, board_cfg.get("tier", "C"), strategy,
                     new_count, board_fetch_status,
