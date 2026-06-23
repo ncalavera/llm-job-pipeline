@@ -48,3 +48,6 @@ node_modules/
 REPORT-*.html
 REPORT-*.md
 *.local.json
+
+# Private architecture lessons migrated from job-search-2026 (do not publish)
+architecture-notes/
