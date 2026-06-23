@@ -1,0 +1,125 @@
+{
+  "_doc": "Curated vacancy set for the filter snapshot test (tests/test_filters_snapshot.py). One entry per behaviour class. stable_key = [org, title]. job = fetcher-shaped dict handed to merge_vacancies/merge_board_vacancies. _class is documentation only. _seed describes pre-existing DB state the harness must create before running an entry point (archived row, archived_hash tombstone, first_seen offset, company status, initial status). _excluded_country, when present, is the canonical country name the harness must pin into filter_vacancies._EXCLUDED_COUNTRIES so the geo gate fires. Frozen 'today' = 2026-06-23.",
+  "_frozen_today": "2026-06-23",
+  "vacancies": [
+    {
+      "_class": "ready",
+      "org": "Aurora Labs",
+      "job": {
+        "title": "Backend Engineer",
+        "snippet": "Backend Engineer — short blurb.",
+        "full_description": "We are hiring a Backend Engineer to own our payments platform end to end. You will design APIs, run migrations, and mentor two juniors. Strong Python and Postgres required.",
+        "location": "Berlin, Germany",
+        "url": "https://example.test/job/backend-engineer"
+      }
+    },
+    {
+      "_class": "blacklist_title",
+      "org": "Aurora Labs",
+      "job": {
+        "title": "Talent Pool — General Application",
+        "snippet": "Join our talent pool for future roles.",
+        "full_description": "Register your interest with our Talent Pool. We keep your CV on file for future openings across all teams and locations worldwide, and reach out when something matches.",
+        "location": "Berlin, Germany",
+        "url": "https://example.test/job/talent-pool"
+      }
+    },
+    {
+      "_class": "junk_content",
+      "org": "Globex Foundation",
+      "job": {
+        "title": "Program Officer",
+        "snippet": "Program Officer role.",
+        "full_description": "Please complete the reCAPTCHA to continue.",
+        "location": "Berlin, Germany",
+        "url": "https://example.test/job/program-officer"
+      }
+    },
+    {
+      "_class": "geo_excluded",
+      "org": "Globex Foundation",
+      "_excluded_country": "france",
+      "job": {
+        "title": "Field Coordinator",
+        "snippet": "Field Coordinator in Paris.",
+        "full_description": "We are hiring a Field Coordinator based in Paris to run our regional operations end to end, manage logistics, and coordinate with local partners across the country.",
+        "location": "Paris, France",
+        "url": "https://example.test/job/field-coordinator"
+      }
+    },
+    {
+      "_class": "stale_blind",
+      "org": "Initech",
+      "_seed": { "first_seen_days_ago": 20 },
+      "job": {
+        "title": "Data Analyst",
+        "snippet": "",
+        "full_description": "",
+        "location": "Berlin, Germany",
+        "url": "https://example.test/job/data-analyst"
+      }
+    },
+    {
+      "_class": "reenrich_blind",
+      "org": "Initech",
+      "_seed": { "first_seen_days_ago": 2 },
+      "job": {
+        "title": "Product Manager",
+        "snippet": "",
+        "full_description": "",
+        "location": "Berlin, Germany",
+        "url": "https://example.test/job/product-manager"
+      }
+    },
+    {
+      "_class": "reenrich_thin",
+      "org": "Initech",
+      "job": {
+        "title": "UX Designer",
+        "snippet": "",
+        "full_description": "We need a UX Designer to redesign the onboarding flow soon.",
+        "location": "Berlin, Germany",
+        "url": ""
+      }
+    },
+    {
+      "_class": "rearchived",
+      "org": "Umbrella Corp",
+      "_seed": { "archived_hash_reason": "low_score" },
+      "job": {
+        "title": "Operations Lead",
+        "snippet": "Operations Lead role.",
+        "full_description": "We are hiring an Operations Lead to own our supply chain end to end, manage a team of five, and drive process improvements across three warehouses in the region.",
+        "location": "Berlin, Germany",
+        "url": "https://example.test/job/operations-lead"
+      }
+    },
+    {
+      "_class": "resurrection",
+      "org": "Hooli",
+      "_seed": {
+        "existing_status": "archived",
+        "archived_hash_reason": "gone_from_source"
+      },
+      "job": {
+        "title": "Site Reliability Engineer",
+        "snippet": "SRE role reopened.",
+        "full_description": "We are hiring a Site Reliability Engineer to keep our platform online. You will own incident response, build automation, and improve our observability stack end to end.",
+        "location": "Berlin, Germany",
+        "url": "https://example.test/job/sre"
+      }
+    },
+    {
+      "_class": "protected_liked_blacklist",
+      "org": "Pied Piper",
+      "_seed": { "existing_status": "liked" },
+      "job": {
+        "title": "Talent Pool — General Application",
+        "snippet": "Liked but blacklisted title.",
+        "full_description": "We are building a talent pool. This row is seeded with status=liked so classify_vacancies must skip it as protected before any delete rule, even though the title is blacklisted.",
+        "location": "Berlin, Germany",
+        "url": "https://example.test/job/pied-piper-talent-pool"
+      }
+    }
+  ]
+}
