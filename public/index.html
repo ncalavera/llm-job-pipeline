@@ -352,7 +352,9 @@
       <div class="company-profile-page" id="companyProfile"></div>
     </div>
 
-    <script src="data.js"></script>
-    <script type="module" src="app.js"></script>
+    <!-- bootstrap.js fetches /api/vacancies (live, full mode), falls back to a
+         static data.js (simple/local mode), then imports app.js. It populates
+         window.VACANCY_DATA before the app's module graph loads. -->
+    <script type="module" src="modules/bootstrap.js"></script>
   </body>
 </html>
