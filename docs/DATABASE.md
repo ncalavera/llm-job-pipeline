@@ -40,7 +40,7 @@ All hot-path indexes are created in `schema.sql`:
 - `idx_company_status` — the filter in `load_vacancies`.
 - `idx_vacancy_status` — critical for `/api/statuses` (fast GET of all
   statuses).
-- `idx_vacancy_dedup_hash` — dedup inside `merge_vacancies`.
+- `idx_vacancy_dedup_hash` — dedup inside `save_vacancies`.
 - `idx_vacancy_llm_score` — dashboard sort by descending score.
 - `idx_archived_hash_at` — TTL window scans on the tombstone table.
 

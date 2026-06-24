@@ -170,7 +170,7 @@ def test_day1_backend_select_and_schema(dal):
 def test_day1_fetch_creates_company_and_rows(dal):
     """2. A fake ATS response → company candidate + vacancies + dedup_hash."""
     dal.ensure_company("Acme Foundation", status="active")
-    new = dal.merge_vacancies("Acme Foundation", "A", ACME_DAY1)
+    new = dal.save_vacancies("Acme Foundation", "A", ACME_DAY1)
     dal.get_conn().commit()
     # Two junk speculative entries are dropped at MERGE time (universal junk),
     # so only the 3 real roles are inserted.
@@ -193,7 +193,7 @@ def test_day1_filter_drops_junk_keeps_real_with_empty_profile(dal):
     importlib.reload(filter_vacancies)
 
     dal.ensure_company("Acme Foundation", status="active")
-    dal.merge_vacancies("Acme Foundation", "A", ACME_DAY1)
+    dal.save_vacancies("Acme Foundation", "A", ACME_DAY1)
     dal.get_conn().commit()
 
     # Junk is gone before classification.
@@ -216,7 +216,7 @@ def test_day1_score_contract_and_save(dal, monkeypatch):
     llm_scored_at, llm_summary and unseen status land on the right rows.
     """
     dal.ensure_company("Acme Foundation", status="active")
-    dal.merge_vacancies("Acme Foundation", "A", ACME_DAY1)
+    dal.save_vacancies("Acme Foundation", "A", ACME_DAY1)
     dal.get_conn().commit()
 
     payload = _run_local(monkeypatch)
@@ -251,7 +251,7 @@ def test_day1_score_contract_and_save(dal, monkeypatch):
 def test_day1_save_auto_archive_below_threshold(dal, monkeypatch):
     """4b. With --archive, unseen vacancies below threshold are archived."""
     dal.ensure_company("Acme Foundation", status="active")
-    dal.merge_vacancies("Acme Foundation", "A", [
+    dal.save_vacancies("Acme Foundation", "A", [
         _job("Keeper Role"), _job("Throwaway Role", city="London, United Kingdom"),
     ])
     dal.get_conn().commit()
@@ -287,7 +287,7 @@ def test_day1_report_builds_with_and_without_data(dal, monkeypatch):
 
     # With scored data the dashboard surfaces the scored roles.
     dal.ensure_company("Acme Foundation", status="active")
-    dal.merge_vacancies("Acme Foundation", "A", ACME_DAY1)
+    dal.save_vacancies("Acme Foundation", "A", ACME_DAY1)
     dal.get_conn().commit()
     payload = _run_local(monkeypatch)
     _run_save(monkeypatch, _fake_scores(payload, lambda o, t: (66, _summary(t))))
@@ -302,7 +302,7 @@ def test_day1_report_builds_with_and_without_data(dal, monkeypatch):
 def test_day1_like_dislike_persist(dal):
     """6. status=liked / passed via the DAL, asserted persisted."""
     dal.ensure_company("Acme Foundation", status="active")
-    dal.merge_vacancies("Acme Foundation", "A", ACME_DAY1)
+    dal.save_vacancies("Acme Foundation", "A", ACME_DAY1)
     dal.get_conn().commit()
     ids = list(dal.load_vacancies().keys())
     dal.update_vacancy_status(ids[0], "liked")
@@ -319,7 +319,7 @@ def test_day1_triage_load_liked_and_persist_decision(dal):
     importlib.reload(triage)
 
     dal.ensure_company("Acme Foundation", status="active")
-    dal.merge_vacancies("Acme Foundation", "A", ACME_DAY1)
+    dal.save_vacancies("Acme Foundation", "A", ACME_DAY1)
     dal.get_conn().commit()
     ids = list(dal.load_vacancies().keys())
     liked_id = ids[0]
@@ -353,7 +353,7 @@ def day2(tmp_path, monkeypatch):
     # --- Day 1 seed ---
     db = _force_sqlite(monkeypatch, db_file)
     db.ensure_company("Acme Foundation", status="active")
-    db.merge_vacancies("Acme Foundation", "A", ACME_DAY1)
+    db.save_vacancies("Acme Foundation", "A", ACME_DAY1)
     db.get_conn().commit()
     # Decide one role on day 1 so we can prove it survives the reconnect.
     ids = list(db.load_vacancies().keys())
@@ -400,7 +400,7 @@ def test_day2_refetch_dedup_new_and_gone(day2, monkeypatch):
         _job("Software Engineer", city="London, United Kingdom"),  # repeat
         _job("Programme Lead"),                             # new → insert
     ]
-    new = db.merge_vacancies("Acme Foundation", "A", day2_listing)
+    new = db.save_vacancies("Acme Foundation", "A", day2_listing)
     db.get_conn().commit()
     assert new == 1  # only the genuinely new role inserts; repeats dedup
 
@@ -537,17 +537,19 @@ def test_day2_profile_change_drops_then_restores(dal, tmp_path, monkeypatch,
     assert config.EXCLUDE_COUNTRIES == ["country a"]
     assert "engineer" in config.EXCLUDE_TITLE_KEYWORDS
 
-    import database_supabase as db_mod
+    # filters was reloaded in place by the chain reload above; this reference
+    # reflects the current (WITH-filters) profile.
+    import filters
     # A vacancy located ONLY in Country A drops on geography.
     assert fv._all_locations_excluded(country_a_vac) is True
     assert fv._geo_delete_category(country_a_vac) == "delete_geo"
     # A multi-location posting that also has a kept location survives.
     assert fv._all_locations_excluded(germany_vac) is False
     # An 'engineer' TITLE drops; a non-matching title survives.
-    assert db_mod._is_blacklisted(eng_title) is True
-    assert db_mod._is_blacklisted(other_title) is False
+    assert filters.title_words_blacklisted(eng_title) is True
+    assert filters.title_words_blacklisted(other_title) is False
     # Universal junk still drops regardless of profile.
-    assert db_mod._is_blacklisted("Talent Pool — General Application") is True
+    assert filters.title_words_blacklisted("Talent Pool — General Application") is True
 
     # --- Empty profile: nothing personal drops ---
     _write_profile(profile, countries="(none)", keywords="(none)")
@@ -558,9 +560,10 @@ def test_day2_profile_change_drops_then_restores(dal, tmp_path, monkeypatch,
     assert config2.EXCLUDE_TITLE_KEYWORDS == []
 
     import database_supabase as db_mod2
-    importlib.reload(db_mod2)
+    importlib.reload(db_mod2)  # reloads filters in place under the empty profile
+    import filters as filters2
     assert fv._all_locations_excluded(country_a_vac) is False
     assert fv._geo_delete_category(country_a_vac) is None
-    assert db_mod2._is_blacklisted(eng_title) is False
+    assert filters2.title_words_blacklisted(eng_title) is False
     # Universal junk STILL drops with an empty profile.
-    assert db_mod2._is_blacklisted("Expression of Interest") is True
+    assert filters2.title_words_blacklisted("Expression of Interest") is True

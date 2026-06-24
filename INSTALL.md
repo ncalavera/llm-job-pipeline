@@ -144,7 +144,7 @@ JOB_BOARDS=arbeitnow,remotive python3 scripts/fetch_vacancies.py
 
 **Boards behind logins (LinkedIn, Devex, …):** the pipeline deliberately ships
 no importers for them; if you accept the terms-of-service risk, ask your agent
-to write a personal importer that feeds `merge_vacancies()` — keep it out of
+to write a personal importer that feeds `save_vacancies()` — keep it out of
 public forks.
 
 ## 8. Dashboard (optional)

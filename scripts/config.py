@@ -150,7 +150,8 @@ UNIVERSAL_JUNK = list(_JUNK["words"])
 UNIVERSAL_JUNK_SUBSTR = list(_JUNK["substr"])
 
 # ---------------------------------------------------------------------------
-# Combined title blacklist used by the pre-score filter (_is_blacklisted).
+# Combined title blacklist used by the pre-score filter
+# (filters.title_words_blacklisted).
 #
 # = UNIVERSAL_JUNK + the user's personal EXCLUDE_TITLE_KEYWORDS (from the
 # profile, empty by default). Importers keep using GLOBAL_BLACKLIST /

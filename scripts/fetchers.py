@@ -1314,8 +1314,8 @@ def _enrich_blind_jobs(jobs: list[dict], org_name: str) -> list[dict]:
         return jobs
 
     # Pre-filter blacklisted titles
-    from score_vacancies import _is_blacklisted
-    to_enrich = [(i, j) for i, j in blind if not _is_blacklisted(j.get("title", ""))]
+    import filters
+    to_enrich = [(i, j) for i, j in blind if not filters.title_words_blacklisted(j.get("title", ""))]
     skipped = len(blind) - len(to_enrich)
 
     if not to_enrich:
