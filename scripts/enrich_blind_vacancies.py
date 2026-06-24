@@ -30,6 +30,7 @@ from quality import (_COOKIE_BANNER_RE, COOKIE_MIN_REMAINDER,
                      COOKIE_SCORE_POLLUTION, _find_cookie_banner_end,
                      is_cookie_boilerplate, strip_cookie_boilerplate)
 import filters
+import run_status  # progress heartbeat (vacancies/run_status.json)
 from filter_vacancies import _all_locations_excluded
 
 
@@ -204,8 +205,10 @@ def main():
     errors = 0
     cookie_pages = 0
     cur = conn.cursor()
+    run_status.begin("enrich", len(blind))
 
     for i, (vid, vac, url) in enumerate(blind, 1):
+        run_status.step(vac['org'], i - 1, enriched=enriched)
         print(f"  [{i}/{len(blind)}] {vac['org']:25s} {vac['title'][:45]:45s}", end="", flush=True)
 
         text = _fetch_description(client, url)
@@ -246,6 +249,7 @@ def main():
         time.sleep(0.5)
 
     conn.commit()
+    run_status.finish(enriched=enriched)
     print(f"\nDone! Enriched {enriched}/{len(blind)} blind vacancies.")
     print(f"Errors/empty: {errors} (of which cookie/consent pages: {cookie_pages})")
 
