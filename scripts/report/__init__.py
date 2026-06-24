@@ -183,13 +183,32 @@ def generate_dashboard(db: dict = None) -> None:
 
 
 def _upsert_dashboard_snapshot(vacancy_data: dict, conn) -> None:
-    """Upsert the assembled payload into the single dashboard_snapshot row.
+    """Upsert the assembled payload into the dashboard_snapshot 'current' row.
 
-    Full mode only. /api/vacancies reads this row, so a browser refresh shows
-    current data without a Vercel redeploy. One fixed-id row, replaced each run.
+    Full mode only. /api/vacancies reads the 'current' row, so a browser refresh
+    shows current data without a Vercel redeploy.
+
+    Before overwriting, the existing 'current' payload is copied to a 'previous'
+    row so a bad run (e.g. a truncated fetch that mass-archived real vacancies)
+    can be rolled back — the live snapshot is no longer a single destructive
+    overwrite with nothing to fall back to. Roll back with:
+        UPDATE dashboard_snapshot c SET payload = p.payload, updated_at = now()
+        FROM dashboard_snapshot p WHERE c.id = 'current' AND p.id = 'previous';
+
+    NOTE: this commits ``conn``. Callers must commit their own pending writes
+    BEFORE calling generate_dashboard (per AGENTS.md the DAL leaves commits to
+    the caller); the fetch and score paths already do.
     """
     from db_backend import Json
     cur = conn.cursor()
+    # Snapshot the current payload as 'previous' (no-op on the very first run).
+    cur.execute(
+        "INSERT INTO dashboard_snapshot (id, payload, updated_at) "
+        "SELECT 'previous', payload, updated_at FROM dashboard_snapshot "
+        "WHERE id = 'current' "
+        "ON CONFLICT (id) DO UPDATE "
+        "SET payload = EXCLUDED.payload, updated_at = EXCLUDED.updated_at",
+    )
     cur.execute(
         "INSERT INTO dashboard_snapshot (id, payload, updated_at) "
         "VALUES ('current', %s, now()) "

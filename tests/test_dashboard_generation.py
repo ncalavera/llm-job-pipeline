@@ -127,15 +127,16 @@ class _FakeCursor:
         self._sink = sink
 
     def execute(self, sql, params=None):
-        self._sink["sql"] = sql
+        self._sink["sql"] = sql          # last statement
         self._sink["params"] = params
+        self._sink.setdefault("calls", []).append((sql, params))
 
 
 class _FakeConn:
-    """psycopg2-connection stand-in that records the upsert for assertions."""
+    """psycopg2-connection stand-in that records every execute for assertions."""
 
     def __init__(self):
-        self.sink = {}
+        self.sink = {"calls": []}
         self.committed = False
 
     def cursor(self, cursor_factory=None):
@@ -182,9 +183,29 @@ def test_full_mode_upserts_snapshot_payload_round_trip(monkeypatch):
     sql = fake.sink["sql"].lower()
     assert "insert into dashboard_snapshot" in sql
     assert "on conflict" in sql
-    # The Json-wrapped param carries the exact payload the generator built.
+    # The 'current' upsert (the last statement) carries the exact payload.
     json_param = fake.sink["params"][0]
     assert json_param.adapted == payload
+
+
+def test_full_mode_keeps_previous_snapshot_before_overwrite(monkeypatch):
+    """Before overwriting 'current', the old payload is copied to 'previous' so a
+    bad run can be rolled back — the live snapshot is not a single destructive
+    overwrite."""
+    report, db_backend = _fresh_report(monkeypatch)
+    fake = _FakeConn()
+    monkeypatch.setattr(db_backend, "IS_SQLITE", False)
+    monkeypatch.setattr(db_backend, "get_conn", lambda: fake)
+
+    report._persist_dashboard({"groups": []})
+
+    statements = " | ".join(sql.lower() for sql, _ in fake.sink["calls"])
+    assert "'previous'" in statements, "must snapshot the old payload as 'previous'"
+    assert "'current'" in statements
+    # previous is captured before current is overwritten.
+    prev_idx = next(i for i, (s, _) in enumerate(fake.sink["calls"]) if "'previous'" in s.lower())
+    curr_idx = next(i for i, (s, _) in enumerate(fake.sink["calls"]) if "values ('current'" in s.lower())
+    assert prev_idx < curr_idx
 
 
 def test_full_mode_does_not_write_data_js(monkeypatch, tmp_path):

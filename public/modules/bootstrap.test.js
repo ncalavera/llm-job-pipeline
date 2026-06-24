@@ -15,8 +15,8 @@ test("404 → fall back to static data.js (endpoint absent = simple/local mode)"
   assert.equal(resolveSource({ ok: false, status: 404 }), "fallback");
 });
 
-test("401 → error, never a silent stale fallback", () => {
-  assert.equal(resolveSource({ ok: false, status: 401 }), "error");
+test("401 → reauth (reload to re-trigger the login prompt), never a stale fallback", () => {
+  assert.equal(resolveSource({ ok: false, status: 401 }), "reauth");
 });
 
 test("503 (snapshot not generated / auth not configured) → error", () => {

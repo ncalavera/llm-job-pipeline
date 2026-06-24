@@ -15,12 +15,13 @@
 /**
  * Decide where the dashboard payload comes from, given an HTTP response to
  * GET /api/vacancies. Pure — unit-tested without a browser.
- * @returns {"live"|"fallback"|"error"}
+ * @returns {"live"|"fallback"|"reauth"|"error"}
  */
 export function resolveSource({ ok, status }) {
   if (ok) return "live";
   if (status === 404) return "fallback"; // endpoint not deployed → simple/local mode
-  return "error"; // 401 / 500 / 503 → real failure, do not mask with stale data
+  if (status === 401) return "reauth"; // session cookie expired/cleared → re-login
+  return "error"; // 500 / 503 → real failure, do not mask with stale data
 }
 
 function isHttp() {
@@ -58,17 +59,37 @@ export async function boot() {
   let payload = null;
 
   if (isHttp()) {
-    try {
-      const res = await fetch("/api/vacancies", {
-        headers: { Accept: "application/json" },
-      });
+    // One retry: a single transient network hiccup on a healthy deploy should
+    // not blank the dashboard.
+    let res = null;
+    for (let attempt = 0; attempt < 2 && !res; attempt++) {
+      try {
+        res = await fetch("/api/vacancies", {
+          headers: { Accept: "application/json" },
+        });
+      } catch {
+        if (attempt === 1) source = "error"; // both tries failed
+      }
+    }
+    if (res) {
       source = resolveSource({ ok: res.ok, status: res.status });
-      if (source === "live") payload = await res.json();
-    } catch {
-      source = "error"; // network failure reaching the API host
+      if (source === "live") {
+        payload = await res.json();
+        // A 200 with a null/non-object body would crash app.js with a confusing
+        // error — treat it as a failure, not live data.
+        if (!payload || typeof payload !== "object") source = "error";
+      }
     }
   }
   // file:// (offline view) keeps source = "fallback" → baked data.js.
+
+  if (source === "reauth") {
+    // A fetch() 401 does NOT trigger the browser's auth dialog — only a
+    // top-level navigation does. Reload so an expired session prompts a login
+    // instead of stranding the user on a dead error screen.
+    location.reload();
+    return;
+  }
 
   if (source === "error") {
     showError("the live endpoint returned an error");

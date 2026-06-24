@@ -470,6 +470,19 @@ If any stage failed or the gone-archive share is high: **do NOT regenerate.** Th
 previous good snapshot stays live. Tell the user to review (e.g. a truncated ATS
 fetch may have archived real vacancies) before publishing.
 
+**Rollback.** Each regenerate copies the old payload to a `previous` row before
+overwriting `current`. If a bad snapshot did go live, restore the prior one:
+
+```bash
+psql "$SUPABASE_DB_URL" -c "UPDATE dashboard_snapshot c SET payload = p.payload, \
+updated_at = now() FROM dashboard_snapshot p WHERE c.id='current' AND p.id='previous';"
+```
+
+**Preview.** In full mode the data is live on the deployed dashboard — preview by
+refreshing it. `scripts/dashboard_local.py` is the **simple-mode** server (it reads
+the local `data.js`, which full mode does not write), so don't use it to preview a
+full-mode run. As always, never run `--report-only` from a git worktree.
+
 ### Assert dashboard auth (full mode)
 
 `/api/vacancies` **fails closed** — with no `AUTH_USER` / `AUTH_PASS` on the
