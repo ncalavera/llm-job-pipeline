@@ -23,6 +23,21 @@ _STRATEGY_REQUIRES_URL = {"firecrawl_scrape", "unops_widget"}
 # Company registry — built from Supabase (single source of truth)
 # ---------------------------------------------------------------------------
 
+# Failure signal: distinguishes a genuinely empty company table (fresh clone)
+# from a transient DB outage. COMPANIES is {} in BOTH cases, so callers that key
+# destructive onboarding on `len(COMPANIES) == 0` (/jobs-new) must also check
+# this flag and HARD-STOP on a load failure instead of onboarding.
+# IMPORTANT: read via `registry_load_failed()`, never `from company_registry
+# import REGISTRY_LOAD_FAILED` — importing the bool snapshots it at import time
+# and would miss a later flip; the function reads the live global.
+REGISTRY_LOAD_FAILED: bool = False
+REGISTRY_LOAD_ERROR: str | None = None
+
+
+def registry_load_failed() -> bool:
+    """True if the registry failed to load from the DB (outage), not empty table."""
+    return REGISTRY_LOAD_FAILED
+
 
 def _build_companies_from_db() -> dict:
     """Build COMPANIES dict from the active backend's company table.
@@ -37,6 +52,7 @@ def _build_companies_from_db() -> dict:
     ONLY on a genuine connection/query failure (e.g. fully offline unit tests),
     so importing this module never crashes.
     """
+    global REGISTRY_LOAD_FAILED, REGISTRY_LOAD_ERROR
     try:
         conn = get_conn()
         cur = conn.cursor()
@@ -54,7 +70,12 @@ def _build_companies_from_db() -> dict:
     except Exception as exc:  # noqa: BLE001 — registry must never crash import
         print(f"⚠ Company registry: backend unavailable, empty registry ({exc})",
               file=sys.stderr)
+        REGISTRY_LOAD_FAILED = True
+        REGISTRY_LOAD_ERROR = str(exc)
         return {}
+
+    REGISTRY_LOAD_FAILED = False
+    REGISTRY_LOAD_ERROR = None
 
     companies: dict[str, dict] = {}
     for (name, strategy, status, tier, careers_url,
