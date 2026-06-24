@@ -426,6 +426,9 @@ def main():
             if fetch_status == "ok" and strategy in GONE_DETECTION_STRATEGIES:
                 archive_gone_vacancies(org_name, raw_jobs)
 
+            # Commit per company so an interrupted run keeps finished orgs.
+            get_conn().commit()
+
         # --- Job Board Aggregators ---
         manual_boards = []
         if JOB_BOARDS and not args.no_boards:
@@ -496,6 +499,8 @@ def main():
                     print(f"  [{board_name}] {new_count} NEW vacancies added")
 
                 mark_board_fetched(board_id)
+                # Commit per board so an interrupted run keeps finished boards.
+                get_conn().commit()
 
         get_conn().commit()
 
