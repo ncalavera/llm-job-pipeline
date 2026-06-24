@@ -236,20 +236,32 @@ python3 -u scripts/fetch_vacancies.py 2>&1
 
 **Job boards are off by default and stay off here.** If the user opted into boards
 matching their sectors, prefix the command with their `JOB_BOARDS=...` selection.
-Board TTLs (3-30 days) keep daily runs cheap either way:
+Board TTLs (2-30 days) keep daily runs cheap either way. Full reference:
+`docs/job-boards-catalogue.md`.
 
-| Board id | Sector fit | Extra env |
-| --- | --- | --- |
-| `80k_hours` | EA / AI safety / policy | — |
-| `reliefweb` | humanitarian / development | — |
-| `arbeitnow` | European tech, visa sponsorship | `ARBEITNOW_VISA_ONLY=1` |
-| `remotive` | remote-first roles | `REMOTIVE_CATEGORIES=product,marketing` |
-| `weworkremotely` | remote product / business | `WWR_CATEGORIES=product,marketing` |
-| `hn_whoishiring` | startups (monthly HN thread, 30-day TTL) | — |
+**Recommended daily set** (impact-aligned; the boards with a track record of
+producing good matches here):
 
-E.g. `JOB_BOARDS=arbeitnow,remotive python3 -u scripts/fetch_vacancies.py 2>&1`.
-Remotive asks for very few calls (~4/day) — the fetcher makes one request per run
-(or per category); do not loop it.
+```bash
+JOB_BOARDS=80k_hours,impactpool,idealist,fast_forward,linkedin python3 -u scripts/fetch_vacancies.py 2>&1
+```
+
+| Board id | Sector fit | On? | Extra env |
+| --- | --- | --- | --- |
+| `80k_hours` | EA / AI safety / policy | **on** | — |
+| `impactpool` | UN / multilateral / development | **on** | — |
+| `idealist` | nonprofit (worldwide-remote) | **on** | knobs in defaults.toml |
+| `fast_forward` | tech-for-good / nonprofit-tech | **on** | — |
+| `linkedin` | targeted ops/programme/impact queries | **on** | edit `queries` in defaults.toml |
+| `reliefweb` | humanitarian (M&E/field-heavy) | off | 0 good in history |
+| `arbeitnow` | German market, German-language | off | 100% DE, 0 good |
+| `remotive` | remote-first, eng-heavy | off | `REMOTIVE_CATEGORIES=...`; 0 good |
+| `weworkremotely` | remote commercial tech | off | `WWR_CATEGORIES=...`; 0 good |
+| `hn_whoishiring` | startups (monthly thread) | off | eng/US, 0 good |
+
+The "off" boards are available but produced zero good matches (score ≥55) across
+the pipeline's history — enable only for a specific reason. LinkedIn throttles
+hard: keep its `queries`/`pages` modest.
 
 Useful flags: `--force-all` (ignore TTL), `--companies "A,B"`, `--tier S`,
 `--no-boards`, `--free-only`, `--boards-only`.

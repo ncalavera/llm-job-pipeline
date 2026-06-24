@@ -37,11 +37,12 @@ and asks you only for the things it can't do itself.
 - **Fetching:** native ATS integrations — Greenhouse, Lever, Ashby, Workable,
   Workday, Recruitee, Teamtailor, BambooHR, Personio, PageUp, Wagtail — plus a
   local scraper for everything else. Optional Firecrawl enrichment for JS-heavy
-  career pages. Six opt-in job boards, all free APIs/feeds: 80,000 Hours
-  (EA / AI safety), ReliefWeb (humanitarian), Arbeitnow (European tech with
-  visa-sponsorship flags), Remotive and We Work Remotely (remote roles by
-  category), and the monthly HN "Who is hiring?" thread (startups) — enable
-  per run with e.g. `JOB_BOARDS=arbeitnow,remotive`.
+  career pages. Ten opt-in job boards, all free APIs/feeds: impact-aligned
+  ones (80,000 Hours, Impactpool, Idealist, Fast Forward) plus LinkedIn's
+  guest API (targeted query set) and general boards (ReliefWeb, Arbeitnow,
+  Remotive, We Work Remotely, HN "Who is hiring?") — enable per run with e.g.
+  `JOB_BOARDS=80k_hours,idealist`. Full reference and per-board fit notes:
+  [`docs/job-boards-catalogue.md`](docs/job-boards-catalogue.md).
 - **Quality gate:** every job description passes a single validation layer
   (`scripts/quality.py`) that strips cookie banners, navigation junk and
   non-vacancy pages before they reach your database.

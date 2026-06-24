@@ -78,6 +78,7 @@ from fetchers import (
     fetch_impactpool_board,
     fetch_arbeitnow_board, fetch_remotive_board, fetch_wwr_board,
     fetch_hn_whoishiring_board,
+    fetch_idealist_board, fetch_fastforward_board, fetch_linkedin_board,
     fetch_unops_widget,
     fetch_recruitee, fetch_teamtailor_rss, fetch_bamboohr,
     fetch_amazon_jobs,
@@ -461,6 +462,12 @@ def main():
                         jobs = fetch_wwr_board(board_cfg)
                     elif strategy == "hn_whoishiring":
                         jobs = fetch_hn_whoishiring_board(board_cfg)
+                    elif strategy == "idealist_algolia":
+                        jobs = fetch_idealist_board(board_cfg)
+                    elif strategy == "fastforward_board":
+                        jobs = fetch_fastforward_board(board_cfg)
+                    elif strategy == "linkedin_guest":
+                        jobs = fetch_linkedin_board(board_cfg)
                 except Exception as exc:
                     print(f"  [{board_name}] Fetch error: {exc}")
                     board_fetch_status = f"error: {exc}"
