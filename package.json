@@ -2,6 +2,10 @@
   "name": "job-search-dashboard",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
+  "scripts": {
+    "test:js": "node --test"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2"
   },

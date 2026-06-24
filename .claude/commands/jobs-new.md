@@ -437,49 +437,72 @@ research / network decisions, issue tracking) lives in `/jobs-review`.
 
 ## Step 9: Publish
 
-Always regenerate the dashboard snapshot from the current DB:
+The dashboard now reads its data **live**. Publishing a data change no longer
+needs a deploy — `--report-only` updates the source the dashboard reads, and a
+browser refresh shows it. `vercel --prod` is only for dashboard **code** changes.
+
+What `--report-only` does depends on the mode:
+
+* **Full mode** (Supabase) — upserts the `dashboard_snapshot` row that
+  `/api/vacancies` serves. The deployed dashboard is live: refresh the browser,
+  no deploy.
+* **Simple mode** (local SQLite) — writes `public/data.js` (gitignored), served
+  by the local dashboard server. Refresh the browser; start it with
+  `python3 scripts/dashboard_local.py` if needed. **Never deploy, never push.**
+  Do NOT run `--report-only` from a git worktree — it writes the wrong
+  `public/data.js`.
+
+### Full mode — publish only a CLEAN run
+
+Publishing now writes the **live** snapshot directly, so a bad run (a truncated
+ATS fetch that mass-archived real vacancies, fetch/score errors) would corrupt
+the live dashboard immediately — there is no deploy step left to catch it. So the
+clean-run gate moved from "before deploy" to "before regenerate".
+
+Regenerate ONLY when the run had **zero stage errors** AND gone-from-source
+archival was < ~30% of any single org this run:
 
 ```bash
 python3 scripts/fetch_vacancies.py --report-only 2>&1
 ```
 
-`public/data.js` is **gitignored** — committing it ships nothing. The live
-dashboard updates only via the Vercel CLI.
+If any stage failed or the gone-archive share is high: **do NOT regenerate.** The
+previous good snapshot stays live. Tell the user to review (e.g. a truncated ATS
+fetch may have archived real vacancies) before publishing.
 
-### Decide the mode and whether to deploy
+**Rollback.** Each regenerate copies the old payload to a `previous` row before
+overwriting `current`. If a bad snapshot did go live, restore the prior one:
 
-**Simple mode** (local SQLite / no Supabase, OR no `.vercel/project.json`, OR no
-`VERCEL_TOKEN`): regenerate `data.js` locally only. **Never deploy, never push.**
-If the local dashboard server is running, the user just refreshes the browser;
-otherwise mention `python3 scripts/dashboard_local.py`.
+```bash
+psql "$SUPABASE_DB_URL" -c "UPDATE dashboard_snapshot c SET payload = p.payload, \
+updated_at = now() FROM dashboard_snapshot p WHERE c.id='current' AND p.id='previous';"
+```
 
-**Full mode** — deploy ONLY when ALL of these hold:
-1. Supabase is configured AND `.vercel/project.json` exists AND `VERCEL_TOKEN` is set.
-2. The run had **zero stage errors**: no fetch errors, no score-save failures, and
-   gone-from-source archival was < ~30% of any single org this run.
+**Preview.** In full mode the data is live on the deployed dashboard — preview by
+refreshing it. `scripts/dashboard_local.py` is the **simple-mode** server (it reads
+the local `data.js`, which full mode does not write), so don't use it to preview a
+full-mode run. As always, never run `--report-only` from a git worktree.
 
-If any stage failed or the gone-archive share is high: **regenerate locally, do
-NOT deploy**, and tell the user to review (e.g. a truncated ATS fetch may have
-archived real vacancies) before publishing.
+### Assert dashboard auth (full mode)
 
-### Before deploying — assert dashboard auth
-
-The dashboard is fully PUBLIC if Vercel `AUTH_USER` / `AUTH_PASS` are unset, and
-`data.js` embeds personal data. `middleware.js` reads these from the **Vercel
-project** env — NOT your local shell — so assert them on the project itself
-(checking `$AUTH_USER` locally proves nothing about the deploy):
+`/api/vacancies` **fails closed** — with no `AUTH_USER` / `AUTH_PASS` on the
+Vercel project it returns 503 and serves no PII, so the dashboard simply will not
+load until auth is set. Confirm it is set so the dashboard works AND stays
+private. `middleware.js` reads these from the **Vercel project** env, not your
+local shell:
 
 ```bash
 venv=$(vercel env ls production 2>/dev/null)
 echo "$venv" | grep -q 'AUTH_USER' && echo "$venv" | grep -q 'AUTH_PASS' \
   && echo "auth OK — Vercel project has AUTH_USER + AUTH_PASS" \
-  || echo "AUTH MISSING in Vercel project — dashboard would be PUBLIC with PII"
+  || echo "AUTH MISSING in Vercel project — /api/vacancies will 503 (safe, but dashboard is down)"
 ```
 
-If they are unset, **warn the user and confirm once** before deploying (or skip
-the deploy).
+### Deploy (code changes only)
 
-### Deploy (full mode, clean run only)
+Run `vercel --prod` **only** when you changed dashboard CODE (`api/`, `public/`,
+`middleware.js`, `vercel.json`) — never for a data change. Same gate as before:
+Supabase configured AND `.vercel/project.json` exists AND `VERCEL_TOKEN` set.
 
 ```bash
 vercel --prod
@@ -493,8 +516,9 @@ Show the resulting URL. **Never** run `git add` / `git commit` / `git push` here
 
 Summarize: N new fetched, M scored, the verdicts captured (liked / passed counts),
 how many liked vacancies are now waiting for a deeper look (`/jobs-review`), and
-whether the dashboard was deployed (full mode) or refreshed locally only (simple
-mode / gated by errors).
+whether the live snapshot was refreshed (full mode — visible on browser refresh,
+no deploy) or `data.js` was regenerated locally (simple mode), or publishing was
+skipped because the run was not clean.
 
 ## Common issues
 

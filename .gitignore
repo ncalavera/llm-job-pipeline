@@ -50,3 +50,6 @@ REPORT-*.md
 
 # Private architecture lessons migrated from job-search-2026 (do not publish)
 architecture-notes/
+
+# npm lockfile — project installs deps fresh; no lockfile tracked
+package-lock.json

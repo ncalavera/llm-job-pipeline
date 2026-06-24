@@ -142,6 +142,20 @@ CREATE TABLE IF NOT EXISTS archived_hash (
 CREATE INDEX IF NOT EXISTS idx_archived_hash_at ON archived_hash (archived_at);
 
 -- ---------------------------------------------------------------------------
+-- dashboard_snapshot — live-dashboard read source (full mode only).
+-- One row holding the latest assembled VACANCY_DATA payload. generate_dashboard()
+-- upserts it on every data change; /api/vacancies serves it so a browser refresh
+-- shows current data with no redeploy. Simple/SQLite mode never reads this and
+-- keeps using public/data.js, so the SQLite baseline omits this table.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS dashboard_snapshot (
+    id          TEXT PRIMARY KEY DEFAULT 'current',
+    payload     JSONB NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ---------------------------------------------------------------------------
 -- Row-Level Security
 --
 -- Recommended setup if you serve the dashboard via Supabase anon key:
