@@ -311,7 +311,7 @@ def main():
         elif not filtered:
             if not COMPANIES:
                 print("\nNo companies tracked yet — nothing to fetch.")
-                print("  Run /jobs-start to discover your first companies,")
+                print("  Run /jobs-new to discover your first companies,")
                 print("  or /jobs-add to add a company by name.")
             else:
                 print("\nNo companies match these filters. "

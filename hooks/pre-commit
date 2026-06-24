@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Guardrail: block private data from ever entering this PUBLIC repo.
+# Tracked source of truth — install into .git/hooks via scripts/install-hooks.sh
+# (or `git config core.hooksPath hooks`). Mirrors the live hook.
+# Override (rarely, and only if you are 100% sure): git commit --no-verify
+set -euo pipefail
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -z "$staged" ] && exit 0
+
+blocked=""
+
+# 1) Sensitive PATHS — never commit these.
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  case "$f" in
+    .env|.env.local|.env.*) [ "$f" = ".env.example" ] || blocked+="  $f  (env / secrets)\n" ;;
+    config/user_profile.md)   blocked+="  $f  (private candidate profile)\n" ;;
+    public/data.js)           blocked+="  $f  (dashboard data — contains PII)\n" ;;
+    vacancies/*)              blocked+="  $f  (scraped vacancy data)\n" ;;
+    .firecrawl/*)             blocked+="  $f  (scrape cache)\n" ;;
+    architecture-notes/*)     blocked+="  $f  (private notes — do not publish)\n" ;;
+    .claude-session-acceptance.md) blocked+="  $f  (session file)\n" ;;
+    *.db|*.db-wal|*.db-shm|*.sqlite) blocked+="  $f  (local database)\n" ;;
+  esac
+done <<< "$staged"
+
+# 2) Secret SIGNATURES in staged text content (defence in depth).
+secret_re='(sk-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----)'
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  [ -f "$f" ] || continue
+  if git show ":$f" 2>/dev/null | grep -qIE "$secret_re"; then
+    blocked+="  $f  (looks like a hardcoded secret/key)\n"
+  fi
+done <<< "$staged"
+
+if [ -n "$blocked" ]; then
+  printf '\n\033[31m✖ COMMIT BLOCKED — private data must not enter this PUBLIC repo:\033[0m\n' >&2
+  printf '%b' "$blocked" >&2
+  printf '\nUnstage them (git restore --staged <file>) or, if truly intentional, use --no-verify.\n' >&2
+  exit 1
+fi
+exit 0
