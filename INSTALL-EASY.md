@@ -48,6 +48,7 @@ That's it. No database account, no API keys required to start.
 git clone https://github.com/ncalavera/llm-job-pipeline
 cd llm-job-pipeline
 python3 -m pip install requests beautifulsoup4 python-dateutil
+./scripts/install-hooks.sh   # one-time: blocks committing private data to this public repo
 ```
 
 If that errors with **`externally-managed-environment`** (PEP 668, common on

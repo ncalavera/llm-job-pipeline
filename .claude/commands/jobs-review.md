@@ -268,7 +268,7 @@ python3 -c "
 import json
 from pathlib import Path
 
-archive_dir = Path('vacancies/jobs-archive')
+archive_dir = Path('vacancies/archive')
 archives = sorted(archive_dir.glob('archived_*.json'), reverse=True)
 
 if not archives:
@@ -400,7 +400,13 @@ Regenerate the dashboard data and deploy it. **Deploy only — never `git add`, 
    ```
    - **Simple mode** (no Supabase / no `.vercel` link / no `VERCEL_TOKEN`): regenerate `public/data.js` locally only — do NOT deploy.
 
-3. **Auth assertion (full mode):** before deploying PII, confirm the dashboard auth is set (`AUTH_USER`/`AUTH_PASS`). If unset, warn and ask once before shipping.
+3. **Auth assertion (full mode):** before deploying PII, confirm the dashboard auth is set on the **Vercel project** (`middleware.js` reads project env, NOT your local shell — checking `$AUTH_USER` locally proves nothing):
+   ```bash
+   venv=$(vercel env ls production 2>/dev/null)
+   echo "$venv" | grep -q 'AUTH_USER' && echo "$venv" | grep -q 'AUTH_PASS' \
+     && echo "auth OK" || echo "AUTH MISSING in Vercel project — would be PUBLIC with PII"
+   ```
+   If unset, warn and ask once before shipping.
 
 4. **Debounce.** If several `/jobs-review` actions run in one session, only regenerate + deploy when the data actually changed since the last publish. Skip a redundant deploy if no state mutated.
 

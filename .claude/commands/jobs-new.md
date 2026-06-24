@@ -63,8 +63,12 @@ print('COMPANIES', len(COMPANIES))
 
 **If `COMPANIES` > 0:** skip to Step 3 (normal daily run).
 
-**If `len(COMPANIES) == 0`:** this is a fresh clone. Ask one confirm line before
-doing anything destructive:
+**If `len(COMPANIES) == 0`:** likely a fresh clone — but `COMPANIES` is *also*
+empty when the database is briefly unreachable (the registry returns `{}` on any
+DB error). If you have onboarded before, a transient DB outage looks identical to a
+fresh clone, and onboarding would overwrite your existing company config. Ask one
+confirm line before doing anything destructive (tell a returning user that an
+empty DB after prior use is probably an outage — choose No and retry):
 
 ```
 Your database has no companies yet. Run first-run onboarding now
@@ -307,7 +311,7 @@ Any edit to `UNIVERSAL_JUNK` in `scripts/config.py` or to the profile's
 `exclude_title_keywords` needs **explicit confirmation** — never edit silently.
 
 The archive path for filter deletions is
-`vacancies/jobs-archive/filter_YYYYMMDD_HHMM.json`.
+`vacancies/archive/filter_YYYYMMDD_HHMM.json`.
 
 ---
 
@@ -455,10 +459,15 @@ archived real vacancies) before publishing.
 ### Before deploying — assert dashboard auth
 
 The dashboard is fully PUBLIC if Vercel `AUTH_USER` / `AUTH_PASS` are unset, and
-`data.js` embeds personal data. Assert both are set before shipping:
+`data.js` embeds personal data. `middleware.js` reads these from the **Vercel
+project** env — NOT your local shell — so assert them on the project itself
+(checking `$AUTH_USER` locally proves nothing about the deploy):
 
 ```bash
-[ -n "$AUTH_USER" ] && [ -n "$AUTH_PASS" ] && echo "auth OK" || echo "AUTH MISSING — dashboard would be PUBLIC with PII"
+venv=$(vercel env ls production 2>/dev/null)
+echo "$venv" | grep -q 'AUTH_USER' && echo "$venv" | grep -q 'AUTH_PASS' \
+  && echo "auth OK — Vercel project has AUTH_USER + AUTH_PASS" \
+  || echo "AUTH MISSING in Vercel project — dashboard would be PUBLIC with PII"
 ```
 
 If they are unset, **warn the user and confirm once** before deploying (or skip

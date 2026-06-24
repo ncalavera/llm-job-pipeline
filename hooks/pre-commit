@@ -37,7 +37,7 @@ done <<< "$staged"
 
 if [ -n "$blocked" ]; then
   printf '\n\033[31m✖ COMMIT BLOCKED — private data must not enter this PUBLIC repo:\033[0m\n' >&2
-  printf "$blocked" >&2
+  printf '%b' "$blocked" >&2
   printf '\nUnstage them (git restore --staged <file>) or, if truly intentional, use --no-verify.\n' >&2
   exit 1
 fi
