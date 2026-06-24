@@ -56,19 +56,25 @@ trigger onboarding.
 ```bash
 python3 -c "
 import sys; sys.path.insert(0, 'scripts')
-from company_registry import COMPANIES
+from company_registry import COMPANIES, registry_load_failed
 print('COMPANIES', len(COMPANIES))
+print('LOAD_FAILED', registry_load_failed())
 "
 ```
 
 **If `COMPANIES` > 0:** skip to Step 3 (normal daily run).
 
-**If `len(COMPANIES) == 0`:** likely a fresh clone — but `COMPANIES` is *also*
-empty when the database is briefly unreachable (the registry returns `{}` on any
-DB error). If you have onboarded before, a transient DB outage looks identical to a
-fresh clone, and onboarding would overwrite your existing company config. Ask one
-confirm line before doing anything destructive (tell a returning user that an
-empty DB after prior use is probably an outage — choose No and retry):
+**If `LOAD_FAILED` is `True`:** the registry could not load — the database is
+unreachable, **not** a fresh clone. The empty `COMPANIES` is an artifact of the
+outage. HARD-STOP here: abort with "database unreachable, not a fresh clone — fix
+the DB and retry", and **never** offer onboarding. Do not run any of the steps below.
+
+**If `len(COMPANIES) == 0` and `LOAD_FAILED` is `False`:** the company table is
+genuinely empty — likely a fresh clone. (`LOAD_FAILED` is the discriminator: it
+distinguishes a true-empty table from the same empty `COMPANIES` you'd see during a
+brief DB outage, when the registry returns `{}` on any DB error. The hard-stop
+above already handled the outage case.) Ask one confirm line before doing anything
+destructive:
 
 ```
 Your database has no companies yet. Run first-run onboarding now
