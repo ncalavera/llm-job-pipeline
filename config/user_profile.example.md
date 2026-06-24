@@ -1,11 +1,17 @@
 # User profile
 
-This file is read by `scripts/prompts.py` and substituted into the scoring
-prompts. Copy it to `config/user_profile.md` (the real file is gitignored)
-and fill it in for yourself.
+THE single human-editable source of your taste. Copy it to
+`config/user_profile.md` (the real file is gitignored) and fill it in.
+The whole pipeline reads from this one file:
+- **Scoring** — `scripts/prompts.py` substitutes each `## SECTION` into the
+  LLM scoring prompt (`{{SECTION_NAME}}`).
+- **Filtering** — `scripts/hard_filters.py` reads `## HARD_FILTERS`
+  (exclude_countries / exclude_title_keywords) to drop vacancies before
+  scoring.
 
-Each `## SECTION` block becomes a `{{SECTION_NAME}}` placeholder in the
-prompt templates. Sections you don't need can be left empty or removed.
+Machine mechanics you do NOT edit (thresholds, geo tables, job boards,
+universal junk words) live in `config/defaults.toml`. Sections you don't
+need can be left empty or removed.
 
 ## USER_PROFILE
 
