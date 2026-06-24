@@ -37,7 +37,12 @@ Time: ~15 minutes of human attention, mostly account signups.
 git clone https://github.com/ncalavera/llm-job-pipeline
 cd llm-job-pipeline
 pip install -r requirements.txt
+./scripts/install-hooks.sh   # activate the private-data pre-commit guard
 ```
+
+`install-hooks.sh` points `core.hooksPath` at the tracked `hooks/`, so a
+pre-commit guard blocks you from ever committing your profile, `.env`,
+`public/data.js`, or other private files to this public repo. Run it once.
 
 ## 3. Create the database
 

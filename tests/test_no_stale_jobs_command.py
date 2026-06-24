@@ -36,12 +36,13 @@ STALE_NAMES = [
 ]
 
 # A slash-command appears at a command boundary: line start, or right after
-# whitespace / backtick / ``(``. This excludes URL/path suffixes like
-# ``.../boards/${SLUG}/jobs`` (the ``/`` is preceded by ``}``) and
-# ``jobs.lever.co`` (no leading slash). The trailing ``(?![\w-])`` keeps the bare
+# whitespace / backtick / ``(`` / markdown emphasis (``*`` ``_``) / quote / ``>``.
+# This excludes URL/path suffixes like ``.../boards/${SLUG}/jobs`` (the ``/`` is
+# preceded by ``}``) and ``jobs.lever.co`` (no leading slash), while still catching
+# ``**/jobs-fetch**`` and `"/jobs-fetch"`. The trailing ``(?![\w-])`` keeps the bare
 # ``jobs`` pattern from matching ``/jobs-new`` and friends.
 PATTERNS = {
-    name: re.compile(r"(?:^|(?<=[\s`(]))/" + re.escape(name) + r"(?![\w-])")
+    name: re.compile(r"(?:^|(?<=[\s`(*_\"'>]))/" + re.escape(name) + r"(?![\w-])")
     for name in STALE_NAMES
 }
 
@@ -94,6 +95,8 @@ def test_patterns_match_and_exclude_correctly():
         pat = PATTERNS[name]
         assert pat.search(f"run /{name} now"), name      # bare → flagged
         assert pat.search(f"`/{name}`"), name             # backticks → flagged
+        assert pat.search(f"**/{name}**"), name           # markdown bold → flagged
+        assert pat.search(f'"/{name}"'), name             # quoted → flagged
     # survivors, URLs, and path prose must NOT match any stale pattern
     for safe in ("/jobs-new", "/jobs-review", "/jobs-add", "/jobs-profile",
                  "/jobs-digest", "/jobs-update", "jobs.lever.co",
