@@ -264,6 +264,11 @@ class _Postgres:
 
         self.url = os.environ.get("SUPABASE_DB_URL") or os.environ.get("SUPABASE_DIRECT_URL")
         self.conn = _connect_supabase()
+        # _connect_supabase() returns a connection with an open transaction
+        # (its trailing SELECT is uncommitted); setting autocommit while a
+        # transaction is open raises "set_session cannot be used inside a
+        # transaction" on the Supabase pooler. Roll back first.
+        self.conn.rollback()
         self.conn.autocommit = False
         with self.conn.cursor() as cur:
             cur.execute("SELECT to_regclass('public.schema_migrations')")
