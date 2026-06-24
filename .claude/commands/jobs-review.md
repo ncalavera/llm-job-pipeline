@@ -387,32 +387,41 @@ python3 scripts/vac.py list --geo uk
 
 ## Publish (after `apply` / `archive` state changes)
 
-Regenerate the dashboard data and deploy it. **Deploy only — never `git add`, `git commit`, or `git push`.** Versioning code/docs to `main` is a separate, manual concern.
+The dashboard reads its data live, so publishing a data change is just a
+regenerate — **no deploy.** `vercel --prod` is only for dashboard code changes,
+and git stays fully manual (never `git add` / `git commit` / `git push`).
 
-1. **Regenerate `public/data.js`** from the current DB:
+1. **Regenerate from the current DB:**
    ```bash
    python3 scripts/fetch_vacancies.py --report-only
    ```
+   - **Full mode** (Supabase): upserts the `dashboard_snapshot` row that
+     `/api/vacancies` serves — the deployed dashboard is live, refresh the
+     browser, **no deploy.**
+   - **Simple mode** (no Supabase / no `.vercel` link / no `VERCEL_TOKEN`):
+     writes `public/data.js` locally, served by the local dashboard server.
+     Never deploy. Do NOT run `--report-only` from a git worktree.
 
-2. **Deploy — full mode only.** Full mode = Supabase backend (`SUPABASE_DB_URL` set) **and** `.vercel/project.json` present **and** `VERCEL_TOKEN` available. Then:
-   ```bash
-   vercel --prod
-   ```
-   - **Simple mode** (no Supabase / no `.vercel` link / no `VERCEL_TOKEN`): regenerate `public/data.js` locally only — do NOT deploy.
-
-3. **Auth assertion (full mode):** before deploying PII, confirm the dashboard auth is set on the **Vercel project** (`middleware.js` reads project env, NOT your local shell — checking `$AUTH_USER` locally proves nothing):
+2. **Auth assertion (full mode):** `/api/vacancies` fails closed — without
+   `AUTH_USER` / `AUTH_PASS` on the **Vercel project** it returns 503 and serves
+   no PII, so the dashboard won't load until auth is set. Confirm it (project env,
+   not your local shell):
    ```bash
    venv=$(vercel env ls production 2>/dev/null)
    echo "$venv" | grep -q 'AUTH_USER' && echo "$venv" | grep -q 'AUTH_PASS' \
-     && echo "auth OK" || echo "AUTH MISSING in Vercel project — would be PUBLIC with PII"
+     && echo "auth OK" || echo "AUTH MISSING in Vercel project — /api/vacancies will 503"
    ```
-   If unset, warn and ask once before shipping.
 
-4. **Debounce.** If several `/jobs-review` actions run in one session, only regenerate + deploy when the data actually changed since the last publish. Skip a redundant deploy if no state mutated.
+3. **Debounce.** If several `/jobs-review` actions run in one session, only
+   regenerate when the data actually changed since the last publish.
 
 ### Publish rules
 
-- **NEVER `git add` / `git commit` / `git push`** — git stays fully manual. Publishing means `--report-only` regen + `vercel --prod`, nothing more.
-- **`public/data.js` is gitignored** — it ships via the Vercel CLI, never via git.
-- **Deploy only on a clean change** — if a mode aborted or made no change, do not deploy.
-- **Simple mode never deploys** — local regen is the whole publish.
+- **NEVER `git add` / `git commit` / `git push`** — git stays fully manual.
+- **Data changes never deploy** — `--report-only` regen makes them live (full
+  mode) or local (simple mode). `vercel --prod` is for dashboard CODE only.
+- **Full mode — regenerate only a clean change.** The regen writes the live
+  snapshot directly, so a bad/aborted run would corrupt the live dashboard with
+  no deploy gate to catch it. If a mode aborted or archived a suspicious amount,
+  do NOT regenerate — the previous good snapshot stays live.
+- **Simple mode** — local `data.js` regen is the whole publish.
