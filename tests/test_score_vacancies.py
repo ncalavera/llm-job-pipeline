@@ -90,7 +90,7 @@ def sqlite_dal(tmp_path, monkeypatch):
 
 def _seed_one_vacancy(db):
     db.ensure_company("Acme Robotics", status="active")
-    db.merge_vacancies("Acme Robotics", "A", [{
+    db.save_vacancies("Acme Robotics", "A", [{
         "title": "Head of Community",
         "snippet": "Lead community efforts.",
         "full_description": "Lead our global community programme. " * 8,

@@ -58,7 +58,7 @@ def _job(title, city="Berlin, Germany"):
 
 def _seed(db, titles):
     db.ensure_company("Globex", status="active")
-    db.merge_vacancies("Globex", "A", [_job(t) for t in titles])
+    db.save_vacancies("Globex", "A", [_job(t) for t in titles])
     db.get_conn().commit()
     return {v["title"]: vid for vid, v in db.load_vacancies().items()}
 
@@ -138,9 +138,9 @@ def test_save_maps_each_member_id(dal, monkeypatch):
     dal.ensure_company("Globex", status="active")
     # Same title, two locations → merge keeps ONE row with 2 locations, so this
     # exercises the single-member path; add a genuinely separate role too.
-    dal.merge_vacancies("Globex", "A", [_job("Ops Lead", "Berlin, Germany")])
-    dal.merge_vacancies("Globex", "A", [_job("Ops Lead", "London, United Kingdom")])
-    dal.merge_vacancies("Globex", "A", [_job("Analyst")])
+    dal.save_vacancies("Globex", "A", [_job("Ops Lead", "Berlin, Germany")])
+    dal.save_vacancies("Globex", "A", [_job("Ops Lead", "London, United Kingdom")])
+    dal.save_vacancies("Globex", "A", [_job("Analyst")])
     dal.get_conn().commit()
     payload = _local(monkeypatch)
     save = [{

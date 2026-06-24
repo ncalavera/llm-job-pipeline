@@ -193,7 +193,7 @@ import sys
 sys.path.insert(0, 'scripts')
 from company_registry import COMPANIES
 from fetchers import fetch_greenhouse, fetch_lever, fetch_ashby, fetch_workable, fetch_firecrawl_scrape, fetch_workday_api
-from database_supabase import merge_vacancies, update_source_tracking
+from database_supabase import save_vacancies, update_source_tracking
 
 org_name = '{COMPANY_NAME}'
 config = COMPANIES[org_name]
@@ -213,7 +213,7 @@ elif strategy == 'workday_api':
 elif strategy == 'firecrawl_scrape':
     jobs = fetch_firecrawl_scrape(org_name, config['url'])
 
-new_count = merge_vacancies(org_name, config.get('tier', 2), jobs)
+new_count = save_vacancies(org_name, config.get('tier', 2), jobs)
 update_source_tracking(org_name, config.get('tier', 2), strategy, new_count)
 print(f'Merged: {new_count} new vacancies added to Supabase')
 "

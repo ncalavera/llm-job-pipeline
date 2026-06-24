@@ -45,7 +45,7 @@ def vac(tmp_path, monkeypatch):
 
 def _seed(dal, title="Head of Community"):
     dal.ensure_company("Acme Robotics", status="active")
-    dal.merge_vacancies("Acme Robotics", "A", [{
+    dal.save_vacancies("Acme Robotics", "A", [{
         "title": title,
         "snippet": "Lead community efforts.",
         "full_description": "Lead our global community programme. " * 8,

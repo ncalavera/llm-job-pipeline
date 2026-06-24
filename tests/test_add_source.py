@@ -1,4 +1,4 @@
-"""Tests for the add-source persistence seam — merge_vacancies +
+"""Tests for the add-source persistence seam — save_vacancies +
 update_source_tracking with their REAL current signatures.
 
 This doubles as a SIGNATURE-DRIFT GUARD: the /jobs-add runbook calls these two
@@ -8,7 +8,7 @@ assert the persistence side effects, so any future arg reshuffle breaks here
 loudly instead of silently in the runbook.
 
 Real signatures (scripts/database_supabase.py):
-    merge_vacancies(org_name: str, tier, jobs: list[dict]) -> int
+    save_vacancies(org_name: str, tier, jobs: list[dict]) -> int
     update_source_tracking(org_name, tier, strategy, new_count,
                            fetch_status=FETCH_STATUS_OK)
 
@@ -67,7 +67,7 @@ def _company_row(db, canonical):
 # ---------------------------------------------------------------------------
 
 def test_merge_vacancies_signature(dal):
-    sig = inspect.signature(dal.merge_vacancies)
+    sig = inspect.signature(dal.save_vacancies)
     assert list(sig.parameters) == ["org_name", "tier", "jobs"]
 
 
@@ -80,13 +80,13 @@ def test_update_source_tracking_signature(dal):
 
 
 # ---------------------------------------------------------------------------
-# merge_vacancies inserts and auto-creates the company (add-source happy path).
+# save_vacancies inserts and auto-creates the company (add-source happy path).
 # ---------------------------------------------------------------------------
 
 def test_merge_vacancies_inserts_and_creates_company(dal):
-    """Calling merge_vacancies for a brand-new org (as /jobs-add does) creates
+    """Calling save_vacancies for a brand-new org (as /jobs-add does) creates
     the company and inserts its vacancies."""
-    new = dal.merge_vacancies("NewCo", "B", [_job("Engineer"), _job("Designer")])
+    new = dal.save_vacancies("NewCo", "B", [_job("Engineer"), _job("Designer")])
     dal.get_conn().commit()
     assert new == 2
 
@@ -104,7 +104,7 @@ def test_merge_vacancies_inserts_and_creates_company(dal):
 # ---------------------------------------------------------------------------
 
 def test_update_source_tracking_records_counts(dal):
-    dal.merge_vacancies("NewCo", "B", [_job("Engineer")])
+    dal.save_vacancies("NewCo", "B", [_job("Engineer")])
     dal.get_conn().commit()
 
     dal.update_source_tracking("NewCo", "B", "greenhouse", new_count=1)
@@ -134,7 +134,7 @@ def test_update_source_tracking_ok_with_zero_becomes_no_data(dal):
 
 def test_add_source_full_round_trip(dal):
     """End-to-end add-source: merge then track, asserting both persisted."""
-    new = dal.merge_vacancies("NewCo", "A", [_job("Head of Ops")])
+    new = dal.save_vacancies("NewCo", "A", [_job("Head of Ops")])
     dal.get_conn().commit()
     dal.update_source_tracking("NewCo", "A", "lever", new_count=new)
     dal.get_conn().commit()

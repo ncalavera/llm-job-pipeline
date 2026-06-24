@@ -1,4 +1,4 @@
-"""Tests for _is_blacklisted (database_supabase) — title-level blacklist matching.
+"""Tests for the filters blacklist predicates — title-level blacklist matching.
 
 Pure logic, no DB.
 
@@ -13,7 +13,13 @@ keyword listed it is dropped.
 """
 
 import pytest
-from database_supabase import _is_blacklisted
+import filters
+
+
+def _is_blacklisted(title, description=""):
+    """Old DAL semantics: title-words-or-substr OR description-kill-phrase."""
+    return (filters.title_words_blacklisted(title)
+            or filters.description_words_blacklisted(description))
 
 
 # ---------------------------------------------------------------------------
