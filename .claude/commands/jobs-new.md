@@ -257,20 +257,6 @@ and stays automatic here. **But watch the volume:** if a truncated fetch (HTTP
 200, partial list) archives a large share of an org's vacancies, that's a red
 flag for the publish gate (Step 8 requires gone-archive < ~30% of any org).
 
-### Devex (cookie-authenticated branch)
-
-Devex requires browser cookies. Check freshness, then scrape + import in one step:
-
-```bash
-COOKIE_FILE=~/Downloads/www.devex.com_cookies.txt
-[ -f "$COOKIE_FILE" ] && echo "Found" || echo "MISSING — export from browser first"
-
-python3 scripts/scrape_devex.py 2>&1 && python3 scripts/import_devex.py 2>&1
-```
-
-If the cookie file is missing, warn the user and skip Devex **without failing the
-rest of the fetch**.
-
 ---
 
 ## Step 5: Enrich blind vacancies once
@@ -497,8 +483,6 @@ mode / gated by errors).
 
 ## Common issues
 
-- **Devex cookies expired**: scrape returns 403 / empty. Re-export cookies from
-  the browser and retry; the rest of the fetch is unaffected.
 - **Firecrawl rate limit**: large enrich batches may throttle; the script retries,
   you may need a second run.
 - **High blind rate (>20%)**: run with enrichment before scoring for accuracy.
