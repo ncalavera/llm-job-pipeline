@@ -361,3 +361,69 @@ board_blacklist = []
 ttl_days = 30
 tier = "C"
 free = true
+
+# Impactpool — server-rendered HTML scrape (free, no key). Listing-only; the
+# enrich pass fills full descriptions later. Nonprofit / multilateral focus.
+[boards.impactpool]
+strategy = "impactpool_html"
+name = "Impactpool"
+url = "https://www.impactpool.org/search"
+max_pages = 5
+board_blacklist = []
+ttl_days = 3
+tier = "B"
+free = true
+
+# Idealist — nonprofit/impact jobs via the public Algolia search key embedded in
+# idealist.org. remote_zone=WORLD keeps only globally-open remote roles.
+[boards.idealist]
+strategy = "idealist_algolia"
+name = "Idealist"
+url = "https://www.idealist.org/en/jobs"
+remote_zone = "WORLD"
+max_pages = 20
+board_blacklist = []
+ttl_days = 2
+tier = "B"
+free = true
+
+# Fast Forward — tech-nonprofit board on Getro (collection 997). Listing-only by
+# default (fetch_descriptions=false) so a run does not make ~1.5k detail calls.
+[boards.fast_forward]
+strategy = "fastforward_board"
+name = "Fast Forward"
+url = "https://jobs.ffwd.org/jobs"
+getro_collection_id = 997
+max_pages = 20
+fetch_descriptions = false
+board_blacklist = []
+ttl_days = 2
+tier = "B"
+free = true
+
+# LinkedIn — public guest jobs API (free, no login). Merges the old "LinkedIn" +
+# "LinkedIn Non-profits" sources: the nonprofit slant is just extra queries.
+# LinkedIn throttles hard — keep pages low and request_delay generous.
+[boards.linkedin]
+strategy = "linkedin_guest"
+name = "LinkedIn"
+url = "https://www.linkedin.com/jobs"
+board_blacklist = []
+ttl_days = 3
+tier = "B"
+free = true
+pages = 2
+request_delay = 3.0
+fetch_detail = true
+queries = [
+  { keywords = "Chief of Staff", location = "London" },
+  { keywords = "Chief of Staff", location = "European Union" },
+  { keywords = "Head of Operations", location = "London" },
+  { keywords = "Director of Operations", location = "Berlin" },
+  { keywords = "Programme Manager", location = "London" },
+  { keywords = "Program Manager", location = "European Union" },
+  { keywords = "Product Manager impact", location = "Remote" },
+  { keywords = "Chief of Staff nonprofit", location = "London" },
+  { keywords = "Programme Manager nonprofit", location = "European Union" },
+  { keywords = "Head of Programmes foundation", location = "London" },
+]

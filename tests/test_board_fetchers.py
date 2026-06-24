@@ -429,7 +429,9 @@ def test_new_boards_registered_and_opt_in(monkeypatch):
     import config as cfg
 
     new_ids = {"arbeitnow", "remotive", "weworkremotely", "hn_whoishiring"}
+    impact_ids = {"impactpool", "idealist", "fast_forward", "linkedin"}
     assert new_ids <= set(cfg._ALL_JOB_BOARDS)
+    assert impact_ids <= set(cfg._ALL_JOB_BOARDS)
 
     # Default: still empty.
     monkeypatch.delenv("JOB_BOARDS", raising=False)
@@ -439,13 +441,155 @@ def test_new_boards_registered_and_opt_in(monkeypatch):
     monkeypatch.setenv("JOB_BOARDS", "arbeitnow,remotive,weworkremotely,hn_whoishiring")
     assert set(cfg._select_enabled_boards()) == new_ids
 
-    # JOB_BOARDS=all includes all six.
+    # The impact boards opt in the same way.
+    monkeypatch.setenv("JOB_BOARDS", "impactpool,idealist,fast_forward,linkedin")
+    assert set(cfg._select_enabled_boards()) == impact_ids
+
+    # JOB_BOARDS=all includes every defined board.
     monkeypatch.setenv("JOB_BOARDS", "all")
     enabled = cfg._select_enabled_boards()
-    assert new_ids | {"80k_hours", "reliefweb"} <= set(enabled)
+    assert new_ids | impact_ids | {"80k_hours", "reliefweb"} <= set(enabled)
 
     # The monthly HN thread carries the long TTL.
     assert cfg._ALL_JOB_BOARDS["hn_whoishiring"]["ttl_days"] == 30
+    # LinkedIn ships a default query set (merged LinkedIn + LinkedIn Non-profits).
+    assert len(cfg._ALL_JOB_BOARDS["linkedin"]["queries"]) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Idealist (Algolia POST) / Fast Forward (Getro POST) / LinkedIn (guest GET)
+# ---------------------------------------------------------------------------
+
+class _Resp:
+    """Minimal response exposing .json(), .text, .content, .status_code."""
+
+    def __init__(self, *, json_data=None, text="", status=200):
+        self._json = json_data
+        self.text = text
+        self.content = text.encode()
+        self.status_code = status
+
+    def json(self):
+        return self._json
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+class _FakeHTTP:
+    """Routes requests.post / requests.get to a single router callable."""
+
+    def __init__(self, router):
+        self.router = router
+        self.calls = []
+
+    def post(self, url, data=None, json=None, headers=None, timeout=None):
+        self.calls.append({"verb": "POST", "url": url, "json": json})
+        return self.router("POST", url, json=json, params=None)
+
+    def get(self, url, params=None, headers=None, timeout=None):
+        self.calls.append({"verb": "GET", "url": url, "params": params or {}})
+        return self.router("GET", url, json=None, params=params or {})
+
+
+def test_fetch_idealist_board(monkeypatch):
+    hit = {
+        "name": "Head of Operations", "orgName": "Global Impact Fund",
+        "objectID": "abc123",
+        "url": {"en": "/en/nonprofit-job/abc123-head-of-operations"},
+        "orgUrl": {"en": "/en/nonprofit/global-impact-fund"},
+        "locationType": "REMOTE", "remoteZone": "WORLD",
+        "functions": ["OPERATIONS"], "keywords": ["operations", "strategy"],
+        "description": "Lead operations for a global grantmaker.",
+        "salaryMinimum": 90000, "salaryMaximum": 110000,
+        "salaryCurrency": "USD", "salaryPeriod": "YEAR",
+        "professionalLevel": "DIRECTOR",
+    }
+
+    def router(verb, url, json=None, params=None):
+        assert verb == "POST" and "algolia.net" in url
+        return _Resp(json_data={"hits": [hit], "nbPages": 1})
+
+    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
+    out = fetchers.fetch_idealist_board(
+        {"name": "Idealist", "url": "https://www.idealist.org/en/jobs"})
+    assert len(out) == 1
+    job = out[0]
+    assert job["title"] == "Head of Operations"
+    assert job["org_override"] == "Global Impact Fund"
+    assert job["external_id"] == "abc123"
+    assert job["url"].endswith("/en/nonprofit-job/abc123-head-of-operations")
+    assert job["location"] == "Remote (worldwide)"
+    assert "USD" in job["compensation"]
+
+
+def test_fetch_fastforward_board(monkeypatch):
+    rec = {
+        "id": 555, "slug": "head-of-programmes", "title": "Head of Programmes",
+        "organization": {"name": "Noora Health", "slug": "noora-health"},
+        "locations": ["London, United Kingdom"], "work_mode": "hybrid",
+        "has_description": True, "compensation_public": True,
+        "compensation_amount_min_cents": 7000000,
+        "compensation_amount_max_cents": 9000000,
+        "compensation_currency": "GBP", "compensation_period": "year",
+    }
+
+    def router(verb, url, json=None, params=None):
+        assert verb == "POST" and "getro.com" in url
+        jobs = [rec] if (json or {}).get("page", 0) == 0 else []
+        return _Resp(json_data={"results": {"jobs": jobs, "count": 1}})
+
+    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
+    out = fetchers.fetch_fastforward_board(
+        {"name": "Fast Forward", "url": "https://jobs.ffwd.org/jobs",
+         "fetch_descriptions": False})
+    assert len(out) == 1
+    job = out[0]
+    assert job["title"] == "Head of Programmes"
+    assert job["org_override"] == "Noora Health"
+    assert job["external_id"] == "555"
+    assert "GBP" in job["compensation"]
+
+
+LINKEDIN_CARD_HTML = """
+<ul>
+<li>
+  <div class="base-card job-search-card" data-entity-urn="urn:li:jobPosting:4403552549">
+    <a class="base-card__full-link" href="https://uk.linkedin.com/jobs/view/chief-of-staff-at-governr-4403552549?refId=x">x</a>
+    <div class="base-search-card__info">
+      <h3 class="base-search-card__title">Chief of Staff</h3>
+      <h4 class="base-search-card__subtitle"><a class="hidden-nested-link" href="https://uk.linkedin.com/company/governr?trk=y">governr</a></h4>
+      <span class="job-search-card__location">London, United Kingdom</span>
+    </div>
+  </div>
+</li>
+</ul>
+"""
+
+
+def test_fetch_linkedin_board(monkeypatch):
+    def router(verb, url, json=None, params=None):
+        assert verb == "GET"
+        if "seeMoreJobPostings" in url and (params or {}).get("start", 0) == 0:
+            return _Resp(text=LINKEDIN_CARD_HTML, status=200)
+        return _Resp(text="", status=200)
+
+    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
+    monkeypatch.setattr(fetchers.time, "sleep", lambda *a, **k: None)
+
+    out = fetchers.fetch_linkedin_board({
+        "name": "LinkedIn", "url": "https://www.linkedin.com/jobs",
+        "queries": [{"keywords": "Chief of Staff", "location": "London"}],
+        "pages": 1, "request_delay": 0, "fetch_detail": False,
+    })
+    assert len(out) == 1
+    job = out[0]
+    assert job["title"] == "Chief of Staff"
+    assert job["org_override"] == "governr"
+    assert job["external_id"] == "4403552549"
+    assert job["url"] == "https://uk.linkedin.com/jobs/view/chief-of-staff-at-governr-4403552549"
+    assert job["location"] == "London, United Kingdom"
 
 
 # ---------------------------------------------------------------------------

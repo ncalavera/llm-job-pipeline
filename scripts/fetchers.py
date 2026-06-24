@@ -2285,28 +2285,16 @@ def fetch_impactpool_board(board_cfg: dict) -> list[dict]:
     max_pages = int(board_cfg.get("max_pages", 5))
     board_blacklist = [kw.lower() for kw in board_cfg.get("board_blacklist", [])]
 
-    # Load known org aliases for dedup with sources we already fetch directly
-    try:
-        from company_registry import COMPANIES, _ALIAS_INDEX
-        known_orgs = {n.lower() for n in COMPANIES.keys()} | set(_ALIAS_INDEX.keys())
-        # Also collect bare acronyms (first token before " - ") to catch "UNICEF - United Nations..."
-        known_prefixes = set()
-        for n in COMPANIES.keys():
-            if " - " in n:
-                known_prefixes.add(n.split(" - ", 1)[0].lower())
-            if "(" in n:
-                m = re.search(r"\(([^)]+)\)", n)
-                if m: known_prefixes.add(m.group(1).lower())
-    except Exception:
-        known_orgs = set()
-        known_prefixes = set()
-
+    # No org-level dedup here: the save layer dedups by canonical company + title
+    # (and skips inactive companies). Filtering by the company registry would drop
+    # vacancies from orgs we know but don't actually fetch directly (e.g. several
+    # UN agencies), losing exactly what this board is best at.
     print(f"  [{board_name}] Impactpool: fetching up to {max_pages} pages...")
 
     jobs: list[dict] = []
     seen_ids: set[str] = set()
     total_seen = 0
-    rej = {"location": 0, "seniority": 0, "dup_org": 0, "blacklist": 0}
+    rej = {"location": 0, "seniority": 0, "blacklist": 0}
 
     for page in range(1, max_pages + 1):
         url = f"{base_url}?page={page}"
@@ -2368,11 +2356,6 @@ def fetch_impactpool_board(board_cfg: dict) -> list[dict]:
             if not _impactpool_seniority_ok(seniority):
                 rej["seniority"] += 1
                 continue
-            org_low = org.lower()
-            org_prefix = org.split(" - ", 1)[0].lower() if " - " in org else org_low
-            if org_low in known_orgs or org_prefix in known_orgs or org_prefix in known_prefixes:
-                rej["dup_org"] += 1
-                continue
 
             job_url = f"https://www.impactpool.org/jobs/{ext_id}"
             snippet = f"{org} — {location}. {seniority}".strip(" .")
@@ -2394,7 +2377,7 @@ def fetch_impactpool_board(board_cfg: dict) -> list[dict]:
 
     print(f"  [{board_name}] Impactpool: {len(jobs)} relevant from {total_seen} total "
           f"(rejected: location={rej['location']}, seniority={rej['seniority']}, "
-          f"dup_org={rej['dup_org']}, blacklist={rej['blacklist']})")
+          f"blacklist={rej['blacklist']})")
     return jobs
 
 
@@ -2815,5 +2798,401 @@ def fetch_hn_whoishiring_board(board_cfg: dict) -> list[dict]:
         jobs.append(p)
 
     print(f"  [{board_name}] HN: {len(jobs)} postings from {total} top-level comments")
+    return jobs
+
+
+# ---------------------------------------------------------------------------
+# Idealist board (Algolia search-only key embedded in the page — free, no auth)
+# ---------------------------------------------------------------------------
+
+_IDEALIST_APP_ID = "NSV3AUESS7"
+# Search-only public key baked into idealist.org's page HTML. If it 403s, refetch
+# it from the page: curl https://www.idealist.org/en/jobs | grep searchApiKey
+_IDEALIST_SEARCH_KEY = "c2730ea10ab82787f2f3cc961e8c1e06"
+_IDEALIST_INDEX = "idealist7-production-published-desc"  # newest-first
+_IDEALIST_SITE = "https://www.idealist.org"
+
+
+def fetch_idealist_board(board_cfg: dict) -> list[dict]:
+    """Fetch nonprofit/impact jobs from Idealist via its embedded Algolia key.
+
+    Idealist's React SPA bakes the Algolia appId + search-only key into the page
+    HTML — no login, no paid API. POSTs to the Algolia query endpoint.
+
+    board_cfg knobs: ``remote_zone`` (default "WORLD" = globally-open remote),
+    ``include_onsite`` (default False), ``max_pages`` (default 20).
+    """
+    board_name = board_cfg["name"]
+    board_blacklist = board_cfg.get("board_blacklist", [])
+    max_pages = int(board_cfg.get("max_pages", 20))
+    remote_zone = board_cfg.get("remote_zone", "WORLD")
+    include_onsite = bool(board_cfg.get("include_onsite", False))
+
+    algolia_url = (
+        f"https://{_IDEALIST_APP_ID}-dsn.algolia.net"
+        f"/1/indexes/{_IDEALIST_INDEX}/query"
+    )
+    headers = {
+        "X-Algolia-Application-Id": _IDEALIST_APP_ID,
+        "X-Algolia-API-Key": _IDEALIST_SEARCH_KEY,
+        "Content-Type": "application/json",
+    }
+    facet = [["type:JOB"]]
+    if not include_onsite:
+        facet.append(["locationType:REMOTE"])
+        if remote_zone:
+            facet.append([f"remoteZone:{remote_zone}"])
+
+    print(f"  [{board_name}] Idealist/Algolia: up to {max_pages} pages "
+          f"(remote_zone={remote_zone!r}, include_onsite={include_onsite})...")
+
+    all_hits: list[dict] = []
+    for page in range(max_pages):
+        params_str = "&".join([
+            "query=", "hitsPerPage=200", f"page={page}",
+            f"facetFilters={json.dumps(facet)}",
+        ])
+        try:
+            resp = requests.post(
+                algolia_url, data=json.dumps({"params": params_str}),
+                headers=headers, timeout=20,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            print(f"  [{board_name}] Algolia ERROR page {page}: {exc}")
+            break
+        hits = data.get("hits") or []
+        if not hits:
+            break
+        all_hits.extend(hits)
+        if page >= int(data.get("nbPages", 1)) - 1:
+            break
+
+    total_seen = len(all_hits)
+    for h in all_hits:
+        h["_title_proxy"] = h.get("name", "")
+    filtered = _blacklist_filter(
+        all_hits, GLOBAL_BLACKLIST + board_blacklist,
+        title_fields=["_title_proxy"], substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
+    )
+
+    jobs: list[dict] = []
+    for hit in filtered:
+        title = (hit.get("name") or "").strip()
+        if not title or _is_generic_pipeline_title(title):
+            continue
+        org = (hit.get("orgName") or "").strip()
+
+        slug = (hit.get("url") or {}).get("en") or ""
+        job_url = (_IDEALIST_SITE + slug) if slug else ""
+
+        loc_type = hit.get("locationType") or ""
+        zone = hit.get("remoteZone") or ""
+        country = hit.get("country") or ""
+        city = hit.get("city") or ""
+        if loc_type == "REMOTE":
+            if zone == "WORLD":
+                location = "Remote (worldwide)"
+            elif zone == "COUNTRY" and country:
+                location = f"Remote ({country})"
+            else:
+                location = "Remote"
+        else:
+            location = ", ".join(p for p in (city, country) if p) or loc_type
+
+        functions = hit.get("functions") or []
+        keywords = hit.get("keywords") or []
+        department = ", ".join((keywords or functions)[:3])
+
+        raw_desc = hit.get("description") or ""
+        snippet = _html_to_snippet(raw_desc)
+        full_description = _html_to_multiline(raw_desc)
+        meta = []
+        if hit.get("areasOfFocus"):
+            meta.append(f"Areas of focus: {', '.join(hit['areasOfFocus'][:5])}")
+        if functions:
+            meta.append(f"Functions: {', '.join(functions)}")
+        level = hit.get("professionalLevel") or ""
+        if level and level != "NONE":
+            meta.append(f"Level: {level}")
+        if meta:
+            full_description = full_description + "\n\n" + " | ".join(meta)
+
+        def _as_num(v):
+            try:
+                return float(v) if v not in (None, "") else None
+            except (TypeError, ValueError):
+                return None
+        sal_min, sal_max = _as_num(hit.get("salaryMinimum")), _as_num(hit.get("salaryMaximum"))
+        currency = hit.get("salaryCurrency") or "USD"
+        period = (hit.get("salaryPeriod") or "YEAR").lower()
+        compensation = ""
+        if sal_min and sal_max:
+            compensation = (f"{currency} {sal_min:,.0f}/{period}" if sal_min == sal_max
+                            else f"{currency} {sal_min:,.0f}-{sal_max:,.0f}/{period}")
+
+        org_slug = (hit.get("orgUrl") or {}).get("en") or ""
+        org_url = (_IDEALIST_SITE + org_slug) if org_slug else board_cfg["url"]
+
+        external_id = hit.get("objectID") or hashlib.md5(
+            f"{org}:{title}".encode()).hexdigest()[:12]
+
+        jobs.append({
+            "title": title, "location": location, "department": department,
+            "url": job_url, "external_id": external_id, "snippet": snippet,
+            "full_description": full_description, "compensation": compensation,
+            "org_override": org, "org_url": org_url,
+        })
+
+    print(f"  [{board_name}] Idealist: {len(jobs)} relevant from {total_seen} total")
+    return jobs
+
+
+# ---------------------------------------------------------------------------
+# Fast Forward board (Getro-hosted tech-nonprofit board — free, no auth)
+# ---------------------------------------------------------------------------
+
+_GETRO_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+def fetch_fastforward_board(board_cfg: dict) -> list[dict]:
+    """Fetch jobs from Fast Forward's tech-nonprofit board (jobs.ffwd.org).
+
+    Platform is Getro (collection 997). Two free, unauthenticated endpoints:
+      * POST api.getro.com/api/v2/collections/997/search/jobs  (paginated list)
+      * GET  api.getro.com/api/v1/jobs/{slug}?collection_id=997 (full HTML desc)
+
+    ``fetch_descriptions`` defaults False (listing-only, like Impactpool) so the
+    run does not make ~1.5k per-job requests; the enrich pass fills descriptions.
+    """
+    network_id = int(board_cfg.get("getro_collection_id", 997))
+    search_url = f"https://api.getro.com/api/v2/collections/{network_id}/search/jobs"
+    detail_tpl = f"https://api.getro.com/api/v1/jobs/{{slug}}?collection_id={network_id}"
+    max_pages = int(board_cfg.get("max_pages", 20))
+    fetch_desc = bool(board_cfg.get("fetch_descriptions", False))
+
+    board_name = board_cfg["name"]
+    board_blacklist = board_cfg.get("board_blacklist", [])
+    headers = {"Content-Type": "application/json", "Accept": "application/json",
+               "User-Agent": _GETRO_UA}
+
+    raw_listings: list[dict] = []
+    seen_ids: set = set()
+    for page in range(max_pages):
+        payload = {"hits_per_page": 100, "page": page, "filters": "", "query": ""}
+        try:
+            resp = requests.post(search_url, json=payload, headers=headers, timeout=20)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            print(f"  [{board_name}] page {page} ERROR: {exc}")
+            break
+        batch = (data.get("results") or {}).get("jobs") or []
+        if not batch:
+            break
+        for j in batch:
+            jid = j.get("id")
+            if jid is None or jid in seen_ids:
+                continue
+            seen_ids.add(jid)
+            raw_listings.append(j)
+        if len(seen_ids) >= int((data.get("results") or {}).get("count", 0)):
+            break
+
+    filtered = _blacklist_filter(
+        raw_listings, GLOBAL_BLACKLIST + board_blacklist,
+        title_fields=["title"], substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
+    )
+
+    jobs: list[dict] = []
+    for j in filtered:
+        title = (j.get("title") or "").strip()
+        org = ((j.get("organization") or {}).get("name") or "").strip()
+        if not title or not org or _is_generic_pipeline_title(title):
+            continue
+
+        locs = j.get("locations") or []
+        location = locs[0] if locs else ""
+        if j.get("work_mode") == "remote":
+            location = f"Remote, {location}" if location else "Remote"
+
+        comp_min = j.get("compensation_amount_min_cents")
+        comp_max = j.get("compensation_amount_max_cents")
+        currency = j.get("compensation_currency") or "USD"
+        period = j.get("compensation_period") or ""
+        compensation = ""
+        if j.get("compensation_public") and comp_min and comp_max:
+            label = {"year": "/yr", "month": "/mo", "hour": "/hr"}.get(period, f"/{period}")
+            compensation = f"{currency} {comp_min/100:,.0f}-{comp_max/100:,.0f}{label}"
+
+        slug = (j.get("slug") or "").strip()
+        snippet = full_description = ""
+        if fetch_desc and j.get("has_description") and slug:
+            try:
+                dresp = requests.get(detail_tpl.format(slug=slug),
+                                     headers={"Accept": "application/json",
+                                              "User-Agent": _GETRO_UA}, timeout=15)
+                if dresp.status_code == 200:
+                    desc_html = (dresp.json() or {}).get("description") or ""
+                    full_description = _html_to_multiline(desc_html)
+                    snippet = _html_to_snippet(desc_html)
+            except Exception:
+                pass
+
+        org_slug = (j.get("organization") or {}).get("slug") or ""
+        org_url = f"https://jobs.ffwd.org/companies/{org_slug}" if org_slug else board_cfg["url"]
+        jid = j.get("id")
+        external_id = str(jid) if jid else hashlib.md5(
+            f"{org}:{title}".encode()).hexdigest()[:12]
+
+        jobs.append({
+            "title": title, "location": location, "department": "",
+            "url": (j.get("url") or "").strip(), "external_id": external_id,
+            "snippet": snippet, "full_description": full_description,
+            "compensation": compensation, "org_override": org, "org_url": org_url,
+        })
+
+    print(f"  [{board_name}] Fast Forward/Getro: {len(jobs)} relevant from {len(raw_listings)} total")
+    return jobs
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn board (public jobs-guest API, no auth) — merges old LinkedIn +
+# LinkedIn Non-profits into ONE board driven by a configurable query set.
+# ---------------------------------------------------------------------------
+
+_LINKEDIN_GUEST = "https://www.linkedin.com/jobs-guest/jobs/api"
+_LINKEDIN_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+_LI_CARD_RE = re.compile(r"<li>.*?</li>", re.S)
+
+
+def _parse_linkedin_card(card: str) -> dict | None:
+    """Extract one LinkedIn guest job card into a raw record (or None)."""
+    m = re.search(r"urn:li:jobPosting:(\d+)", card)
+    jid = m.group(1) if m else None
+    href_m = (re.search(r'base-card__full-link[^>]*href="([^"]+)"', card)
+              or re.search(r'href="([^"]*?/jobs/view/[^"]+)"', card))
+    href = (href_m.group(1) if href_m else "").replace("&amp;", "&").split("?", 1)[0]
+    if not jid:
+        jm = re.search(r"/jobs/view/[^\"?]*?-(\d+)(?:[/?]|$)", href)
+        jid = jm.group(1) if jm else None
+    if not jid:
+        return None
+    title_m = re.search(r'base-search-card__title">(.*?)</h3>', card, re.S)
+    title = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", title_m.group(1))).strip() if title_m else ""
+    org_m = re.search(
+        r'base-search-card__subtitle">.*?<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>', card, re.S)
+    org_url = org_m.group(1).replace("&amp;", "&").split("?", 1)[0] if org_m else ""
+    org = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", org_m.group(2))).strip() if org_m else ""
+    loc_m = re.search(r'job-search-card__location">(.*?)</span>', card, re.S)
+    loc = re.sub(r"\s+", " ", loc_m.group(1)).strip() if loc_m else ""
+    return {"title": title, "org": org, "org_url": org_url, "location": loc,
+            "url": href, "external_id": jid}
+
+
+def fetch_linkedin_board(board_cfg: dict) -> list[dict]:
+    """Fetch jobs from LinkedIn's public *guest* API (free, no login).
+
+    Uses the unauthenticated endpoints JobSpy relies on: a listing search that
+    returns HTML job cards, and a per-job detail page for the description.
+    The nonprofit/impact focus is just extra entries in ``board_cfg["queries"]``
+    (list of {keywords, location}) — this is the merged "LinkedIn" +
+    "LinkedIn Non-profits" board, not two boards.
+
+    LinkedIn throttles hard (429 after ~10 rapid requests) so every request is
+    spaced by ``request_delay`` seconds with back-off on 429.
+    """
+    board_name = board_cfg["name"]
+    list_url = f"{_LINKEDIN_GUEST}/seeMoreJobPostings/search"
+    queries = board_cfg.get("queries") or []
+    pages = int(board_cfg.get("pages", 2))
+    delay = float(board_cfg.get("request_delay", 3.0))
+    want_detail = bool(board_cfg.get("fetch_detail", True))
+    board_blacklist = board_cfg.get("board_blacklist", [])
+    headers = {
+        "User-Agent": _LINKEDIN_UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    def _get(url, params=None):
+        for attempt in range(3):
+            try:
+                resp = requests.get(url, params=params, headers=headers, timeout=20)
+            except Exception as e:
+                print(f"  [{board_name}] request error: {e}")
+                return None
+            if resp.status_code == 429:
+                wait = delay * (attempt + 2)
+                print(f"  [{board_name}] 429 throttled, sleeping {wait:.0f}s")
+                time.sleep(wait)
+                continue
+            if resp.status_code != 200:
+                return None
+            return resp.text
+        return None
+
+    def _fetch_detail(jid):
+        html = _get(f"{_LINKEDIN_GUEST}/jobPosting/{jid}")
+        time.sleep(delay)
+        if not html:
+            return ""
+        m = (re.search(r'show-more-less-html__markup[^>]*>(.*?)</div>', html, re.S)
+             or re.search(r'description__text[^>]*>(.*?)</section>', html, re.S))
+        return m.group(1) if m else ""
+
+    raw: list[dict] = []
+    seen_ids: set = set()
+    for q in queries:
+        kw = (q.get("keywords") or "").strip()
+        loc = (q.get("location") or "").strip()
+        if not kw:
+            continue
+        for page in range(pages):
+            html = _get(list_url, params={"keywords": kw, "location": loc,
+                                          "start": page * 25})
+            time.sleep(delay)
+            if not html:
+                break
+            cards = _LI_CARD_RE.findall(html)
+            if not cards:
+                break
+            for card in cards:
+                rec = _parse_linkedin_card(card)
+                if not rec or not rec["title"] or not rec["org"]:
+                    continue
+                if rec["external_id"] in seen_ids:
+                    continue
+                seen_ids.add(rec["external_id"])
+                raw.append(rec)
+
+    total = len(raw)
+    filtered = _blacklist_filter(
+        raw, GLOBAL_BLACKLIST + board_blacklist,
+        title_fields=["title"], substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
+    )
+
+    jobs = []
+    for rec in filtered:
+        if _is_generic_pipeline_title(rec["title"]):
+            continue
+        desc_html = _fetch_detail(rec["external_id"]) if want_detail else ""
+        snippet = _html_to_snippet(desc_html) if desc_html else rec["title"]
+        full_description = _html_to_multiline(desc_html) if desc_html else snippet
+        jobs.append({
+            "title": rec["title"], "location": rec["location"], "department": "",
+            "url": rec["url"], "external_id": rec["external_id"], "snippet": snippet,
+            "full_description": full_description, "compensation": "",
+            "org_override": rec["org"], "org_url": rec["org_url"] or board_cfg["url"],
+        })
+
+    print(f"  [{board_name}] LinkedIn guest: {len(jobs)} relevant from {total} total")
     return jobs
 
