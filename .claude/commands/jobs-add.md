@@ -1,12 +1,234 @@
 ---
-description: Add a new company to the vacancy monitoring pipeline. Auto-detects the ATS (Greenhouse, Lever, Ashby, Workable, Workday), runs a test fetch, and adds the record to Supabase.
+description: Add a source to the pipeline in one of three modes — company (auto-detect ATS, default), board (enable a built-in job board via JOB_BOARDS), or vacancy/job (hand-add a single role that auto-scores in /jobs-new).
 ---
 
 # /jobs-add
 
+Adds a source to the pipeline. The first argument selects the mode:
+
+| First arg | Mode | What it does |
+| --- | --- | --- |
+| `board` | **Board** | Enable a built-in job board for fetching (env-only, via `JOB_BOARDS`). |
+| `vacancy` / `job` | **Single vacancy** | Hand-add ONE vacancy; it lands `unseen` and is auto-scored by `/jobs-new`. |
+| _(anything else)_ / `company` | **Company** (default) | Auto-detect a company's ATS and add it to Supabase. |
+
+## Step 0: Route on the first argument
+
+Inspect the first argument the user passed.
+
+- If it is exactly `board` → go to **Mode B (board)**.
+- If it is exactly `vacancy` or `job` → go to **Mode C (single vacancy)**.
+- Otherwise → go to **Mode A (company)**, treating the argument as the company name / careers URL.
+
+**Disambiguation (keyword collision).** The keywords `board`, `vacancy`, and
+`job` can also be real company names ("Board Intelligence", "JobTeaser", "Jobandtalent").
+If the first argument is one of those keywords **but the surrounding message
+suggests a real company** (e.g. a careers URL is present, or the user typed
+"add Board Intelligence"), ask **once** which they meant before routing:
+
+```
+"board" can mean two things here:
+  1. Enable a built-in job board (Mode B)
+  2. Add the company "Board Intelligence" (Mode A)
+Which did you mean?
+```
+
+Do not guess silently. If there is no collision signal, route by the keyword.
+
+---
+
+## Mode B — enable a job board
+
+Boards are **built into** `config/defaults.toml [boards.*]`, loaded by
+`config._ALL_JOB_BOARDS`, and enabled per run via the `JOB_BOARDS` env var →
+`config._select_enabled_boards()`. This mode is **env-only** — there is no new
+config mechanism, no DB row, no persisted setting. You enable a board by running
+a fetch with `JOB_BOARDS=...` and telling the user to keep that env var on daily runs.
+
+### B0. Out-of-scope guard
+
+Adding a **brand-new** board (one not already in the 6 built-ins) is **out of
+scope** for this command — it needs a new `[boards.<id>]` block in
+`config/defaults.toml` plus a matching `fetch_*_board` strategy. If the user
+wants a board that is not listed below, say so plainly and stop.
+
+### B1. Present the built-in boards
+
+List the boards from `config._ALL_JOB_BOARDS` so the user can pick by id:
+
+```bash
+python3 -c "
+import sys
+sys.path.insert(0, 'scripts')
+from config import _ALL_JOB_BOARDS
+for bid in _ALL_JOB_BOARDS:
+    print(bid)
+"
+```
+
+Present them with their sector fit and any extra env knobs:
+
+| Board id | Sector fit | Extra env |
+| --- | --- | --- |
+| `80k_hours` | EA / AI safety / policy | — |
+| `reliefweb` | humanitarian / development | — |
+| `arbeitnow` | European tech, visa sponsorship | `ARBEITNOW_VISA_ONLY=1` |
+| `remotive` | remote-first roles | `REMOTIVE_CATEGORIES=product,marketing` |
+| `weworkremotely` | remote product / business | `WWR_CATEGORIES=product,marketing` |
+| `hn_whoishiring` | startups (monthly HN thread, 30-day TTL) | — |
+
+Ask the user which board id(s) to enable (comma-separated). If a board they name
+is not in `_ALL_JOB_BOARDS`, fall back to the B0 out-of-scope guard.
+
+### B2. Run the first fetch
+
+Run a free, boards-only fetch with the chosen ids opted in:
+
+```bash
+JOB_BOARDS=<ids> python3 -u scripts/fetch_vacancies.py --boards-only --free-only 2>&1
+```
+
+This routes through `save_board_vacancies` → rows land `status='unseen'` → they
+will be auto-scored on the next `/jobs-new`.
+
+Show the result: total vacancies pulled per board, description coverage, any
+fetch errors.
+
+> Remotive asks API users for very few calls (max ~4/day) and the HN thread is
+> monthly (30-day TTL) — one fetch per run is enough; do not loop it.
+
+### B3. Tell the user how to keep the board on
+
+Boards are not persisted — they only fetch on runs where `JOB_BOARDS` opts them
+in. Tell the user the exact env var to keep on daily runs:
+
+```
+Board(s) enabled for this run: <ids>
+
+To keep fetching them every day, set on your daily runs:
+   JOB_BOARDS=<ids>
+
+(e.g. prepend it to /jobs-new's fetch, or export it in your shell profile.)
+Unset JOB_BOARDS → boards are skipped and only your tracked companies fetch.
+```
+
+---
+
+## Mode C — add a single vacancy by hand
+
+Add ONE vacancy directly, reusing `save_vacancies(org, tier, [job])`
+(`scripts/database_supabase.py`). That function resolves the canonical org, runs
+the quality gate, dedups on `dedup_hash = md5(lower("org|title"))`, merges
+locations, and inserts the row as `status='unseen'` → auto-scored by `/jobs-new`.
+
+### C1. Collect inputs
+
+Ask for (skip any the user already provided):
+
+**Required**
+1. **org** — company name (e.g. "Stripe")
+2. **title** — the role title
+3. **url** — the vacancy URL
+
+**Strongly recommended**
+4. **description** — paste the full job description (without it, scoring is blind / may be dropped)
+
+**Optional**
+- **location** — e.g. "Remote (EU)", "Berlin, Germany"
+- **snippet** — a short summary line
+- **compensation** — e.g. "€80–100k"
+- **deadline** — application deadline
+- **department** — e.g. "Engineering"
+
+Also ask for **tier** (1 = Top Priority, 2 = Strong Fit, 3 = Good Options) — default 2.
+
+### C2. Build the job dict and insert
+
+```bash
+python3 -c "
+import sys
+sys.path.insert(0, 'scripts')
+from database_supabase import save_vacancies
+
+org   = '{ORG}'
+tier  = {TIER}
+job = {
+    'title':            '{TITLE}',
+    'url':              '{URL}',
+    'full_description': '''{DESCRIPTION}''',
+    'snippet':          '{SNIPPET}',
+    'location':         '{LOCATION}',
+    'compensation':     '{COMPENSATION}',
+    'deadline':         '{DEADLINE}',
+    'department':       '{DEPARTMENT}',
+}
+# Drop empty optional keys so they don't overwrite anything.
+job = {k: v for k, v in job.items() if v not in ('', None)}
+
+new_count = save_vacancies(org, tier, [job])
+print(f'new_count={new_count}')
+"
+```
+
+Report `new_count`:
+- **`new_count == 1`** → inserted. The row is `status='unseen'` and will be scored
+  automatically on the next `/jobs-new`. Done.
+- **`new_count == 0` and the row already existed** → it was a duplicate (same
+  `org|title`); `save_vacancies` merged the new location/url/description into the
+  existing row instead of inserting. Tell the user it was de-duplicated.
+- **`new_count == 0` and it was NOT a duplicate** → the **quality gate silently
+  dropped it** (see C4).
+
+### C3. Unknown-company handling
+
+`save_vacancies` calls `ensure_company(org, status=AUTO_DISCOVERED_STATUS)` when
+the org is not already in the registry — this creates a **fetch-less stub
+company** (no `fetch_strategy`, no `ats_slug`). Warn the user:
+
+```
+"{ORG}" was not a tracked company — I created a stub for it so the vacancy
+could be saved. WARNING: this stub has no ATS config, so /jobs-new will NOT
+auto-fetch new roles from {ORG}. The single vacancy you added will still score.
+```
+
+Then offer two follow-ups:
+1. **Configure the ATS** so future roles auto-fetch → route to **Mode A
+   (company)** for `{ORG}` (auto-detect + set `fetch_strategy`/`ats_slug`).
+2. **Just set it active** and move on (the single vacancy still scores; no future
+   auto-fetch).
+
+If the org already exists, skip this step.
+
+### C4. Silent quality-gate drop (`new_count == 0`, not a dup)
+
+The gate inside `save_vacancies` can drop a row for: blacklisted title words
+(`filters.title_words_blacklisted`), content junk (`filters.is_content_junk`), or
+too little content (`filters.has_enough_content` — needs ≥50 chars of
+description/snippet **or** a non-empty URL). Since the URL is required here,
+`has_enough_content` usually passes, so a silent drop most often means a thin
+description that tripped a content check.
+
+Explain which check likely fired, then offer **Firecrawl enrichment** to fetch a
+real description from the URL before re-inserting:
+
+```
+The vacancy was not inserted — the quality gate dropped it (likely thin/empty
+description). Options:
+  1. Enrich with Firecrawl — scrape {URL} for a full description, then retry.
+  2. Paste a fuller description and retry.
+  3. Skip.
+```
+
+If the user picks Firecrawl, scrape the URL (requires `FIRECRAWL_API_KEY`), put
+the result in `full_description`, and re-run C2.
+
+---
+
+## Mode A — add a company (default)
+
 Adds a new company to the pipeline.
 
-## Step 0: Collect inputs
+### Step 0: Collect inputs
 
 Ask the user for (if not already provided):
 1. **Careers page URL** — the company's jobs page
@@ -15,11 +237,11 @@ Ask the user for (if not already provided):
 
 If the user provided these in their message, skip the question and proceed.
 
-## Step 1: ATS Auto-Detection
+### Step 1: ATS Auto-Detection
 
 Detect which ATS the company uses by probing known API patterns.
 
-### 1a. Check page HTML for ATS signals
+#### 1a. Check page HTML for ATS signals
 
 ```bash
 curl -s -L --max-time 10 "{CAREERS_URL}" | head -200
@@ -32,7 +254,7 @@ Look for these indicators in the HTML:
 - `apply.workable.com` or `workable.com` → **Workable**
 - `myworkdayjobs.com` or `myworkdaysite.com` → **Workday**
 
-### 1b. Extract slug from redirects
+#### 1b. Extract slug from redirects
 
 If the careers URL itself is an ATS URL, extract the slug directly:
 - `https://boards.greenhouse.io/{SLUG}/` → slug = `{SLUG}`
@@ -41,7 +263,7 @@ If the careers URL itself is an ATS URL, extract the slug directly:
 - `https://jobs-apply.workable.com/{SLUG}/` → slug = `{SLUG}`
 - `https://{TENANT}.myworkdayjobs.com/{BOARD}/` → tenant = `{TENANT}`, board = `{BOARD}`
 
-### 1c. Probe known API endpoints
+#### 1c. Probe known API endpoints
 
 If the slug is uncertain, try common guesses (company name lowercased, no spaces):
 
@@ -69,7 +291,7 @@ curl -s --max-time 8 "https://jobs-apply.workable.com/api/v3/accounts/${SLUG_GUE
 
 HTTP 200 = ATS confirmed. HTTP 404 = wrong slug or not that ATS.
 
-### 1d. Determine result
+#### 1d. Determine result
 
 Based on the probes, determine:
 - **Detected ATS** (greenhouse / lever / ashby / workable / workday_api / firecrawl_scrape)
@@ -80,7 +302,7 @@ If detection is uncertain, show the user what was found and ask them to confirm 
 
 **If no ATS detected → fallback to `firecrawl_scrape` strategy.**
 
-## Step 2: Show detection result and confirm
+### Step 2: Show detection result and confirm
 
 Present to the user:
 
@@ -104,7 +326,7 @@ Ask: "Does this look correct? Should I add it and run a test fetch?"
 
 Wait for confirmation before adding to Supabase.
 
-## Step 3: Add to Supabase company table
+### Step 3: Add to Supabase company table
 
 **Check for duplicates first:**
 
@@ -158,7 +380,7 @@ print(f'Company {company_id} metadata updated')
 - **UNOPS**: `{"url": "...", "title_blacklist": [...]}`
 - **All others**: empty string (no ATS config needed)
 
-## Step 4: Run test fetch
+### Step 4: Run test fetch
 
 Run a targeted fetch for just this company:
 
@@ -183,7 +405,7 @@ Options:
   3. Switch to firecrawl_scrape strategy (uses Firecrawl credits)
 ```
 
-## Step 5: Merge into Supabase (if fetch succeeded)
+### Step 5: Merge into Supabase (if fetch succeeded)
 
 If the test fetch returned vacancies, offer to merge them into the database:
 
@@ -219,7 +441,7 @@ print(f'Merged: {new_count} new vacancies added to Supabase')
 "
 ```
 
-## Step 6: Quality report
+### Step 6: Quality report
 
 Present the final summary:
 
@@ -235,10 +457,10 @@ Test fetch results:
    No description:          Z  (blind scoring risk)
 
 {If all good:}
-Ready for scoring! Run /jobs-score to evaluate {COMPANY_NAME} roles.
+Ready for scoring! Run /jobs-new to fetch, filter, and score {COMPANY_NAME} roles.
 ```
 
-## If ATS is not detected
+### If ATS is not detected
 
 Options when a company uses a custom site without a known ATS:
 
@@ -246,7 +468,7 @@ Options when a company uses a custom site without a known ATS:
 - **RSS feed** — some companies publish vacancies as RSS. Find the feed URL, set `fetch_strategy = 'rss'` and `ats_config = {"feed_url": "..."}`.
 - **Skip** — if the scraping cost outweighs the expected value, do not add the company.
 
-## Aliases
+### Aliases
 
 If a company publishes under different names (e.g. "Wikimedia Foundation" and "Wikipedia"), add all variants to the `aliases` array:
 
@@ -257,7 +479,7 @@ WHERE canonical_name = 'Wikimedia Foundation';
 
 This is needed for cross-board deduplication.
 
-## Important rules
+### Important rules (company mode)
 
 - **Always confirm with the user** before adding to Supabase
 - **Always run a test fetch** before merging into Supabase
@@ -266,10 +488,22 @@ This is needed for cross-board deduplication.
 - **Check for duplicates** before adding (check `company_registry.COMPANIES`)
 - **Supabase `company` table is the single source of truth** — `company_registry.py` loads COMPANIES from it
 
+---
+
 ## Common Issues
 
-- **ATS detection fails**: Company uses a custom careers page with no known ATS. Fallback to `firecrawl_scrape` strategy and ask the user for the correct slug.
-- **Wrong slug guess**: The API returns 404 for the guessed slug. Ask the user to check the careers page URL and provide the correct identifier.
-- **Duplicate company**: `ensure_company()` finds an existing record. Check if the existing record needs updating rather than creating a new one.
-- **Test fetch returns 0 vacancies**: The ATS endpoint may require an EU domain, a different slug, or the company simply has no open roles. Verify the careers page manually.
+- **Ambiguous first arg**: `board`/`vacancy`/`job` collides with a real company
+  name → ask once which mode (Step 0 disambiguation), do not guess.
+- **Board not built in (Mode B)**: the requested board has no `[boards.<id>]`
+  block → out of scope; needs a `defaults.toml` block + `fetch_*_board` strategy.
+- **Single vacancy silently dropped (Mode C)**: `new_count == 0` and not a dup →
+  quality gate dropped it (thin description / blacklisted title / content junk).
+  Offer Firecrawl enrichment or a fuller description.
+- **Unknown company on hand-add (Mode C)**: `ensure_company` made a fetch-less
+  stub → warn that `/jobs-new` won't auto-fetch it; offer to configure the ATS
+  (Mode A) or just leave it active.
+- **ATS detection fails (Mode A)**: Company uses a custom careers page with no known ATS. Fallback to `firecrawl_scrape` strategy and ask the user for the correct slug.
+- **Wrong slug guess (Mode A)**: The API returns 404 for the guessed slug. Ask the user to check the careers page URL and provide the correct identifier.
+- **Duplicate company (Mode A)**: `ensure_company()` finds an existing record. Check if the existing record needs updating rather than creating a new one.
+- **Test fetch returns 0 vacancies (Mode A)**: The ATS endpoint may require an EU domain, a different slug, or the company simply has no open roles. Verify the careers page manually.
 - **Firecrawl scrape returns empty**: The page may use heavy JS rendering. Try adding `wait_for` or `actions` parameters, or switch to a different strategy.
