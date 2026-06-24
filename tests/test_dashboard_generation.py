@@ -115,3 +115,108 @@ def test_defaults_toml_dashboard_style_is_illustrated():
     settings.clear_cache()
     cfg = settings.load_defaults().get("dashboard", {})
     assert cfg.get("style") == "illustrated"
+
+
+# ---------------------------------------------------------------------------
+# 3. Snapshot persistence — full mode upserts the dashboard_snapshot row,
+#    simple mode writes data.js. (U2)
+# ---------------------------------------------------------------------------
+
+class _FakeCursor:
+    def __init__(self, sink):
+        self._sink = sink
+
+    def execute(self, sql, params=None):
+        self._sink["sql"] = sql
+        self._sink["params"] = params
+
+
+class _FakeConn:
+    """psycopg2-connection stand-in that records the upsert for assertions."""
+
+    def __init__(self):
+        self.sink = {}
+        self.committed = False
+
+    def cursor(self, cursor_factory=None):
+        return _FakeCursor(self.sink)
+
+    def commit(self):
+        self.committed = True
+
+
+def _fresh_report(monkeypatch):
+    """Reload report (and its db_backend dependency) with a clean SQLite chain."""
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
+    for mod in ("database_supabase", "config", "db_conn", "db_backend", "report"):
+        sys.modules.pop(mod, None)
+    import db_backend
+    importlib.reload(db_backend)
+    import report
+    return report, db_backend
+
+
+def test_full_mode_upserts_snapshot_payload_round_trip(monkeypatch):
+    """Full mode: the snapshot row's payload is byte/shape-identical to what the
+    static data.js path would carry — so the live endpoint and the baked file are
+    interchangeable and client-side filtering can't regress."""
+    report, db_backend = _fresh_report(monkeypatch)
+
+    fake = _FakeConn()
+    monkeypatch.setattr(db_backend, "IS_SQLITE", False)
+    monkeypatch.setattr(db_backend, "get_conn", lambda: fake)
+
+    payload = {
+        "config": {"language": "en"},
+        "stats": {"total": 3},
+        "vacancy_ids": ["a", "b"],
+        "groups": [{"id": "a"}, {"id": "b"}],
+        "companies": [],
+        "triage_reviews": [],
+        "archived_groups": [],
+    }
+    report._persist_dashboard(payload)
+
+    assert fake.committed, "full-mode upsert must commit"
+    sql = fake.sink["sql"].lower()
+    assert "insert into dashboard_snapshot" in sql
+    assert "on conflict" in sql
+    # The Json-wrapped param carries the exact payload the generator built.
+    json_param = fake.sink["params"][0]
+    assert json_param.adapted == payload
+
+
+def test_full_mode_does_not_write_data_js(monkeypatch, tmp_path):
+    """Full mode persists only to the snapshot row — never public/data.js."""
+    report, db_backend = _fresh_report(monkeypatch)
+
+    out_dir = tmp_path / "public_out"
+    out_dir.mkdir()
+    monkeypatch.setattr(report, "PUBLIC_DIR", out_dir, raising=False)
+    monkeypatch.setattr(db_backend, "IS_SQLITE", False)
+    monkeypatch.setattr(db_backend, "get_conn", lambda: _FakeConn())
+
+    report._persist_dashboard({"groups": []})
+
+    assert list(out_dir.iterdir()) == [], "full mode must not write data.js"
+
+
+def test_simple_mode_writes_data_js_and_skips_snapshot(monkeypatch, tmp_path):
+    """Simple mode (IS_SQLITE) writes data.js and never touches the DB."""
+    report, db_backend = _fresh_report(monkeypatch)
+    assert db_backend.IS_SQLITE, "this test must run on the SQLite backend"
+
+    out_dir = tmp_path / "public_out"
+    out_dir.mkdir()
+    monkeypatch.setattr(report, "PUBLIC_DIR", out_dir, raising=False)
+
+    def _boom():
+        raise AssertionError("simple mode must not open a DB connection for persistence")
+
+    monkeypatch.setattr(db_backend, "get_conn", _boom)
+
+    report._persist_dashboard({"groups": [{"id": "x"}]})
+
+    assert [p.name for p in out_dir.iterdir()] == ["data.js"]
+    assert "VACANCY_DATA" in (out_dir / "data.js").read_text(encoding="utf-8")

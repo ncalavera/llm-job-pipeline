@@ -175,12 +175,49 @@ def generate_dashboard(db: dict = None) -> None:
         "archived_groups": archived_groups,
     }
 
-    # --- Write data.js ---
+    # --- Persist the payload to the active sink ---
+    # Simple mode bakes public/data.js (served statically, no API host). Full
+    # mode upserts the snapshot row so /api/vacancies serves it live with no
+    # redeploy, and does NOT write data.js.
+    _persist_dashboard(vacancy_data)
+
+
+def _upsert_dashboard_snapshot(vacancy_data: dict, conn) -> None:
+    """Upsert the assembled payload into the single dashboard_snapshot row.
+
+    Full mode only. /api/vacancies reads this row, so a browser refresh shows
+    current data without a Vercel redeploy. One fixed-id row, replaced each run.
+    """
+    from db_backend import Json
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO dashboard_snapshot (id, payload, updated_at) "
+        "VALUES ('current', %s, now()) "
+        "ON CONFLICT (id) DO UPDATE "
+        "SET payload = EXCLUDED.payload, updated_at = now()",
+        (Json(vacancy_data),),
+    )
+    conn.commit()
+
+
+def _persist_dashboard(vacancy_data: dict) -> None:
+    """Route the payload to the active backend's sink.
+
+    SQLite (simple mode) -> static public/data.js. Supabase (full mode) ->
+    dashboard_snapshot row, and NO data.js.
+    """
+    import db_backend
+    if db_backend.IS_SQLITE:
+        _write_data_js(vacancy_data)
+    else:
+        _upsert_dashboard_snapshot(vacancy_data, db_backend.get_conn())
+
+
+def _write_data_js(vacancy_data: dict) -> None:
+    """Bake public/data.js — the static snapshot for simple/local mode."""
     PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
     data_js_path = PUBLIC_DIR / "data.js"
     payload_json = json.dumps(vacancy_data, ensure_ascii=False).replace("</", "<\\/")
     with open(data_js_path, "w", encoding="utf-8") as f:
         f.write("// Auto-generated \u2014 DO NOT EDIT\n")
         f.write(f"var VACANCY_DATA = {payload_json};\n")
-
-    # index.html is a static, hand-maintained file — intentionally NOT generated.
