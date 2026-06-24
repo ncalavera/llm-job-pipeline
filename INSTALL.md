@@ -106,9 +106,7 @@ about. You can also bulk-import from a CSV — see `examples/companies.example.c
 In your agent:
 
 ```
-/jobs-fetch     # fetch vacancies from all your companies
-/jobs-filter    # quality gate: junk removal, dedup, geography buckets
-/jobs-score     # LLM-score each vacancy against your profile (1 subagent per vacancy)
+/jobs-new     # fetch → filter → score vacancies against your profile
 ```
 
 Scoring runs inside your agent — one vacancy per request (see AGENTS.md), scored
@@ -118,9 +116,9 @@ database.
 Then triage from the terminal:
 
 ```
-/jobs-vac list           # top unseen vacancies by score
-/jobs-vac show <id>      # full description + scoring reasoning
-/jobs-vac mark <id> liked
+/jobs-review list           # top unseen vacancies by score
+/jobs-review show <id>      # full description + scoring reasoning
+/jobs-review mark <id> liked
 ```
 
 ### Optional: job boards
@@ -185,9 +183,9 @@ A daily push of your top unscored vacancies with 👍/👎 inline buttons.
 Once set up, the loop is:
 
 ```
-/jobs-fetch → /jobs-filter → /jobs-score        # morning, ~5 min, mostly automated
-/jobs-vac list → like/pass            # over coffee, or via Telegram buttons
-/jobs-apply                          # weekly: decide what to actually apply to
+/jobs-new                            # morning, ~5 min, mostly automated
+/jobs-review list → like/pass        # over coffee, or via Telegram buttons
+/jobs-review                         # weekly: decide what to actually apply to
 ```
 
 ## Troubleshooting
