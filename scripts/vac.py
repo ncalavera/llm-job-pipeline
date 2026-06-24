@@ -200,13 +200,13 @@ def cmd_list(args):
             # Empty database (or no rows for this status) — point at the
             # pipeline's first action instead of a dead end.
             print("No vacancies yet.")
-            print("  Fetch some first: /jobs-fetch (or python3 scripts/fetch_vacancies.py)")
-            print("  No companies tracked yet? Run /jobs-start to discover the first ones,")
+            print("  Fetch some first: /jobs-new (or python3 scripts/fetch_vacancies.py)")
+            print("  No companies tracked yet? Run /jobs-new to discover the first ones,")
             print("  or /jobs-add to add a company by name.")
         else:
             # Rows exist but every one was filtered out.
             print("No vacancies match these filters. Loosen --status / --min-score / "
-                  "--tier / --org / --geo, or run /jobs-fetch for fresh listings.")
+                  "--tier / --org / --geo, or run /jobs-new for fresh listings.")
         return
 
     width = _term_width()
@@ -344,7 +344,7 @@ def cmd_companies(args):
                   "Drop --status to see all tracked companies.")
         else:
             print("No companies tracked yet.")
-            print("  Run /jobs-start to discover your first companies,")
+            print("  Run /jobs-new to discover your first companies,")
             print("  or /jobs-add to add a company by name.")
         return
 

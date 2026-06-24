@@ -15,8 +15,8 @@ posting.
 ## Two modes
 
 1. **Simple mode — zero signups.** The database is a local SQLite file that
-   creates itself; the dashboard runs on localhost; `/jobs-start` discovers your
-   first companies from your profile and `/jobs` is your one daily command.
+   creates itself; the dashboard runs on localhost; `/jobs-new` discovers your
+   first companies from your profile and `/jobs-new` is your one daily command.
    No Supabase, no Vercel, ~5 minutes. Runbook: [INSTALL-EASY.md](INSTALL-EASY.md).
 2. **Full mode — cloud setup.** Hosted Supabase database, password-protected
    Vercel dashboard you can open from your phone, daily Telegram digest with
@@ -56,7 +56,7 @@ and asks you only for the things it can't do itself.
   vacancies at not-yet-reviewed companies get rescued and flagged hot, so you
   approve companies with evidence in front of you.
 - **Triage:** dashboard (companies / catalog / pipeline / archive views),
-  `/jobs-vac` terminal CLI, or a daily Telegram digest with 👍/👎 buttons that
+  `/jobs-review` terminal CLI, or a daily Telegram digest with 👍/👎 buttons that
   write statuses straight back to the database.
 
 ## Flow
@@ -99,7 +99,7 @@ Typical setup: **subscription you already have + $0/month.**
 - It won't find unpublished roles — a big share of good positions never get
   posted. Networking, referrals and communities stay on you.
 - It's not a hosted service. You run it, you own the data, you babysit it
-  (~10 minutes a day, one `/jobs-fetch → /jobs-filter → /jobs-score` cycle).
+  (~10 minutes a day, one `/jobs-new` cycle).
 - It doesn't apply for you. It gets you a short, scored list worth your time.
 
 ## Quick start (full mode, manual)
@@ -185,11 +185,11 @@ You only need three:
 
 | Command | When | What it does |
 | --- | --- | --- |
-| `/jobs-start` | once | Discovers starter companies from your profile, fetches, scores, opens the dashboard |
-| `/jobs` | daily | Fetch → filter → score → top new matches in chat, like/pass verdicts saved |
-| `/jobs-apply` | weekly | Deep review of liked vacancies — decide what to actually apply to |
+| `/jobs-new` | once (first run) | Discovers starter companies from your profile, fetches, scores, opens the dashboard |
+| `/jobs-new` | daily | Fetch → filter → score → top new matches in chat, like/pass verdicts saved |
+| `/jobs-review` | weekly | Deep review of liked vacancies — decide what to actually apply to |
 
-`/jobs` runs the whole machinery (fetching, junk filtering, scoring,
+`/jobs-new` runs the whole machinery (fetching, junk filtering, scoring,
 archiving), so you never think about the stages. To add a company, just ask
 the agent ("add Stripe") — it uses `/jobs-add` itself.
 
@@ -199,19 +199,36 @@ the agent ("add Stripe") — it uses `/jobs-add` itself.
 | Command | What it does |
 | --- | --- |
 | `/jobs-add` | Add a company: ATS auto-detection, test fetch |
-| `/jobs-fetch` | Vacancy fetching alone, with source selection |
-| `/jobs-filter` | Quality gate alone: junk removal, dedup, geography buckets |
-| `/jobs-score` | LLM scoring alone (1 vacancy = 1 request) |
-| `/jobs-archive` | Preview + confirm archiving of low scores |
-| `/jobs-vac` | Terminal triage CLI, no dashboard needed |
+| `/jobs-review` | Deep review of liked vacancies, archive low scores, terminal triage |
+| `/jobs-profile` | Update scoring rules and candidate profile |
 | `/jobs-digest` | Send/poll the Telegram digest (full mode) |
-| `/jobs-finish` | Regenerate dashboard, commit, push (full mode) |
+| `/jobs-update` | Pull latest code, refresh deps, apply DB migrations |
 
 </details>
 
 Runbooks live in `.claude/commands/` — slash commands in Claude Code, plain
 markdown runbooks for any other agent (see [AGENTS.md](AGENTS.md)). Full
 reference: [docs/SKILLS.md](docs/SKILLS.md).
+
+## Command changes (old → new)
+
+If you used this pipeline before the 6-command restructure, here is the mapping:
+
+| Old command | New command |
+| --- | --- |
+| `jobs` | `/jobs-new` |
+| `jobs-fetch` | `/jobs-new` |
+| `jobs-filter` | `/jobs-new` |
+| `jobs-score` | `/jobs-new` |
+| `jobs-start` | `/jobs-new` |
+| `jobs-finish` | `/jobs-new` |
+| `jobs-apply` | `/jobs-review` |
+| `jobs-archive` | `/jobs-review` |
+| `jobs-vac` | `/jobs-review` |
+| `jobs-rules` | `/jobs-profile` |
+| `jobs-add` | `/jobs-add` (unchanged) |
+| `jobs-digest` | `/jobs-digest` (unchanged) |
+| `jobs-update` | `/jobs-update` (unchanged) |
 
 ## Updating
 

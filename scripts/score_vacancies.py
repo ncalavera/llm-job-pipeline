@@ -339,7 +339,7 @@ def cmd_save(_args):
 
         # Two accepted shapes:
         #   1. Strict: a pre-built nested ``score_data`` with DB column names.
-        #   2. Flat (what AGENTS.md + /jobs-score tell agents to produce):
+        #   2. Flat (what AGENTS.md + /jobs-new tell agents to produce):
         #      top-level ``score`` / ``reasoning`` / ``short_summary`` /
         #      ``hard_requirements`` / ``tags``. Build score_data from it.
         score_data = entry.get("score_data")
