@@ -64,7 +64,8 @@ Run this from the project root whenever you want the latest version.
    - If the local dashboard (`scripts/dashboard_local.py`) is running, it must be
      restarted to pick up code changes.
    - If full mode is in use and the change touched `public/` or the dashboard,
-     run `/jobs-finish` to redeploy to Vercel.
+     run `/jobs-new` (it regenerates and redeploys) or `vercel --prod` directly to
+     redeploy to Vercel.
 
 ## What this command never does
 

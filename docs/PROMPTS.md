@@ -58,7 +58,7 @@ When you change `user_profile.md` or the prompt itself, old scores stay in
 the DB. To re-run everything:
 
 ```sql
--- Reset scores so /jobs-score runs again
+-- Reset scores so /jobs-new runs scoring again
 UPDATE vacancy SET llm_score = NULL, llm_scored_at = NULL
 WHERE status = 'unseen';
 ```

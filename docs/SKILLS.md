@@ -7,105 +7,64 @@ list — what to do and in what order.
 
 The list, briefly:
 
-## The three you actually use
+## The commands
 
-Day to day you need only `/jobs-start` (once), `/jobs` (daily) and `/jobs-apply`
-(weekly). `/jobs` chains fetch → filter → score → verdict capture, so the
-stage commands below are for fine control and debugging, not the daily
-routine.
+Day to day you need only `/jobs-new` (first-run + daily) and `/jobs-review`
+(weekly). `/jobs-new` chains fetch → filter → score → verdict capture, so the
+pipeline stages run automatically.
 
-## `/jobs-fetch` — fetch vacancies
+## `/jobs-new` — first-run setup, daily fetch + score
 
-Interactive fetching:
+Covers first-time setup, the daily pipeline, resuming a partial run, and
+deploying the dashboard.
 
-1. Shows the status of every source (when it was last refreshed).
-2. Asks what to fetch: everything / active companies only / a selection.
-3. Runs `python3 scripts/fetch_vacancies.py` with the right flags.
-4. Reports how many new vacancies arrived.
+**First run:** reads your profile, web-searches 10–15 matching companies,
+validates each careers page, shows a yes/no shortlist, adds approved ones,
+then runs the first fetch → filter → score.
 
-During the merge, every description passes the `quality.py` gate (cookie
-walls, error pages, and nav chrome are never saved). For direct-ATS
-strategies that return the complete listing, unseen vacancies missing from
-a fresh fetch are auto-archived as `gone_from_source`; JS-rendered shell
-pages are marked `js_required` instead of silently returning zero.
+**Daily:** fetches fresh vacancies from all tracked companies → filters junk
+→ scores new ones → shows top matches in chat → captures your like/pass
+verdicts.
 
-Options:
+Options passed through to the underlying scripts:
 
 - `--force-all` — ignore TTL, pull every company.
 - `--companies "A,B,C"` — only the listed ones.
 - `--tier S` — companies with tier S.
-- `--auto-score` — run filter + score right after the fetch.
-
-## `/jobs-filter` — clean out junk
-
-The quality gate between fetching and scoring:
-
-1. Loads unscored vacancies.
-2. Classifies by title blacklist, locations, descriptions.
-3. Geography exclusion via profile hard filters: vacancies whose every
-   location falls in a country listed under `## HARD_FILTERS →
-   exclude_countries` in your profile are deleted before scoring. No
-   country is hardcoded — the list is empty by default (nothing dropped).
-4. Marks duplicates (exact and fuzzy by title).
-5. Deletes junk, leaves a ready set for scoring.
-6. If it spots recurring patterns, it suggests adding them to
-   `GLOBAL_BLACKLIST`.
-
-Options:
-
-- `--dedup` — enable fuzzy title comparison (0.85 threshold).
-- `--dry-run` — show what would be deleted without touching anything.
-
-## `/jobs-score` — score with Claude
-
-Launches an Opus subagent per vacancy (1 vacancy = 1 request). Default
-parallelism is 5 concurrent subagents.
-
-1. Pulls unscored vacancies (20 at a time by default). By default it also
-   rescues a capped batch of strong vacancies from unreviewed *candidate*
-   companies (`--no-candidates` disables this).
-2. Runs a subagent per vacancy, waits for the answers.
-3. Saves `llm_score`, `reasoning`, `tags`, `hard_requirements`,
-   `summary`, `deadline`.
-4. Prints a session report with score distribution and junk flags.
+- `--dedup` — enable fuzzy title deduplication (0.85 threshold).
+- `--dry-run` — show what filter would delete without touching anything.
 
 Scoring is **pure fit** (prompt v4.0): geography and visa considerations
-are excluded — they're handled by `/jobs-filter`. Score-threshold auto-archive
-is currently paused under pure-fit scoring (opt-in only via
-`archive_vacancies(force=True)`).
+are excluded — they're handled by the pre-score filter. Score-threshold
+auto-archive is opt-in only.
 
-## `/jobs-archive` — clean out old postings
+## `/jobs-review` — review liked vacancies, archive, terminal triage
 
-Interactive archival of low-scoring unreviewed vacancies:
+Covers three intents that all happen in a triage session:
+
+**Deep review of liked vacancies:**
+
+1. Groups liked vacancies by company.
+2. One vacancy at a time: asks 3–5 questions about interest, fit, and
+   risks.
+3. Records the decision: `apply` / `skip` / `research`.
+4. Creates a tracker issue when the decision is `apply`.
+5. Compares decisions against `llm_score` at session end and suggests
+   prompt updates if they diverge.
+
+**Archive low-scoring postings:**
 
 1. Shows a preview: how many candidates per score bracket
    (0–10, 10–20, 20–30).
 2. Flags borderline cases (near the threshold, blind-scored).
 3. Waits for explicit confirmation.
-4. Sets the status to `archived` — the vacancy moves to the read-only
-   Archive tab on the dashboard, and its `dedup_hash` is tombstoned in
-   `archived_hash` so boards can't re-import it.
+4. Sets the status to `archived` — moves to the read-only Archive tab and
+   tombstones the `dedup_hash` in `archived_hash`.
 
 Previously archived vacancies can be restored with
 `python3 scripts/vac.py mark <id> unseen`.
 
-## `/jobs-apply` — deep review of liked vacancies
-
-A structured interview over every liked vacancy:
-
-1. Groups them by company.
-2. One vacancy at a time: asks 3–5 questions about your interest, fit, and
-   risks — including whether the role offers enough complexity for real
-   growth.
-3. Records the decision: `apply` / `skip` / `research`.
-4. Creates a tracker issue with acceptance criteria when the decision is
-   `apply`.
-5. At the end of the session compares decisions against `llm_score` — if
-   they diverge, suggests a prompt update.
-
-## `/jobs-vac` — terminal triage
-
-A KISS CLI for day-to-day work from the terminal, no browser:
+**Terminal triage (no browser):**
 
 ```bash
 python3 scripts/vac.py list                  # top 20 by score
@@ -118,8 +77,7 @@ python3 scripts/vac.py companies             # company summary
 ```
 
 `--geo` accepts the `geo.py` buckets: `uk`, `germany`, `europe`, `us`,
-`cis`, `other`, `unknown`. Use it when you don't feel like opening the
-dashboard.
+`cis`, `other`, `unknown`.
 
 ## `/jobs-digest` — Telegram digest
 
@@ -148,17 +106,17 @@ Adds a company to monitoring:
 4. If the result looks right, adds it to `company`; otherwise shows what
    went wrong.
 
-## `/jobs-finish` — close the session
+## `/jobs-profile` — update scoring rules and candidate profile
 
-Finalizes the work:
+Updates the filtering rules and candidate profile that drive scoring:
 
-1. Regenerates `public/data.js` (`fetch_vacancies.py --report-only`) —
-   including the Archive tab data.
-2. Commits the changes with a meaningful message.
-3. Pushes to the repo — Vercel redeploys the dashboard automatically.
-
-Use it after any batch of changes: a new company, a reworked prompt, a
-triaged batch of vacancies.
+1. Shows the current `GLOBAL_BLACKLIST`, `HARD_FILTERS`, and profile
+   sections.
+2. Lets you add/remove title blacklist entries, geography exclusions, and
+   `EXCLUDE_PATTERNS`.
+3. Saves changes to `config/user_profile.md`.
+4. Optionally resets `llm_score` / `llm_scored_at` so `/jobs-new`
+   re-scores with the updated rules.
 
 ## How Claude Code finds these commands
 

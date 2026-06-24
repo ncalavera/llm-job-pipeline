@@ -8,7 +8,6 @@ config/user_profile.md
 vacancies/
 .firecrawl/
 public/data.js
-!public/data.js.example
 
 # Local illustration packs — personal art for a non-default DASHBOARD_PACK.
 # The committed "default" pack lives directly under public/images/. Any pack

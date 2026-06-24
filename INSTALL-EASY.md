@@ -48,6 +48,7 @@ That's it. No database account, no API keys required to start.
 git clone https://github.com/ncalavera/llm-job-pipeline
 cd llm-job-pipeline
 python3 -m pip install requests beautifulsoup4 python-dateutil
+./scripts/install-hooks.sh   # one-time: blocks committing private data to this public repo
 ```
 
 If that errors with **`externally-managed-environment`** (PEP 668, common on
@@ -97,15 +98,15 @@ This takes an automatic backup before touching anything and is safe to re-run
 (already-applied migrations are skipped). If nothing is pending, it prints
 "Up to date" and exits cleanly.
 
-Skip this on a brand-new clone — `/jobs-start` (next step) will do it for you.
+Skip this on a brand-new clone — `/jobs-new` (next step) will do it for you.
 
-## 3. One command: `/jobs-start`
+## 3. One command: `/jobs-new`
 
 Open your agent in the repo and run (non-Claude agents: follow
-`.claude/commands/jobs-start.md`):
+`.claude/commands/jobs-new.md`):
 
 ```
-/jobs-start
+/jobs-new
 ```
 
 It will:
@@ -122,17 +123,17 @@ It will:
 That is the whole onboarding. No copy-pasting connection strings, no SQL.
 
 Without an agent? You can do step 2 by hand — copy the example profile and edit
-it — then add companies with `/jobs-add` (or its runbook):
+it — then add companies with `/jobs-add` (or its runbook `.claude/commands/jobs-add.md`):
 
 ```bash
 cp config/user_profile.example.md config/user_profile.md
 # then edit config/user_profile.md to describe yourself
 ```
 
-## 4. Every day: `/jobs`
+## 4. Every day: `/jobs-new`
 
 ```
-/jobs
+/jobs-new
 ```
 
 One command does the daily loop: fetch new vacancies → filter junk → score the
@@ -189,13 +190,13 @@ public forks.
 Set `SUPABASE_DB_URL` (and the dashboard env vars) and the exact same scripts
 talk to Supabase instead of SQLite — no code changes. Follow
 [INSTALL.md](INSTALL.md) from step 3, then re-add your companies (or migrate the
-SQLite rows). Your commands (`/jobs-fetch`, `/jobs-score`, `/jobs-apply`, …) keep working.
+SQLite rows). Your commands (`/jobs-new`, `/jobs-review`, `/jobs-add`, …) keep working.
 
 ## Troubleshooting
 
 - **"Run `--report-only` first" warning when starting the dashboard** — the
   dashboard needs `public/data.js`. Run
-  `python3 scripts/fetch_vacancies.py --report-only` (or just run `/jobs` once).
+  `python3 scripts/fetch_vacancies.py --report-only` (or just run `/jobs-new` once).
 - **Fetch returns 0 jobs for a company** — its ATS may be unsupported. Run
   `python3 scripts/discover_ats.py --company "Name"` to re-detect.
 - **Scoring feels off** — sharpen `config/user_profile.md`. The prompt only

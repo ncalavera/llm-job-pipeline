@@ -97,7 +97,7 @@ REGION_KEYWORDS: dict[str, list[str]] = {
 # These are NOT hardcoded to anyone's taste. They come from the
 # `## HARD_FILTERS` section of YOUR user profile (config/user_profile.md) and
 # are EMPTY by default — so out of the box nothing is dropped on geography or
-# on a title's discipline. Edit them with /jobs-rules, or by hand in the
+# on a title's discipline. Edit them with /jobs-profile, or by hand in the
 # profile. See scripts/hard_filters.py for the loader.
 # ---------------------------------------------------------------------------
 

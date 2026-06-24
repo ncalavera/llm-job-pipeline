@@ -984,7 +984,7 @@
           fn2: "you — reviewing only the 6 worth it",
           caption: "your pipeline — reading and scoring every single one",
           hiwk: "How it works",
-          hiwt: "One run of <em>/jobs</em>, start to finish",
+          hiwt: "One run of <em>/jobs-new</em>, start to finish",
           f_fetch_l: "Fetch",
           f_fetch_d:
             "<b>412 open roles</b> pulled from the companies' own hiring systems — Greenhouse, Lever, Ashby and eight more.",
@@ -1034,7 +1034,7 @@
           fn2: "ты — смотришь только 6 стоящих",
           caption: "твой конвейер — читает и оценивает каждую",
           hiwk: "Как это работает",
-          hiwt: "Один запуск <em>/jobs</em>, от начала до конца",
+          hiwt: "Один запуск <em>/jobs-new</em>, от начала до конца",
           f_fetch_l: "Сбор",
           f_fetch_d:
             "<b>412 вакансий</b> взяты из систем найма самих компаний — Greenhouse, Lever, Ashby и ещё восемь.",
@@ -1656,7 +1656,7 @@ career_narrative_boost
 1. Склонируй репозиторий в текущую папку.
 2. Прочитай INSTALL-EASY.md в корне и пройди по нему шаг за шагом. Никаких аккаунтов создавать не нужно: НЕ задавай SUPABASE_DB_URL — тогда база сама создастся локальным файлом.
 3. Сохрани профиль ниже дословно в config/user_profile.md — это мой профиль кандидата, его используют промпты оценки.
-4. Затем запусти /jobs-start — он подберёт первые компании под мой профиль, соберёт и оценит вакансии и поднимет локальную панель результатов. Дальше моя ежедневная команда — /jobs.
+4. Затем запусти /jobs-new — он автоматически определит пустую базу, подберёт первые компании под мой профиль, соберёт и оценит вакансии и поднимет локальную панель результатов. Ежедневная команда после этого — тоже /jobs-new.
 
 Если ты не Claude Code и слэш-команды не поддерживаешь — те же сценарии лежат в .claude/commands/*.md, начни с AGENTS.md.
 
@@ -1667,7 +1667,7 @@ career_narrative_boost
 1. Склонируй репозиторий в текущую папку.
 2. Прочитай INSTALL.md в корне и пройди по нему шаг за шагом, спрашивая меня только о том, что не можешь сделать сам (создание бесплатных аккаунтов Supabase и Vercel, вставка ключей).
 3. Сохрани профиль ниже дословно в config/user_profile.md — это мой профиль кандидата, его используют промпты оценки.
-4. Когда установка готова — помоги добавить первые 5–10 интересных мне компаний через /jobs-add, затем запусти /jobs-fetch, /jobs-filter и /jobs-score и покажи результат.
+4. Когда установка готова — помоги добавить первые 5–10 интересных мне компаний через /jobs-add, затем запусти /jobs-new и покажи результат.
 
 Если ты не Claude Code и слэш-команды не поддерживаешь — те же сценарии лежат в .claude/commands/*.md, начни с AGENTS.md.
 
@@ -1679,7 +1679,7 @@ Please:
 1. Clone the repo into the current folder.
 2. Read INSTALL-EASY.md in the repo root and follow it step by step. No accounts needed: do NOT set SUPABASE_DB_URL — the database then auto-creates as a local file.
 3. Save the profile below verbatim as config/user_profile.md — this is my candidate profile that the scoring prompts use.
-4. Then run /jobs-start — it discovers starter companies matching my profile, fetches and scores vacancies, and launches the local dashboard. My daily command after that is /jobs.
+4. Then run /jobs-new — it auto-detects the empty database, discovers starter companies matching my profile, fetches and scores vacancies, and launches the local dashboard. My daily command after that is also /jobs-new.
 
 If you are not Claude Code and don't support slash commands, the same workflows live in .claude/commands/*.md — start with AGENTS.md.
 
@@ -1690,7 +1690,7 @@ Please:
 1. Clone the repo into the current folder.
 2. Read INSTALL.md in the repo root and follow it step by step, asking me only for things you cannot do yourself (creating free Supabase and Vercel accounts, pasting API keys).
 3. Save the profile below verbatim as config/user_profile.md — this is my candidate profile that the scoring prompts use.
-4. When setup is done, help me add the first 5–10 companies I care about with /jobs-add, then run /jobs-fetch, /jobs-filter and /jobs-score, and show me the results.
+4. When setup is done, help me add the first 5–10 companies I care about with /jobs-add, then run /jobs-new, and show me the results.
 
 If you are not Claude Code and don't support slash commands, the same workflows live in .claude/commands/*.md — start with AGENTS.md.
 
@@ -1734,7 +1734,7 @@ ${buildProfile()}
         const LINES = [
           [
             500,
-            '<span class="g">~/job-search $</span> <span class="br">/jobs</span>',
+            '<span class="g">~/job-search $</span> <span class="br">/jobs-new</span>',
           ],
           [
             600,
