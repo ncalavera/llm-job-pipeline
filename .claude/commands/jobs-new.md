@@ -24,6 +24,33 @@ regenerating `public/data.js` and (full mode only) `vercel --prod`.
 
 ---
 
+## Live status — run long steps in the BACKGROUND and show a card
+
+Three steps are slow and silent (fetch, enrich, score). A foreground command's
+stdout is **invisible until it exits** — that is exactly why a 17-minute fetch
+looks frozen with no status. So every long step runs in the background while you
+reprint a compact progress card from the heartbeat file
+`vacancies/run_status.json`:
+
+1. Launch the script with `run_in_background: true`. **Never** wrap it in a
+   `while kill -0 … sleep; done` poll loop — that blocks the foreground and
+   re-creates the freeze.
+2. Every ~20–30s, run `python3 scripts/run_card.py` and post its one-line output
+   to chat as the current status, e.g.
+   `fetch  ▕███████░░░░░░░░░▏ 18/40 · LinkedIn · +12 new · 6m02s`.
+   Pace the polls with the wait / `Monitor` primitive — do **not** foreground
+   `sleep` (it is blocked).
+3. Stop polling when `run_status.json` shows `"finished": true` **or** the
+   background task completes. Then read the tail of the task output for the final
+   summary line (`FETCH COMPLETE: N new`, enrich `Done!`, any errors).
+
+`fetch_vacancies.py` and `enrich_blind_vacancies.py` write the heartbeat
+themselves. Scoring is driven by you (subagents, not one script), so write the
+heartbeat from a one-liner — `begin('score', N)` once, then `step(org, k)` after
+each saved chunk — and render the same card with `run_card.py`.
+
+---
+
 ## Step 1: Validate the profile FIRST
 
 Scoring needs `config/user_profile.md`. Validate it **before any fetch** so a bad
@@ -225,7 +252,10 @@ unscored; verdicts commit per-verdict), so resuming never redoes finished work.
 ## Step 4: Fetch new vacancies
 
 Fetch from monitored companies. TTL cooldown applies, so this is cheap daily.
-Always use `python3 -u` (unbuffered) so progress lines appear in real time:
+**Run it in the background and show the live card** (see "Live status" above) —
+fetch is the slowest, silent step; a blocking call is what made it look frozen.
+Launch with `run_in_background: true`, then poll `python3 scripts/run_card.py`
+every ~20–30s until `run_status.json` is `finished` or the task completes:
 
 ```bash
 python3 -u scripts/fetch_vacancies.py 2>&1
@@ -286,7 +316,8 @@ flag for the publish gate (Step 8 requires gone-archive < ~30% of any org).
 Right after fetch and **before** filter, enrich vacancies that have a URL but no
 description (and delete junk with no URL and no description). Run this exactly
 once per pipeline — the filter step only re-checks still-blind vacancies later, it
-does not re-enrich:
+does not re-enrich. **Run it in the background with the live card** (see "Live
+status") — Firecrawl makes this slow too:
 
 ```bash
 python3 scripts/enrich_blind_vacancies.py 2>&1
@@ -361,6 +392,23 @@ For **each** vacancy, launch a **separate** subagent with `model: "opus"`:
 **Critical:** 1 vacancy = 1 subagent. Never send 2-3 vacancies in one prompt — it
 causes systematic over-scoring (+20-50 points). Use the `member_ids` array from
 the `--local` output (the real DB UUIDs), not the top-level `id`.
+
+**Show the live card here too.** Scoring fans out over minutes; drive the same
+heartbeat yourself. Once, after loading the batch of `N`:
+
+```bash
+python3 -c "import sys;sys.path.insert(0,'scripts');import run_status as r;r.begin('score',$N)"
+```
+
+After each saved chunk, advance it and reprint the card (`k` = vacancies scored
+so far):
+
+```bash
+python3 -c "import sys;sys.path.insert(0,'scripts');import run_status as r;r.step('$ORG',$k)"
+python3 scripts/run_card.py
+```
+
+When the batch is done: `r.finish()`.
 
 ### Save INCREMENTALLY (per vacancy or small chunks)
 

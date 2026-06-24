@@ -29,6 +29,8 @@ import subprocess
 import sys
 from datetime import datetime, date, timezone
 
+import run_status  # lightweight progress heartbeat (vacancies/run_status.json)
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Construct the CLI parser. Defined before the heavy project imports so
@@ -307,6 +309,13 @@ def main():
     if not args.report_only:
         filtered = _filter_companies(args)
 
+        # Progress heartbeat: total = companies to fetch + boards to fetch. The
+        # /jobs-new runbook backgrounds this run and polls run_status.json, since
+        # foreground stdout stays invisible until the command exits.
+        companies_total = 0 if args.boards_only else len(filtered)
+        boards_total = len(JOB_BOARDS) if (JOB_BOARDS and not args.no_boards) else 0
+        run_status.begin("fetch", companies_total + boards_total)
+
         if args.boards_only:
             print("\nSkipping companies (--boards-only mode)")
         elif not filtered:
@@ -323,7 +332,8 @@ def main():
         # Collect manual-check companies to show at the end
         manual_companies = []
 
-        for org_name, config in filtered.items():
+        for org_idx, (org_name, config) in enumerate(filtered.items()):
+            run_status.step(org_name, org_idx, new=total_new)
             strategy = config["strategy"]
             tier = config.get("tier")
 
@@ -423,9 +433,10 @@ def main():
             print("  JOB BOARDS")
             print(f"{'─' * 60}")
 
-            for board_id, board_cfg in JOB_BOARDS.items():
+            for board_idx, (board_id, board_cfg) in enumerate(JOB_BOARDS.items()):
                 strategy = board_cfg["strategy"]
                 board_name = board_cfg["name"]
+                run_status.step(board_name, companies_total + board_idx, new=total_new)
 
                 if strategy == "manual_check":
                     manual_boards.append((board_name, board_cfg["url"]))
@@ -498,6 +509,7 @@ def main():
             if unchanged:
                 print(f"\n  Firecrawl: {unchanged}/{len(change_statuses)} pages unchanged (saved credits)")
 
+        run_status.finish(new=total_new)
         print(f"\n{'=' * 60}")
         print(f"  FETCH COMPLETE: {total_new} new vacancies found")
         print(f"{'=' * 60}")
