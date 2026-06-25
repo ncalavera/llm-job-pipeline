@@ -2,7 +2,14 @@
 // api.js — Server communication (save/load), offline detection
 // =============================================================================
 
-import { state, API_BASE, emit, on, mergeRemoteStatuses } from "./state.js";
+import {
+  state,
+  API_BASE,
+  emit,
+  on,
+  mergeRemoteStatuses,
+  companiesList,
+} from "./state.js";
 
 // ---------------------------------------------------------------------------
 // Sync status indicators
@@ -159,6 +166,78 @@ export function loadCompanyStatuses() {
       state.companyStatusesLoaded = true;
       emit("companyStatusesLoaded");
       console.warn("Company status sync failed:", e);
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Load live company rows from server (Companies tab — always current)
+// ---------------------------------------------------------------------------
+
+// Snapshot-only deep-profile fields not returned by /api/companies; merged onto
+// the live rows by company_id so the profile page keeps working.
+const DEEP_PROFILE_FIELDS = [
+  "product",
+  "website",
+  "careers_url",
+  "description",
+  "executive_summary",
+  "md_content",
+  "has_deep_analysis",
+  "is_enriched",
+  "founded_year",
+  "employee_count",
+  "funding_status",
+  "hq_location",
+  "sector",
+  "logo_url",
+  "alignment_label",
+  "fit_strengths",
+  "fit_risks",
+  "fit_approach",
+  "experience_reasoning",
+  "mission_verdict",
+  "experience_match",
+  "personal_interest",
+  "notes",
+  "glassdoor_rating",
+  "linkedin_employees",
+  "recent_news",
+  "org_color",
+  "region_breakdown",
+  "status_reason",
+];
+
+export function loadCompanies() {
+  if (!API_BASE) return;
+  fetch(API_BASE + "/api/companies", { credentials: "same-origin" })
+    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then((payload) => {
+      var live =
+        payload && Array.isArray(payload.companies) ? payload.companies : null;
+      if (!live) return;
+      // Merge snapshot deep-profile fields (by company_id) onto the live rows.
+      var snapById = {};
+      for (var i = 0; i < companiesList.length; i++) {
+        if (companiesList[i].company_id)
+          snapById[companiesList[i].company_id] = companiesList[i];
+      }
+      for (var j = 0; j < live.length; j++) {
+        var snap = snapById[live[j].company_id];
+        if (!snap) continue;
+        for (var k = 0; k < DEEP_PROFILE_FIELDS.length; k++) {
+          var f = DEEP_PROFILE_FIELDS[k];
+          if (live[j][f] === undefined) live[j][f] = snap[f];
+        }
+        // The profile's vacancy section renders snapshot vacancy cards by id;
+        // keep the snapshot ids for it (the table uses live counts, not ids).
+        if (Array.isArray(snap.vacancy_ids))
+          live[j].vacancy_ids = snap.vacancy_ids;
+      }
+      state.liveCompanies = live;
+      emit("companiesLoaded");
+    })
+    .catch((e) => {
+      console.warn("Live company load failed (using snapshot):", e);
     });
 }
 
