@@ -53,3 +53,6 @@ architecture-notes/
 
 # npm lockfile — project installs deps fresh; no lockfile tracked
 package-lock.json
+
+# runtime company filter archives
+companies/
