@@ -427,3 +427,25 @@ queries = [
   { keywords = "Programme Manager nonprofit", location = "European Union" },
   { keywords = "Head of Programmes foundation", location = "London" },
 ]
+
+# Consider portfolio boards (a16z, Sequoia) — VC job aggregators. Defined here so
+# they appear in the dashboard's Boards tab, but OFF by default (not in
+# JOB_BOARDS): past runs found ~0 mission-fit roles. The consider_board fetcher
+# is not implemented in this repo, so do not enable these without restoring it.
+[boards.a16z]
+strategy = "consider_board"
+name = "a16z Portfolio"
+url = "https://jobs.a16z.com"
+board_blacklist = []
+ttl_days = 3
+tier = "B"
+free = true
+
+[boards.sequoia]
+strategy = "consider_board"
+name = "Sequoia Portfolio"
+url = "https://jobs.sequoiacap.com"
+board_blacklist = []
+ttl_days = 3
+tier = "B"
+free = true

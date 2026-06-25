@@ -50,6 +50,9 @@
         >
           &#128230; <span data-i18n="tab_archive">Archive</span>
         </button>
+        <button class="mode-btn" id="modeBoards" onclick="switchMode('boards')">
+          &#128202; <span data-i18n="tab_boards">Boards</span>
+        </button>
       </div>
       <div class="top-nav-right">
         <span class="hero-date" id="heroDate"></span>
@@ -347,6 +350,20 @@
         <div class="catalog-grid" id="archiveGrid"></div>
       </div>
       <!-- /archive-section -->
+
+      <!-- === BOARDS MODE === -->
+      <div class="boards-section" id="boardsSection">
+        <div class="boards-intro">
+          <h2 class="boards-title">
+            &#128202; <span data-i18n="boards_title">Job boards</span>
+          </h2>
+          <p class="boards-sub" data-i18n="boards_sub">
+            Live status of the aggregators feeding the pipeline.
+          </p>
+        </div>
+        <div class="boards-grid" id="boardsGrid"></div>
+      </div>
+      <!-- /boards-section -->
 
       <!-- === COMPANY PROFILE PAGE === -->
       <div class="company-profile-page" id="companyProfile"></div>

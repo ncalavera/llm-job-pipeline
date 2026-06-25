@@ -3415,3 +3415,85 @@ body[data-dashboard-style="minimal"] .loading-illus {
     display: none;
   }
 }
+
+/* === BOARDS MODE ============================================================ */
+.boards-section {
+  display: none;
+}
+.boards-section.active {
+  display: block;
+  position: relative;
+}
+.boards-intro {
+  margin: 8px 0 20px;
+}
+.boards-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 4px;
+}
+.boards-sub {
+  color: var(--muted);
+  margin: 0;
+}
+.boards-loading,
+.boards-empty {
+  color: var(--muted);
+  padding: 16px 0;
+}
+.boards-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.boards-table th,
+.boards-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--surface);
+}
+.boards-table th {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.boards-table td.num,
+.boards-table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.boards-table td code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  color: #8a5a2a;
+}
+.boards-table a {
+  color: #1e40af;
+  text-decoration: none;
+}
+.boards-table a:hover {
+  text-decoration: underline;
+}
+.board-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.board-status-ok {
+  background: #d1fae5;
+  color: #065f46;
+}
+.board-status-overdue {
+  background: #fef3c7;
+  color: #92400e;
+}
+.board-status-never {
+  background: #fee2e2;
+  color: #991b1b;
+}
