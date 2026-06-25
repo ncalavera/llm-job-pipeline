@@ -13,6 +13,8 @@ import {
   STATUS_BASKET,
   getGroupStatus,
   isGroupCompanyApproved,
+  updateStatus,
+  scheduleRender,
 } from "./state.js";
 import {
   escHtml,
@@ -151,6 +153,15 @@ function renderTriageControls(controlsEl, metrics) {
 // Triage card
 // ---------------------------------------------------------------------------
 
+const MOVE_LABELS = {
+  liked: "Like",
+  to_apply: "Apply",
+  to_research: "Research",
+  to_network: "Network",
+  applied: "Applied ✓",
+  skipped: "Skip",
+};
+
 function buildTriageCard(g, col, review) {
   const firstUrl =
     (g.locations || []).find(function (l) {
@@ -215,9 +226,34 @@ function buildTriageCard(g, col, review) {
       '" target="_blank" rel="noopener">Open \u2197</a></div>'
     : "";
 
+  const moveBtnsHtml =
+    '<div class="triage-move-btns">' +
+    TRIAGE_COLUMNS.filter(function (c) {
+      return c.key !== col.key;
+    })
+      .map(function (c) {
+        return (
+          '<button class="triage-move-btn" data-move-to="' +
+          c.key +
+          '" style="border-color:' +
+          c.color +
+          ";color:" +
+          c.color +
+          '" title="Move to ' +
+          escHtml(MOVE_LABELS[c.key] || c.label) +
+          '">' +
+          escHtml(MOVE_LABELS[c.key] || c.label) +
+          "</button>"
+        );
+      })
+      .join("") +
+    "</div>";
+
   return (
     '<div class="pipe-card' +
     (isCompact ? " compact" : " expanded") +
+    '" data-group-id="' +
+    escHtml(g.id) +
     '">' +
     orgHtml +
     '<div class="pipe-card-title">' +
@@ -234,6 +270,7 @@ function buildTriageCard(g, col, review) {
       : "") +
     openLinkHtml +
     meta +
+    moveBtnsHtml +
     "</div>"
   );
 }
@@ -375,6 +412,22 @@ export function renderPipeline() {
         e.stopPropagation();
         const slug = el.getAttribute("data-company-slug");
         if (slug) window.openCompanyProfile(slug);
+      });
+    });
+
+  // Bind move buttons
+  board
+    .querySelectorAll(".triage-move-btn[data-move-to]")
+    .forEach(function (btn) {
+      btn.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const card = btn.closest(".pipe-card[data-group-id]");
+        if (!card) return;
+        const g = groupsById.get(card.getAttribute("data-group-id"));
+        if (!g) return;
+        updateStatus(g.id, g.member_ids || [], btn.getAttribute("data-move-to"));
+        scheduleRender();
       });
     });
 }
