@@ -1078,12 +1078,47 @@ def update_source_tracking(org_name: str, tier, strategy: str,
     cur.close()
 
 
+def sync_boards(boards: dict) -> None:
+    """Upsert the board catalog (id → cfg) into the `board` table.
+
+    Keeps name/strategy/tier/ttl_days/url in sync with config (JOB_BOARDS) so
+    the dashboard's Boards tab and the board-statuses API have a single source
+    of truth. last_fetched is left untouched (owned by mark_board_fetched).
+    Called at the start of a fetch run.
+    """
+    if not boards:
+        return
+    conn = get_conn()
+    cur = conn.cursor()
+    for board_id, cfg in boards.items():
+        cur.execute(
+            """INSERT INTO board (id, name, strategy, tier, ttl_days, url)
+               VALUES (%s, %s, %s, %s, %s, %s)
+               ON CONFLICT (id) DO UPDATE SET
+                   name = EXCLUDED.name,
+                   strategy = EXCLUDED.strategy,
+                   tier = EXCLUDED.tier,
+                   ttl_days = EXCLUDED.ttl_days,
+                   url = EXCLUDED.url,
+                   updated_at = now()""",
+            (
+                board_id,
+                cfg.get("name", board_id),
+                cfg.get("strategy"),
+                cfg.get("tier"),
+                cfg.get("ttl_days"),
+                cfg.get("url"),
+            ),
+        )
+    cur.close()
+
+
 def should_fetch_board(board_id: str, ttl_days: int) -> bool:
     """Return True if board has not been scraped within ttl_days."""
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        "SELECT last_fetched FROM company WHERE canonical_name = %s",
+        "SELECT last_fetched FROM board WHERE id = %s",
         (board_id,),
     )
     row = cur.fetchone()
@@ -1097,21 +1132,19 @@ def should_fetch_board(board_id: str, ttl_days: int) -> bool:
 
 
 def mark_board_fetched(board_id: str):
-    """Record now as the last fetch date for a board."""
+    """Record now as the last fetch date for a board.
+
+    Inserts a bare row if the board is not yet in the catalog (a fetch can run
+    before sync_boards in edge cases); sync_boards backfills the metadata.
+    """
     conn = get_conn()
     cur = conn.cursor()
-    # Ensure the board company row exists
-    cur.execute("SELECT id FROM company WHERE canonical_name = %s", (board_id,))
-    if not cur.fetchone():
-        cur.execute(
-            """INSERT INTO company (canonical_name, status, aliases)
-               VALUES (%s, 'active', ARRAY[%s]::text[])
-               ON CONFLICT (canonical_name) DO NOTHING""",
-            (board_id, board_id),
-        )
     cur.execute(
-        "UPDATE company SET last_fetched = now() WHERE canonical_name = %s",
-        (board_id,),
+        """INSERT INTO board (id, name, last_fetched)
+           VALUES (%s, %s, now())
+           ON CONFLICT (id) DO UPDATE SET
+               last_fetched = now(), updated_at = now()""",
+        (board_id, board_id),
     )
     cur.close()
 

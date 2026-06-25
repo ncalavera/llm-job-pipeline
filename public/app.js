@@ -44,6 +44,7 @@ import {
 import { renderPipeline } from "./modules/pipeline.js";
 import { initStats, renderStats } from "./modules/stats.js";
 import { initArchive, renderArchive } from "./modules/archive.js";
+import { initBoards } from "./modules/boards.js";
 
 // ---------------------------------------------------------------------------
 // Initialize UI elements (toast, scroll-to-top)
@@ -123,6 +124,7 @@ function switchMode(mode) {
   const pipelineSection = document.getElementById("pipelineSection");
   const statsSection = document.getElementById("statsSection");
   const archiveSection = document.getElementById("archiveSection");
+  const boardsSection = document.getElementById("boardsSection");
 
   document
     .getElementById("modeCatalog")
@@ -138,6 +140,9 @@ function switchMode(mode) {
   var modeArchiveBtn = document.getElementById("modeArchive");
   if (modeArchiveBtn)
     modeArchiveBtn.classList.toggle("active", mode === "archive");
+  var modeBoardsBtn = document.getElementById("modeBoards");
+  if (modeBoardsBtn)
+    modeBoardsBtn.classList.toggle("active", mode === "boards");
 
   catalogSection.classList.toggle("active", mode === "catalog");
   companiesSection.classList.toggle("active", mode === "companies");
@@ -146,6 +151,8 @@ function switchMode(mode) {
   if (statsSection) statsSection.classList.toggle("active", mode === "stats");
   if (archiveSection)
     archiveSection.classList.toggle("active", mode === "archive");
+  if (boardsSection)
+    boardsSection.classList.toggle("active", mode === "boards");
 
   // Lazy-load images for the activated section
   var sectionMap = {
@@ -154,6 +161,7 @@ function switchMode(mode) {
     pipeline: pipelineSection,
     stats: statsSection,
     archive: archiveSection,
+    boards: boardsSection,
   };
   var section = sectionMap[mode];
   if (section) {
@@ -173,6 +181,8 @@ function switchMode(mode) {
     initStats();
   } else if (mode === "archive") {
     initArchive();
+  } else if (mode === "boards") {
+    initBoards();
   }
 }
 

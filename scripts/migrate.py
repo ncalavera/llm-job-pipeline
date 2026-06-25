@@ -264,6 +264,9 @@ class _Postgres:
 
         self.url = os.environ.get("SUPABASE_DB_URL") or os.environ.get("SUPABASE_DIRECT_URL")
         self.conn = _connect_supabase()
+        # _connect_supabase leaves a transaction open from its identity SELECT;
+        # psycopg2 refuses to flip autocommit mid-transaction, so close it first.
+        self.conn.rollback()
         self.conn.autocommit = False
         with self.conn.cursor() as cur:
             cur.execute("SELECT to_regclass('public.schema_migrations')")

@@ -89,7 +89,7 @@ from fetchers import (
 )
 from database_supabase import (
     get_conn, save_vacancies, archive_gone_vacancies,
-    should_fetch_board, mark_board_fetched, save_board_vacancies,
+    should_fetch_board, mark_board_fetched, save_board_vacancies, sync_boards,
     update_source_tracking, load_vacancies, print_reconciliation_report,
     pass_expired_vacancies,
 )
@@ -435,6 +435,10 @@ def main():
             print(f"\n{'─' * 60}")
             print("  JOB BOARDS")
             print(f"{'─' * 60}")
+
+            # Keep the board catalog (name/strategy/tier/ttl/url) in sync with
+            # config so the dashboard's Boards tab has a single source of truth.
+            sync_boards(JOB_BOARDS)
 
             for board_idx, (board_id, board_cfg) in enumerate(JOB_BOARDS.items()):
                 strategy = board_cfg["strategy"]
