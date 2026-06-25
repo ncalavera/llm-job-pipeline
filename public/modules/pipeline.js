@@ -26,6 +26,35 @@ import { T } from "./i18n.js";
 // Triage helpers
 // ---------------------------------------------------------------------------
 
+// Grouping mode for the triage board: "grouped" collapses a company's roles
+// into one card per column; "ungrouped" keeps one card per role (legacy view).
+const GROUP_MODE_KEY = "triageGroupMode";
+let groupMode = (function () {
+  try {
+    return localStorage.getItem(GROUP_MODE_KEY) === "ungrouped"
+      ? "ungrouped"
+      : "grouped";
+  } catch (e) {
+    return "grouped";
+  }
+})();
+
+function setGroupMode(mode) {
+  if (mode !== "grouped" && mode !== "ungrouped") return;
+  if (mode === groupMode) return;
+  groupMode = mode;
+  try {
+    localStorage.setItem(GROUP_MODE_KEY, mode);
+  } catch (e) {
+    /* localStorage unavailable — keep in-memory only */
+  }
+  renderPipeline();
+}
+
+function companyKey(g) {
+  return g.company_slug || normalizeDedupeText(g.org);
+}
+
 function getReviewForGroup(g, reviewByVid) {
   if (reviewByVid[g.id]) return reviewByVid[g.id];
   const memberIds = Array.isArray(g.member_ids) ? g.member_ids : [];
@@ -144,7 +173,24 @@ function renderTriageFunnel(funnelEl, metrics) {
 
 function renderTriageControls(controlsEl, metrics) {
   if (!controlsEl) return;
-  controlsEl.innerHTML = "";
+  controlsEl.innerHTML =
+    '<div class="triage-group-toggle">' +
+    '<button type="button" class="triage-group-btn' +
+    (groupMode === "grouped" ? " active" : "") +
+    '" data-group-mode="grouped">' +
+    T("triage_grouped", "Grouped") +
+    "</button>" +
+    '<button type="button" class="triage-group-btn' +
+    (groupMode === "ungrouped" ? " active" : "") +
+    '" data-group-mode="ungrouped">' +
+    T("triage_ungrouped", "Ungrouped") +
+    "</button>" +
+    "</div>";
+  controlsEl.querySelectorAll("[data-group-mode]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      setGroupMode(btn.getAttribute("data-group-mode"));
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +280,181 @@ function buildTriageCard(g, col, review) {
       : "") +
     openLinkHtml +
     meta +
+    "</div>"
+  );
+}
+
+// Per-status label + colour, derived from the kanban column definitions.
+const STATUS_META = {};
+TRIAGE_COLUMNS.forEach(function (c) {
+  STATUS_META[c.key] = { label: c.label, color: c.color };
+});
+
+// "Furthest-along" status of a company's roles (lowest STATUS_PRI = most advanced).
+function bestStatus(entries) {
+  let best = entries[0]._status;
+  let bestP = STATUS_PRI[best] ?? 99;
+  entries.forEach(function (g) {
+    const p = STATUS_PRI[g._status] ?? 99;
+    if (p < bestP) {
+      bestP = p;
+      best = g._status;
+    }
+  });
+  return best;
+}
+
+// Ungrouped kanban column: one normal card per role, sorted by score.
+function buildColumnCards(entries, col) {
+  return entries
+    .slice()
+    .sort(function (a, b) {
+      return (b.llm_score || 0) - (a.llm_score || 0);
+    })
+    .map(function (g) {
+      return buildTriageCard(g, col, g._review);
+    })
+    .join("");
+}
+
+// Grouped view: ONE card per company spanning every status. The card carries an
+// aggregate status badge ("In progress" when its roles sit in 2+ statuses) and
+// lists each role with its own status chip, score and link.
+function buildCompanyCard(entries) {
+  const head = entries[0];
+  const orgColor = head.org_color ? head.org_color[0] : "var(--coral)";
+  const orgHtml = head.company_slug
+    ? '<button type="button" class="pipe-card-org pipe-card-org-link" style="color:' +
+      orgColor +
+      '" data-company-slug="' +
+      escHtml(head.company_slug) +
+      '" title="Open company card">' +
+      escHtml(head.org) +
+      "</button>"
+    : '<div class="pipe-card-org" style="color:' +
+      orgColor +
+      '">' +
+      escHtml(head.org) +
+      "</div>";
+
+  const statuses = new Set(entries.map((g) => g._status));
+  const top = bestStatus(entries);
+  const meta = STATUS_META[top] || { label: top, color: "var(--muted)" };
+  const badgeLabel =
+    statuses.size > 1 ? T("triage_in_progress", "In progress") : meta.label;
+  const badgeHtml =
+    '<span class="pipe-grp-status" style="--badge:' +
+    meta.color +
+    '">' +
+    escHtml(badgeLabel) +
+    "</span>";
+
+  const roles = entries.slice().sort(function (a, b) {
+    const pa = STATUS_PRI[a._status] ?? 99;
+    const pb = STATUS_PRI[b._status] ?? 99;
+    if (pa !== pb) return pa - pb;
+    return (b.llm_score || 0) - (a.llm_score || 0);
+  });
+
+  const rolesHtml = roles
+    .map(function (g) {
+      const firstUrl =
+        (g.locations || []).find(function (l) {
+          return !!l.url;
+        })?.url ||
+        g.org_url ||
+        "";
+      const locs = (g.locations || [])
+        .map(function (l) {
+          return l.location;
+        })
+        .join(", ");
+      const titleHtml = firstUrl
+        ? '<a class="pipe-grp-role-title" href="' +
+          escHtml(firstUrl) +
+          '" target="_blank" rel="noopener" title="Open external vacancy">' +
+          escHtml(g.title) +
+          "</a>"
+        : '<span class="pipe-grp-role-title">' + escHtml(g.title) + "</span>";
+      const rMeta = STATUS_META[g._status] || {
+        label: g._status,
+        color: "var(--muted)",
+      };
+      return (
+        '<li class="pipe-grp-role">' +
+        '<div class="pipe-grp-role-head">' +
+        titleHtml +
+        (g.llm_score != null
+          ? '<span class="pipe-grp-role-score">' + g.llm_score + "</span>"
+          : "") +
+        "</div>" +
+        '<div class="pipe-grp-role-sub">' +
+        '<span class="pipe-grp-role-chip" style="--chip:' +
+        rMeta.color +
+        '">' +
+        escHtml(rMeta.label) +
+        "</span>" +
+        (locs
+          ? '<span class="pipe-grp-role-loc">' + escHtml(locs) + "</span>"
+          : "") +
+        "</div>" +
+        "</li>"
+      );
+    })
+    .join("");
+
+  return (
+    '<div class="pipe-card pipe-card-group expanded">' +
+    '<div class="pipe-grp-head">' +
+    orgHtml +
+    badgeHtml +
+    "</div>" +
+    '<span class="pipe-grp-count">' +
+    entries.length +
+    (entries.length === 1 ? " role" : " roles") +
+    "</span>" +
+    '<ul class="pipe-grp-roles">' +
+    rolesHtml +
+    "</ul>" +
+    "</div>"
+  );
+}
+
+// Grouped board: a single flat group of company cards (one per company),
+// ordered by furthest-along status then top score.
+function buildGroupedBoard(buckets) {
+  const tracked = [];
+  TRIAGE_COLUMNS.forEach(function (col) {
+    buckets[col.key].forEach(function (e) {
+      tracked.push(e);
+    });
+  });
+
+  const byOrg = new Map();
+  tracked.forEach(function (g) {
+    const k = companyKey(g);
+    if (!byOrg.has(k)) byOrg.set(k, []);
+    byOrg.get(k).push(g);
+  });
+
+  const companies = Array.from(byOrg.values()).sort(function (a, b) {
+    const pa = STATUS_PRI[bestStatus(a)] ?? 99;
+    const pb = STATUS_PRI[bestStatus(b)] ?? 99;
+    if (pa !== pb) return pa - pb;
+    const sa = Math.max.apply(
+      null,
+      a.map((g) => g.llm_score || 0),
+    );
+    const sb = Math.max.apply(
+      null,
+      b.map((g) => g.llm_score || 0),
+    );
+    return sb - sa;
+  });
+
+  return (
+    '<div class="pipe-grouped-grid">' +
+    companies.map(buildCompanyCard).join("") +
     "</div>"
   );
 }
@@ -333,18 +554,13 @@ export function renderPipeline() {
     return;
   }
 
-  const visibleColumns = TRIAGE_COLUMNS;
-
-  board.innerHTML = visibleColumns
-    .map(function (col) {
-      var cards = buckets[col.key]
-        .sort(function (a, b) {
-          return (b.llm_score || 0) - (a.llm_score || 0);
-        })
-        .map(function (g) {
-          return buildTriageCard(g, col, g._review);
-        })
-        .join("");
+  if (groupMode === "grouped") {
+    board.className = "pipeline-board pipeline-board-grouped";
+    board.innerHTML = buildGroupedBoard(buckets);
+  } else {
+    board.className = "pipeline-board";
+    board.innerHTML = TRIAGE_COLUMNS.map(function (col) {
+      var cards = buildColumnCards(buckets[col.key], col);
 
       return (
         '<div class="pipe-col" id="triageCol-' +
@@ -363,8 +579,8 @@ export function renderPipeline() {
         (cards || '<div class="pipe-col-empty">\u2014</div>') +
         "</div></div>"
       );
-    })
-    .join("");
+    }).join("");
+  }
 
   // Bind company profile openers (after DOM mount)
   board
