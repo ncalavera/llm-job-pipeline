@@ -26,31 +26,8 @@ import { T } from "./i18n.js";
 // Triage helpers
 // ---------------------------------------------------------------------------
 
-// Grouping mode for the triage board: "grouped" collapses a company's roles
-// into one card per column; "ungrouped" keeps one card per role (legacy view).
-const GROUP_MODE_KEY = "triageGroupMode";
-let groupMode = (function () {
-  try {
-    return localStorage.getItem(GROUP_MODE_KEY) === "ungrouped"
-      ? "ungrouped"
-      : "grouped";
-  } catch (e) {
-    return "grouped";
-  }
-})();
-
-function setGroupMode(mode) {
-  if (mode !== "grouped" && mode !== "ungrouped") return;
-  if (mode === groupMode) return;
-  groupMode = mode;
-  try {
-    localStorage.setItem(GROUP_MODE_KEY, mode);
-  } catch (e) {
-    /* localStorage unavailable — keep in-memory only */
-  }
-  renderPipeline();
-}
-
+// Triage cards are always grouped by company within each status column: a
+// company with 2+ roles in a column collapses into one card.
 function companyKey(g) {
   return g.company_slug || normalizeDedupeText(g.org);
 }
@@ -173,24 +150,7 @@ function renderTriageFunnel(funnelEl, metrics) {
 
 function renderTriageControls(controlsEl, metrics) {
   if (!controlsEl) return;
-  controlsEl.innerHTML =
-    '<div class="triage-group-toggle">' +
-    '<button type="button" class="triage-group-btn' +
-    (groupMode === "grouped" ? " active" : "") +
-    '" data-group-mode="grouped">' +
-    T("triage_grouped", "Grouped") +
-    "</button>" +
-    '<button type="button" class="triage-group-btn' +
-    (groupMode === "ungrouped" ? " active" : "") +
-    '" data-group-mode="ungrouped">' +
-    T("triage_ungrouped", "Ungrouped") +
-    "</button>" +
-    "</div>";
-  controlsEl.querySelectorAll("[data-group-mode]").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      setGroupMode(btn.getAttribute("data-group-mode"));
-    });
-  });
+  controlsEl.innerHTML = "";
 }
 
 // ---------------------------------------------------------------------------
@@ -364,13 +324,6 @@ function buildColumnCards(entries, col) {
   const sorted = entries.slice().sort(function (a, b) {
     return (b.llm_score || 0) - (a.llm_score || 0);
   });
-  if (groupMode !== "grouped") {
-    return sorted
-      .map(function (g) {
-        return buildTriageCard(g, col, g._review);
-      })
-      .join("");
-  }
   const byOrg = new Map();
   sorted.forEach(function (g) {
     const k = companyKey(g);

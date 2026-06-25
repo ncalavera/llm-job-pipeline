@@ -1369,6 +1369,13 @@ body[data-dashboard-style="minimal"] .loading-illus {
   font-size: 10px;
 }
 
+/* US work-eligibility "unclear" — softer amber (an unknown, not a blocker). */
+.hard-req-tag--warn {
+  background: #fffbeb;
+  color: #b45309;
+  border-color: #fde68a;
+}
+
 /* ===========================================================================
    COMPANIES MODE
    =========================================================================== */
@@ -3143,34 +3150,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
 .triage-skipped-toggle:disabled {
   opacity: 0.45;
   cursor: default;
-}
-
-.triage-group-toggle {
-  display: inline-flex;
-  border: 1px solid var(--surface);
-  border-radius: 999px;
-  overflow: hidden;
-  background: var(--card);
-}
-.triage-group-btn {
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  padding: 6px 14px;
-  font-size: var(--text-xs);
-  font-family: "Onest", sans-serif;
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    background 0.15s ease,
-    color 0.15s ease;
-}
-.triage-group-btn:hover:not(.active) {
-  color: var(--text);
-}
-.triage-group-btn.active {
-  background: var(--surface);
-  color: var(--text);
 }
 
 .pipe-card-group .pipe-grp-count {
