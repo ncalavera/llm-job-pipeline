@@ -13,7 +13,12 @@ import {
 } from "./modules/state.js";
 import { initUI, showToast } from "./modules/helpers.js";
 import { applyI18n, T } from "./modules/i18n.js";
-import { initApi, loadFromServer, loadCompanyStatuses } from "./modules/api.js";
+import {
+  initApi,
+  loadFromServer,
+  loadCompanyStatuses,
+  loadCompanies,
+} from "./modules/api.js";
 import {
   initCatalog,
   updateBasketCounts,
@@ -305,8 +310,14 @@ if (!API_BASE) {
     if (state.currentMode === "catalog") renderCatalog();
     if (state.currentMode === "stats") renderStats();
   });
+  // Live company rows (list, counts, tier, monitoring) — re-render when they
+  // arrive so the Companies tab never shows the stale snapshot list.
+  on("companiesLoaded", function () {
+    if (state.currentMode === "companies") renderCompanies();
+  });
   loadFromServer();
   loadCompanyStatuses();
+  loadCompanies();
   // Watchdog: force init after 5s if statusesLoaded never fires
   setTimeout(function () {
     if (!state.statusesLoaded) {

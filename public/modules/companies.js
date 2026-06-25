@@ -5,9 +5,8 @@
 import {
   state,
   groups,
-  companies,
-  companiesList,
-  companiesBySlug,
+  getCompanies,
+  getCompanyBySlug,
   groupsById,
   STATUS_BASKET,
   STATUS_PRI,
@@ -39,6 +38,15 @@ import { T } from "./i18n.js";
 
 export function initCompanies() {
   renderCompanies();
+}
+
+// Per-company liked/unseen counts. Live rows (/api/companies) carry their own
+// counts; snapshot rows fall back to counting vacancy_ids against dbData.
+function _counts(c) {
+  if (c && (c.liked_count != null || c.new_count != null)) {
+    return { liked: c.liked_count || 0, unseen: c.new_count || 0 };
+  }
+  return getCompanyStatusCounts(c.vacancy_ids);
 }
 
 // ---------------------------------------------------------------------------
@@ -134,7 +142,7 @@ function getFilteredSortedCompanies() {
   var tierFilter = document.getElementById("companyTierFilter").value;
   var subTab = state.companySubTab;
 
-  var filtered = companiesList.filter(function (c) {
+  var filtered = getCompanies().filter(function (c) {
     var reviewSt = _getReviewStatus(c);
     // Sub-tab filter
     if (subTab === "approved" && reviewSt !== "approved") return false;
@@ -162,7 +170,7 @@ function getFilteredSortedCompanies() {
   if (subTab === "approved" && cardFilter) {
     if (cardFilter === "withNew") {
       filtered = filtered.filter(function (c) {
-        return getCompanyStatusCounts(c.vacancy_ids).unseen > 0;
+        return _counts(c).unseen > 0;
       });
     }
     // needAction card uses monitoring chips, not separate filter
@@ -201,15 +209,15 @@ function getFilteredSortedCompanies() {
       va = a.vacancy_count || 0;
       vb = b.vacancy_count || 0;
     } else if (col === "liked") {
-      va = getCompanyStatusCounts(a.vacancy_ids).liked;
-      vb = getCompanyStatusCounts(b.vacancy_ids).liked;
+      va = _counts(a).liked;
+      vb = _counts(b).liked;
     } else if (col === "freshness") {
       va = a.last_fetched || "";
       vb = b.last_fetched || "";
       return asc ? va.localeCompare(vb) : vb.localeCompare(va);
     } else if (col === "new") {
-      va = getCompanyStatusCounts(a.vacancy_ids).unseen;
-      vb = getCompanyStatusCounts(b.vacancy_ids).unseen;
+      va = _counts(a).unseen;
+      vb = _counts(b).unseen;
     } else if (col === "monitoring") {
       var MON_ORD = {
         error: 0,
@@ -414,7 +422,7 @@ function _renderStatsCards(unfilteredByCard, filtered) {
     var staleCount = 0;
     var errorCount = 0;
     for (var i = 0; i < unfilteredByCard.length; i++) {
-      var counts = getCompanyStatusCounts(unfilteredByCard[i].vacancy_ids);
+      var counts = _counts(unfilteredByCard[i]);
       if (counts.unseen > 0) withNew++;
       var ms = _getMonitoringStatus(unfilteredByCard[i]);
       if (ms.level === "stale" || ms.level === "never") staleCount++;
@@ -761,8 +769,9 @@ export function renderCompanies() {
       // Count total for current sub-tab
       var subTab = state.companySubTab;
       var tabTotal = 0;
-      for (var ci = 0; ci < companiesList.length; ci++) {
-        var rs = _getReviewStatus(companiesList[ci]);
+      var allCompanies = getCompanies();
+      for (var ci = 0; ci < allCompanies.length; ci++) {
+        var rs = _getReviewStatus(allCompanies[ci]);
         if (subTab === "approved" && rs === "approved") tabTotal++;
         else if (subTab === "pending" && rs === "pending") tabTotal++;
         else if (subTab === "archived" && rs === "rejected") tabTotal++;
@@ -820,8 +829,9 @@ export function renderCompanies() {
 
 function _updateSubTabCounts() {
   var counts = { approved: 0, pending: 0, rejected: 0 };
-  for (var i = 0; i < companiesList.length; i++) {
-    var rs = _getReviewStatus(companiesList[i]);
+  var allCompanies = getCompanies();
+  for (var i = 0; i < allCompanies.length; i++) {
+    var rs = _getReviewStatus(allCompanies[i]);
     if (rs === "approved") counts.approved++;
     else if (rs === "pending") counts.pending++;
     else if (rs === "rejected") counts.rejected++;
@@ -858,7 +868,7 @@ function _buildRow(c) {
 
 function _buildApprovedRow(c) {
   var fg = (c.org_color || ["#F97316"])[0];
-  var counts = getCompanyStatusCounts(c.vacancy_ids);
+  var counts = _counts(c);
   var tierCls = c.calculated_tier
     ? "ctier-" + c.calculated_tier.toLowerCase()
     : "ctier-none";
@@ -1128,7 +1138,7 @@ export function getCompanySlugFromUrl() {
 }
 
 export function openCompanyProfile(slug) {
-  var c = companiesBySlug.get(slug);
+  var c = getCompanyBySlug(slug);
   if (!c) return;
   state.currentProfileSlug = slug;
   var url = new URL(window.location);
@@ -1146,7 +1156,7 @@ export function closeCompanyProfile() {
 }
 
 export function renderProfileForSlug(slug) {
-  var c = companiesBySlug.get(slug);
+  var c = getCompanyBySlug(slug);
   if (!c) return;
   state.currentProfileSlug = slug;
 

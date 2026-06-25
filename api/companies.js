@@ -1,0 +1,135 @@
+import { getSupabase, validateConfig } from "./_supabase.js";
+
+// GET /api/companies — live company rows for the dashboard's Companies tab.
+//
+// The dashboard snapshot (served by /api/vacancies) is only rebuilt by a
+// fetch/score run, so its company list, statuses and tiers go stale between
+// runs. This endpoint reads the company + vacancy tables live so the Companies
+// tab's list, counts, tier, fit and monitoring are always current. Deep-profile
+// fields (executive summary, full enrichment) still come from the snapshot —
+// they are built from private local files the deployment does not carry.
+//
+// Same-origin only + no-store: the payload carries scoring text (PII), gated by
+// the middleware.js Basic Auth like /api/vacancies.
+const REVIEW_MAP = {
+  active: "approved",
+  candidate: "pending",
+  inactive: "rejected",
+};
+const CUSTOM_BOOST_KEYS = ["career_narrative_boost", "mpa_narrative_boost"];
+
+function slugify(name) {
+  return (name || "").toLowerCase().replace(/ /g, "-").replace(/\./g, "");
+}
+
+function customBoost(mission) {
+  if (!mission || typeof mission !== "object") return null;
+  for (const k of CUSTOM_BOOST_KEYS) {
+    const v = mission[k];
+    if (typeof v === "number") return v;
+  }
+  return null;
+}
+
+export default async function handler(req, res) {
+  res.setHeader("Cache-Control", "no-store");
+
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "GET")
+    return res.status(405).json({ error: "Method not allowed" });
+
+  if (!process.env.AUTH_USER || !process.env.AUTH_PASS) {
+    console.error("companies: refusing to serve — AUTH_USER/AUTH_PASS not set");
+    return res.status(503).json({ error: "Auth not configured" });
+  }
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    console.error(
+      "companies: missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY",
+    );
+    return res.status(500).json({ error: "Server misconfigured" });
+  }
+
+  const warnings = validateConfig();
+  if (warnings.length)
+    console.warn("companies: config warning —", warnings.join("; "));
+
+  try {
+    const supabase = getSupabase();
+
+    const { data: rows, error: cErr } = await supabase
+      .from("company")
+      .select(
+        "id, canonical_name, status, tier, alignment_score, mission_fit, " +
+          "offices, category, fetch_strategy, fetch_status, last_fetched, " +
+          "vacancy_count, new_count",
+      );
+    if (cErr) throw cErr;
+
+    // Live vacancy ids + counts per company (non-archived only — the table's
+    // "Vacancies"/"New"/"Liked" columns are about live roles).
+    const vacByCompany = {};
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: vacs, error: vErr } = await supabase
+        .from("vacancy")
+        .select("id, company_id, status")
+        .neq("status", "archived")
+        .range(from, from + PAGE - 1);
+      if (vErr) throw vErr;
+      for (const v of vacs || []) {
+        const bucket = (vacByCompany[v.company_id] ||= {
+          ids: [],
+          total: 0,
+          liked: 0,
+          unseen: 0,
+        });
+        bucket.ids.push(v.id);
+        bucket.total += 1;
+        if (
+          ["liked", "to_apply", "to_research", "to_network"].includes(v.status)
+        )
+          bucket.liked += 1;
+        if (v.status === "unseen") bucket.unseen += 1;
+      }
+      if (!vacs || vacs.length < PAGE) break;
+    }
+
+    const companies = (rows || []).map((c) => {
+      const vc = vacByCompany[c.id] || {
+        ids: [],
+        total: 0,
+        liked: 0,
+        unseen: 0,
+      };
+      const strategy = c.fetch_strategy || "";
+      return {
+        company_id: String(c.id),
+        name: c.canonical_name,
+        slug: slugify(c.canonical_name),
+        status: (c.status || "").toLowerCase(),
+        review_status: REVIEW_MAP[(c.status || "").toLowerCase()] || "pending",
+        calculated_tier: c.tier || null,
+        alignment_score:
+          c.alignment_score != null ? Number(c.alignment_score) : null,
+        mpa_prestige: customBoost(c.mission_fit),
+        offices: c.offices || "",
+        category: c.category || "",
+        strategy,
+        fetch_status: c.fetch_status || "",
+        last_fetched: c.last_fetched || "",
+        is_manual_check: strategy === "manual_check",
+        needs_source: !strategy && vc.total === 0,
+        is_archived: (c.status || "").toLowerCase() === "inactive",
+        vacancy_count: vc.total,
+        liked_count: vc.liked,
+        new_count: vc.unseen,
+        vacancy_ids: vc.ids,
+      };
+    });
+
+    return res.status(200).json({ companies });
+  } catch (err) {
+    console.error("companies: error", err.message);
+    return res.status(500).json({ error: "Database error" });
+  }
+}

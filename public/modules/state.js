@@ -37,6 +37,20 @@ export const groupsById = new Map(groups.map((g) => [g.id, g]));
 export const companiesBySlug = new Map(companies.map((c) => [c.slug, c]));
 export const companiesList = Array.isArray(companies) ? companies : [];
 
+// Company data source: live rows from /api/companies once loaded, else the
+// (possibly stale) snapshot baked into VACANCY_DATA. The live rows are merged
+// with snapshot deep-profile fields at load time (see api.js loadCompanies).
+export function getCompanies() {
+  return state.liveCompanies || companiesList;
+}
+
+export function getCompanyBySlug(slug) {
+  if (state.liveCompanies) {
+    return state.liveCompanies.find((c) => c.slug === slug) || null;
+  }
+  return companiesBySlug.get(slug) || null;
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -122,6 +136,8 @@ export const state = {
   companyCardFilter: null,
   companyMonitorFilters: new Set(),
   currentProfileSlug: null,
+  // Live company rows from /api/companies (null until loaded → snapshot used).
+  liveCompanies: null,
 };
 
 // Initialize dbData — all vacancies start as "unseen", real statuses come from API
