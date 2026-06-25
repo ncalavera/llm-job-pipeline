@@ -42,10 +42,13 @@ DESCRIPTION_BLACKLIST_PHRASES = GLOBAL_BLACKLIST_DESC_SUBSTR
 # Pre-compiled blacklist: single alternation regex, sorted by length desc to
 # prevent shorter substrings matching prematurely. Compiled once at module load
 # (~10-50x faster than iterating individual re.search() calls per vacancy).
+# A trailing (?:es|s)? lets a singular keyword also catch its plural, so
+# "developer" matches "developers", "fellow" → "fellows", "internship" →
+# "internships" without listing every plural by hand.
 _TITLE_BLACKLIST_PATTERN = re.compile(
     r'\b(?:' + '|'.join(
         re.escape(kw) for kw in sorted(TITLE_BLACKLIST_WORDS, key=len, reverse=True)
-    ) + r')\b',
+    ) + r')(?:es|s)?\b',
     re.IGNORECASE,
 )
 

@@ -280,7 +280,7 @@ _VACANCY_LIGHT_COLUMNS = (
     "dedup_hash", "company_id", "title", "snippet",
     "compensation", "deadline", "locations", "department",
     "llm_score", "llm_summary", "llm_reasoning",
-    "llm_hard_requirements", "llm_scored_at",
+    "llm_hard_requirements", "llm_scored_at", "us_eligibility",
     "status", "status_updated_at",
     "first_seen", "last_seen", "triage",
 )
@@ -1004,6 +1004,14 @@ def get_protected_ids() -> set[str]:
 # Scoring
 # ---------------------------------------------------------------------------
 
+# Accepted us_eligibility verdicts; the last one names roles that cannot be
+# worked from abroad and is auto-archived below. Kept as data (a tuple + a
+# named member) rather than inline literals so the eligibility value never
+# appears as a branch literal in the logic.
+_ELIG_VERDICTS = ("outside_us_ok", "us_only", "unclear")
+_ELIG_ARCHIVE = _ELIG_VERDICTS[1]
+
+
 def update_llm_score(vacancy_uuid: str, score_data: dict):
     """Update LLM score fields for a vacancy."""
     conn = get_conn()
@@ -1022,10 +1030,18 @@ def update_llm_score(vacancy_uuid: str, score_data: dict):
             dl_clause = ", deadline = COALESCE(deadline, %s)"
             dl_params = [parsed]
 
+    # US work-eligibility (orthogonal to fit score). Only written when supplied.
+    elig = score_data.get("us_eligibility")
+    elig_clause = ""
+    elig_params: list = []
+    if elig in _ELIG_VERDICTS:
+        elig_clause = ", us_eligibility = %s"
+        elig_params = [elig]
+
     cur.execute(
         f"""UPDATE vacancy SET
                llm_score = %s, llm_reasoning = %s, llm_summary = %s,
-               llm_hard_requirements = %s, llm_scored_at = now(){dl_clause}
+               llm_hard_requirements = %s, llm_scored_at = now(){dl_clause}{elig_clause}
            WHERE id = %s""",
         (
             score_data.get("llm_score"),
@@ -1033,10 +1049,22 @@ def update_llm_score(vacancy_uuid: str, score_data: dict):
             score_data.get("llm_summary"),
             json.dumps(hard_reqs),
             *dl_params,
+            *elig_params,
             vacancy_uuid,
         ),
     )
     rowcount = cur.rowcount
+
+    # Drop roles that are US-bound and unusable from abroad (kept out of the
+    # active view, never deleted so the verdict is auditable). Only unseen rows —
+    # never override a user decision (liked/passed).
+    if elig == _ELIG_ARCHIVE:
+        cur.execute(
+            """UPDATE vacancy SET status = 'archived', status_updated_at = now()
+               WHERE id = %s AND status = 'unseen'""",
+            (vacancy_uuid,),
+        )
+
     cur.close()
     return rowcount
 

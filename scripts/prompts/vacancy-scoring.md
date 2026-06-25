@@ -62,9 +62,24 @@ All bands are measured against the candidate's TARGET_ROLES and USER_PROFILE —
 - Do NOT invent a "no-description" tag.
 - If description exists (even short), do NOT add "blind-scored".
 
+## US WORK-ELIGIBILITY FIELD
+`us_eligibility` — a SEPARATE judgement that does NOT affect the score. It answers
+only: if this role is in the United States, can the candidate do it from OUTSIDE
+the US (he is abroad, no US work authorisation)? Set one of:
+- **"us_only"** — US-bound and unusable from abroad. Signals: salary given ONLY in
+  USD, US-specific benefits (401k, 403b, US holidays / "Summer Fridays"), a
+  hybrid/in-office policy requiring presence in a US office, "Remote — US" or a
+  US-timezone requirement with no international option.
+- **"outside_us_ok"** — explicitly workable from abroad: "work from anywhere /
+  global / international candidates", visa sponsorship + relocation offered, or a
+  genuinely location-independent remote role with no US-authorisation clause.
+  ALSO use this for any role NOT located in the United States.
+- **"unclear"** — the description gives no signal about US location or work
+  authorisation. Use only when truly silent; do not guess.
+
 ## RESPONSE FORMAT
 Return ONLY valid JSON:
-{"score": <0-100>, "reasoning": "<2-3 sentences explaining the score, be specific about what matches and what doesn't>", "tags": ["<tag1>", "<tag2>", ...], "hard_requirements": ["<blocker1>", ...], "short_summary": "<{{SHORT_SUMMARY_INSTRUCTION}}>", "deadline": "<YYYY-MM-DD or null — application deadline if explicitly mentioned>"}
+{"score": <0-100>, "reasoning": "<2-3 sentences explaining the score, be specific about what matches and what doesn't>", "tags": ["<tag1>", "<tag2>", ...], "hard_requirements": ["<blocker1>", ...], "us_eligibility": "<outside_us_ok | us_only | unclear>", "short_summary": "<{{SHORT_SUMMARY_INSTRUCTION}}>", "deadline": "<YYYY-MM-DD or null — application deadline if explicitly mentioned>"}
 
 ## HARD REQUIREMENTS FIELD
 `hard_requirements` — list of BLOCKING conditions that disqualify the candidate. Return [] if none.

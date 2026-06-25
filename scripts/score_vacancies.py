@@ -256,6 +256,11 @@ def _make_score_data(result: dict, rep: dict) -> dict:
         "llm_summary": result["short_summary"],
         "llm_hard_requirements": result.get("hard_requirements", []),
     }
+    # US work-eligibility (orthogonal to the fit score): outside_us_ok | us_only
+    # | unclear. Only persisted when the subagent supplied a recognised value.
+    elig = result.get("us_eligibility")
+    if elig in ("outside_us_ok", "us_only", "unclear"):
+        data["us_eligibility"] = elig
     # LLM-extracted deadline (nullable, only fills gaps)
     dl = result.get("deadline")
     if dl and dl != "null":
@@ -350,6 +355,7 @@ def cmd_save(_args):
                     "reasoning": entry.get("reasoning", ""),
                     "short_summary": entry.get("short_summary", ""),
                     "hard_requirements": entry.get("hard_requirements", []),
+                    "us_eligibility": entry.get("us_eligibility"),
                     "deadline": entry.get("deadline"),
                 }
                 score_data = _make_score_data(result, entry)

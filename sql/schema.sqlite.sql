@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS vacancy (
     llm_tags              TEXT DEFAULT '[]',        -- JSON array
     llm_hard_requirements TEXT DEFAULT '[]',        -- JSON array
     llm_scored_at         TEXT,
+    us_eligibility        TEXT,                     -- outside_us_ok|us_only|unclear
 
     triage                TEXT DEFAULT '{}',        -- JSON object/array
 

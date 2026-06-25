@@ -85,7 +85,9 @@ words = [
     "expression of interest", "expressions of interest", "talent pool",
     "general application", "talent community", "speculative application",
     "future opportunities", "open application", "talent network",
-    "join our talent",
+    "join our talent", "talent connection", "general interest",
+    "request for proposals", "request for proposal", "career advising",
+    "now closed",
 ]
 
 # Substring (stem) matches — no word boundaries. Ships EMPTY on purpose.

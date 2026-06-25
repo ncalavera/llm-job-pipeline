@@ -393,6 +393,13 @@ For **each** vacancy, launch a **separate** subagent with `model: "opus"`:
 causes systematic over-scoring (+20-50 points). Use the `member_ids` array from
 the `--local` output (the real DB UUIDs), not the top-level `id`.
 
+**Concurrency:** run at most **5 subagents at a time** (rolling). Launch a wave of
+5, await them, then launch the next 5 — never fan out all N at once. The cleanest
+way is a Workflow that loops `parallel()` over groups of 5, one role per `agent()`
+call with `model: "opus"`; the per-role work units come from
+`score_vacancies.py --local` (one JSON object per vacancy, each carrying its own
+`system_prompt` + `user_msg`).
+
 **Show the live card here too.** Scoring fans out over minutes; drive the same
 heartbeat yourself. Once, after loading the batch of `N`:
 

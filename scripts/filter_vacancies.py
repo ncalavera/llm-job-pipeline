@@ -339,19 +339,40 @@ def _entry_is_excluded_geo(loc: dict) -> bool:
     return _normalize_country(country) in _EXCLUDED_COUNTRIES
 
 
+_REMOTE_MARKERS = ("remote", "worldwide", "anywhere", "global", "distributed")
+
+
+def _entry_is_remote(loc: dict) -> bool:
+    """True if a location entry signals remote / location-independent work.
+
+    Protects remote postings from the geography gate: a role open remotely is
+    reachable regardless of the country stamped on it, so it must never be
+    dropped on geography alone (a 'Remote — United States' role may well accept
+    a non-US worker with timezone overlap)."""
+    if "remote" in (loc.get("work_mode") or "").lower():
+        return True
+    text = " ".join(
+        str(loc.get(k) or "") for k in ("location", "city", "region")
+    ).lower()
+    return any(m in text for m in _REMOTE_MARKERS)
+
+
 def _all_locations_excluded(vac: dict) -> bool:
     """True if EVERY location of the vacancy is in a profile-excluded country.
 
     This is the single geography gate. It privileges no country — a location is
     a delete vote only when its resolved COUNTRY is exactly in the user's
     _EXCLUDED_COUNTRIES. Returns False when the user excluded no countries, when
-    the vacancy has no location, or when any single location is NOT excluded
-    (multi-country postings that include a kept country survive).
+    the vacancy has no location, when any single location is NOT excluded
+    (multi-country postings that include a kept country survive), or when any
+    location is remote (geography must not drop a remote-open role).
     """
     if not _EXCLUDED_COUNTRIES:
         return False
 
     locs = vac.get("locations", [])
+    if any(_entry_is_remote(loc) for loc in locs):
+        return False
     if not locs:
         # Legacy: no locations array — check top-level fields.
         region = vac.get("region", "")

@@ -737,11 +737,19 @@ export function isVacancyExpired(g) {
 }
 
 export function hardReqHtml(g) {
-  if (!g.llm_hard_requirements || !g.llm_hard_requirements.length) return "";
-  const tagsHtml = g.llm_hard_requirements
+  // US-eligibility flag: "unclear" means we could not confirm from the listing
+  // whether the role is workable from outside the US. Confirmed us_only roles
+  // are archived upstream, so only "unclear" ever needs surfacing here.
+  const eligChip =
+    g.us_eligibility === "unclear"
+      ? '<span class="hard-req-tag hard-req-tag--warn" title="Could not confirm this role is workable from outside the US">US?</span>'
+      : "";
+  const reqs = g.llm_hard_requirements || [];
+  if (!reqs.length && !eligChip) return "";
+  const tagsHtml = reqs
     .map((label) => `<span class="hard-req-tag">${escHtml(label)}</span>`)
     .join("");
-  return `<div class="hard-req-row">${tagsHtml}</div>`;
+  return `<div class="hard-req-row">${eligChip}${tagsHtml}</div>`;
 }
 
 export function ratingDotsHtml(value, max) {
