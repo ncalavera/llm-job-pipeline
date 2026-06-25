@@ -3225,59 +3225,10 @@ a.pipe-grp-role-title:hover {
   font-weight: 700;
   font-family: "JetBrains Mono", monospace;
 }
-.pipe-grp-role-sub {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 3px;
-  flex-wrap: wrap;
-}
 .pipe-grp-role-loc {
   font-size: var(--text-xs);
   color: var(--muted);
-}
-.pipe-grp-role-chip {
-  flex: none;
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 1px 6px;
-  border-radius: 999px;
-  color: var(--chip, var(--muted));
-  background: color-mix(in srgb, var(--chip, var(--muted)) 16%, transparent);
-}
-
-/* Grouped triage view: header + aggregate status badge */
-.pipe-grp-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.pipe-grp-status {
-  flex: none;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 2px 8px;
-  border-radius: 999px;
-  color: var(--badge, var(--muted));
-  background: color-mix(in srgb, var(--badge, var(--muted)) 16%, transparent);
-  border: 1px solid
-    color-mix(in srgb, var(--badge, var(--muted)) 35%, transparent);
-}
-
-/* One flat group of company cards instead of the kanban columns */
-.pipeline-board-grouped {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 16px;
-  align-items: start;
-}
-.pipe-grouped-grid {
-  display: contents;
+  margin-top: 2px;
 }
 
 .pipeline-board {
