@@ -52,10 +52,10 @@ def main() -> None:
     if s.get("finished"):
         parts = [f"{stage:<6}", "✓ done", f"{total} sources"]
     elif s.get("current"):
-        parts.append(f"· {s['current']}")
+        parts.append(f"· now: {s['current']}")
 
     if extra.get("new") is not None:
-        parts.append(f"· +{extra['new']} new")
+        parts.append(f"· +{extra['new']} new total")
     elif extra.get("enriched") is not None:
         parts.append(f"· {extra['enriched']} enriched")
 
