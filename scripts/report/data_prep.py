@@ -209,6 +209,7 @@ def _build_group(v: dict, org_colors: dict, company_hq: dict) -> dict:
         "llm_summary": v.get("llm_summary", ""),
         "llm_reasoning": v.get("llm_reasoning", ""),
         "llm_hard_requirements": v.get("llm_hard_requirements", []),
+        "us_eligibility": v.get("us_eligibility", ""),
         "snippet": v.get("snippet", ""),
         "full_description": v.get("full_description", ""),
         "compensation": comp,

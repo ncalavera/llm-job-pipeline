@@ -152,7 +152,10 @@ def main():
     from database_supabase import load_vacancies, get_conn
     from psycopg2.extras import Json
 
-    all_vacs = load_vacancies(unscored_only=False, include_inactive_companies=True)
+    # Scope to active-company, unscored vacancies only: enriching inactive or
+    # already-scored rows wastes Firecrawl credits and re-parses vacancies the
+    # pipeline has deliberately dropped (inactive companies stay unscored).
+    all_vacs = load_vacancies(unscored_only=True)
     conn = get_conn()
 
     # Find blind vacancies: no full_description or < 100 chars, has URL

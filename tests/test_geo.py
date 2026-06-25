@@ -133,25 +133,46 @@ def test_belarus_not_us_explicit():
 # excluded country (US, Canada, Georgia, Turkey, …) is treated identically.
 # ---------------------------------------------------------------------------
 
-# Each excluded country drops the same way, regardless of bucket or work_mode.
+# Each excluded country drops the same way — but ONLY for an on-site role. A
+# location in an excluded country drops solely when it is not remote.
 EXCLUDED_SINGLE_LOC_CASES = [
     ("georgia_inperson",  {"country": "Georgia", "city": "Tbilisi", "work_mode": "onsite"}),
-    ("georgia_remote",    {"country": "Georgia", "city": "Tbilisi", "work_mode": "remote"}),
     ("turkey_inperson",   {"country": "Turkey", "city": "Istanbul", "work_mode": "onsite"}),
     ("nigeria_inperson",  {"country": "Nigeria", "city": "Lagos"}),
     ("us_inperson",       {"country": "United States", "city": "New York", "work_mode": "onsite"}),
     ("canada_inperson",   {"country": "Canada", "city": "Toronto", "work_mode": "onsite"}),
-    ("us_v1_text",        {"location": "Remote, USA"}),
 ]
 
 
 @pytest.mark.parametrize("case_id,loc", EXCLUDED_SINGLE_LOC_CASES, ids=[c[0] for c in EXCLUDED_SINGLE_LOC_CASES])
 def test_single_excluded_location_dropped(fv, case_id, loc):
-    """A vacancy whose only location is in an excluded country drops — same
-    mechanism for every country, no special carve-out."""
+    """A vacancy whose only location is an ON-SITE role in an excluded country
+    drops — same mechanism for every country, no special carve-out."""
     vac = {"locations": [loc]}
     assert fv._all_locations_excluded(vac) is True
     assert fv._geo_delete_category(vac) == "delete_geo"
+
+
+# Remote carve-out: a remote-open role is reachable regardless of the country
+# stamped on it, so the geography gate must NOT drop it — even when that country
+# is profile-excluded. Signalled either by work_mode=remote or a "Remote" text.
+REMOTE_IN_EXCLUDED_COUNTRY_CASES = [
+    ("georgia_remote",  {"country": "Georgia", "city": "Tbilisi", "work_mode": "remote"}),
+    ("us_remote_mode",  {"country": "United States", "city": "New York", "work_mode": "remote"}),
+    ("us_v1_text",      {"location": "Remote, USA"}),
+]
+
+
+@pytest.mark.parametrize(
+    "case_id,loc",
+    REMOTE_IN_EXCLUDED_COUNTRY_CASES,
+    ids=[c[0] for c in REMOTE_IN_EXCLUDED_COUNTRY_CASES],
+)
+def test_remote_in_excluded_country_kept(fv, case_id, loc):
+    """A remote role survives the geography gate even in an excluded country."""
+    vac = {"locations": [loc]}
+    assert fv._all_locations_excluded(vac) is False
+    assert fv._geo_delete_category(vac) is None
 
 
 # A NOT-excluded country (recognised or not) keeps the vacancy.

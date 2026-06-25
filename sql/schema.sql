@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS vacancy (
     llm_tags              TEXT[] DEFAULT '{}',
     llm_hard_requirements JSONB DEFAULT '[]',
     llm_scored_at         TIMESTAMPTZ,
+    us_eligibility        TEXT,  -- outside_us_ok|us_only|unclear (orthogonal to score)
 
     -- Free-form triage notes (filled by /triage flow).
     triage                JSONB DEFAULT '{}',
