@@ -65,6 +65,7 @@ export default async function handler(req, res) {
         .from("company")
         .select(
           "id, canonical_name, status, tier, alignment_score, mission_fit, " +
+            "about, notes, experience_match, personal_interest, " +
             "offices, category, fetch_strategy, fetch_status, last_fetched, " +
             "vacancy_count, new_count",
         )
@@ -111,6 +112,18 @@ export default async function handler(req, res) {
         unseen: 0,
       };
       const strategy = c.fetch_strategy || "";
+      const about = c.about && typeof c.about === "object" ? c.about : {};
+      const mission =
+        c.mission_fit && typeof c.mission_fit === "object" ? c.mission_fit : {};
+      const alignmentScore =
+        c.alignment_score != null
+          ? Number(c.alignment_score)
+          : mission.alignment_score != null
+            ? Number(mission.alignment_score)
+            : null;
+      const isEnriched = !!(
+        about.description || mission.alignment_score != null
+      );
       return {
         company_id: String(c.id),
         name: c.canonical_name,
@@ -118,8 +131,7 @@ export default async function handler(req, res) {
         status: (c.status || "").toLowerCase(),
         review_status: REVIEW_MAP[(c.status || "").toLowerCase()] || "pending",
         calculated_tier: c.tier || null,
-        alignment_score:
-          c.alignment_score != null ? Number(c.alignment_score) : null,
+        alignment_score: alignmentScore,
         mpa_prestige: customBoost(c.mission_fit),
         offices: c.offices || "",
         category: c.category || "",
@@ -133,6 +145,23 @@ export default async function handler(req, res) {
         liked_count: vc.liked,
         new_count: vc.unseen,
         vacancy_ids: vc.ids,
+        // --- Enrichment fields (live from the about / mission_fit JSONB) ---
+        is_enriched: isEnriched,
+        experience_match: c.experience_match,
+        personal_interest: c.personal_interest,
+        notes: c.notes || "",
+        description: about.description || "",
+        sector: about.sector || "",
+        founded_year: about.founded_year || "",
+        employee_count: about.employee_count || "",
+        funding_status: about.funding_status || "",
+        hq_location: about.hq_location || "",
+        alignment_label: mission.alignment_label || "",
+        fit_strengths: mission.strengths || [],
+        fit_risks: mission.risks || [],
+        fit_approach: mission.approach || "",
+        experience_reasoning: mission.experience_match_reasoning || "",
+        mission_verdict: mission.mission_verdict || "",
       };
     });
 
