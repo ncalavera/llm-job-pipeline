@@ -34,6 +34,20 @@ os.environ.setdefault(
     os.path.join(tempfile.mkdtemp(prefix="ljp_default_db_"), "jobsearch.db"),
 )
 
+# ---------------------------------------------------------------------------
+# Pin the user profile to the bundled EXAMPLE for the whole run. Without this,
+# prompts._load_user_profile() falls back to the maintainer's real
+# config/user_profile.md (gitignored), whose personal hard filters (e.g.
+# exclude_title_keywords: volunteer, coordinator) drop fixture roles like
+# "Volunteer Coordinator" and break otherwise-neutral fixtures. A clean clone
+# has no such file and passes; this makes the developer's machine behave the
+# same. Tests that need a specific profile still set USER_PROFILE_PATH + reload.
+# ---------------------------------------------------------------------------
+os.environ["USER_PROFILE_PATH"] = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "config", "user_profile.example.md",
+)
+
 
 @pytest.fixture
 def empty_db():
