@@ -13,7 +13,38 @@
 
 import { config } from "./state.js";
 
-const STRINGS = (config && config.i18n) || {};
+const LANG_STORAGE_KEY = "dashboard_lang";
+const ALL = (config && config.i18n_all) || null;
+
+/** Languages the dashboard can switch between (from the baked i18n_all). */
+export function availableLanguages() {
+  return ALL ? Object.keys(ALL) : [(config && config.language) || "en"];
+}
+
+/** The active UI language: user's saved choice, else the server default. */
+export function getLanguage() {
+  var saved = null;
+  try {
+    saved = localStorage.getItem(LANG_STORAGE_KEY);
+  } catch (e) {
+    saved = null;
+  }
+  if (saved && ALL && ALL[saved]) return saved;
+  return (config && config.language) || "en";
+}
+
+/** Persist a language choice and reload so every view re-renders in it. */
+export function setLanguage(lang) {
+  if (lang === getLanguage()) return;
+  try {
+    localStorage.setItem(LANG_STORAGE_KEY, lang);
+  } catch (e) {
+    /* ignore — the reload below still applies it for this load */
+  }
+  location.reload();
+}
+
+const STRINGS = (ALL && ALL[getLanguage()]) || (config && config.i18n) || {};
 const PACK_IMAGES = (config && config.pack_images) || {};
 
 /** Translate a stable key. Returns the baked string, else the fallback. */
