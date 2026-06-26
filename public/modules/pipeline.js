@@ -13,6 +13,7 @@ import {
   STATUS_BASKET,
   getGroupStatus,
   isGroupCompanyApproved,
+  updateStatus,
 } from "./state.js";
 import {
   escHtml,
@@ -157,6 +158,45 @@ function renderTriageControls(controlsEl, metrics) {
 // Triage card
 // ---------------------------------------------------------------------------
 
+const MOVE_LABELS = {
+  liked: "Like",
+  to_apply: "Apply",
+  to_research: "Research",
+  to_network: "Network",
+  applied: "Applied ✓",
+  skipped: "Skip",
+};
+
+// One compact, colour-coded button per column the card is NOT already in.
+// Shared by single and grouped cards; the click handler reads data-canon-ids
+// off the enclosing .pipe-card and moves every role to the target column.
+function buildMoveBtns(curColKey) {
+  return (
+    '<div class="triage-move-btns">' +
+    TRIAGE_COLUMNS.filter(function (c) {
+      return c.key !== curColKey;
+    })
+      .map(function (c) {
+        const lbl = MOVE_LABELS[c.key] || c.label;
+        return (
+          '<button type="button" class="triage-move-btn" data-move-to="' +
+          c.key +
+          '" style="border-color:' +
+          c.color +
+          ";color:" +
+          c.color +
+          '" title="Move to ' +
+          escHtml(lbl) +
+          '">' +
+          escHtml(lbl) +
+          "</button>"
+        );
+      })
+      .join("") +
+    "</div>"
+  );
+}
+
 function buildTriageCard(g, col, review) {
   const firstUrl =
     (g.locations || []).find(function (l) {
@@ -224,6 +264,8 @@ function buildTriageCard(g, col, review) {
   return (
     '<div class="pipe-card' +
     (isCompact ? " compact" : " expanded") +
+    '" data-canon-ids="' +
+    escHtml(JSON.stringify([g.id])) +
     '">' +
     orgHtml +
     '<div class="pipe-card-title">' +
@@ -240,6 +282,7 @@ function buildTriageCard(g, col, review) {
       : "") +
     openLinkHtml +
     meta +
+    buildMoveBtns(col.key) +
     "</div>"
   );
 }
@@ -303,9 +346,15 @@ function buildTriageGroupCard(entries, col) {
     })
     .join("");
 
+  const canonIds = entries.map(function (g) {
+    return g.id;
+  });
+
   return (
     '<div class="pipe-card pipe-card-group' +
     (col.compact ? " compact" : " expanded") +
+    '" data-canon-ids="' +
+    escHtml(JSON.stringify(canonIds)) +
     '">' +
     orgHtml +
     '<span class="pipe-grp-count">' +
@@ -314,6 +363,7 @@ function buildTriageGroupCard(entries, col) {
     '<ul class="pipe-grp-roles">' +
     rolesHtml +
     "</ul>" +
+    buildMoveBtns(col.key) +
     "</div>"
   );
 }
@@ -465,6 +515,31 @@ export function renderPipeline() {
         e.stopPropagation();
         const slug = el.getAttribute("data-company-slug");
         if (slug) window.openCompanyProfile(slug);
+      });
+    });
+
+  // Bind move buttons. Each moves every role on the card (one role for a
+  // single card, all of them for a grouped card) to the target column.
+  // updateStatus emits "statusChanged"; app.js handles save + re-render.
+  board
+    .querySelectorAll(".triage-move-btn[data-move-to]")
+    .forEach(function (btn) {
+      btn.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const card = btn.closest(".pipe-card[data-canon-ids]");
+        if (!card) return;
+        const target = btn.getAttribute("data-move-to");
+        let ids;
+        try {
+          ids = JSON.parse(card.getAttribute("data-canon-ids"));
+        } catch (_) {
+          return;
+        }
+        (ids || []).forEach(function (id) {
+          const g = groupsById.get(id);
+          if (g) updateStatus(g.id, g.member_ids || [], target);
+        });
       });
     });
 }
