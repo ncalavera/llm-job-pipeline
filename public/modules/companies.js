@@ -717,6 +717,40 @@ function _renderMonitoringChips(baseList) {
 // Review complete banner
 // ---------------------------------------------------------------------------
 
+// Persistent note on the Pending sub-tab: vacancies from not-yet-approved
+// companies stay hidden from the job list until the company is approved.
+function _renderPendingDisclaimer(pendingCompanies) {
+  var statsEl = document.getElementById("companyEnrichmentStats");
+  if (!statsEl) return;
+  var existing = document.getElementById("companyPendingDisclaimer");
+  if (existing) existing.remove();
+
+  if (state.companySubTab !== "pending") return;
+
+  var orgs = 0;
+  var vacs = 0;
+  for (var i = 0; i < pendingCompanies.length; i++) {
+    var n = pendingCompanies[i].vacancy_count || 0;
+    if (n > 0) {
+      orgs++;
+      vacs += n;
+    }
+  }
+  if (vacs === 0) return;
+
+  var note = document.createElement("div");
+  note.id = "companyPendingDisclaimer";
+  note.className = "ces-pending-hidden";
+  note.textContent =
+    "ℹ️ " +
+    orgs +
+    (orgs === 1 ? " company here has " : " companies here have ") +
+    vacs +
+    (vacs === 1 ? " vacancy" : " vacancies") +
+    " hidden from your job list — approve a company to surface its roles.";
+  statsEl.parentNode.insertBefore(note, statsEl.nextSibling);
+}
+
 function showReviewComplete() {
   var statsEl = document.getElementById("companyEnrichmentStats");
   if (statsEl) {
@@ -748,6 +782,7 @@ export function renderCompanies() {
   var filtered = getFilteredSortedCompanies();
 
   _renderStatsCards(unfilteredByCard, filtered);
+  _renderPendingDisclaimer(unfilteredByCard);
   _renderMonitoringChips(unfilteredByCard);
 
   var shownEl = document.getElementById("companyShownCount");
