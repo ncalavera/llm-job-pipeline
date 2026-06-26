@@ -3404,6 +3404,23 @@ a.pipe-grp-role-title:hover {
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
+/* Drag-and-drop (SortableJS) */
+.pipe-card {
+  cursor: grab;
+}
+.pipe-card:active {
+  cursor: grabbing;
+}
+.pipe-card-ghost {
+  opacity: 0.4;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border: 1px dashed var(--border);
+}
+.pipe-card-dragging {
+  opacity: 0.95;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
 .pipeline-empty {
   text-align: center;
   padding: 60px 20px;
