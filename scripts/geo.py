@@ -215,6 +215,68 @@ def _country_in_text(text: str, known: set[str], city_country: dict[str, str]) -
     return None
 
 
+def _country_region_map() -> dict[str, str]:
+    """country (lowercased canonical) → region id, from geo.country_region."""
+    return settings.geo_country_region()
+
+
+def region_for_country(name: str) -> str | None:
+    """Map a bare country name to its world region id, or None if unknown.
+
+    Canonicalizes aliases first (so "usa" → "united states" → "north_america").
+    Returns None for an empty/unrecognised name so callers can treat it as
+    "no region resolved" (never banned, never penalised on geography).
+    """
+    text = canonical_country(name)
+    if not text:
+        return None
+    return _country_region_map().get(text)
+
+
+def is_remote_mode(work_mode: str) -> bool:
+    """True if a work_mode string signals remote work (substring match).
+
+    Mirrors the work_mode half of filter_vacancies._entry_is_remote so the
+    pre-score filter, the post-score ban, and the soft penalty all agree on what
+    "remote" means (e.g. "remote", "fully remote", "remote-friendly")."""
+    return "remote" in (work_mode or "").lower()
+
+
+def country_banned(
+    country: str,
+    *,
+    banned_regions: "frozenset[str] | set[str]",
+    keep_countries: "frozenset[str] | set[str]",
+    banned_countries: "frozenset[str] | set[str]",
+) -> bool:
+    """Single source of truth for the geo ban decision on a resolved country.
+
+    Whitelist (keep_countries) always wins; otherwise a country is banned when
+    explicitly listed (banned_countries) or sitting in a banned world region.
+    Callers pass already-canonicalised sets (see config.GEO_* caches). Remote
+    handling is the caller's responsibility — a remote role is reachable
+    regardless of country."""
+    c = canonical_country(country or "")
+    if not c or c in keep_countries:
+        return False
+    if c in banned_countries:
+        return True
+    region = region_for_country(c)
+    return bool(region and region in banned_regions)
+
+
+def region_for_location(loc: dict) -> str | None:
+    """Return the world region id of a single location entry, or None.
+
+    Resolves the entry's country via country_for_location(), then maps it to a
+    region. None means no resolvable country/region → geography stays neutral.
+    """
+    country = country_for_location(loc)
+    if not country:
+        return None
+    return region_for_country(country)
+
+
 def geo_bucket(loc: dict) -> str:
     """Map one location entry to a geography bucket.
 

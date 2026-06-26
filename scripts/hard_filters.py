@@ -54,38 +54,86 @@ def _split_csv(value: str) -> list[str]:
     return items
 
 
-def _parse_section(body: str) -> dict[str, list[str]]:
-    """Parse a HARD_FILTERS section body into the two filter lists."""
+_TRUE_TOKENS = {"yes", "true", "1", "on", "y"}
+
+
+def _parse_bool(value: str, default: bool = False) -> bool:
+    """Parse a yes/no field. Empty/placeholder → default."""
+    token = (value or "").strip().lower()
+    if token in _EMPTY_TOKENS:
+        return default
+    return token in _TRUE_TOKENS
+
+
+def _parse_int(value: str, default: int = 0) -> int:
+    """Parse an integer field. Empty/placeholder/garbage → default."""
+    token = (value or "").strip()
+    if token.lower() in _EMPTY_TOKENS:
+        return default
+    try:
+        return int(token)
+    except ValueError:
+        return default
+
+
+# Default geo policy when the profile says nothing: drop nothing, penalise
+# nothing. A fresh clone stays geography-neutral until configured in the profile.
+_GEO_DEFAULTS: dict = {
+    "exclude_countries": [],
+    "exclude_title_keywords": [],
+    "ban_regions": [],
+    "keep_countries": [],
+    "ban_countries": [],
+    "ban_us_only": False,
+    "onsite_ok_regions": [],
+    "onsite_penalty": 0,
+}
+
+
+def _parse_section(body: str) -> dict:
+    """Parse a HARD_FILTERS section body into the filter lists + geo policy."""
     body = _HTML_COMMENT.sub("", body or "")
-    countries: list[str] = []
-    title_keywords: list[str] = []
+    out = dict(_GEO_DEFAULTS)
+    # field name → kind: "csv" | "bool" | "int".
+    fields = {
+        "exclude_countries": "csv",
+        "exclude_title_keywords": "csv",
+        "ban_regions": "csv",
+        "keep_countries": "csv",
+        "ban_countries": "csv",
+        "ban_us_only": "bool",
+        "onsite_ok_regions": "csv",
+        "onsite_penalty": "int",
+    }
     for line in body.splitlines():
         stripped = line.strip()
         low = stripped.lower()
-        if low.startswith("exclude_countries:"):
-            countries = _split_csv(stripped.split(":", 1)[1])
-        elif low.startswith("exclude_title_keywords:"):
-            title_keywords = _split_csv(stripped.split(":", 1)[1])
-    return {
-        "exclude_countries": countries,
-        "exclude_title_keywords": title_keywords,
-    }
+        for name, kind in fields.items():
+            if low.startswith(name + ":"):
+                raw = stripped.split(":", 1)[1]
+                if kind == "csv":
+                    out[name] = _split_csv(raw)
+                elif kind == "bool":
+                    out[name] = _parse_bool(raw)
+                else:
+                    out[name] = _parse_int(raw)
+                break
+    return out
 
 
-def load_hard_filters() -> dict[str, list[str]]:
-    """Return the user's HARD filters from the active profile.
+def load_hard_filters() -> dict:
+    """Return the user's HARD filters + geo policy from the active profile.
 
-    Always returns ``{"exclude_countries": [...], "exclude_title_keywords":
-    [...]}`` with empty lists when the profile, the section, or a field is
-    absent or set to ``(none)``. Never raises — a missing/broken profile yields
-    empty filters (drop nothing) so the pipeline still runs out of the box.
+    Always returns the full geo-policy dict (see ``_GEO_DEFAULTS``) with neutral
+    defaults when the profile, the section, or a field is absent or ``(none)``.
+    Never raises — a missing/broken profile yields neutral filters (drop and
+    penalise nothing) so the pipeline still runs out of the box.
     """
-    empty = {"exclude_countries": [], "exclude_title_keywords": []}
     try:
         sections = _load_user_profile()
     except Exception:
-        return empty
+        return dict(_GEO_DEFAULTS)
     body = sections.get("HARD_FILTERS")
     if not body:
-        return empty
+        return dict(_GEO_DEFAULTS)
     return _parse_section(body)

@@ -113,6 +113,51 @@ EXCLUDE_COUNTRIES = list(_HARD_FILTERS["exclude_countries"])
 #: boundaries against the job title. Empty → drop nothing on title discipline.
 EXCLUDE_TITLE_KEYWORDS = list(_HARD_FILTERS["exclude_title_keywords"])
 
+# --- Geo policy (region-based, see scripts/geo.py + filter_vacancies.py) ------
+#: World regions the user hard-bans (e.g. "africa", "south_asia"). A vacancy is
+#: dropped when EVERY location resolves to a banned region — unless the country
+#: is whitelisted in GEO_KEEP_COUNTRIES or the role is remote. Empty → ban none.
+GEO_BAN_REGIONS = list(_HARD_FILTERS["ban_regions"])
+
+#: Countries that override a region ban (e.g. keep "georgia" though "ex_ussr" is
+#: banned). Exact (canonical) country names. Empty → no overrides.
+GEO_KEEP_COUNTRIES = list(_HARD_FILTERS["keep_countries"])
+
+#: Extra explicit country bans on top of GEO_BAN_REGIONS. Empty → none.
+GEO_BAN_COUNTRIES = list(_HARD_FILTERS["ban_countries"])
+
+#: When True, drop roles the scorer flags us_eligibility == "us_only"
+#: (US/Canada-residency-bound, unreachable from abroad). Default False.
+GEO_BAN_US_ONLY = bool(_HARD_FILTERS["ban_us_only"])
+
+#: Regions where an on-site role gets NO soft penalty (e.g. "europe"). Remote
+#: roles are never penalised regardless. Empty → every on-site role penalised.
+GEO_ONSITE_OK_REGIONS = list(_HARD_FILTERS["onsite_ok_regions"])
+
+#: Points subtracted from the score for an on-site role outside
+#: GEO_ONSITE_OK_REGIONS (makes remote preferable). 0 → no soft penalty.
+GEO_ONSITE_PENALTY = int(_HARD_FILTERS["onsite_penalty"])
+
+# Canonicalised, ready-to-query caches built ONCE here (not per vacancy) so the
+# pre-score filter, the post-score ban, and the soft penalty share one normalised
+# view of the policy. geo.canonical_country only depends on settings → no cycle.
+from geo import canonical_country as _canon  # noqa: E402
+
+GEO_BANNED_COUNTRIES = frozenset(
+    _canon(c) for c in (list(EXCLUDE_COUNTRIES) + list(GEO_BAN_COUNTRIES)) if _canon(c)
+)
+GEO_BANNED_REGIONS = frozenset(
+    r.lower().strip() for r in GEO_BAN_REGIONS if r and r.strip()
+)
+GEO_KEEP_COUNTRIES_SET = frozenset(
+    _canon(c) for c in GEO_KEEP_COUNTRIES if _canon(c)
+)
+GEO_ONSITE_OK_SET = frozenset(
+    r.lower().strip() for r in GEO_ONSITE_OK_REGIONS if r and r.strip()
+)
+#: True when ANY geography ban is configured (explicit country or whole region).
+GEO_ACTIVE = bool(GEO_BANNED_COUNTRIES or GEO_BANNED_REGIONS)
+
 # Backward-compat: a few call sites still import LOCATION_BLACKLIST as a list of
 # location-text substrings. It is now empty by default and only filled from the
 # profile's exclude_countries (so legacy substring matching keeps working for

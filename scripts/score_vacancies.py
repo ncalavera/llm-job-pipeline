@@ -76,6 +76,8 @@ if "--local" in sys.argv or "--save" not in sys.argv:
 import filters  # noqa: E402
 from prompts import VACANCY_SCORING_PROMPT as SYSTEM_PROMPT  # noqa: E402
 from prompts import VACANCY_SCORING_USER_TEMPLATE as USER_TEMPLATE  # noqa: E402
+from config import GEO_ONSITE_PENALTY, GEO_ONSITE_OK_SET  # noqa: E402
+from geo import region_for_country, is_remote_mode  # noqa: E402
 
 sys.stdout = _real_stdout
 
@@ -243,18 +245,44 @@ def _load_and_dedup(*, force=False, include_passed=False,
 # Shared: build score_data
 # ---------------------------------------------------------------------------
 
+def _apply_onsite_penalty(score: int, country: str, work_mode: str) -> int:
+    """Subtract the profile's on-site penalty for a non-remote role outside the
+    no-penalty regions (makes remote roles preferable). Pure score nudge — hard
+    geography bans are enforced separately (pre-score filter + save-time net).
+
+    No-op when the profile sets no penalty, when the role is remote, when the
+    country is unknown, or when its region is in onsite_ok_regions.
+    """
+    if not GEO_ONSITE_PENALTY or is_remote_mode(work_mode):
+        return score
+    region = region_for_country(country or "")
+    if not region or region in GEO_ONSITE_OK_SET:
+        return score
+    return max(0, score - GEO_ONSITE_PENALTY)
+
+
 def _make_score_data(result: dict, rep: dict) -> dict:
     """Build score_data dict from an LLM result.
 
-    Geography is enforced in the pre-score filter (delete_geo), not here —
-    scoring no longer caps by location.
+    Hard geography bans are enforced in the pre-score filter (delete_geo) and a
+    save-time net (update_llm_score). Here we apply only the SOFT on-site penalty
+    that nudges non-remote roles outside the preferred regions down the list.
     """
     score = result["score"]
+    country = (result.get("country") or "").strip()
+    work_mode = (result.get("work_mode") or "").strip()
+    adjusted = _apply_onsite_penalty(score, country, work_mode)
+    reasoning = result["reasoning"]
+    if adjusted != score:
+        reasoning = f"{reasoning} [geo: -{score - adjusted} on-site outside preferred regions]"
     data = {
-        "llm_score": score,
-        "llm_reasoning": result["reasoning"],
+        "llm_score": adjusted,
+        "llm_reasoning": reasoning,
         "llm_summary": result["short_summary"],
         "llm_hard_requirements": result.get("hard_requirements", []),
+        # Carried for the save-time geo ban net (not DB columns themselves).
+        "country": country,
+        "work_mode": work_mode,
     }
     # US work-eligibility (orthogonal to the fit score): outside_us_ok | us_only
     # | unclear. Only persisted when the subagent supplied a recognised value.
@@ -355,6 +383,8 @@ def cmd_save(_args):
                     "reasoning": entry.get("reasoning", ""),
                     "short_summary": entry.get("short_summary", ""),
                     "hard_requirements": entry.get("hard_requirements", []),
+                    "country": entry.get("country"),
+                    "work_mode": entry.get("work_mode"),
                     "us_eligibility": entry.get("us_eligibility"),
                     "deadline": entry.get("deadline"),
                 }

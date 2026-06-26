@@ -210,6 +210,17 @@ def geo_work_mode() -> dict[str, set]:
     }
 
 
+def geo_country_region() -> dict:
+    """country name (lowercased) → world region id. {} if missing.
+
+    Structural world data (which region a country is in). The user profile,
+    not this map, decides which regions to ban or penalise.
+    """
+    sec = _section("geo", "country_region")
+    return {str(k).lower().strip(): str(v).lower().strip()
+            for k, v in sec.items()} if sec else {}
+
+
 def geo_country_aliases() -> dict:
     """alias (lowercased) → canonical country name (lowercased). {} if missing.
 

@@ -192,24 +192,38 @@ per-strategy JSON (Greenhouse EU, Workday tenant/board, Firecrawl url).
 
 ### 2d. Confirm hard filters before the first filter run
 
-Show which jobs get dropped automatically BEFORE scoring. These "hard filters"
-come from the `## HARD_FILTERS` section of the profile and are EMPTY by default —
-so by default nothing is dropped on geography or job title:
+Show which jobs get dropped automatically and how geography is ranked. These
+come from the `## HARD_FILTERS` section of the profile and are NEUTRAL by default
+— so by default nothing is dropped or penalised on geography or job title:
 
 ```bash
 python3 -c "
 import sys; sys.path.insert(0, 'scripts')
 from hard_filters import load_hard_filters
 hf = load_hard_filters()
-c = hf['exclude_countries']; k = hf['exclude_title_keywords']
-print('Countries dropped:', ', '.join(c) if c else '(none)')
-print('Title words dropped:', ', '.join(k) if k else '(none)')
+fmt = lambda v: ', '.join(v) if v else '(none)'
+print('Banned regions:', fmt(hf['ban_regions']))
+print('Kept (whitelist):', fmt(hf['keep_countries']))
+print('Banned countries:', fmt(hf['ban_countries'] + hf['exclude_countries']))
+print('Drop US/Canada-only roles:', 'yes' if hf['ban_us_only'] else 'no')
+print('On-site no-penalty regions:', fmt(hf['onsite_ok_regions']), '| penalty:', hf['onsite_penalty'])
+print('Title words dropped:', fmt(hf['exclude_title_keywords']))
 "
 ```
 
-Say it back plainly ("Before scoring I'll drop jobs ONLY in: (none); and jobs
-whose title contains: (none). Everything else gets scored."). If the user wants
-changes, point them to `/jobs-profile`, then continue once they confirm.
+If the profile geo policy is still empty, this is the moment to offer to set it:
+ask the user (a) which world regions to skip entirely (remote is always kept;
+whitelist exceptions like their home country), (b) whether to drop roles bound to
+the US/Canada only, and (c) whether to prefer remote by penalising on-site roles
+outside their home region. Region ids: `europe, north_america, latin_america,
+middle_east, africa, south_asia, southeast_asia, east_asia, ex_ussr, oceania`.
+Write their answers into `## HARD_FILTERS` (fields `ban_regions`,
+`keep_countries`, `ban_us_only`, `onsite_ok_regions`, `onsite_penalty`) or point
+them to `/jobs-profile`.
+
+Then say the policy back plainly ("Before scoring I'll drop jobs in regions: …;
+keep remote everywhere; drop US/Canada-only: …; lower on-site outside: … by N
+points. Everything else gets scored."). Continue once they confirm.
 
 After inserting, set the fetch scope for Step 3 to **only the just-added
 companies** (`--companies "{names}" --no-boards`) to keep the first run fast,

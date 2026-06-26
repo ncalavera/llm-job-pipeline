@@ -50,8 +50,10 @@ SCAN_DIRS = [REPO / "docs", REPO / ".claude" / "commands"]
 SCAN_ROOT_FILES = ["README.md", "AGENTS.md", "INSTALL.md", "INSTALL-EASY.md"]
 
 # Path prefixes (relative to repo) whose stale names are intentional design
-# records, not live instructions.
-EXCLUDE_PREFIXES = ("docs/plans/", "docs/brainstorms/")
+# records, not live instructions. `docs/solutions/` are debugging post-mortems
+# that quote URL paths like `/jobs/` (a data.org redirect target), which are not
+# slash-command references.
+EXCLUDE_PREFIXES = ("docs/plans/", "docs/brainstorms/", "docs/solutions/")
 
 
 def _scanned_files() -> list[Path]:

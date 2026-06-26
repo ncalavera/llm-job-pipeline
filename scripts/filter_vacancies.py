@@ -36,9 +36,10 @@ if __name__ == "__main__" and wants_help():
 
 from config import (
     COMPANIES, VACANCIES_DIR, GLOBAL_BLACKLIST,
-    EXCLUDE_COUNTRIES, resolve_canonical_name,
+    GEO_BANNED_COUNTRIES, GEO_BANNED_REGIONS, GEO_KEEP_COUNTRIES_SET, GEO_ACTIVE,
+    resolve_canonical_name,
 )
-from geo import canonical_country, country_for_location
+from geo import canonical_country, country_for_location, country_banned
 from db_backend import RealDictCursor
 import filters
 from database_supabase import (
@@ -303,40 +304,53 @@ def _normalize_country(name: str) -> str:
     return canonical_country(name)
 
 
-#: Exact (canonical) country names the user excluded. Empty → drop nothing.
-_EXCLUDED_COUNTRIES: frozenset[str] = frozenset(
-    _normalize_country(c) for c in EXCLUDE_COUNTRIES if _normalize_country(c)
-)
+# Canonicalised policy caches, built once in config.py and aliased here so the
+# geo gate (and the snapshot test, which patches these names) share one view.
+_BANNED_COUNTRIES = GEO_BANNED_COUNTRIES
+_BANNED_REGIONS = GEO_BANNED_REGIONS
+_KEEP_COUNTRIES = GEO_KEEP_COUNTRIES_SET
+_GEO_ACTIVE = GEO_ACTIVE
+
+
+def _country_is_banned(country: str) -> bool:
+    """True if a resolved country is hard-banned by the profile. Thin wrapper over
+    the shared geo.country_banned predicate (single source of truth)."""
+    return country_banned(
+        country,
+        banned_regions=_BANNED_REGIONS,
+        keep_countries=_KEEP_COUNTRIES,
+        banned_countries=_BANNED_COUNTRIES,
+    )
 
 
 def _entry_is_excluded_geo(loc: dict) -> bool:
-    """True if a single location entry's COUNTRY is exactly in the user's
-    exclude_countries. Always False when the user listed no exclude_countries.
+    """True if a single location entry's COUNTRY is hard-banned by the profile.
 
-    Matching is on the EXACT (normalized) country name — never on a region
-    bucket. Handles v2 entries (country/city fields) and v1 entries (free-text
+    Banned = the resolved country is explicitly excluded OR sits in a banned
+    world region, and is not whitelisted. Always False when no geo ban is set.
+    Handles v2 entries (country/city fields) and v1 entries (free-text
     'location'): country_for_location() resolves the country from either form.
     A location whose country cannot be resolved is never excluded.
     """
-    if not _EXCLUDED_COUNTRIES:
-        return False  # nothing excluded → keep everything on geography
+    if not _GEO_ACTIVE:
+        return False  # nothing banned → keep everything on geography
 
     # Multi-city free text (";"-joined): excluded only when EVERY part resolves
-    # to an excluded country. A single kept part keeps the whole entry.
+    # to a banned country. A single kept part keeps the whole entry.
     raw_text = _normalize_country(loc.get("location") or "") or _normalize_country(loc.get("city") or "")
     if ";" in raw_text and not _normalize_country(loc.get("country") or ""):
         parts = [p.strip() for p in raw_text.split(";") if p.strip()]
         if not parts:
             return False
         return all(
-            _normalize_country(country_for_location({"location": part}) or "") in _EXCLUDED_COUNTRIES
+            _country_is_banned(country_for_location({"location": part}) or "")
             for part in parts
         )
 
     country = country_for_location(loc)
     if not country:
         return False
-    return _normalize_country(country) in _EXCLUDED_COUNTRIES
+    return _country_is_banned(country)
 
 
 _REMOTE_MARKERS = ("remote", "worldwide", "anywhere", "global", "distributed")
@@ -367,7 +381,7 @@ def _all_locations_excluded(vac: dict) -> bool:
     (multi-country postings that include a kept country survive), or when any
     location is remote (geography must not drop a remote-open role).
     """
-    if not _EXCLUDED_COUNTRIES:
+    if not _GEO_ACTIVE:
         return False
 
     locs = vac.get("locations", [])

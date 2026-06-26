@@ -290,8 +290,11 @@ def _run_classify(tmp_path, monkeypatch):
         import filter_vacancies
         importlib.reload(filter_vacancies)
         _freeze_clock(monkeypatch, filter_vacancies)
-        monkeypatch.setattr(filter_vacancies, "_EXCLUDED_COUNTRIES",
+        monkeypatch.setattr(filter_vacancies, "_BANNED_COUNTRIES",
                             _excluded_countries())
+        # The geo gate is inert unless a ban is configured; force it on so the
+        # patched country set is honoured under the test's empty profile.
+        monkeypatch.setattr(filter_vacancies, "_GEO_ACTIVE", True)
 
         keys_by_class = {}
         for entry in _load_fixtures():

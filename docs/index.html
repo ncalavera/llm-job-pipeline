@@ -1322,6 +1322,44 @@
           },
         },
         {
+          id: "geo",
+          type: "selects",
+          req: false,
+          en: {
+            t: "Geography filters",
+            h: "Shapes which locations the pipeline keeps and how it ranks them. Remote roles are always kept.",
+            a: "Regions to skip entirely",
+            aopts: [
+              ["", "None — consider everywhere"],
+              ["developing", "Developing regions (Africa, South & SE Asia)"],
+              ["developing_exussr", "Developing regions + ex-USSR states"],
+            ],
+            b: "On-site roles outside your home region",
+            bopts: [
+              ["consider", "Consider them equally"],
+              ["penalise", "Prefer remote — rank on-site abroad lower"],
+            ],
+          },
+          ru: {
+            t: "Гео-фильтры",
+            h: "Определяет, какие локации конвейер оставляет и как ранжирует. Удалёнка остаётся всегда.",
+            a: "Регионы, которые пропускать целиком",
+            aopts: [
+              ["", "Никакие — рассматривать везде"],
+              [
+                "developing",
+                "Развивающиеся (Африка, Южная и Юго-Восточная Азия)",
+              ],
+              ["developing_exussr", "Развивающиеся + бывший СССР"],
+            ],
+            b: "Офисные роли вне домашнего региона",
+            bopts: [
+              ["consider", "Рассматривать наравне"],
+              ["penalise", "Предпочитаю удалёнку — занижать офис за рубежом"],
+            ],
+          },
+        },
+        {
           id: "salary",
           type: "text",
           req: false,
@@ -1573,6 +1611,18 @@
         const vw = answers.visa_when || {};
         const outLang = lang === "ru" ? "Russian" : "English";
 
+        // --- Geo HARD_FILTERS derived from the geo + visa answers ---
+        const geo = answers.geo || {};
+        const banRegions =
+          geo.a === "developing_exussr"
+            ? "africa, south_asia, southeast_asia, ex_ussr"
+            : geo.a === "developing"
+              ? "africa, south_asia, southeast_asia"
+              : "(none)";
+        const onsitePenalty = geo.b === "penalise" ? "15" : "0";
+        const onsiteOk = geo.b === "penalise" ? "europe" : "(none)";
+        const banUsOnly = (vw.a || "").startsWith("Needs") ? "yes" : "no";
+
         return `# User profile
 
 ## USER_PROFILE
@@ -1614,6 +1664,17 @@ ${roles}
 These reduce the score by -15 to -25 even when the title superficially matches:
 
 ${anti}
+
+## HARD_FILTERS
+
+ban_regions: ${banRegions}
+keep_countries: (none)
+ban_countries: (none)
+ban_us_only: ${banUsOnly}
+onsite_ok_regions: ${onsiteOk}
+onsite_penalty: ${onsitePenalty}
+exclude_countries: (none)
+exclude_title_keywords: (none)
 
 ## SHORT_SUMMARY_INSTRUCTION
 

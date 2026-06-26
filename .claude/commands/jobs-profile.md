@@ -10,7 +10,7 @@ filtering. Three modes selected by the first argument:
 | Invocation | What it does |
 |---|---|
 | `/jobs-profile` (no arg) | Print a profile summary + active HARD filters |
-| `/jobs-profile rules` | Edit `exclude_countries` / `exclude_title_keywords` in `## HARD_FILTERS` |
+| `/jobs-profile rules` | Edit geo policy (`ban_regions`, `keep_countries`, `ban_us_only`, …) + `exclude_title_keywords` in `## HARD_FILTERS` |
 | `/jobs-profile edit` | Broader edits — seniority, target roles, exclude patterns, geography |
 
 Profile creation (first-time) happens on the onboarding page (`docs/index.html`)
@@ -53,9 +53,13 @@ python3 -c "
 import sys; sys.path.insert(0, 'scripts')
 from hard_filters import load_hard_filters
 hf = load_hard_filters()
-c = hf['exclude_countries']; k = hf['exclude_title_keywords']
-print('Countries dropped:', ', '.join(c) if c else '(none — keeping every country)')
-print('Title words dropped:', ', '.join(k) if k else '(none — keeping every discipline)')
+fmt = lambda v: ', '.join(v) if v else '(none)'
+print('Banned regions:', fmt(hf['ban_regions']))
+print('Kept (whitelist):', fmt(hf['keep_countries']))
+print('Banned countries:', fmt(hf['ban_countries'] + hf['exclude_countries']))
+print('Drop US/Canada-only roles:', 'yes' if hf['ban_us_only'] else 'no')
+print('On-site no-penalty regions:', fmt(hf['onsite_ok_regions']), '| penalty:', hf['onsite_penalty'])
+print('Title words dropped:', fmt(hf['exclude_title_keywords']))
 "
 ```
 
@@ -63,11 +67,13 @@ Example output to emulate:
 
 > **Profile summary**
 > Seniority: Senior / Staff IC. Target roles: Product Engineer, Full-Stack
-> Engineer, Platform Engineer. Geography: EU-only (remote or relocation
-> package). Soft exclusions: sales, recruiter, QA-only.
+> Engineer, Platform Engineer. Soft exclusions: sales, recruiter, QA-only.
 >
-> Hard filters — these run before scoring and drop vacancies entirely:
-> Countries dropped: united states, canada
+> Hard filters — these run before/around scoring:
+> Banned regions: africa, south_asia, southeast_asia, ex_ussr (remote always kept)
+> Kept (whitelist): georgia, kazakhstan
+> Drop US/Canada-only roles: yes
+> On-site no-penalty regions: europe | penalty: 15 (on-site elsewhere ranked lower)
 > Title words dropped: (none — keeping every discipline)
 
 Stop here unless the user asks to make changes.
@@ -79,14 +85,27 @@ Stop here unless the user asks to make changes.
 Edit the HARD_FILTERS section of `config/user_profile.md`. These are
 deterministic — they drop a vacancy BEFORE the LLM scores it.
 
-Two fields only:
+Geography is region-based. Region ids (from `defaults.toml [geo.country_region]`):
+`europe, north_america, latin_america, middle_east, africa, south_asia,
+southeast_asia, east_asia, ex_ussr, oceania`. Fields:
 
-- **`exclude_countries`** — drop a job only when EVERY location it lists is in
-  one of these countries. A job that also lists a non-excluded country is kept.
+- **`ban_regions`** — drop a job when EVERY location sits in one of these regions.
+  Remote roles are ALWAYS kept; whitelisted countries survive.
+- **`keep_countries`** — countries that override a region ban (e.g. keep
+  `georgia` though `ex_ussr` is banned).
+- **`ban_countries`** — extra explicit country bans on top of the regions.
+- **`ban_us_only`** — `yes`/`no`; drop roles the scorer flags us_only (US/Canada
+  residency-bound, unreachable from abroad).
+- **`onsite_ok_regions`** — regions where an on-site role gets NO soft penalty
+  (remote is never penalised).
+- **`onsite_penalty`** — points subtracted from an on-site role outside
+  `onsite_ok_regions` (0 = off).
+- **`exclude_countries`** — legacy exact-country ban (still works; prefer
+  `ban_regions`).
 - **`exclude_title_keywords`** — drop a job whose title contains one of these
   words (whole-word, case-insensitive match).
 
-Both are empty by default. Everything softer (roles you'd rather not do but
+All empty/neutral by default. Everything softer (roles you'd rather not do but
 might consider) belongs in `## EXCLUDE_PATTERNS` (score penalty only) — use
 `/jobs-profile edit` for that.
 
@@ -110,31 +129,36 @@ Run the snippet from the view mode and read the current rules back.
 
 Ask what they want to change, one question at a time. Common requests:
 
-- "Stop seeing US jobs" → add `united states` (and usually `canada`) to
-  `exclude_countries`.
+- "Skip developing regions" → add `africa, south_asia, southeast_asia` to
+  `ban_regions`.
+- "But keep my home country" → add it to `keep_countries` (e.g. `georgia`).
+- "Drop US/Canada-only roles I can't take" → set `ban_us_only: yes`.
+- "Prefer remote" → set `onsite_ok_regions: europe` and `onsite_penalty: 15`.
 - "No engineering roles" → add `engineer`, `developer` to
   `exclude_title_keywords`.
-- "Show me US jobs again" → remove `united states` from `exclude_countries`.
 
-Use plain country names (`united states`, `germany`) and plain title words
-(`engineer`, `sales`). Confirm the exact final lists before writing.
+Use region ids for `ban_regions`/`onsite_ok_regions`, plain country names for
+`keep_countries`/`ban_countries`, plain words for titles. Confirm the exact final
+lists before writing.
 
 ### Step 4 — Write the change
 
-Edit ONLY the two field lines inside `## HARD_FILTERS` in
-`config/user_profile.md`. Leave any explanatory comment block above them
-intact. The two lines must look exactly like this:
+Edit ONLY the field lines inside `## HARD_FILTERS` in `config/user_profile.md`.
+Leave the explanatory comment block above them intact. The lines look like:
 
 ```
-exclude_countries: united states, canada
+ban_regions: africa, south_asia, southeast_asia, ex_ussr
+keep_countries: georgia, kazakhstan
+ban_countries: (none)
+ban_us_only: yes
+onsite_ok_regions: europe
+onsite_penalty: 15
+exclude_countries: (none)
 exclude_title_keywords: engineer, developer
 ```
 
-To clear a filter entirely:
-
-```
-exclude_countries: (none)
-```
+To clear a filter entirely set it to `(none)` (or `0` for `onsite_penalty`,
+`no` for `ban_us_only`).
 
 ### Step 5 — Confirm it took effect
 

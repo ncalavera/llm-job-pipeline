@@ -22,7 +22,12 @@ import settings
 from config import (
     LLM_SCORE_THRESHOLD,
     VACANCIES_DIR,
+    GEO_BANNED_COUNTRIES,
+    GEO_BANNED_REGIONS,
+    GEO_KEEP_COUNTRIES_SET,
+    GEO_BAN_US_ONLY,
 )
+from geo import country_banned, is_remote_mode
 # Json / RealDictCursor come from db_backend so they work under both the
 # Supabase (psycopg2) and the local SQLite backend without importing psycopg2.
 from db_backend import IS_SQLITE, Json, RealDictCursor
@@ -1012,6 +1017,24 @@ _ELIG_VERDICTS = ("outside_us_ok", "us_only", "unclear")
 _ELIG_ARCHIVE = _ELIG_VERDICTS[1]
 
 
+def _geo_hard_banned(country: str, work_mode: str) -> bool:
+    """True if a scored role's country is hard-banned by the profile geo policy.
+
+    Save-time safety net for roles the pre-score filter could not resolve but the
+    scorer's extracted `country` can. Remote roles are never banned (reachable
+    from anywhere). Delegates the ban decision to the shared geo.country_banned
+    predicate over config's pre-built (canonicalised) policy caches.
+    """
+    if is_remote_mode(work_mode):
+        return False
+    return country_banned(
+        country,
+        banned_regions=GEO_BANNED_REGIONS,
+        keep_countries=GEO_KEEP_COUNTRIES_SET,
+        banned_countries=GEO_BANNED_COUNTRIES,
+    )
+
+
 def update_llm_score(vacancy_uuid: str, score_data: dict):
     """Update LLM score fields for a vacancy."""
     conn = get_conn()
@@ -1055,10 +1078,14 @@ def update_llm_score(vacancy_uuid: str, score_data: dict):
     )
     rowcount = cur.rowcount
 
-    # Drop roles that are US-bound and unusable from abroad (kept out of the
-    # active view, never deleted so the verdict is auditable). Only unseen rows —
-    # never override a user decision (liked/passed).
-    if elig == _ELIG_ARCHIVE:
+    # Drop roles that geography makes unreachable: US/Canada-bound (us_only, only
+    # when the profile opts in via ban_us_only) or a banned-region country the
+    # pre-score filter missed. Kept out of the active view, never deleted so the
+    # verdict is auditable. Only unseen rows — never override a user decision.
+    geo_ban = (elig == _ELIG_ARCHIVE and GEO_BAN_US_ONLY) or _geo_hard_banned(
+        score_data.get("country"), score_data.get("work_mode")
+    )
+    if geo_ban:
         cur.execute(
             """UPDATE vacancy SET status = 'archived', status_updated_at = now()
                WHERE id = %s AND status = 'unseen'""",

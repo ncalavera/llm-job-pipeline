@@ -82,33 +82,48 @@ matches a target role:
 ## HARD_FILTERS
 
 <!--
-HARD filters drop vacancies BEFORE the LLM ever scores them. They are
-deterministic on/off rules, not score penalties. Use them only for things you
-NEVER want to see — everything softer belongs in EXCLUDE_PATTERNS above (those
-just lower the score).
+HARD filters shape geography and titles around scoring. Geography is region-
+based: ban whole world regions, whitelist exceptions, and softly penalise
+on-site roles outside your preferred regions. Region ids come from
+defaults.toml [geo.country_region]: europe, north_america, latin_america,
+middle_east, africa, south_asia, southeast_asia, east_asia, ex_ussr, oceania.
+Leave any field "(none)" / empty to disable it. Everything is EMPTY by default,
+so out of the box NOTHING is dropped or penalised on geography.
 
-Two fields, both comma-separated. Leave a field as "(none)" to disable it.
+- ban_regions: drop a vacancy when EVERY location sits in one of these regions.
+  Remote roles are always kept; whitelisted countries below survive.
+- keep_countries: countries that override a region ban (e.g. keep "georgia"
+  though "ex_ussr" is banned).
+- ban_countries: extra explicit country bans on top of the regions.
+- ban_us_only: yes/no — drop roles the scorer flags us_only (US/Canada-residency
+  bound, unreachable from abroad). Default no.
+- onsite_ok_regions: regions where an ON-SITE role gets NO soft penalty (remote
+  is never penalised). Everything else on-site loses onsite_penalty points.
+- onsite_penalty: integer points subtracted from an on-site role outside
+  onsite_ok_regions (0 = no soft penalty).
+- exclude_countries: legacy exact-country ban (still works; prefer ban_regions).
+- exclude_title_keywords: drop a vacancy if its TITLE contains one of these words
+  (whole-word match).
 
-- exclude_countries: drop a vacancy if EVERY location it lists is in one of
-  these countries. A multi-country posting that also lists a country you did
-  NOT exclude is kept. Match is on the country name (e.g. "united states",
-  "canada"). Empty by default — so by default NO vacancy is dropped on
-  geography.
+Example — a Europe-based searcher who can't relocate outside the EU, won't take
+US/Canada-only roles, and prefers remote elsewhere would write:
 
-- exclude_title_keywords: drop a vacancy if its job TITLE contains one of these
-  words (matched on whole words, so "engineer" does not hit "engineering
-  manager" only if you list the exact word). Empty by default — so by default
-  NO vacancy is dropped on its title discipline.
-
-Example — a non-technical European searcher who never wants US/Canada roles or
-engineering titles would write:
-
-    exclude_countries: united states, canada
+    ban_regions: africa, south_asia, southeast_asia
+    keep_countries: (none)
+    ban_us_only: yes
+    onsite_ok_regions: europe
+    onsite_penalty: 15
     exclude_title_keywords: engineer, developer, software engineer
 
 The template below is EMPTY on purpose. Add your own only if you are sure.
 -->
 
+ban_regions: (none)
+keep_countries: (none)
+ban_countries: (none)
+ban_us_only: no
+onsite_ok_regions: (none)
+onsite_penalty: 0
 exclude_countries: (none)
 exclude_title_keywords: (none)
 

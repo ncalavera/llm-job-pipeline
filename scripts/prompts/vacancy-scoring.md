@@ -62,24 +62,43 @@ All bands are measured against the candidate's TARGET_ROLES and USER_PROFILE —
 - Do NOT invent a "no-description" tag.
 - If description exists (even short), do NOT add "blind-scored".
 
+## LOCATION EXTRACTION FIELDS (DATA ONLY — never affect the score)
+Extract, do not judge. These feed the deterministic geo filter; the score itself
+must stay location-blind (see the rule above).
+- `country` — the role's primary country as a plain English name (e.g. "India",
+  "United States", "Germany"). Rules:
+  - A city or region → its country ("Delhi, Gurgaon" → "India"; "Mountain View,
+    CA" → "United States"; "Bengaluru" → "India").
+  - Remote-from-anywhere with no country tie → "" (empty string).
+  - Remote restricted to a country/countries → the FIRST listed country
+    ("Remote — US + Canada" → "United States").
+  - Multiple distinct office countries → the first listed.
+- `work_mode` — one of "remote", "hybrid", "onsite". "remote" only when the role
+  is genuinely location-independent or remote-within-a-country; "hybrid" when it
+  mixes office + home; "onsite" when office presence is required.
+
 ## US WORK-ELIGIBILITY FIELD
 `us_eligibility` — a SEPARATE judgement that does NOT affect the score. It answers
-only: if this role is in the United States, can the candidate do it from OUTSIDE
-the US (he is abroad, no US work authorisation)? Set one of:
-- **"us_only"** — US-bound and unusable from abroad. Signals: salary given ONLY in
-  USD, US-specific benefits (401k, 403b, US holidays / "Summer Fridays"), a
-  hybrid/in-office policy requiring presence in a US office, "Remote — US" or a
-  US-timezone requirement with no international option.
+only: can the candidate do this role from where he is (abroad, no US/Canada work
+authorisation, cannot relocate to North America)? Set one of:
+- **"us_only"** — bound to the US (or US + Canada) and unusable from abroad.
+  Signals: salary given ONLY in USD (or USD + CAD), US-specific benefits (401k,
+  403b, US holidays / "Summer Fridays"), a hybrid/in-office policy requiring
+  presence in a US office, OR a remote role explicitly restricted to residents of
+  the US and/or Canada (e.g. "Remote — Continental US + Canada Only", "must
+  reside in the US", "US/Canada-based only") with no international option. A
+  remote role that lists ONLY US/Canada eligibility is us_only even if it says
+  "remote".
 - **"outside_us_ok"** — explicitly workable from abroad: "work from anywhere /
   global / international candidates", visa sponsorship + relocation offered, or a
-  genuinely location-independent remote role with no US-authorisation clause.
-  ALSO use this for any role NOT located in the United States.
+  genuinely location-independent remote role with no US/Canada-residency clause.
+  ALSO use this for any role NOT located in the United States or Canada.
 - **"unclear"** — the description gives no signal about US location or work
   authorisation. Use only when truly silent; do not guess.
 
 ## RESPONSE FORMAT
 Return ONLY valid JSON:
-{"score": <0-100>, "reasoning": "<2-3 sentences explaining the score, be specific about what matches and what doesn't>", "tags": ["<tag1>", "<tag2>", ...], "hard_requirements": ["<blocker1>", ...], "us_eligibility": "<outside_us_ok | us_only | unclear>", "short_summary": "<{{SHORT_SUMMARY_INSTRUCTION}}>", "deadline": "<YYYY-MM-DD or null — application deadline if explicitly mentioned>"}
+{"score": <0-100>, "reasoning": "<2-3 sentences explaining the score, be specific about what matches and what doesn't>", "tags": ["<tag1>", "<tag2>", ...], "hard_requirements": ["<blocker1>", ...], "country": "<plain English country name, or empty string if remote-anywhere>", "work_mode": "<remote | hybrid | onsite>", "us_eligibility": "<outside_us_ok | us_only | unclear>", "short_summary": "<{{SHORT_SUMMARY_INSTRUCTION}}>", "deadline": "<YYYY-MM-DD or null — application deadline if explicitly mentioned>"}
 
 ## HARD REQUIREMENTS FIELD
 `hard_requirements` — list of BLOCKING conditions that disqualify the candidate. Return [] if none.

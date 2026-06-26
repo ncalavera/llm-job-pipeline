@@ -56,7 +56,7 @@ def test_parse_none_placeholder_is_empty():
     parsed = hf._parse_section(
         "exclude_countries: (none)\nexclude_title_keywords: (none)"
     )
-    assert parsed == {"exclude_countries": [], "exclude_title_keywords": []}
+    assert parsed == dict(hf._GEO_DEFAULTS)
 
 
 def test_parse_lists_lowercased_and_trimmed():
@@ -68,11 +68,31 @@ def test_parse_lists_lowercased_and_trimmed():
     assert parsed["exclude_title_keywords"] == ["engineer", "developer"]
 
 
+def test_parse_geo_policy_fields():
+    parsed = hf._parse_section(
+        "ban_regions: Africa, South_Asia\n"
+        "keep_countries: Georgia, Singapore\n"
+        "ban_us_only: yes\n"
+        "onsite_ok_regions: europe\n"
+        "onsite_penalty: 15\n"
+    )
+    assert parsed["ban_regions"] == ["africa", "south_asia"]
+    assert parsed["keep_countries"] == ["georgia", "singapore"]
+    assert parsed["ban_us_only"] is True
+    assert parsed["onsite_ok_regions"] == ["europe"]
+    assert parsed["onsite_penalty"] == 15
+
+
+def test_parse_geo_bool_and_int_placeholders():
+    parsed = hf._parse_section("ban_us_only: no\nonsite_penalty: (none)")
+    assert parsed["ban_us_only"] is False
+    assert parsed["onsite_penalty"] == 0
+    # Garbage int falls back to the default rather than raising.
+    assert hf._parse_section("onsite_penalty: lots")["onsite_penalty"] == 0
+
+
 def test_parse_missing_fields_are_empty():
-    assert hf._parse_section("") == {
-        "exclude_countries": [],
-        "exclude_title_keywords": [],
-    }
+    assert hf._parse_section("") == dict(hf._GEO_DEFAULTS)
 
 
 def test_parse_ignores_html_comment_examples():
@@ -83,16 +103,13 @@ def test_parse_ignores_html_comment_examples():
         "exclude_title_keywords: (none)\n"
     )
     parsed = hf._parse_section(body)
-    assert parsed == {"exclude_countries": [], "exclude_title_keywords": []}
+    assert parsed == dict(hf._GEO_DEFAULTS)
 
 
 def test_load_missing_profile_returns_empty(monkeypatch):
     monkeypatch.setenv("USER_PROFILE_PATH", "/nonexistent/profile/does_not_exist.md")
     importlib.reload(hf)
-    assert hf.load_hard_filters() == {
-        "exclude_countries": [],
-        "exclude_title_keywords": [],
-    }
+    assert hf.load_hard_filters() == dict(hf._GEO_DEFAULTS)
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +202,31 @@ def test_profile_with_filters_drops_engineering_and_us(tmp_path, restore_default
     assert filters.title_words_blacklisted("Talent Pool — Future Roles") is True
     # A format role NOT in the profile keywords still survives.
     assert filters.title_words_blacklisted("Volunteer Coordinator") is False
+
+
+def test_region_ban_drops_country_but_whitelist_and_remote_survive(
+    tmp_path, restore_default_profile
+):
+    """ban_regions drops on-site banned-region roles; whitelist + remote survive."""
+    profile = _write_profile(
+        tmp_path,
+        "ban_regions: south_asia, ex_ussr\n"
+        "keep_countries: georgia\n"
+        "exclude_title_keywords: (none)",
+    )
+    _config, filter_vacancies, _filters = _reload_pipeline(profile)
+    ax = filter_vacancies._all_locations_excluded
+    # India (south_asia) on-site → dropped, by explicit country and by free text.
+    assert ax({"locations": [{"country": "India", "work_mode": "onsite"}]}) is True
+    assert ax({"locations": [{"location": "Delhi, Gurgaon", "work_mode": "onsite"}]}) is True
+    # Remote India → kept (reachable from anywhere).
+    assert ax({"locations": [{"country": "India", "work_mode": "remote"}]}) is False
+    # Georgia (ex_ussr) is whitelisted → kept even on-site.
+    assert ax({"locations": [{"country": "Georgia", "work_mode": "onsite"}]}) is False
+    # Russia (ex_ussr, not whitelisted) → dropped.
+    assert ax({"locations": [{"country": "Russia", "work_mode": "onsite"}]}) is True
+    # Europe is in no banned region → kept.
+    assert ax({"locations": [{"country": "Germany", "city": "Berlin"}]}) is False
 
 
 def test_excluded_country_keeps_multi_country_posting(tmp_path, restore_default_profile):
