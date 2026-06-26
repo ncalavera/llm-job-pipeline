@@ -376,6 +376,21 @@ ttl_days = 3
 tier = "B"
 free = true
 
+# data.org — WordPress aggregator (free, no key). Each posting links out to the
+# real employer's ATS, so vacancies are attributed to that employer (not data.org)
+# and the external apply URL is stored. Data-for-social-impact / AI-for-good focus.
+[boards.datadotorg]
+strategy = "datadotorg_wp"
+name = "data.org"
+url = "https://data.org/jobs/"
+api_url = "https://data.org/wp-json/wp/v2/job"
+max_jobs = 60
+request_delay = 0.4
+board_blacklist = []
+ttl_days = 3
+tier = "B"
+free = true
+
 # Idealist — nonprofit/impact jobs via the public Algolia search key embedded in
 # idealist.org. remote_zone=WORLD keeps only globally-open remote roles.
 [boards.idealist]
