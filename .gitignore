@@ -9,6 +9,17 @@ vacancies/
 .firecrawl/
 public/data.js
 
+# Personal labelled eval set — never publish
+evals/
+
+# Internal dev docs — keep out of the public Pages repo. docs/ also serves the
+# GitHub Pages landing, so allow-list only the public assets back in below.
+docs/*
+!docs/index.html
+!docs/favicon.svg
+!docs/assets/
+!docs/assets/**
+
 # Local illustration packs — personal art for a non-default DASHBOARD_PACK.
 # The committed "default" pack lives directly under public/images/. Any pack
 # subdirectory (public/images/<pack>/) is local-only and never committed.
