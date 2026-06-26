@@ -22,6 +22,12 @@ import {
   isVacancyExpired,
 } from "./helpers.js";
 import { T } from "./i18n.js";
+import Sortable from "../vendor/sortable.esm.js";
+
+// Live Sortable instances, one per column. Rebuilt on every render since the
+// board's innerHTML is replaced wholesale; old instances are destroyed first
+// to avoid leaking listeners on detached nodes.
+let sortableInstances = [];
 
 // ---------------------------------------------------------------------------
 // Triage helpers
@@ -518,28 +524,62 @@ export function renderPipeline() {
       });
     });
 
-  // Bind move buttons. Each moves every role on the card (one role for a
-  // single card, all of them for a grouped card) to the target column.
-  // updateStatus emits "statusChanged"; app.js handles save + re-render.
+  // Move every role on a card (one for a single card, all for a grouped card)
+  // to the target column. updateStatus emits "statusChanged"; app.js handles
+  // save + re-render. Shared by the move-buttons and drag-and-drop.
+  function moveCardToColumn(card, target) {
+    if (!card || !target) return;
+    let ids;
+    try {
+      ids = JSON.parse(card.getAttribute("data-canon-ids"));
+    } catch (_) {
+      return;
+    }
+    (ids || []).forEach(function (id) {
+      const g = groupsById.get(id);
+      if (g) updateStatus(g.id, g.member_ids || [], target);
+    });
+  }
+
+  // Bind move buttons.
   board
     .querySelectorAll(".triage-move-btn[data-move-to]")
     .forEach(function (btn) {
       btn.addEventListener("click", function (e) {
         e.preventDefault();
         e.stopPropagation();
-        const card = btn.closest(".pipe-card[data-canon-ids]");
-        if (!card) return;
-        const target = btn.getAttribute("data-move-to");
-        let ids;
-        try {
-          ids = JSON.parse(card.getAttribute("data-canon-ids"));
-        } catch (_) {
-          return;
-        }
-        (ids || []).forEach(function (id) {
-          const g = groupsById.get(id);
-          if (g) updateStatus(g.id, g.member_ids || [], target);
-        });
+        moveCardToColumn(
+          btn.closest(".pipe-card[data-canon-ids]"),
+          btn.getAttribute("data-move-to"),
+        );
       });
     });
+
+  // Drag-and-drop: each column's card list is a Sortable connected to the
+  // shared "triage" group, so cards drag between columns. Dropping into a
+  // different column moves the role(s) to that column's status.
+  sortableInstances.forEach(function (s) {
+    s.destroy();
+  });
+  sortableInstances = [];
+  board.querySelectorAll(".pipe-col-cards").forEach(function (listEl) {
+    sortableInstances.push(
+      Sortable.create(listEl, {
+        group: "triage",
+        animation: 150,
+        draggable: ".pipe-card",
+        ghostClass: "pipe-card-ghost",
+        dragClass: "pipe-card-dragging",
+        // Clicks on links/buttons must not start a drag — let them through.
+        filter: "a, button",
+        preventOnFilter: false,
+        onEnd: function (evt) {
+          if (evt.from === evt.to) return; // reorder within a column — no status change
+          const col = evt.to.closest(".pipe-col");
+          if (!col || !col.id.startsWith("triageCol-")) return;
+          moveCardToColumn(evt.item, col.id.slice("triageCol-".length));
+        },
+      }),
+    );
+  });
 }
