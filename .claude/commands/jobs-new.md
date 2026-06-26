@@ -9,7 +9,7 @@ The everyday loop. Run it once a day. One linear pipeline — no sub-stage flags
 ```
 validate profile → (empty DB? → first-run onboarding) → resume? →
 fetch → enrich once → filter → score (incremental) →
-show top new matches + capture verdicts → publish
+show top new matches + capture verdicts → score new candidate companies → publish
 ```
 
 It works on the local SQLite database with no Supabase and no Vercel (**simple
@@ -502,6 +502,137 @@ research / network decisions, issue tracking) lives in `/jobs-review`.
 
 ---
 
+## Step 8.5: Score new candidate companies (optional, gated)
+
+Fetch discovers new **companies** too — boards and LinkedIn add organisations as
+`candidate`, waiting to be scored before you approve or reject them on the
+Companies tab. This step enriches those candidates (the company-level
+`alignment_score` + `mission_fit` + `about`), which is **separate** from the
+vacancy enrich in Step 5 (that one only backfills missing job descriptions).
+
+### Detect candidates needing a score
+
+```bash
+python3 -c "
+import sys; sys.path.insert(0, 'scripts')
+from db_conn import get_conn
+cur = get_conn().cursor()
+cur.execute(\"\"\"
+    SELECT count(*) FROM company
+    WHERE status = 'candidate' AND alignment_score IS NULL
+      AND website IS NOT NULL AND website != ''
+\"\"\")
+print('CANDIDATES_TO_SCORE', cur.fetchone()[0])
+"
+```
+
+If the count is **0**, print "No new candidate companies to score" and skip
+straight to Step 9. Otherwise offer the run (this is the walk-through gate):
+
+```
+{N} new candidate companies were discovered. Score them now so they show up
+in Companies → Pending for your approval?
+  1. Yes, score them
+  2. No, skip — leave them unscored for now
+```
+
+Only on "yes", run the sub-flow below. It needs `FIRECRAWL_API_KEY` (for the
+about-page scrape) — if unset, tell the user and skip to Step 9.
+
+### 8.5a. Scrape about pages (Firecrawl, background)
+
+Company scoring reads each company's about page from the scrape cache, so scrape
+the unscored candidates first. Run it in the **background** (Firecrawl is slow)
+and report the final summary line when it finishes:
+
+```bash
+python3 scripts/fetch_companies.py --limit {N} 2>&1
+```
+
+`fetch_companies.py` scrapes only candidates that have a website and no cached
+markdown, writing `.firecrawl/scrape_cache.json`. Companies it cannot scrape are
+skipped by the next step (no cache entry → no scoring payload).
+
+### 8.5b. Prepare scoring payloads
+
+```bash
+python3 scripts/score_companies.py --local --limit {N} 2>&1
+```
+
+This prints a JSON array to stdout — one object per company with
+`payload_kind: "company"`, `id`, `canonical_name`, `url`, `system_prompt`, and
+`user_msg`. Companies not in the scrape cache are silently dropped (the stderr
+line "Skipped K companies" tells you how many).
+
+### 8.5c. Score — one subagent per company
+
+For **each** payload, launch a **separate** subagent with `model: "sonnet"`
+(company enrichment is saved with the `claude-sonnet-4-6` label; Sonnet is the
+right tier here — full-org judgement, not the per-vacancy precision that needs
+Opus):
+
+- System prompt: the payload's `system_prompt`.
+- User message: the payload's `user_msg`.
+- The subagent returns JSON with `about`, `mission_fit` (carrying
+  `alignment_score`, `alignment_label`, `strengths`, `risks`, `approach`,
+  `mission_verdict`, `experience_match_reasoning`), and a top-level
+  `alignment_score`.
+
+**1 company = 1 subagent.** Never batch several companies into one prompt — it
+over-scores, same failure as vacancy scoring. Run at most **5 subagents at a
+time** (rolling waves), exactly like Step 7. A Workflow that loops `parallel()`
+over groups of 5 — one company per `agent()` call with `model: "sonnet"` — is the
+cleanest driver; the per-company work units are the objects from
+`score_companies.py --local`.
+
+### 8.5d. Save incrementally
+
+As each subagent returns (or after a small chunk), wrap its result under
+`enrichment` and save immediately — each `--save` commits, so an interrupt keeps
+finished work:
+
+```bash
+cat > /tmp/company_scores.json <<'EOF'
+[
+  {
+    "payload_kind": "company",
+    "id": "<company-uuid from the payload>",
+    "canonical_name": "Acme Foundation",
+    "enrichment": {
+      "alignment_score": 78,
+      "about": { "description": "...", "sector": "...", "hq_location": "..." },
+      "mission_fit": {
+        "alignment_score": 78,
+        "alignment_label": "Good fit",
+        "strengths": ["..."],
+        "risks": ["..."],
+        "approach": "...",
+        "mission_verdict": "...",
+        "experience_match_reasoning": "..."
+      }
+    }
+  }
+]
+EOF
+python3 scripts/score_companies.py --save < /tmp/company_scores.json 2>&1
+```
+
+`--save` writes `about` + `mission_fit` + `alignment_score`, mirrors `category` /
+`offices` onto the top-level columns the dashboard reads, computes the tier, and
+sets `enriched_at`. The `id` and `canonical_name` come straight from the payload.
+
+### 8.5e. Where they land
+
+`--save` runs `auto_review_candidates()`, but that is **opt-in and off by
+default** (env `AUTO_REVIEW_CANDIDATES`), so scored companies stay `candidate` —
+i.e. they appear under **Companies → Pending** for you to approve or reject.
+Tell the user the count scored and that they are waiting in Pending (the deeper
+company review — approve/reject, monitoring — lives in `/jobs-review companies
+--status candidate`). The Companies tab reads live from the DB, so a browser
+refresh shows them with no deploy.
+
+---
+
 ## Step 9: Publish
 
 The dashboard now reads its data **live**. Publishing a data change no longer
@@ -582,10 +713,11 @@ Show the resulting URL. **Never** run `git add` / `git commit` / `git push` here
 ## Done
 
 Summarize: N new fetched, M scored, the verdicts captured (liked / passed counts),
-how many liked vacancies are now waiting for a deeper look (`/jobs-review`), and
-whether the live snapshot was refreshed (full mode — visible on browser refresh,
-no deploy) or `data.js` was regenerated locally (simple mode), or publishing was
-skipped because the run was not clean.
+how many candidate companies were scored this run (and that they wait in
+Companies → Pending), how many liked vacancies are now waiting for a deeper look
+(`/jobs-review`), and whether the live snapshot was refreshed (full mode —
+visible on browser refresh, no deploy) or `data.js` was regenerated locally
+(simple mode), or publishing was skipped because the run was not clean.
 
 ## Common issues
 
