@@ -21,11 +21,19 @@ export default async function handler(req, res) {
     console.warn("company-statuses: config warning —", warnings.join("; "));
 
   try {
-    const { data, error } = await getSupabase()
-      .from("company")
-      .select("id, status");
-
-    if (error) throw error;
+    // Page through — Supabase caps a single select at 1000 rows, which would
+    // drop status overrides for companies beyond the first 1000.
+    const PAGE = 1000;
+    const data = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data: page, error } = await getSupabase()
+        .from("company")
+        .select("id, status")
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      data.push(...(page || []));
+      if (!page || page.length < PAGE) break;
+    }
 
     const statusMap = {
       active: "approved",

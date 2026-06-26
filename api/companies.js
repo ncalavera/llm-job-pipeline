@@ -56,14 +56,23 @@ export default async function handler(req, res) {
   try {
     const supabase = getSupabase();
 
-    const { data: rows, error: cErr } = await supabase
-      .from("company")
-      .select(
-        "id, canonical_name, status, tier, alignment_score, mission_fit, " +
-          "offices, category, fetch_strategy, fetch_status, last_fetched, " +
-          "vacancy_count, new_count",
-      );
-    if (cErr) throw cErr;
+    // Supabase caps a single select at 1000 rows — page through so newly
+    // enriched companies beyond the first 1000 still reach the dashboard.
+    const COMPANY_PAGE = 1000;
+    const rows = [];
+    for (let from = 0; ; from += COMPANY_PAGE) {
+      const { data: page, error: cErr } = await supabase
+        .from("company")
+        .select(
+          "id, canonical_name, status, tier, alignment_score, mission_fit, " +
+            "offices, category, fetch_strategy, fetch_status, last_fetched, " +
+            "vacancy_count, new_count",
+        )
+        .range(from, from + COMPANY_PAGE - 1);
+      if (cErr) throw cErr;
+      rows.push(...(page || []));
+      if (!page || page.length < COMPANY_PAGE) break;
+    }
 
     // Live vacancy ids + counts per company (non-archived only — the table's
     // "Vacancies"/"New"/"Liked" columns are about live roles).
