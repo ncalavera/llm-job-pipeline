@@ -3,6 +3,7 @@
 // =============================================================================
 
 import {
+  config,
   state,
   groups,
   getCompanies,
@@ -31,6 +32,10 @@ import {
 } from "./helpers.js";
 import { saveCompanyReview, showSyncStatus } from "./api.js";
 import { T } from "./i18n.js";
+
+// MPA Prestige is a personal metric (MPA/MPP application strategy), off by
+// default. Opt in with DASHBOARD_MPA=1 / [dashboard] show_mpa_column = true.
+const SHOW_MPA = !!(config && config.show_mpa_column);
 
 // ---------------------------------------------------------------------------
 // Companies table — init, render, sort, filter
@@ -366,7 +371,9 @@ function _getColumns() {
       sortable: true,
       cls: "ct-col-fit",
     },
-    { key: "mpa", label: "MPA", sortable: true, cls: "ct-col-mpa" },
+    ...(SHOW_MPA
+      ? [{ key: "mpa", label: "MPA", sortable: true, cls: "ct-col-mpa" }]
+      : []),
     {
       key: "vacancies",
       label: T("col_vacancies", "Vacancies"),
@@ -937,9 +944,11 @@ function _buildApprovedRow(c) {
     '<td class="ct-td ct-col-fit">' +
     fitBadge +
     "</td>" +
-    '<td class="ct-td ct-col-mpa">' +
-    (c.mpa_prestige != null ? llmScoreBadge(c.mpa_prestige) : "\u2014") +
-    "</td>" +
+    (SHOW_MPA
+      ? '<td class="ct-td ct-col-mpa">' +
+        (c.mpa_prestige != null ? llmScoreBadge(c.mpa_prestige) : "\u2014") +
+        "</td>"
+      : "") +
     '<td class="ct-td ct-col-vac">' +
     (c.vacancy_count || 0) +
     "</td>" +
@@ -1541,7 +1550,7 @@ function buildFitSection(c) {
       c.alignment_score +
       '%;border-radius:4px"></div></div></div></div>';
 
-    if (c.mpa_prestige != null) {
+    if (SHOW_MPA && c.mpa_prestige != null) {
       inner +=
         '<div style="display:flex;gap:24px;margin-bottom:16px;font-size:13px">' +
         '<div><span style="color:#6B7280">MPA Prestige:</span> <strong>' +
