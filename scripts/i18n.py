@@ -149,6 +149,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "archive_sub": "Vacancies archived from earlier runs. View only.",
         "archive_no_match": "Nothing matches the filters",
         "archive_empty": "The archive is empty",
+        # Hidden-vacancy notes (candidate companies not yet approved). {orgs}
+        # and {vacs} are substituted on the client.
+        "companies_pending_hidden": "ℹ️ {orgs} companies here have {vacs} vacancies hidden from your job list — approve a company to surface its roles.",
+        "catalog_hidden_pending": "ℹ️ {vacs} vacancies from {orgs} not-yet-approved companies are hidden here — approve the company on the Companies tab to see its roles.",
     },
     # Russian — verbatim from the maintainer's prior dashboard build.
     "ru": {
@@ -275,6 +279,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "archive_sub": "Старые вакансии из прошлых запусков. Только просмотр.",
         "archive_no_match": "Ничего не найдено по фильтрам",
         "archive_empty": "Архив пуст",
+        "companies_pending_hidden": "ℹ️ {orgs} компаний здесь держат {vacs} вакансий, скрытых из вашего списка — одобрите компанию, чтобы её вакансии появились.",
+        "catalog_hidden_pending": "ℹ️ {vacs} вакансий из {orgs} ещё не одобренных компаний скрыты — одобрите компанию на вкладке «Компании», чтобы увидеть их.",
     },
 }
 

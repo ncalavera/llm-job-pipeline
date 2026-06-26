@@ -738,16 +738,14 @@ function _renderPendingDisclaimer(pendingCompanies) {
   }
   if (vacs === 0) return;
 
+  var tpl = T(
+    "companies_pending_hidden",
+    "ℹ️ {orgs} companies here have {vacs} vacancies hidden from your job list — approve a company to surface its roles.",
+  );
   var note = document.createElement("div");
   note.id = "companyPendingDisclaimer";
   note.className = "ces-pending-hidden";
-  note.textContent =
-    "ℹ️ " +
-    orgs +
-    (orgs === 1 ? " company here has " : " companies here have ") +
-    vacs +
-    (vacs === 1 ? " vacancy" : " vacancies") +
-    " hidden from your job list — approve a company to surface its roles.";
+  note.textContent = tpl.replace("{orgs}", orgs).replace("{vacs}", vacs);
   statsEl.parentNode.insertBefore(note, statsEl.nextSibling);
 }
 

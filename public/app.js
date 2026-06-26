@@ -12,7 +12,13 @@ import {
   scheduleRender,
 } from "./modules/state.js";
 import { initUI, showToast } from "./modules/helpers.js";
-import { applyI18n, T } from "./modules/i18n.js";
+import {
+  applyI18n,
+  T,
+  setLanguage,
+  getLanguage,
+  availableLanguages,
+} from "./modules/i18n.js";
 import {
   initApi,
   loadFromServer,
@@ -63,6 +69,30 @@ initUI();
 // ---------------------------------------------------------------------------
 
 applyI18n();
+renderLanguageSwitch();
+
+// Render an EN/RU toggle into the top nav. Hidden when only one language is
+// baked. Clicking persists the choice and reloads so every view re-renders.
+function renderLanguageSwitch() {
+  var langs = availableLanguages();
+  if (langs.length < 2) return;
+  var host = document.querySelector(".top-nav-right");
+  if (!host) return;
+
+  var wrap = document.createElement("div");
+  wrap.className = "lang-switch";
+  var active = getLanguage();
+  langs.forEach(function (lang) {
+    var btn = document.createElement("button");
+    btn.className = "lang-btn" + (lang === active ? " lang-btn--active" : "");
+    btn.textContent = lang.toUpperCase();
+    btn.onclick = function () {
+      setLanguage(lang);
+    };
+    wrap.appendChild(btn);
+  });
+  host.insertBefore(wrap, host.firstChild);
+}
 
 // ---------------------------------------------------------------------------
 // Dashboard style — "illustrated" (default) or "minimal".

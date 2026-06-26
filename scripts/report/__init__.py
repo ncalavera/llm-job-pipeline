@@ -163,6 +163,12 @@ def generate_dashboard(db: dict = None) -> None:
             "dashboard_style": _resolve_dashboard_style(),
             "language": language,
             "i18n": i18n.strings(language),
+            # All language maps so the dashboard can switch RU/EN client-side
+            # without a rebuild. "i18n" stays the server-chosen default for the
+            # first render and as a fallback when "i18n_all" is absent.
+            "i18n_all": {
+                lang: i18n.strings(lang) for lang in i18n.available_languages()
+            },
             "pack": pack,
             "pack_images": pack_images(pack),
         },

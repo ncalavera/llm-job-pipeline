@@ -100,12 +100,43 @@ export function initCatalog() {
 // Render catalog grid
 // ---------------------------------------------------------------------------
 
+// Persistent note above the catalog: roles from not-yet-approved (candidate)
+// companies are excluded from the list until the company is approved on the
+// Companies tab. Same message as the Companies → Pending banner.
+function _renderCatalogHiddenNote(grid) {
+  const existing = document.getElementById("catalogHiddenNote");
+  if (existing) existing.remove();
+  if (!grid || !grid.parentNode) return;
+
+  const hidden = groups.filter((g) => !isGroupCompanyApproved(g));
+  if (hidden.length === 0) return;
+
+  const orgs = new Set();
+  let vacs = 0;
+  for (const g of hidden) {
+    orgs.add(g.org);
+    vacs += g.member_ids && g.member_ids.length ? g.member_ids.length : 1;
+  }
+
+  const tpl = T(
+    "catalog_hidden_pending",
+    "ℹ️ {vacs} vacancies from {orgs} not-yet-approved companies are hidden here — approve the company on the Companies tab to see its roles.",
+  );
+  const note = document.createElement("div");
+  note.id = "catalogHiddenNote";
+  note.className = "ces-pending-hidden";
+  note.textContent = tpl.replace("{vacs}", vacs).replace("{orgs}", orgs.size);
+  grid.parentNode.insertBefore(note, grid);
+}
+
 export function renderCatalog() {
   const query = (
     document.getElementById("catalogSearch").value || ""
   ).toLowerCase();
   const orgFilter = document.getElementById("catalogOrgFilter").value;
   const grid = document.getElementById("catalogGrid");
+
+  _renderCatalogHiddenNote(grid);
 
   const visible = groups.filter((g) => isGroupCompanyApproved(g));
   const inBasket = visible.filter((g) => {
