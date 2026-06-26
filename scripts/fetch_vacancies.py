@@ -77,7 +77,7 @@ from fetchers import (
     fetch_greenhouse, fetch_firecrawl_scrape,
     fetch_workday_api, fetch_algolia_board, fetch_firecrawl_board,
     fetch_lever, fetch_ashby, fetch_workable, fetch_reliefweb_board,
-    fetch_impactpool_board,
+    fetch_impactpool_board, fetch_datadotorg_board,
     fetch_arbeitnow_board, fetch_remotive_board, fetch_wwr_board,
     fetch_hn_whoishiring_board,
     fetch_idealist_board, fetch_fastforward_board, fetch_linkedin_board,
@@ -472,6 +472,8 @@ def main():
                         jobs = fetch_reliefweb_board(board_cfg)
                     elif strategy == "impactpool_html":
                         jobs = fetch_impactpool_board(board_cfg)
+                    elif strategy == "datadotorg_wp":
+                        jobs = fetch_datadotorg_board(board_cfg)
                     elif strategy == "arbeitnow_api":
                         jobs = fetch_arbeitnow_board(board_cfg)
                     elif strategy == "remotive_api":

@@ -273,7 +273,7 @@ Board TTLs (2-30 days) keep daily runs cheap either way. Full reference:
 producing good matches here):
 
 ```bash
-JOB_BOARDS=80k_hours,impactpool,idealist,fast_forward,linkedin python3 -u scripts/fetch_vacancies.py 2>&1
+JOB_BOARDS=80k_hours,impactpool,idealist,fast_forward,linkedin,datadotorg python3 -u scripts/fetch_vacancies.py 2>&1
 ```
 
 | Board id | Sector fit | On? | Extra env |
@@ -283,6 +283,7 @@ JOB_BOARDS=80k_hours,impactpool,idealist,fast_forward,linkedin python3 -u script
 | `idealist` | nonprofit (worldwide-remote) | **on** | knobs in defaults.toml |
 | `fast_forward` | tech-for-good / nonprofit-tech | **on** | — |
 | `linkedin` | targeted ops/programme/impact queries | **on** | edit `queries` in defaults.toml |
+| `datadotorg` | data-for-social-impact / AI-for-good (real-employer ATS links) | **on** | — |
 | `reliefweb` | humanitarian (M&E/field-heavy) | off | 0 good in history |
 | `arbeitnow` | German market, German-language | off | 100% DE, 0 good |
 | `remotive` | remote-first, eng-heavy | off | `REMOTIVE_CATEGORIES=...`; 0 good |
