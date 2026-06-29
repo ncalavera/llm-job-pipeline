@@ -32,6 +32,7 @@ import {
   switchBasket,
   toggleCatalogLoc,
   toggleCatalogSort,
+  toggleCatalogShowAll,
   catalogThumbAction,
   toggleCatalogExpand,
 } from "./modules/catalog.js";
@@ -276,6 +277,7 @@ window.switchMode = switchMode;
 window.switchBasket = switchBasket;
 window.toggleCatalogLoc = toggleCatalogLoc;
 window.toggleCatalogSort = toggleCatalogSort;
+window.toggleCatalogShowAll = toggleCatalogShowAll;
 window.catalogThumbAction = catalogThumbAction;
 window.toggleCatalogExpand = toggleCatalogExpand;
 window.renderCatalog = renderCatalog;

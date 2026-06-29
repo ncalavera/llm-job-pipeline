@@ -23,6 +23,12 @@ import {
 } from "./helpers.js";
 import { T } from "./i18n.js";
 
+// Default catalog score floor (mirrors CATALOG_MIN_SCORE in scripts/config.py).
+// Roles below this — and unscored roles — are hidden until "показать все".
+const CATALOG_MIN_SCORE = 40;
+// UI-only toggle: when true, the score floor is lifted and everything shows.
+let catalogShowAll = false;
+
 // ---------------------------------------------------------------------------
 // Basket tabs
 // ---------------------------------------------------------------------------
@@ -71,6 +77,22 @@ export function toggleCatalogSort(btn) {
   btn.textContent = state.catalogSortDesc
     ? T("sort_score", "Score") + "\u00A0\u2193"
     : T("sort_score", "Score") + "\u00A0\u2191";
+  renderCatalog();
+}
+
+// Lift / restore the default score floor (CATALOG_MIN_SCORE). UI state only.
+export function toggleCatalogShowAll(btn) {
+  catalogShowAll = !catalogShowAll;
+  btn.classList.toggle("active", catalogShowAll);
+  btn.textContent = catalogShowAll
+    ? T(
+        "catalog_show_top",
+        "\u0422\u043E\u043B\u044C\u043A\u043E \u0433\u043E\u0434\u043D\u044B\u0435",
+      )
+    : T(
+        "catalog_show_all",
+        "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0432\u0441\u0435",
+      );
   renderCatalog();
 }
 
@@ -149,6 +171,12 @@ export function renderCatalog() {
     return basket === state.currentBasket;
   });
   const filtered = inBasket.filter((g) => {
+    // Default score floor: hide low- and unscored roles unless "показать все".
+    if (
+      !catalogShowAll &&
+      (g.llm_score == null || g.llm_score < CATALOG_MIN_SCORE)
+    )
+      return false;
     if (orgFilter && g.org !== orgFilter) return false;
     if (
       state.activeCatalogLocs.size > 0 &&
