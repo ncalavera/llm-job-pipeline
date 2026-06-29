@@ -118,6 +118,10 @@ CREATE TABLE IF NOT EXISTS vacancy (
     -- Telegram digest, so it is never sent twice.
     digest_sent_at        TIMESTAMPTZ,
 
+    -- Set when the loud "expiring" alert for this role has been sent, so the
+    -- protected-role alert (status='expiring') fires exactly once.
+    expiring_alerted_at   TIMESTAMPTZ,
+
     created_at            TIMESTAMPTZ DEFAULT NOW(),
     updated_at            TIMESTAMPTZ DEFAULT NOW()
 );

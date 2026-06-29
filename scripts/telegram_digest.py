@@ -53,8 +53,8 @@ SUMMARY_FALLBACK_CHARS = _DIGEST["summary_fallback_chars"]
 SUMMARY_MAX_CHARS = _DIGEST["summary_max_chars"]  # guard the Telegram message limit
 MESSAGE_MAX_CHARS = _DIGEST["message_max_chars"]
 CALLBACK_PREFIX = "v"
-ACTION_TO_STATUS = {"l": "liked", "p": "passed"}
-STATUS_LABEL = {"liked": "👍 Liked", "passed": "👎 Passed"}
+ACTION_TO_STATUS = {"l": "liked", "p": "passed", "a": "applied"}
+STATUS_LABEL = {"liked": "👍 Liked", "passed": "👎 Passed", "applied": "✅ Уже подал"}
 
 SELECT_FRESH_SQL = """
 SELECT v.id, v.title, c.canonical_name AS org, v.llm_score, v.llm_summary,
@@ -87,6 +87,21 @@ WHERE c.status = 'candidate'
   AND v.status NOT IN ('passed', 'skipped', 'archived')
 ORDER BY v.llm_score DESC, v.created_at DESC
 LIMIT %s
+"""
+
+# Protected high-fit roles (status='expiring') that haven't been alerted yet.
+# These are the scarce decisions latency protection exists to save, so they get
+# a loud, separate message — not the score-ranked daily batch. Fires once per
+# role (expiring_alerted_at gate).
+SELECT_EXPIRING_SQL = """
+SELECT v.id, v.title, c.canonical_name AS org, v.llm_score, v.llm_summary,
+       v.full_description, v.snippet, v.locations, v.compensation,
+       v.deadline, v.last_seen
+FROM vacancy v
+JOIN company c ON v.company_id = c.id
+WHERE v.status = 'expiring'
+  AND v.expiring_alerted_at IS NULL
+ORDER BY v.llm_score DESC NULLS LAST, v.last_seen ASC
 """
 
 
@@ -270,6 +285,64 @@ def build_candidate_hot_message(rows):
     return "\n".join(lines)
 
 
+def _deadline_or_last_seen_line(row):
+    """A short 'why this is expiring' line for the alert."""
+    dl = deadline_soon_label(row.get("deadline"))
+    if dl:
+        return f"⏳ {html.escape(dl)}"
+    ls = row.get("last_seen")
+    if ls:
+        return f"👁 последний раз виден {html.escape(str(ls)[:10])}"
+    return ""
+
+
+def build_expiring_message(row):
+    """Loud single-role alert for a protected role about to disappear."""
+    org = html.escape(row.get("org") or "")
+    title = html.escape(row.get("title") or "")
+    lines = [
+        "⚠️ <b>Вот-вот пропадёт — реши сегодня</b>",
+        f"<b>{org} — {title}</b>",
+    ]
+    meta = [f"📍 {html.escape(vacancy_location(row))}"]
+    if row.get("llm_score") is not None:
+        meta.append(f"🎯 {row['llm_score']}/100")
+    why = _deadline_or_last_seen_line(row)
+    if why:
+        meta.append(why)
+    lines.append(" · ".join(meta))
+
+    summary = vacancy_summary(row)
+    if summary:
+        lines.append("")
+        lines.append(html.escape(summary))
+
+    url = vacancy_url(row)
+    if url:
+        lines.append("")
+        lines.append(f'<a href="{html.escape(url, quote=True)}">Open vacancy →</a>')
+    text = "\n".join(lines)
+    if len(text) > MESSAGE_MAX_CHARS:
+        overflow = len(text) - MESSAGE_MAX_CHARS
+        summary = html.escape(vacancy_summary(row))
+        keep = max(200, len(summary) - overflow - 1)
+        lines = [l if l != summary else _truncate(summary, keep) for l in lines]
+        text = "\n".join(lines)
+    return text
+
+
+def build_expiring_keyboard(vac_id):
+    """👍 / 👎 / «уже подал» for an expiring-role alert. Reuses the v:<id>:<a>
+    callback format so the existing poll handler records the decision."""
+    return {
+        "inline_keyboard": [[
+            {"text": "👍 Liked", "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:l"},
+            {"text": "👎 Passed", "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:p"},
+            {"text": "✅ Уже подал", "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:a"},
+        ]]
+    }
+
+
 def build_keyboard(vac_id, chosen=None):
     """👍/👎 buttons; the chosen one gets a ✅ (tapping again flips the choice)."""
     like = "👍 Liked"
@@ -324,6 +397,30 @@ def fetch_candidate_hot(conn, limit=10, min_score=HOT_VACANCY_SCORE):
         return [dict(r) for r in cur.fetchall()]
 
 
+def fetch_expiring(conn):
+    import psycopg2.extras
+
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(SELECT_EXPIRING_SQL)
+        return [dict(r) for r in cur.fetchall()]
+
+
+def mark_alerted(conn, vac_id):
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE vacancy SET expiring_alerted_at = now() WHERE id = %s",
+            (vac_id,),
+        )
+
+
+def unmark_alerted(conn, vac_id):
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE vacancy SET expiring_alerted_at = NULL WHERE id = %s",
+            (vac_id,),
+        )
+
+
 def mark_sent(conn, vac_id):
     with conn.cursor() as cur:
         cur.execute(
@@ -352,14 +449,66 @@ def set_status(conn, vac_id, status):
 
 # --- send mode ----------------------------------------------------------------
 
+def send_expiring_alerts(conn, token, chat_id, expiring_rows, dry_run=False):
+    """Send one loud alert per freshly-expiring protected role. Returns the
+    number sent. Each is claimed (mark_alerted) before sending so a parallel run
+    or a re-run never double-alerts; a send failure releases it for next time."""
+    if not expiring_rows:
+        return 0
+    if dry_run:
+        for row in expiring_rows:
+            print("--- expiring alert ---")
+            print(build_expiring_message(row))
+        print(f"[dry-run] {len(expiring_rows)} expiring alert(s), nothing sent",
+              flush=True)
+        return 0
+    sent = 0
+    for row in expiring_rows:
+        mark_alerted(conn, row["id"])  # claim-first
+        try:
+            tg_call(token, "sendMessage", {
+                "chat_id": chat_id,
+                "text": build_expiring_message(row),
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+                "reply_markup": build_expiring_keyboard(row["id"]),
+            })
+            sent += 1
+            time.sleep(0.5)
+        except Exception as e:
+            unmark_alerted(conn, row["id"])  # release for the next run
+            print(f"ERROR expiring alert '{row.get('title')}': {e}",
+                  file=sys.stderr, flush=True)
+    print(f"Sent {sent}/{len(expiring_rows)} expiring alert(s) to chat {chat_id}",
+          flush=True)
+    return sent
+
+
+def cmd_alert(args):
+    """Standalone: send only the loud expiring-role alerts."""
+    token, db_url, chat_id = get_config()
+    conn = db_connect(db_url)
+    expiring_rows = fetch_expiring(conn)
+    if not expiring_rows:
+        print("No freshly-expiring roles to alert.", flush=True)
+        return
+    send_expiring_alerts(conn, token, chat_id, expiring_rows,
+                         dry_run=args.dry_run)
+
+
 def cmd_send(args):
     token, db_url, chat_id = get_config()
     conn = db_connect(db_url)
+    # Loud, distinct expiring alerts go FIRST — the scarce decisions we protect.
+    expiring_rows = fetch_expiring(conn)
+    expiring_sent = send_expiring_alerts(conn, token, chat_id, expiring_rows,
+                                         dry_run=args.dry_run)
+
     rows = fetch_fresh(conn, args.limit, args.min_score)
     # Strong vacancies at unreviewed companies — a separate section.
     hot_rows = fetch_candidate_hot(conn)
 
-    if not rows and not hot_rows:
+    if not rows and not hot_rows and not expiring_sent:
         if not args.dry_run:
             tg_call(token, "sendMessage", {
                 "chat_id": chat_id,
@@ -546,6 +695,11 @@ def main():
                         default=int(os.environ.get("DIGEST_MIN_SCORE", _DIGEST["default_min_score"])))
     p_send.add_argument("--dry-run", action="store_true")
     p_send.set_defaults(func=cmd_send)
+
+    p_alert = sub.add_parser(
+        "alert", help="send only the loud expiring-role alerts")
+    p_alert.add_argument("--dry-run", action="store_true")
+    p_alert.set_defaults(func=cmd_alert)
 
     p_poll = sub.add_parser("poll", help="listen for button taps")
     p_poll.add_argument("--loop", action="store_true", help="run forever")

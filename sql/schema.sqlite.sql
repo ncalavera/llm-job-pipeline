@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS vacancy (
     triage                TEXT DEFAULT '{}',        -- JSON object/array
 
     digest_sent_at        TEXT,
+    expiring_alerted_at   TEXT,        -- loud expiring alert sent (once)
 
     created_at            TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at            TEXT DEFAULT CURRENT_TIMESTAMP
