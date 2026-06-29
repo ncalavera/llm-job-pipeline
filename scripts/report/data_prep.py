@@ -6,7 +6,7 @@ from datetime import date, timezone, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from config import COMPANIES, PROJECT_ROOT, resolve_canonical_name
+from config import COMPANIES, PROJECT_ROOT, APPLYABLE_SCORE, resolve_canonical_name
 from company_registry import PARSING_ARTIFACTS
 from database_supabase import _parse_comp_value, load_vacancies, load_all_enrichment
 from db_conn import get_conn
@@ -40,6 +40,40 @@ def _deadline_soon_label(deadline_iso: str) -> str:
     if 0 <= days_left <= DEADLINE_SOON_DAYS:
         return f"deadline {dl.day:02d}.{dl.month:02d}"
     return ""
+
+
+# Statuses that disqualify a vacancy from the "applyable" count: already
+# decided (passed) or removed (archived). "expiring" is in the spec's exclusion
+# list but is NOT a real vacancy status in the schema — expiry is enforced by
+# the deadline-in-the-past check below; the name is kept here for forward-compat
+# so a future "expiring" status would be excluded automatically.
+_NON_APPLYABLE_STATUSES = {"archived", "passed", "expiring"}
+
+
+def _is_applyable_vacancy(v: dict) -> bool:
+    """True if a vacancy is worth applying to right now.
+
+    A role counts when its score clears APPLYABLE_SCORE, it isn't already
+    archived/passed/expiring, and its deadline (if any) hasn't passed.
+
+    Donor-facing exclusion is deferred: the vacancy scorer emits free-form
+    `tags` with no reliable donor-facing marker, and `llm_tags` isn't even in
+    the light vacancy SELECT used here — so we don't fabricate a tag the scorer
+    never emits. This stays score+status+deadline only until a clean tag exists.
+    """
+    score = v.get("llm_score")
+    if score is None or score < APPLYABLE_SCORE:
+        return False
+    if (v.get("status") or "") in _NON_APPLYABLE_STATUSES:
+        return False
+    deadline = v.get("deadline")
+    if deadline:
+        try:
+            if date.fromisoformat(str(deadline)[:10]) < date.today():
+                return False
+        except (ValueError, TypeError):
+            pass  # unparseable deadline → treat as no deadline, don't exclude
+    return True
 
 
 def _count_unscored(all_vacs: dict) -> int:
@@ -462,6 +496,7 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
         if org not in org_stats:
             org_stats[org] = {
                 "vacancy_count": 0,
+                "applyable_count": 0,
                 "scored_count": 0,
                 "scores": [],
                 "regions": {"europe": 0, "us": 0, "remote": 0, "other": 0},
@@ -473,6 +508,8 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
         st = org_stats[org]
         st["vacancy_count"] += 1
         st["vacancy_ids"].append(vid)
+        if _is_applyable_vacancy(v):
+            st["applyable_count"] += 1
         llm = v.get("llm_score")
         if llm is not None and llm >= 0:
             st["scored_count"] += 1
@@ -602,6 +639,7 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
             "is_archived": csv_row.get("status", "") == "inactive",
             "is_manual_check": cfg.get("strategy") == "manual_check",
             "vacancy_count": vacancy_count,
+            "applyable_count": stats.get("applyable_count", 0),
             "scored_count": scored_count,
             "avg_llm_score": avg_score,
             "max_llm_score": max_score,

@@ -108,6 +108,7 @@ export const TRIAGE_COLUMNS = [
 ];
 
 export const CHIP_TO_COL = {
+  applyable: "applyable",
   liked: "liked",
   score: "score",
   interest: "fit",
@@ -125,7 +126,7 @@ export const state = {
   currentBasket: "unseen",
   activeCatalogLocs: new Set(),
   catalogSortDesc: true,
-  companySortCol: "liked",
+  companySortCol: "applyable",
   companySortAsc: false,
   statsSortCol: "count",
   statsSortAsc: false,

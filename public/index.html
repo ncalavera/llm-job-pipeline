@@ -252,10 +252,17 @@
           <div class="company-sort-chips">
             <button
               class="chip chip-sort active"
+              data-csort="applyable"
+              onclick="toggleCompanySort(this)"
+            >
+              <span data-i18n="csort_applyable">Годные</span> &#8595;
+            </button>
+            <button
+              class="chip chip-sort"
               data-csort="liked"
               onclick="toggleCompanySort(this)"
             >
-              <span data-i18n="csort_liked">Liked</span> &#8595;
+              <span data-i18n="csort_liked">Liked</span>
             </button>
             <button
               class="chip chip-sort"
