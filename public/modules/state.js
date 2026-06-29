@@ -89,6 +89,13 @@ export const TRIAGE_COLUMNS = [
     compact: true,
   },
   {
+    // Protected roles (status='expiring') + liked roles past their deadline:
+    // visible for an explicit decision instead of being silently passed.
+    key: "expiring",
+    label: "Истекает",
+    color: "var(--coral)",
+  },
+  {
     key: "to_apply",
     label: "To apply",
     color: "var(--emerald)",
