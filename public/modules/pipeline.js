@@ -446,7 +446,7 @@ export function renderPipeline() {
   });
   deduped.forEach(function (entry) {
     // A liked role past its deadline is no longer auto-passed (U9): surface it
-    // in the "Истекает" column for an explicit decision instead of hiding it.
+    // in the "Expiring" column for an explicit decision instead of hiding it.
     if (entry._status === "liked" && isVacancyExpired(entry)) {
       if (buckets.expiring !== undefined) buckets.expiring.push(entry);
       return;

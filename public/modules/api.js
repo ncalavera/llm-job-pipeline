@@ -207,7 +207,7 @@ const DEEP_PROFILE_FIELDS = [
   "status_reason",
   // Per-company "applyable roles" count, computed at snapshot-generation time
   // (the live /api/companies vacancy SELECT lacks score/deadline). Pairs with
-  // the live vacancy_count for the "N годных / M всего" badge.
+  // the live vacancy_count for the "N applyable / M total" badge.
   "applyable_count",
 ];
 

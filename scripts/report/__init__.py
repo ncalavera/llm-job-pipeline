@@ -155,6 +155,10 @@ def generate_dashboard(db: dict = None) -> None:
         "empty_shells": has_neither,
     }
 
+    # --- Latency / SLA health metrics for the "Сегодня" tab ---
+    from .data_prep import compute_latency_metrics
+    latency_metrics = compute_latency_metrics()
+
     # --- Build triage data for Triage tab ---
     triage_reviews = prepare_triage_data()
 
@@ -193,6 +197,7 @@ def generate_dashboard(db: dict = None) -> None:
         },
         "stats": stats,
         "enrichment_stats": enrichment_stats,
+        "latency_metrics": latency_metrics,
         "vacancy_ids": [g["id"] for g in groups],
         "groups": groups,
         "companies": companies,

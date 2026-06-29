@@ -76,6 +76,95 @@ def _is_applyable_vacancy(v: dict) -> bool:
     return True
 
 
+# ---------------------------------------------------------------------------
+# Latency / SLA health metrics (U11)
+# ---------------------------------------------------------------------------
+
+# Active-but-undecided statuses an SLA-tracked role can stall in.
+_SLA_ACTIVE_STATUSES = (
+    "unseen", "liked", "expiring", "to_research", "to_network", "to_apply",
+)
+
+
+def _as_date(val):
+    """Best-effort parse a date/timestamp (Postgres datetime or SQLite text)."""
+    from datetime import datetime as _dt
+    if not val:
+        return None
+    if isinstance(val, _dt):
+        return val.date()
+    if isinstance(val, date):
+        return val
+    try:
+        return date.fromisoformat(str(val)[:10])
+    except (ValueError, TypeError):
+        return None
+
+
+def compute_latency_metrics(conn=None) -> dict:
+    """Decision-SLA health, computed at snapshot time (KTD1 / U11).
+
+    - **stuck**: roles scoring >= SLA_SCORE in an active-but-undecided status
+      that haven't moved in > SLA_DAYS (age from status_updated_at, falling back
+      to first_seen so a never-touched unseen role still counts).
+    - **leakage_count**: roles scoring >= SLA_SCORE that landed in archived/passed
+      within the last SLA-week. Post-U2 the system no longer silently archives or
+      passes protected roles, so this is a watchdog that should trend to ~0; it
+      cannot perfectly separate a user's deliberate pass from a system leak, so
+      treat a spike — not the baseline — as the signal.
+    """
+    from config import SLA_SCORE, SLA_DAYS
+    from db_backend import RealDictCursor
+    conn = conn or get_conn()
+    today = date.today()
+
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    placeholders = ", ".join(["%s"] * len(_SLA_ACTIVE_STATUSES))
+    cur.execute(
+        "SELECT v.id, v.title, c.canonical_name AS org, v.llm_score, v.status, "
+        "       v.status_updated_at, v.first_seen "
+        "FROM vacancy v JOIN company c ON v.company_id = c.id "
+        f"WHERE v.llm_score >= %s AND v.status IN ({placeholders})",
+        (SLA_SCORE, *_SLA_ACTIVE_STATUSES),
+    )
+    stuck = []
+    for r in cur.fetchall():
+        ref = _as_date(r["status_updated_at"]) or _as_date(r["first_seen"])
+        if ref is None:
+            continue
+        age = (today - ref).days
+        if age >= SLA_DAYS:
+            stuck.append({
+                "id": str(r["id"]),
+                "org": r["org"],
+                "title": r["title"],
+                "llm_score": r["llm_score"],
+                "status": r["status"],
+                "days_stuck": age,
+            })
+    stuck.sort(key=lambda s: s["days_stuck"], reverse=True)
+
+    cur.execute(
+        "SELECT v.status_updated_at FROM vacancy v "
+        "WHERE v.llm_score >= %s AND v.status IN ('archived', 'passed')",
+        (SLA_SCORE,),
+    )
+    leakage = 0
+    for r in cur.fetchall():
+        d = _as_date(r["status_updated_at"])
+        if d is not None and (today - d).days <= SLA_DAYS:
+            leakage += 1
+    cur.close()
+
+    return {
+        "sla_score": SLA_SCORE,
+        "sla_days": SLA_DAYS,
+        "stuck": stuck,
+        "stuck_count": len(stuck),
+        "leakage_count": leakage,
+    }
+
+
 def _count_unscored(all_vacs: dict) -> int:
     """Count vacancies that are genuinely awaiting scoring.
 

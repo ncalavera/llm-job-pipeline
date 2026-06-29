@@ -19,6 +19,9 @@
     <nav class="top-nav">
       <div class="top-nav-brand">Job Search Pipeline</div>
       <div class="mode-toggle">
+        <button class="mode-btn" id="modeToday" onclick="switchMode('today')">
+          &#9728; <span data-i18n="tab_today">Today</span>
+        </button>
         <button
           class="mode-btn"
           id="modeCompanies"
@@ -61,6 +64,10 @@
 
     <div class="container">
       <div id="syncIndicator" class="sync-indicator"></div>
+
+      <!-- === TODAY MODE === -->
+      <div class="today-section" id="todaySection"></div>
+      <!-- /today-section -->
 
       <!-- === CATALOG MODE === -->
       <div class="catalog-section active" id="catalogSection">
@@ -182,7 +189,7 @@
             onclick="toggleCatalogShowAll(this)"
             data-i18n="catalog_show_all"
           >
-            Показать все
+            Show all
           </button>
         </div>
 
@@ -262,7 +269,7 @@
               data-csort="applyable"
               onclick="toggleCompanySort(this)"
             >
-              <span data-i18n="csort_applyable">Годные</span> &#8595;
+              <span data-i18n="csort_applyable">Applyable</span> &#8595;
             </button>
             <button
               class="chip chip-sort"

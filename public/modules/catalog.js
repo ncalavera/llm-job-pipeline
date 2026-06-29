@@ -24,7 +24,7 @@ import {
 import { T } from "./i18n.js";
 
 // Default catalog score floor (mirrors CATALOG_MIN_SCORE in scripts/config.py).
-// Roles below this — and unscored roles — are hidden until "показать все".
+// Roles below this — and unscored roles — are hidden until "show all".
 const CATALOG_MIN_SCORE = 40;
 // UI-only toggle: when true, the score floor is lifted and everything shows.
 let catalogShowAll = false;
@@ -43,17 +43,17 @@ function catalogFreshness(lastSeen) {
   if (ageDays >= STALE_SOURCE_DAYS) {
     return {
       cls: "card-freshness stale",
-      text: T("freshness_stale", "давно не видели, вероятно закрыта"),
+      text: T("freshness_stale", "stale, likely closed"),
       title: T(
         "freshness_stale_hint",
-        "оценка по дате последнего показа в источнике; прямые ATS точны, агрегаторы приблизительны",
+        "based on the last time the source confirmed the role; direct ATS is exact, aggregators approximate",
       ),
     };
   }
   return {
     cls: "card-freshness fresh",
-    text: T("freshness_fresh", "свежая, открыта"),
-    title: T("freshness_fresh_hint", "источник подтверждал роль недавно"),
+    text: T("freshness_fresh", "fresh, open"),
+    title: T("freshness_fresh_hint", "the source confirmed this role recently"),
   };
 }
 
@@ -113,14 +113,8 @@ export function toggleCatalogShowAll(btn) {
   catalogShowAll = !catalogShowAll;
   btn.classList.toggle("active", catalogShowAll);
   btn.textContent = catalogShowAll
-    ? T(
-        "catalog_show_top",
-        "\u0422\u043E\u043B\u044C\u043A\u043E \u0433\u043E\u0434\u043D\u044B\u0435",
-      )
-    : T(
-        "catalog_show_all",
-        "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0432\u0441\u0435",
-      );
+    ? T("catalog_show_top", "Top only")
+    : T("catalog_show_all", "Show all");
   renderCatalog();
 }
 
@@ -199,7 +193,7 @@ export function renderCatalog() {
     return basket === state.currentBasket;
   });
   const filtered = inBasket.filter((g) => {
-    // Default score floor: hide low- and unscored roles unless "показать все".
+    // Default score floor: hide low- and unscored roles unless "show all".
     if (
       !catalogShowAll &&
       (g.llm_score == null || g.llm_score < CATALOG_MIN_SCORE)

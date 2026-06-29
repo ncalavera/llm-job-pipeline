@@ -385,7 +385,7 @@ function _getColumns() {
       : []),
     {
       key: "applyable",
-      label: T("col_applyable", "Годные / Всего"),
+      label: T("col_applyable", "Applyable / Total"),
       sortable: true,
       cls: "ct-col-vac",
     },
@@ -967,9 +967,12 @@ function _buildApprovedRow(c) {
     '<td class="ct-td ct-col-vac">' +
     '<span class="ct-applyable">' +
     (c.applyable_count || 0) +
-    " годных</span> / " +
+    " " +
+    T("badge_applyable", "applyable") +
+    "</span> / " +
     (c.vacancy_count || 0) +
-    " всего" +
+    " " +
+    T("badge_total", "total") +
     "</td>" +
     '<td class="ct-td ct-col-liked">' +
     likedHtml +
