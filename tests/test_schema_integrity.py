@@ -11,7 +11,7 @@ import pytest
 VALID_COMPANY_STATUSES = {"candidate", "active", "inactive"}
 VALID_VACANCY_STATUSES = {
     "unseen", "liked", "passed", "to_apply",
-    "to_research", "to_network", "skipped", "applied", "archived",
+    "to_research", "to_network", "skipped", "applied", "expiring", "archived",
 }
 VALID_TIERS = {"S", "A", "B", "C"}
 

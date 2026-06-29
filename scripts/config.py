@@ -178,6 +178,41 @@ LLM_SCORE_THRESHOLD = int(
 )
 
 # ---------------------------------------------------------------------------
+# Latency-protection thresholds (see architecture-notes plan, KTD1).
+#
+# The pipeline's scarce resource is the candidate's decision attention on the
+# rare high-fit roles, not the volume of vacancies. These thresholds protect
+# that decision instead of optimising for a fresh feed.
+#
+# PROTECT_SCORE and SLA_SCORE are unified at 60 (Open Question #1 resolved):
+# every SLA-tracked role is also protected from silent archive/pass, so a
+# 60-69 role can no longer leak before it is ever seen.
+# ---------------------------------------------------------------------------
+
+#: Unseen roles at/above this are never silently archived or auto-passed; they
+#: flip to `expiring`, get a loud alert, and stay visible for a decision.
+PROTECT_SCORE = int(os.environ.get("PROTECT_SCORE", 60))
+
+#: Roles at/above this must move (be decided) within SLA_DAYS or surface as
+#: "stuck". Unified with PROTECT_SCORE.
+SLA_SCORE = int(os.environ.get("SLA_SCORE", 60))
+
+#: Decision SLA, in days. A SLA_SCORE+ role untouched longer than this is stuck.
+SLA_DAYS = int(os.environ.get("SLA_DAYS", 7))
+
+#: A company's "applyable" roles are open vacancies scoring at/above this that
+#: pass red flags (see scripts/report applyable-count computation).
+APPLYABLE_SCORE = int(os.environ.get("APPLYABLE_SCORE", 60))
+
+#: A vacancy not confirmed by its source for this many days is shown as
+#: "probably closed" on the catalog card.
+STALE_SOURCE_DAYS = int(os.environ.get("STALE_SOURCE_DAYS", 14))
+
+#: The catalog hides vacancies scoring below this by default ("показать все"
+#: reveals them).
+CATALOG_MIN_SCORE = int(os.environ.get("CATALOG_MIN_SCORE", 40))
+
+# ---------------------------------------------------------------------------
 # Universal junk — applied to ALL sources (companies + job boards).
 #
 # Catches postings that are not a specific open role for ANYONE: speculative /

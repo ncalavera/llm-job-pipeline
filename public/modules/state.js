@@ -62,8 +62,9 @@ export const STATUS_PRI = {
   applied: 3,
   skipped: 4,
   liked: 5,
-  passed: 6,
-  unseen: 7,
+  expiring: 6,
+  passed: 7,
+  unseen: 8,
 };
 
 export const STATUS_BASKET = {
@@ -72,6 +73,9 @@ export const STATUS_BASKET = {
   to_research: "liked",
   to_network: "liked",
   applied: "liked",
+  // A protected, about-to-disappear role with a decision still pending belongs
+  // in the active (Liked) basket, not Passed.
+  expiring: "liked",
   unseen: "unseen",
   passed: "passed",
   skipped: "passed",

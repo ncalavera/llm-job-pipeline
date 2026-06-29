@@ -93,11 +93,13 @@ CREATE TABLE IF NOT EXISTS vacancy (
 
     -- Triage decision. 'archived' is a status VALUE (not a column) — a vacancy
     -- removed from the active catalog (low score, gone from source, or manual).
+    -- 'expiring' = a protected high-fit role (score >= PROTECT_SCORE) that would
+    -- otherwise have been silently archived/passed; kept visible for a decision.
     status                TEXT NOT NULL DEFAULT 'unseen'
                           CHECK (status IN ('unseen', 'liked', 'passed',
                                             'to_apply', 'to_research',
                                             'to_network', 'skipped', 'applied',
-                                            'archived')),
+                                            'expiring', 'archived')),
     status_updated_at     TIMESTAMPTZ,
 
     -- LLM scoring output (filled by scripts/score_vacancies.py).

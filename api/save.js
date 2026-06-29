@@ -9,6 +9,7 @@ const VALID_STATUSES = [
   "to_network",
   "skipped",
   "applied",
+  "expiring",
   "archived",
 ];
 
