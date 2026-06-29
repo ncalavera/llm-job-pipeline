@@ -29,6 +29,34 @@ const CATALOG_MIN_SCORE = 40;
 // UI-only toggle: when true, the score floor is lifted and everything shows.
 let catalogShowAll = false;
 
+// A role not confirmed by its source for this many days is shown as probably
+// closed (mirrors STALE_SOURCE_DAYS in scripts/config.py).
+const STALE_SOURCE_DAYS = 14;
+
+// Source-freshness label from a role's last_seen date. Null when unknown.
+function catalogFreshness(lastSeen) {
+  if (!lastSeen) return null;
+  const seen = new Date(lastSeen);
+  if (isNaN(seen.getTime())) return null;
+  const ageDays = Math.floor((Date.now() - seen.getTime()) / 86400000);
+  // Boundary: exactly STALE_SOURCE_DAYS counts as stale.
+  if (ageDays >= STALE_SOURCE_DAYS) {
+    return {
+      cls: "card-freshness stale",
+      text: T("freshness_stale", "давно не видели, вероятно закрыта"),
+      title: T(
+        "freshness_stale_hint",
+        "оценка по дате последнего показа в источнике; прямые ATS точны, агрегаторы приблизительны",
+      ),
+    };
+  }
+  return {
+    cls: "card-freshness fresh",
+    text: T("freshness_fresh", "свежая, открыта"),
+    title: T("freshness_fresh_hint", "источник подтверждал роль недавно"),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Basket tabs
 // ---------------------------------------------------------------------------
@@ -322,6 +350,18 @@ function buildCatalogCard(g) {
       parts.push(
         '<span class="card-first-seen">' +
           relativeTime(g.first_seen) +
+          "</span>",
+      );
+    }
+    const fresh = catalogFreshness(g.last_seen);
+    if (fresh) {
+      parts.push(
+        '<span class="' +
+          fresh.cls +
+          '" title="' +
+          escHtml(fresh.title) +
+          '">' +
+          escHtml(fresh.text) +
           "</span>",
       );
     }

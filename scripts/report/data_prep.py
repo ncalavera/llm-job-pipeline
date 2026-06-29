@@ -249,6 +249,7 @@ def _build_group(v: dict, org_colors: dict, company_hq: dict) -> dict:
         "compensation": comp,
         "deadline": v.get("deadline", ""),
         "first_seen": v.get("first_seen", ""),
+        "last_seen": v.get("last_seen", ""),
         "org_color": org_colors.get(v["org"], ["#F97316", "#FFF7ED"]),
         "locations": entry_locations,
         "member_ids": [],

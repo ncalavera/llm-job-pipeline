@@ -438,6 +438,21 @@ body::after {
   margin-left: auto;
 }
 
+.card-freshness {
+  font-size: var(--text-xs);
+  padding: 1px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.card-freshness.fresh {
+  color: var(--emerald);
+  background: color-mix(in srgb, var(--emerald) 12%, transparent);
+}
+.card-freshness.stale {
+  color: var(--coral);
+  background: color-mix(in srgb, var(--coral) 14%, transparent);
+}
+
 .card-snippet {
   font-size: var(--text-sm);
   color: var(--muted);
