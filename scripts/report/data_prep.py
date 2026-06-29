@@ -43,10 +43,10 @@ def _deadline_soon_label(deadline_iso: str) -> str:
 
 
 # Statuses that disqualify a vacancy from the "applyable" count: already
-# decided (passed) or removed (archived). "expiring" is in the spec's exclusion
-# list but is NOT a real vacancy status in the schema — expiry is enforced by
-# the deadline-in-the-past check below; the name is kept here for forward-compat
-# so a future "expiring" status would be excluded automatically.
+# decided (passed), removed (archived), or protected-but-disappearing
+# (expiring — a first-class status; it needs an explicit decision, it is not a
+# live role to apply to). The deadline-in-the-past check below is an additional
+# guard for live statuses.
 _NON_APPLYABLE_STATUSES = {"archived", "passed", "expiring"}
 
 

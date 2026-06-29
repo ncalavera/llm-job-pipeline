@@ -177,10 +177,6 @@ LLM_SCORE_THRESHOLD = int(
     os.environ.get("LLM_SCORE_THRESHOLD", settings.thresholds()["llm_score_threshold"])
 )
 
-# A vacancy at or above this score is considered worth applying to. Drives the
-# dashboard's per-company "applyable roles" count (N годных / M всего badge).
-APPLYABLE_SCORE = 60
-
 # ---------------------------------------------------------------------------
 # Latency-protection thresholds (see architecture-notes plan, KTD1).
 #
