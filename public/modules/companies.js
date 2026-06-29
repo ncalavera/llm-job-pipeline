@@ -349,6 +349,12 @@ function _getColumns() {
         sortable: false,
         cls: "ct-col-reason",
       },
+      {
+        key: "review",
+        label: T("col_review_hdr", "Review"),
+        sortable: false,
+        cls: "ct-col-review",
+      },
     ];
   }
   // approved (default)
@@ -409,6 +415,12 @@ function _getColumns() {
       label: T("col_monitoring", "Monitoring"),
       sortable: true,
       cls: "ct-col-monitoring",
+    },
+    {
+      key: "review",
+      label: T("col_review_hdr", "Review"),
+      sortable: false,
+      cls: "ct-col-review",
     },
   ];
 }
@@ -967,6 +979,11 @@ function _buildApprovedRow(c) {
     '<td class="ct-td ct-col-monitoring">' +
     _monitoringHtml(c) +
     "</td>" +
+    '<td class="ct-td ct-col-review">' +
+    '<button class="cr-btn cr-reject" onclick="event.stopPropagation();reviewCompany(\'' +
+    escHtml(c.company_id || "") +
+    "','reject')\" title=\"Archive\">✗</button>" +
+    "</td>" +
     "</tr>"
   );
 }
@@ -1063,6 +1080,11 @@ function _buildArchivedRow(c) {
     '<td class="ct-td ct-col-reason">' +
     reasonText +
     "</td>" +
+    '<td class="ct-td ct-col-review">' +
+    '<button class="cr-btn cr-approve" onclick="event.stopPropagation();reviewCompany(\'' +
+    escHtml(c.company_id || "") +
+    "','approve')\" title=\"Restore to active\">✓</button>" +
+    "</td>" +
     "</tr>"
   );
 }
@@ -1102,6 +1124,14 @@ export function toggleCompanySort(btn) {
 export function reviewCompany(companyId, action) {
   if (!companyId) return;
   var newStatus = action === "approve" ? "approved" : "rejected";
+
+  // Remember the status to restore if the server call fails. The company may
+  // currently be pending, approved, or rejected (active/archived tabs now have
+  // action buttons too), so we can't assume "pending".
+  var prevCompany = getCompanies().find(function (c) {
+    return c.company_id === companyId;
+  });
+  var prevStatus = prevCompany ? _getReviewStatus(prevCompany) : "pending";
 
   // Capture current position BEFORE optimistic update (for auto-nav in pending tab)
   var shouldAutoNav =
@@ -1148,7 +1178,7 @@ export function reviewCompany(companyId, action) {
   // Persist to server
   saveCompanyReview(companyId, action).then(function (ok) {
     if (!ok) {
-      state.companyStatuses[companyId] = "pending";
+      state.companyStatuses[companyId] = prevStatus;
       renderCompanies();
       scheduleRender();
       if (state.currentProfileSlug) {
@@ -1819,12 +1849,24 @@ function buildCompanyProfilePage(c) {
       cid +
       "','reject')\">\u2717 Reject</button>" +
       "</div>";
-  } else if (reviewSt === "approved") {
+  } else if (reviewSt === "approved" && c.company_id) {
+    var cidA = escHtml(c.company_id);
     reviewBanner =
-      '<div class="cp-review-banner cp-review-approved"><span class="cp-review-label">\u2713 Approved</span></div>';
-  } else if (reviewSt === "rejected") {
+      '<div class="cp-review-banner cp-review-approved">' +
+      '<span class="cp-review-label">\u2713 Approved</span>' +
+      '<button class="cr-btn cr-reject cr-btn-lg" onclick="reviewCompany(\'' +
+      cidA +
+      "','reject')\">\u2717 Archive</button>" +
+      "</div>";
+  } else if (reviewSt === "rejected" && c.company_id) {
+    var cidR = escHtml(c.company_id);
     reviewBanner =
-      '<div class="cp-review-banner cp-review-rejected"><span class="cp-review-label">\u2717 Rejected</span></div>';
+      '<div class="cp-review-banner cp-review-rejected">' +
+      '<span class="cp-review-label">\u2717 Archived</span>' +
+      '<button class="cr-btn cr-approve cr-btn-lg" onclick="reviewCompany(\'' +
+      cidR +
+      "','approve')\">\u2713 Restore to active</button>" +
+      "</div>";
   }
 
   return (
