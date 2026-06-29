@@ -118,8 +118,12 @@ def _sanitize_text(text: str) -> str:
     return text
 
 
-def _build_user_msg(vacancy: dict, alignment_score=None) -> str:
-    """Build user message for scoring — identical for all backends."""
+def _build_user_msg(vacancy: dict) -> str:
+    """Build user message for scoring — identical for all backends.
+
+    Vacancy scoring is independent of company scoring (KTD4): the company
+    alignment_score is intentionally not part of the prompt input.
+    """
     description = vacancy.get("full_description") or vacancy.get("snippet") or "No description available"
     description = _sanitize_text(description)
     if len(description) > 8000:
@@ -139,8 +143,6 @@ def _build_user_msg(vacancy: dict, alignment_score=None) -> str:
             loc_parts.append(", ".join(parts))
     location_str = "; ".join(loc_parts)
 
-    alignment_str = f"{alignment_score}/100" if alignment_score is not None else "not enriched"
-
     tier = vacancy.get("tier") or vacancy.get("company_tier") or "?"
 
     return USER_TEMPLATE.format(
@@ -149,7 +151,6 @@ def _build_user_msg(vacancy: dict, alignment_score=None) -> str:
         title=vacancy["title"],
         location=location_str or "",
         description=description,
-        alignment_score=alignment_str,
     )
 
 
@@ -305,7 +306,7 @@ def cmd_local(args):
     _real_stdout = sys.stdout
     sys.stdout = sys.stderr
 
-    roles, fitness_map, stats = _load_and_dedup(
+    roles, _fitness_map, stats = _load_and_dedup(
         force=args.force,
         include_passed=args.include_passed,
         include_candidates=not args.no_candidates,
@@ -321,9 +322,7 @@ def cmd_local(args):
 
     output = []
     for _key, rep, members in roles:
-        company_info = fitness_map.get(rep["org"], {})
-        alignment = company_info.get("alignment_score")
-        user_msg = _build_user_msg(rep, alignment_score=alignment)
+        user_msg = _build_user_msg(rep)
 
         output.append({
             "payload_kind": "vacancy",
