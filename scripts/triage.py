@@ -29,33 +29,15 @@ TRIAGED_STATUSES = {"to_apply", "to_research", "to_network", "skipped", "applied
 def get_liked_vacancies() -> list[dict]:
     """Fetch liked vacancies from Supabase.
 
-    Automatically moves expired vacancies (deadline passed) to 'passed' status
-    so they don't reappear in future triage sessions.
-    Returns list of non-expired vacancy dicts.
+    No longer auto-passes expired roles (KTD2 / U9): a past deadline is not a
+    decision the system gets to make on the user's behalf. Expired liked roles
+    are returned too, surfaced in the dashboard's "Истекает" column for an
+    explicit call. Returns all liked vacancy dicts.
     """
     liked = load_vacancies(status="liked")
     if not liked:
         return []
-
-    today = date.today().isoformat()
-    filtered = []
-    expired_ids: dict[str, str] = {}
-    for uid, v in liked.items():
-        dl = v.get("deadline", "")
-        if dl and dl < today:
-            expired_ids[uid] = "passed"
-        else:
-            filtered.append(v)
-
-    if expired_ids:
-        batch_update_statuses(expired_ids)
-        get_conn().commit()
-        titles = [liked[uid].get("title", "?") for uid in expired_ids]
-        print(f"  {len(expired_ids)} liked vacancies auto-passed (deadline expired):")
-        for t in titles:
-            print(f"    - {t}")
-
-    return filtered
+    return list(liked.values())
 
 
 def update_status(vacancy_id: str, status: str) -> bool:
