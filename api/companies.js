@@ -95,10 +95,10 @@ export default async function handler(req, res) {
         });
         bucket.ids.push(v.id);
         bucket.total += 1;
-        if (
-          ["liked", "to_apply", "to_research", "to_network"].includes(v.status)
-        )
-          bucket.liked += 1;
+        // "Selected" = anything the user has touched and kept: everything
+        // except untouched (unseen) and rejected (passed). Includes applied,
+        // and stays correct for any future positive status (e.g. interviewing).
+        if (!["unseen", "passed"].includes(v.status)) bucket.liked += 1;
         if (v.status === "unseen") bucket.unseen += 1;
       }
       if (!vacs || vacs.length < PAGE) break;
