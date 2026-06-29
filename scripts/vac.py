@@ -79,7 +79,7 @@ from geo import geo_bucket
 VALID_STATUSES = {
     "unseen", "liked", "passed",
     "to_apply", "to_research", "to_network",
-    "skipped", "applied", "archived",
+    "skipped", "applied", "expiring", "archived",
 }
 
 GEO_BUCKETS = {"uk", "germany", "europe", "us", "cis", "other", "unknown"}

@@ -651,6 +651,8 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
             # (gone from source) OR protected as 'expiring' back to 'unseen'.
             if existing.get("status") in ("archived", "expiring"):
                 updates["status"] = "unseen"
+                # Reset the expiring alert so a future expiry re-alerts.
+                updates["expiring_alerted_at"] = None
                 resurrected += 1
 
             if job.get("snippet") and not existing.get("snippet"):
@@ -814,6 +816,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
             updates = {"last_seen": today}
             if existing.get("status") in ("archived", "expiring"):
                 updates["status"] = "unseen"
+                updates["expiring_alerted_at"] = None
                 resurrected += 1
             for field in ("snippet", "full_description"):
                 if job.get(field) and not existing.get(field):
@@ -1615,7 +1618,7 @@ def print_reconciliation_report():
 # Validation
 # ---------------------------------------------------------------------------
 
-VALID_STATUSES = {"unseen", "liked", "passed", "to_apply", "to_research", "to_network", "skipped", "applied", "archived"}
+VALID_STATUSES = {"unseen", "liked", "passed", "to_apply", "to_research", "to_network", "skipped", "applied", "expiring", "archived"}
 
 
 def validate_db() -> list[str]:

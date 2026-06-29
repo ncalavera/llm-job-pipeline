@@ -35,7 +35,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 VALID_STATUSES = {
     "unseen", "liked", "passed", "to_apply", "to_research",
-    "to_network", "skipped", "applied", "archived",
+    "to_network", "skipped", "applied", "expiring", "archived",
 }
 VALID_ACTIONS = {"approve", "reject"}
 

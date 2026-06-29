@@ -149,9 +149,14 @@ def test_expiring_role_resurrects_on_relisting(dal):
     dal.archive_gone_vacancies("Acme Robotics", [])  # → expiring
     _commit(dal)
     assert dal.load_vacancies()[vid]["status"] == "expiring"
+    # Pretend the loud alert already fired for it.
+    _set(dal, vid, expiring_alerted_at="2026-06-20T00:00:00")
 
-    # The company re-lists it → resurrected to a normal active state.
+    # The company re-lists it → resurrected to a normal active state, and the
+    # alert flag is cleared so a future expiry can re-alert.
     new = dal.save_vacancies("Acme Robotics", "A", [_job("Senior Advisor")])
     _commit(dal)
     assert new == 0
-    assert dal.load_vacancies()[vid]["status"] == "unseen"
+    row = dal.load_vacancies()[vid]
+    assert row["status"] == "unseen"
+    assert row["expiring_alerted_at"] is None

@@ -47,7 +47,9 @@ def _deadline_soon_label(deadline_iso: str) -> str:
 # (expiring — a first-class status; it needs an explicit decision, it is not a
 # live role to apply to). The deadline-in-the-past check below is an additional
 # guard for live statuses.
-_NON_APPLYABLE_STATUSES = {"archived", "passed", "expiring"}
+_NON_APPLYABLE_STATUSES = {
+    "archived", "passed", "expiring", "applied", "skipped",
+}
 
 
 def _is_applyable_vacancy(v: dict) -> bool:
