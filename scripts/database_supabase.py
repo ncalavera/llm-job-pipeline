@@ -21,6 +21,7 @@ from company_registry import (
 import settings
 from config import (
     LLM_SCORE_THRESHOLD,
+    PROTECT_SCORE,
     VACANCIES_DIR,
     GEO_BANNED_COUNTRIES,
     GEO_BANNED_REGIONS,
@@ -646,7 +647,9 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
         if existing:
             updates = {"last_seen": today}
 
-            if existing.get("status") == "archived":
+            # A re-listed role is alive again: resurrect a row we had archived
+            # (gone from source) OR protected as 'expiring' back to 'unseen'.
+            if existing.get("status") in ("archived", "expiring"):
                 updates["status"] = "unseen"
                 resurrected += 1
 
@@ -809,7 +812,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
 
         if existing:
             updates = {"last_seen": today}
-            if existing.get("status") == "archived":
+            if existing.get("status") in ("archived", "expiring"):
                 updates["status"] = "unseen"
                 resurrected += 1
             for field in ("snippet", "full_description"):
@@ -1292,7 +1295,7 @@ def archive_gone_vacancies(org_name: str, fetched_jobs: list[dict]) -> int:
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     cur.execute(
-        "SELECT id, dedup_hash, title FROM vacancy "
+        "SELECT id, dedup_hash, title, llm_score FROM vacancy "
         "WHERE company_id = %s AND status = 'unseen'",
         (company_id,),
     )
@@ -1300,16 +1303,39 @@ def archive_gone_vacancies(org_name: str, fetched_jobs: list[dict]) -> int:
     if not gone:
         cur.close()
         return 0
-    cur.execute(
-        "UPDATE vacancy SET status = 'archived', status_updated_at = NOW() "
-        "WHERE id = ANY(%s::uuid[])",
-        ([str(r["id"]) for r in gone],),
-    )
+
+    # Latency protection (KTD1/KTD2): a high-fit role that vanished from its
+    # source is exactly the scarce decision we must not lose silently. Flip it
+    # to 'expiring' (kept visible, alerted in telegram_digest) instead of
+    # archiving, and do NOT tombstone it — so a re-listing resurrects it freely.
+    protected = [r for r in gone if (r["llm_score"] or 0) >= PROTECT_SCORE]
+    to_archive = [r for r in gone if (r["llm_score"] or 0) < PROTECT_SCORE]
+
+    if protected:
+        cur.execute(
+            "UPDATE vacancy SET status = 'expiring', status_updated_at = NOW() "
+            "WHERE id = ANY(%s::uuid[])",
+            ([str(r["id"]) for r in protected],),
+        )
+    if to_archive:
+        cur.execute(
+            "UPDATE vacancy SET status = 'archived', status_updated_at = NOW() "
+            "WHERE id = ANY(%s::uuid[])",
+            ([str(r["id"]) for r in to_archive],),
+        )
     cur.close()
-    record_archived_hashes([(r["dedup_hash"], "gone_from_source") for r in gone])
-    titles = ", ".join(sorted(r["title"] for r in gone)[:3])
-    print(f"  [{org}] archived {len(gone)} gone from source: {titles}", flush=True)
-    return len(gone)
+    if to_archive:
+        record_archived_hashes(
+            [(r["dedup_hash"], "gone_from_source") for r in to_archive]
+        )
+        titles = ", ".join(sorted(r["title"] for r in to_archive)[:3])
+        print(f"  [{org}] archived {len(to_archive)} gone from source: {titles}",
+              flush=True)
+    if protected:
+        ptitles = ", ".join(sorted(r["title"] for r in protected)[:3])
+        print(f"  [{org}] PROTECTED {len(protected)} high-fit gone from source "
+              f"→ expiring: {ptitles}", flush=True)
+    return len(to_archive)
 
 
 # ---------------------------------------------------------------------------
@@ -1317,9 +1343,24 @@ def archive_gone_vacancies(org_name: str, fetched_jobs: list[dict]) -> int:
 # ---------------------------------------------------------------------------
 
 def pass_expired_vacancies() -> int:
-    """Mark expired unseen vacancies as passed. Returns count."""
+    """Auto-resolve expired unseen vacancies past their deadline.
+
+    High-fit roles (llm_score >= PROTECT_SCORE) are NOT silently passed — they
+    flip to 'expiring' so the scarce decision stays visible and alerted
+    (KTD1/KTD2). Everything below the threshold is passed as before. Returns the
+    count auto-passed (the protected→expiring count is logged separately).
+    """
     conn = get_conn()
     cur = conn.cursor()
+    # Protect first so the rows leave 'unseen' before the pass sweep runs.
+    cur.execute("""
+        UPDATE vacancy SET status = 'expiring', status_updated_at = NOW()
+        WHERE deadline IS NOT NULL
+          AND deadline < CURRENT_DATE
+          AND status = 'unseen'
+          AND COALESCE(llm_score, 0) >= %s
+    """, (PROTECT_SCORE,))
+    protected = cur.rowcount
     cur.execute("""
         UPDATE vacancy SET status = 'passed', status_updated_at = NOW()
         WHERE deadline IS NOT NULL
@@ -1330,6 +1371,9 @@ def pass_expired_vacancies() -> int:
     cur.close()
     if count:
         print(f"  Auto-passed {count} expired unseen vacancies", flush=True)
+    if protected:
+        print(f"  PROTECTED {protected} expired high-fit roles → expiring",
+              flush=True)
     return count
 
 
