@@ -352,7 +352,7 @@ def _extract_enrichment(result: dict) -> dict | None:
     mission_data = mission if isinstance(mission, dict) else {}
     boost_keys = set(CUSTOM_BOOST_KEYS) | {f"{k}_reasoning" for k in CUSTOM_BOOST_KEYS}
     keep_keys = (
-        "alignment_score", "alignment_label", "strengths", "risks",
+        "alignment_score", "alignment_label", "dimensions", "strengths", "risks",
         "approach", "experience_match_reasoning", "mission_verdict",
     ) + tuple(boost_keys)
     mission_fit = {
