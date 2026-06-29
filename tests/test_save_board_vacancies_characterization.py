@@ -125,6 +125,34 @@ def test_batch_dedup_by_external_id(dal):
     assert _row_count(dal, dal.make_vacancy_id("DupCo", "Dup Role B")) == 0
 
 
+def test_title_geo_suffix_dedups_to_one_row(dal):
+    """Two jobs for the same role, one titled "... (Remote)", dedup to a single
+    row: the trailing work-mode suffix is stripped before hashing. Different
+    external_ids, so this is the title normaliser, not external_id dedup.
+    """
+    _seed_company(dal, "SuffixCo")
+    jobs = [
+        _job("Ops Lead", org="SuffixCo", external_id="EXT-A"),
+        _job("Ops Lead (Remote)", org="SuffixCo", external_id="EXT-B"),
+    ]
+    dal.save_board_vacancies(_board("SuffixCo"), jobs)
+    dal.get_conn().commit()
+
+    assert _row_count(dal, dal.make_vacancy_id("SuffixCo", "Ops Lead")) == 1
+
+
+def test_normalize_title_for_dedup_keeps_non_geo_parens():
+    import database_supabase as db
+    # stripped: work-mode / location qualifiers and stray whitespace
+    assert db._normalize_title_for_dedup("Ops Lead (Remote)") == "Ops Lead"
+    assert db._normalize_title_for_dedup("Analyst (Remote, United States)") == "Analyst"
+    assert db._normalize_title_for_dedup("Manager (Hybrid)") == "Manager"
+    assert db._normalize_title_for_dedup("Consultant -  Grants") == "Consultant - Grants"
+    # preserved: parentheticals that distinguish genuinely different roles
+    assert db._normalize_title_for_dedup("Teacher (Spanish)") == "Teacher (Spanish)"
+    assert db._normalize_title_for_dedup("Lead (Maternity Cover)") == "Lead (Maternity Cover)"
+
+
 # ===========================================================================
 # 2. Inactive company → skipped, never inserted
 # ===========================================================================

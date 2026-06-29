@@ -3171,8 +3171,11 @@ def fetch_fastforward_board(board_cfg: dict) -> list[dict]:
         if not title or not org or _is_generic_pipeline_title(title):
             continue
 
+        # Getro lists the literal "Remote" as a pseudo-location; drop it and
+        # keep the first real place name so remote roles keep their city.
         locs = j.get("locations") or []
-        location = locs[0] if locs else ""
+        real_locs = [l for l in locs if l and l.lower() != "remote"]
+        location = real_locs[0] if real_locs else ""
         if j.get("work_mode") == "remote":
             location = f"Remote, {location}" if location else "Remote"
 

@@ -168,8 +168,28 @@ def _sanitize_title(title: str) -> str:
     return title.strip()
 
 
+# Trailing parenthetical that only restates work-mode / location, e.g.
+# "(Remote)", "(Remote, United States)", "(Hybrid)", "(On-site)". Boards like
+# Getro append these to the title, which would otherwise fork the dedup hash
+# from the same role posted without the suffix. Only mode/location qualifiers
+# are stripped — "(Spanish)", "(Maternity cover)" etc. stay, so genuinely
+# distinct roles are not merged.
+_TITLE_GEO_SUFFIX = re.compile(
+    r"\s*\((?:remote|hybrid|on[\s-]?site|onsite|wfh|hq)\b[^)]*\)\s*$", re.I)
+
+
+def _normalize_title_for_dedup(title: str) -> str:
+    """Collapse whitespace and drop trailing work-mode/location parentheticals."""
+    t = title or ""
+    prev = None
+    while prev != t:
+        prev = t
+        t = _TITLE_GEO_SUFFIX.sub("", t).strip()
+    return re.sub(r"\s+", " ", t).strip()
+
+
 def make_vacancy_id(org: str, title: str, location: str = "") -> str:
-    key = f"{org}|{title}".lower()
+    key = f"{org}|{_normalize_title_for_dedup(title)}".lower()
     return hashlib.md5(key.encode()).hexdigest()[:16]
 
 
