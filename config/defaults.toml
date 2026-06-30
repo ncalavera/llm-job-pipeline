@@ -53,9 +53,9 @@ llm_score_threshold = 20
 
 # Score → tier cut-offs (highest first). S = best fit. Used by the dashboard /
 # tier helpers; not a geography or discipline preference.
-tier_s = 65
-tier_a = 50
-tier_b = 35
+tier_s = 82
+tier_a = 70
+tier_b = 55
 tier_c = 0
 
 # Composite company-ranking weights (alignment vs. any boost). Neutral split.

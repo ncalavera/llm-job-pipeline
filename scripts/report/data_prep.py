@@ -754,6 +754,8 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
             "logo_url": about.get("logo_url", ""),
             "alignment_score": mission.get("alignment_score"),
             "alignment_label": mission.get("alignment_label", ""),
+            "fit_dimensions": mission.get("dimensions", {}),
+            "fit_evidence": mission.get("evidence_anchors", []),
             "fit_strengths": mission.get("strengths", []),
             "fit_risks": mission.get("risks", []),
             "fit_approach": mission.get("approach", ""),

@@ -1574,6 +1574,49 @@ function buildFitSection(c) {
       c.alignment_score +
       '%;border-radius:4px"></div></div></div></div>';
 
+    if (c.fit_dimensions && Object.keys(c.fit_dimensions).length) {
+      var DIMS = [
+        ["mission_authenticity", "Mission"],
+        ["domain_desirability", "Domain"],
+        ["breadth_rotation", "Breadth"],
+        ["builder_stage", "Stage 0→1"],
+        ["career_entry_value", "Career"],
+        ["money_stability", "Money"],
+        ["culture_fit", "Culture"],
+      ];
+      inner +=
+        '<div style="margin-bottom:16px"><div style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">WANT breakdown</div>';
+      for (var di = 0; di < DIMS.length; di++) {
+        var dv = c.fit_dimensions[DIMS[di][0]];
+        if (dv == null) continue;
+        var dc =
+          dv >= 75
+            ? "#059669"
+            : dv >= 55
+              ? "#0284C7"
+              : dv >= 35
+                ? "#D97706"
+                : "#DC2626";
+        inner +=
+          '<div style="display:flex;align-items:center;gap:8px;margin:3px 0">' +
+          '<div style="width:78px;font-size:12px;color:#6B7280">' +
+          DIMS[di][1] +
+          "</div>" +
+          '<div style="flex:1;background:#E5E7EB;border-radius:4px;height:8px;overflow:hidden">' +
+          '<div style="background:' +
+          dc +
+          ";height:100%;width:" +
+          dv +
+          '%;border-radius:4px"></div></div>' +
+          '<div style="width:24px;font-size:12px;font-weight:600;color:' +
+          dc +
+          ';text-align:right">' +
+          dv +
+          "</div></div>";
+      }
+      inner += "</div>";
+    }
+
     if (SHOW_MPA && c.mpa_prestige != null) {
       inner +=
         '<div style="display:flex;gap:24px;margin-bottom:16px;font-size:13px">' +
@@ -1610,6 +1653,34 @@ function buildFitSection(c) {
           "</div>";
       }
       inner += "</div>";
+    }
+
+    if (c.fit_evidence && c.fit_evidence.length) {
+      inner +=
+        '<details style="margin-bottom:12px"><summary style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;cursor:pointer">Evidence (' +
+        c.fit_evidence.length +
+        ")</summary>";
+      for (var evi = 0; evi < c.fit_evidence.length; evi++) {
+        var ev = c.fit_evidence[evi];
+        if (!ev) continue;
+        var q = ev.quote || "";
+        if (q.length > 240) q = q.slice(0, 240) + "…";
+        inner +=
+          '<div style="font-size:12px;padding:6px 0;border-bottom:1px solid #F3F4F6">' +
+          '<span style="background:#EEF2FF;color:#3730A3;font-size:11px;padding:1px 6px;border-radius:4px;margin-right:6px">' +
+          escHtml(ev.source || "") +
+          "</span>" +
+          '<strong style="color:#374151">' +
+          escHtml(ev.claim || "") +
+          "</strong>" +
+          (q
+            ? '<div style="color:#6B7280;font-style:italic;margin-top:2px">«' +
+              escHtml(q) +
+              "»</div>"
+            : "") +
+          "</div>";
+      }
+      inner += "</details>";
     }
 
     if (c.fit_approach) {
