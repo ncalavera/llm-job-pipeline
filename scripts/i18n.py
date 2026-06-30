@@ -51,6 +51,11 @@ STRINGS: dict[str, dict[str, str]] = {
         "today_none_new": "nothing new",
         "today_protected": "protected, decide",
         "today_deadline_in": "deadline in",
+        # Today inline action buttons
+        "today_act_apply": "Apply",
+        "today_act_applied": "Mark applied",
+        "today_act_pass": "Pass",
+        "today_act_like": "Like",
         "today_sla": "Decision discipline",
         "today_stuck_hint": "stuck (>=",
         "today_stuck_hint_tail": " d):",
@@ -214,6 +219,11 @@ STRINGS: dict[str, dict[str, str]] = {
         "today_none_new": "нового нет",
         "today_protected": "защищённая, решить",
         "today_deadline_in": "дедлайн через",
+        # Today inline action buttons
+        "today_act_apply": "Откликнуться",
+        "today_act_applied": "Отправлено",
+        "today_act_pass": "Отказ",
+        "today_act_like": "В избранное",
         "today_sla": "Дисциплина решений",
         "today_stuck_hint": "застряло (≥",
         "today_stuck_hint_tail": " дн.):",
