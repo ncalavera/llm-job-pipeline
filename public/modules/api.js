@@ -191,6 +191,8 @@ const DEEP_PROFILE_FIELDS = [
   "sector",
   "logo_url",
   "alignment_label",
+  "fit_dimensions",
+  "fit_evidence",
   "fit_strengths",
   "fit_risks",
   "fit_approach",
