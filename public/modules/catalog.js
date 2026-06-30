@@ -23,6 +23,40 @@ import {
 } from "./helpers.js";
 import { T } from "./i18n.js";
 
+// Default catalog score floor (mirrors CATALOG_MIN_SCORE in scripts/config.py).
+// Roles below this — and unscored roles — are hidden until "show all".
+const CATALOG_MIN_SCORE = 40;
+// UI-only toggle: when true, the score floor is lifted and everything shows.
+let catalogShowAll = false;
+
+// A role not confirmed by its source for this many days is shown as probably
+// closed (mirrors STALE_SOURCE_DAYS in scripts/config.py).
+const STALE_SOURCE_DAYS = 14;
+
+// Source-freshness label from a role's last_seen date. Null when unknown.
+function catalogFreshness(lastSeen) {
+  if (!lastSeen) return null;
+  const seen = new Date(lastSeen);
+  if (isNaN(seen.getTime())) return null;
+  const ageDays = Math.floor((Date.now() - seen.getTime()) / 86400000);
+  // Boundary: exactly STALE_SOURCE_DAYS counts as stale.
+  if (ageDays >= STALE_SOURCE_DAYS) {
+    return {
+      cls: "card-freshness stale",
+      text: T("freshness_stale", "stale, likely closed"),
+      title: T(
+        "freshness_stale_hint",
+        "based on the last time the source confirmed the role; direct ATS is exact, aggregators approximate",
+      ),
+    };
+  }
+  return {
+    cls: "card-freshness fresh",
+    text: T("freshness_fresh", "fresh, open"),
+    title: T("freshness_fresh_hint", "the source confirmed this role recently"),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Basket tabs
 // ---------------------------------------------------------------------------
@@ -71,6 +105,16 @@ export function toggleCatalogSort(btn) {
   btn.textContent = state.catalogSortDesc
     ? T("sort_score", "Score") + "\u00A0\u2193"
     : T("sort_score", "Score") + "\u00A0\u2191";
+  renderCatalog();
+}
+
+// Lift / restore the default score floor (CATALOG_MIN_SCORE). UI state only.
+export function toggleCatalogShowAll(btn) {
+  catalogShowAll = !catalogShowAll;
+  btn.classList.toggle("active", catalogShowAll);
+  btn.textContent = catalogShowAll
+    ? T("catalog_show_top", "Top only")
+    : T("catalog_show_all", "Show all");
   renderCatalog();
 }
 
@@ -149,6 +193,12 @@ export function renderCatalog() {
     return basket === state.currentBasket;
   });
   const filtered = inBasket.filter((g) => {
+    // Default score floor: hide low- and unscored roles unless "show all".
+    if (
+      !catalogShowAll &&
+      (g.llm_score == null || g.llm_score < CATALOG_MIN_SCORE)
+    )
+      return false;
     if (orgFilter && g.org !== orgFilter) return false;
     if (
       state.activeCatalogLocs.size > 0 &&
@@ -294,6 +344,18 @@ function buildCatalogCard(g) {
       parts.push(
         '<span class="card-first-seen">' +
           relativeTime(g.first_seen) +
+          "</span>",
+      );
+    }
+    const fresh = catalogFreshness(g.last_seen);
+    if (fresh) {
+      parts.push(
+        '<span class="' +
+          fresh.cls +
+          '" title="' +
+          escHtml(fresh.title) +
+          '">' +
+          escHtml(fresh.text) +
           "</span>",
       );
     }

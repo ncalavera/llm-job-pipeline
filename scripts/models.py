@@ -35,6 +35,7 @@ class VacancyStatus(str, Enum):
     to_network = "to_network"
     skipped = "skipped"
     applied = "applied"
+    expiring = "expiring"
     archived = "archived"
 
 

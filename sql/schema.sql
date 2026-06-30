@@ -93,11 +93,13 @@ CREATE TABLE IF NOT EXISTS vacancy (
 
     -- Triage decision. 'archived' is a status VALUE (not a column) — a vacancy
     -- removed from the active catalog (low score, gone from source, or manual).
+    -- 'expiring' = a protected high-fit role (score >= PROTECT_SCORE) that would
+    -- otherwise have been silently archived/passed; kept visible for a decision.
     status                TEXT NOT NULL DEFAULT 'unseen'
                           CHECK (status IN ('unseen', 'liked', 'passed',
                                             'to_apply', 'to_research',
                                             'to_network', 'skipped', 'applied',
-                                            'archived')),
+                                            'expiring', 'archived')),
     status_updated_at     TIMESTAMPTZ,
 
     -- LLM scoring output (filled by scripts/score_vacancies.py).
@@ -115,6 +117,10 @@ CREATE TABLE IF NOT EXISTS vacancy (
     -- Set by scripts/telegram_digest.py when a vacancy is pushed to the
     -- Telegram digest, so it is never sent twice.
     digest_sent_at        TIMESTAMPTZ,
+
+    -- Set when the loud "expiring" alert for this role has been sent, so the
+    -- protected-role alert (status='expiring') fires exactly once.
+    expiring_alerted_at   TIMESTAMPTZ,
 
     created_at            TIMESTAMPTZ DEFAULT NOW(),
     updated_at            TIMESTAMPTZ DEFAULT NOW()

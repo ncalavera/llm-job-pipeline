@@ -438,6 +438,21 @@ body::after {
   margin-left: auto;
 }
 
+.card-freshness {
+  font-size: var(--text-xs);
+  padding: 1px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.card-freshness.fresh {
+  color: var(--emerald);
+  background: color-mix(in srgb, var(--emerald) 12%, transparent);
+}
+.card-freshness.stale {
+  color: var(--coral);
+  background: color-mix(in srgb, var(--coral) 14%, transparent);
+}
+
 .card-snippet {
   font-size: var(--text-sm);
   color: var(--muted);
@@ -816,6 +831,64 @@ body[data-dashboard-style="minimal"] .loading-illus {
 .catalog-section.active {
   display: block;
   position: relative;
+}
+.today-section {
+  display: none;
+}
+.today-section.active {
+  display: block;
+  position: relative;
+}
+.today-block {
+  margin-bottom: 28px;
+}
+.today-block h3 {
+  font-size: var(--text-md);
+  margin-bottom: 10px;
+}
+.today-count {
+  display: inline-block;
+  min-width: 20px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: var(--surface-2, rgba(127, 127, 127, 0.15));
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.today-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.today-item {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border, rgba(127, 127, 127, 0.15));
+  font-size: var(--text-sm);
+}
+.today-why {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.today-empty {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-style: italic;
+}
+.today-sla {
+  border-top: 2px solid var(--border, rgba(127, 127, 127, 0.2));
+  padding-top: 16px;
+}
+.today-sla-hint {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  margin-bottom: 8px;
+}
+.today-leakage {
+  font-size: var(--text-sm);
+  margin-top: 10px;
+}
+.today-leakage.warn {
+  color: var(--coral);
 }
 .stats-section {
   display: none;

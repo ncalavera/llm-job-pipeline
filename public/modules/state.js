@@ -62,8 +62,9 @@ export const STATUS_PRI = {
   applied: 3,
   skipped: 4,
   liked: 5,
-  passed: 6,
-  unseen: 7,
+  expiring: 6,
+  passed: 7,
+  unseen: 8,
 };
 
 export const STATUS_BASKET = {
@@ -72,6 +73,9 @@ export const STATUS_BASKET = {
   to_research: "liked",
   to_network: "liked",
   applied: "liked",
+  // A protected, about-to-disappear role with a decision still pending belongs
+  // in the active (Liked) basket, not Passed.
+  expiring: "liked",
   unseen: "unseen",
   passed: "passed",
   skipped: "passed",
@@ -83,6 +87,13 @@ export const TRIAGE_COLUMNS = [
     label: "Liked",
     color: "var(--gold)",
     compact: true,
+  },
+  {
+    // Protected roles (status='expiring') + liked roles past their deadline:
+    // visible for an explicit decision instead of being silently passed.
+    key: "expiring",
+    label: "Expiring",
+    color: "var(--coral)",
   },
   {
     key: "to_apply",
@@ -108,6 +119,7 @@ export const TRIAGE_COLUMNS = [
 ];
 
 export const CHIP_TO_COL = {
+  applyable: "applyable",
   liked: "liked",
   score: "score",
   interest: "fit",
@@ -125,7 +137,7 @@ export const state = {
   currentBasket: "unseen",
   activeCatalogLocs: new Set(),
   catalogSortDesc: true,
-  companySortCol: "liked",
+  companySortCol: "applyable",
   companySortAsc: false,
   statsSortCol: "count",
   statsSortAsc: false,

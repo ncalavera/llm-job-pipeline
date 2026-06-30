@@ -445,12 +445,13 @@ export function renderPipeline() {
     }
   });
   deduped.forEach(function (entry) {
+    // A liked role past its deadline is no longer auto-passed (U9): surface it
+    // in the "Expiring" column for an explicit decision instead of hiding it.
+    if (entry._status === "liked" && isVacancyExpired(entry)) {
+      if (buckets.expiring !== undefined) buckets.expiring.push(entry);
+      return;
+    }
     if (buckets[entry._status] !== undefined) {
-      // Exclude expired vacancies from the liked column —
-      // they are closed and should not appear in the triage queue
-      if (entry._status === "liked" && isVacancyExpired(entry)) {
-        return;
-      }
       buckets[entry._status].push(entry);
     }
   });

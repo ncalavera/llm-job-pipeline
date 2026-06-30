@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS vacancy (
                           CHECK (status IN ('unseen', 'liked', 'passed',
                                             'to_apply', 'to_research',
                                             'to_network', 'skipped', 'applied',
-                                            'archived')),
+                                            'expiring', 'archived')),
     status_updated_at     TEXT,
 
     llm_score             INTEGER,
@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS vacancy (
     triage                TEXT DEFAULT '{}',        -- JSON object/array
 
     digest_sent_at        TEXT,
+    expiring_alerted_at   TEXT,        -- loud expiring alert sent (once)
 
     created_at            TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at            TEXT DEFAULT CURRENT_TIMESTAMP

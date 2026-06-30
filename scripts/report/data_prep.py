@@ -6,7 +6,7 @@ from datetime import date, timezone, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from config import COMPANIES, PROJECT_ROOT, resolve_canonical_name
+from config import COMPANIES, PROJECT_ROOT, APPLYABLE_SCORE, resolve_canonical_name
 from company_registry import PARSING_ARTIFACTS
 from database_supabase import _parse_comp_value, load_vacancies, load_all_enrichment
 from db_conn import get_conn
@@ -40,6 +40,131 @@ def _deadline_soon_label(deadline_iso: str) -> str:
     if 0 <= days_left <= DEADLINE_SOON_DAYS:
         return f"deadline {dl.day:02d}.{dl.month:02d}"
     return ""
+
+
+# Statuses that disqualify a vacancy from the "applyable" count: already
+# decided (passed), removed (archived), or protected-but-disappearing
+# (expiring — a first-class status; it needs an explicit decision, it is not a
+# live role to apply to). The deadline-in-the-past check below is an additional
+# guard for live statuses.
+_NON_APPLYABLE_STATUSES = {
+    "archived", "passed", "expiring", "applied", "skipped",
+}
+
+
+def _is_applyable_vacancy(v: dict) -> bool:
+    """True if a vacancy is worth applying to right now.
+
+    A role counts when its score clears APPLYABLE_SCORE, it isn't already
+    archived/passed/expiring, and its deadline (if any) hasn't passed.
+
+    Donor-facing exclusion is deferred: the vacancy scorer emits free-form
+    `tags` with no reliable donor-facing marker, and `llm_tags` isn't even in
+    the light vacancy SELECT used here — so we don't fabricate a tag the scorer
+    never emits. This stays score+status+deadline only until a clean tag exists.
+    """
+    score = v.get("llm_score")
+    if score is None or score < APPLYABLE_SCORE:
+        return False
+    if (v.get("status") or "") in _NON_APPLYABLE_STATUSES:
+        return False
+    deadline = v.get("deadline")
+    if deadline:
+        try:
+            if date.fromisoformat(str(deadline)[:10]) < date.today():
+                return False
+        except (ValueError, TypeError):
+            pass  # unparseable deadline → treat as no deadline, don't exclude
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Latency / SLA health metrics (U11)
+# ---------------------------------------------------------------------------
+
+# Active-but-undecided statuses an SLA-tracked role can stall in.
+_SLA_ACTIVE_STATUSES = (
+    "unseen", "liked", "expiring", "to_research", "to_network", "to_apply",
+)
+
+
+def _as_date(val):
+    """Best-effort parse a date/timestamp (Postgres datetime or SQLite text)."""
+    from datetime import datetime as _dt
+    if not val:
+        return None
+    if isinstance(val, _dt):
+        return val.date()
+    if isinstance(val, date):
+        return val
+    try:
+        return date.fromisoformat(str(val)[:10])
+    except (ValueError, TypeError):
+        return None
+
+
+def compute_latency_metrics(conn=None) -> dict:
+    """Decision-SLA health, computed at snapshot time (KTD1 / U11).
+
+    - **stuck**: roles scoring >= SLA_SCORE in an active-but-undecided status
+      that haven't moved in > SLA_DAYS (age from status_updated_at, falling back
+      to first_seen so a never-touched unseen role still counts).
+    - **leakage_count**: roles scoring >= SLA_SCORE that landed in archived/passed
+      within the last SLA-week. Post-U2 the system no longer silently archives or
+      passes protected roles, so this is a watchdog that should trend to ~0; it
+      cannot perfectly separate a user's deliberate pass from a system leak, so
+      treat a spike — not the baseline — as the signal.
+    """
+    from config import SLA_SCORE, SLA_DAYS
+    from db_backend import RealDictCursor
+    conn = conn or get_conn()
+    today = date.today()
+
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    placeholders = ", ".join(["%s"] * len(_SLA_ACTIVE_STATUSES))
+    cur.execute(
+        "SELECT v.id, v.title, c.canonical_name AS org, v.llm_score, v.status, "
+        "       v.status_updated_at, v.first_seen "
+        "FROM vacancy v JOIN company c ON v.company_id = c.id "
+        f"WHERE v.llm_score >= %s AND v.status IN ({placeholders})",
+        (SLA_SCORE, *_SLA_ACTIVE_STATUSES),
+    )
+    stuck = []
+    for r in cur.fetchall():
+        ref = _as_date(r["status_updated_at"]) or _as_date(r["first_seen"])
+        if ref is None:
+            continue
+        age = (today - ref).days
+        if age >= SLA_DAYS:
+            stuck.append({
+                "id": str(r["id"]),
+                "org": r["org"],
+                "title": r["title"],
+                "llm_score": r["llm_score"],
+                "status": r["status"],
+                "days_stuck": age,
+            })
+    stuck.sort(key=lambda s: s["days_stuck"], reverse=True)
+
+    cur.execute(
+        "SELECT v.status_updated_at FROM vacancy v "
+        "WHERE v.llm_score >= %s AND v.status IN ('archived', 'passed')",
+        (SLA_SCORE,),
+    )
+    leakage = 0
+    for r in cur.fetchall():
+        d = _as_date(r["status_updated_at"])
+        if d is not None and (today - d).days <= SLA_DAYS:
+            leakage += 1
+    cur.close()
+
+    return {
+        "sla_score": SLA_SCORE,
+        "sla_days": SLA_DAYS,
+        "stuck": stuck,
+        "stuck_count": len(stuck),
+        "leakage_count": leakage,
+    }
 
 
 def _count_unscored(all_vacs: dict) -> int:
@@ -215,6 +340,7 @@ def _build_group(v: dict, org_colors: dict, company_hq: dict) -> dict:
         "compensation": comp,
         "deadline": v.get("deadline", ""),
         "first_seen": v.get("first_seen", ""),
+        "last_seen": v.get("last_seen", ""),
         "org_color": org_colors.get(v["org"], ["#F97316", "#FFF7ED"]),
         "locations": entry_locations,
         "member_ids": [],
@@ -462,6 +588,7 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
         if org not in org_stats:
             org_stats[org] = {
                 "vacancy_count": 0,
+                "applyable_count": 0,
                 "scored_count": 0,
                 "scores": [],
                 "regions": {"europe": 0, "us": 0, "remote": 0, "other": 0},
@@ -473,6 +600,8 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
         st = org_stats[org]
         st["vacancy_count"] += 1
         st["vacancy_ids"].append(vid)
+        if _is_applyable_vacancy(v):
+            st["applyable_count"] += 1
         llm = v.get("llm_score")
         if llm is not None and llm >= 0:
             st["scored_count"] += 1
@@ -602,6 +731,7 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
             "is_archived": csv_row.get("status", "") == "inactive",
             "is_manual_check": cfg.get("strategy") == "manual_check",
             "vacancy_count": vacancy_count,
+            "applyable_count": stats.get("applyable_count", 0),
             "scored_count": scored_count,
             "avg_llm_score": avg_score,
             "max_llm_score": max_score,

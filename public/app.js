@@ -32,6 +32,7 @@ import {
   switchBasket,
   toggleCatalogLoc,
   toggleCatalogSort,
+  toggleCatalogShowAll,
   catalogThumbAction,
   toggleCatalogExpand,
 } from "./modules/catalog.js";
@@ -53,6 +54,7 @@ import {
   hideProfile,
 } from "./modules/companies.js";
 import { renderPipeline } from "./modules/pipeline.js";
+import { renderToday } from "./modules/today.js";
 import { initStats, renderStats } from "./modules/stats.js";
 import { initArchive, renderArchive } from "./modules/archive.js";
 import { initBoards } from "./modules/boards.js";
@@ -118,6 +120,7 @@ on("statusChanged", ({ status }) => {
 on("render", () => {
   updateBasketCounts();
   renderCatalog();
+  if (state.currentMode === "today") renderToday();
   if (state.currentMode === "companies") renderCompanies();
   if (state.currentMode === "pipeline") renderPipeline();
   if (state.currentMode === "stats") renderStats();
@@ -154,6 +157,7 @@ function switchMode(mode) {
   }
 
   state.currentMode = mode;
+  const todaySection = document.getElementById("todaySection");
   const catalogSection = document.getElementById("catalogSection");
   const companiesSection = document.getElementById("companiesSection");
   const pipelineSection = document.getElementById("pipelineSection");
@@ -161,6 +165,8 @@ function switchMode(mode) {
   const archiveSection = document.getElementById("archiveSection");
   const boardsSection = document.getElementById("boardsSection");
 
+  var modeTodayBtn = document.getElementById("modeToday");
+  if (modeTodayBtn) modeTodayBtn.classList.toggle("active", mode === "today");
   document
     .getElementById("modeCatalog")
     .classList.toggle("active", mode === "catalog");
@@ -179,6 +185,7 @@ function switchMode(mode) {
   if (modeBoardsBtn)
     modeBoardsBtn.classList.toggle("active", mode === "boards");
 
+  if (todaySection) todaySection.classList.toggle("active", mode === "today");
   catalogSection.classList.toggle("active", mode === "catalog");
   companiesSection.classList.toggle("active", mode === "companies");
   if (pipelineSection)
@@ -191,6 +198,7 @@ function switchMode(mode) {
 
   // Lazy-load images for the activated section
   var sectionMap = {
+    today: todaySection,
     catalog: catalogSection,
     companies: companiesSection,
     pipeline: pipelineSection,
@@ -206,7 +214,9 @@ function switchMode(mode) {
     });
   }
 
-  if (mode === "catalog") {
+  if (mode === "today") {
+    renderToday();
+  } else if (mode === "catalog") {
     initCatalog();
   } else if (mode === "companies") {
     initCompanies();
@@ -276,6 +286,7 @@ window.switchMode = switchMode;
 window.switchBasket = switchBasket;
 window.toggleCatalogLoc = toggleCatalogLoc;
 window.toggleCatalogSort = toggleCatalogSort;
+window.toggleCatalogShowAll = toggleCatalogShowAll;
 window.catalogThumbAction = catalogThumbAction;
 window.toggleCatalogExpand = toggleCatalogExpand;
 window.renderCatalog = renderCatalog;
@@ -292,6 +303,7 @@ window.viewOrgInCatalog = viewOrgInCatalog;
 window.openCompanyProfile = openCompanyProfile;
 window.closeCompanyProfile = closeCompanyProfile;
 window.renderPipeline = renderPipeline;
+window.renderToday = renderToday;
 window.renderArchive = renderArchive;
 
 // ---------------------------------------------------------------------------
@@ -338,6 +350,7 @@ if (!API_BASE) {
     // Re-render catalog with live company approval data
     updateBasketCounts();
     if (state.currentMode === "catalog") renderCatalog();
+    if (state.currentMode === "today") renderToday();
     if (state.currentMode === "stats") renderStats();
   });
   // Live company rows (list, counts, tier, monitoring) — re-render when they

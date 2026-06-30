@@ -106,7 +106,7 @@ export function switchCompanySubTab(tab) {
     state.companySortCol = "fit";
     state.companySortAsc = false;
   } else {
-    state.companySortCol = "liked";
+    state.companySortCol = "applyable";
     state.companySortAsc = false;
   }
   // Update tab button active state
@@ -213,6 +213,9 @@ function getFilteredSortedCompanies() {
     } else if (col === "vacancies") {
       va = a.vacancy_count || 0;
       vb = b.vacancy_count || 0;
+    } else if (col === "applyable") {
+      va = a.applyable_count || 0;
+      vb = b.applyable_count || 0;
     } else if (col === "liked") {
       va = _counts(a).liked;
       vb = _counts(b).liked;
@@ -381,8 +384,8 @@ function _getColumns() {
       ? [{ key: "mpa", label: "MPA", sortable: true, cls: "ct-col-mpa" }]
       : []),
     {
-      key: "vacancies",
-      label: T("col_vacancies", "Vacancies"),
+      key: "applyable",
+      label: T("col_applyable", "Applyable / Total"),
       sortable: true,
       cls: "ct-col-vac",
     },
@@ -962,7 +965,14 @@ function _buildApprovedRow(c) {
         "</td>"
       : "") +
     '<td class="ct-td ct-col-vac">' +
+    '<span class="ct-applyable">' +
+    (c.applyable_count || 0) +
+    " " +
+    T("badge_applyable", "applyable") +
+    "</span> / " +
     (c.vacancy_count || 0) +
+    " " +
+    T("badge_total", "total") +
     "</td>" +
     '<td class="ct-td ct-col-liked">' +
     likedHtml +

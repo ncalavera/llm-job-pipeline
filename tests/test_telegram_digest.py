@@ -76,3 +76,68 @@ def test_parse_callback_rejects_garbage():
     assert td.parse_callback("v:abc:q") is None      # unknown action
     assert td.parse_callback("v::l") is None         # empty id
     assert td.parse_callback("v:abc:l:extra") is None
+
+
+# --- U3: expiring-role alert ------------------------------------------------
+
+EXPIRING_ROW = dict(
+    ROW,
+    deadline=None,
+    last_seen="2026-06-20",
+)
+
+
+def test_expiring_message_is_loud_and_complete():
+    msg = td.build_expiring_message(dict(EXPIRING_ROW))
+    assert "Вот-вот пропадёт" in msg              # loud, distinct header
+    assert "Example Org — Senior Advisor" in msg
+    assert "🎯 89/100" in msg
+    assert "виден 2026-06-20" in msg              # why it is expiring
+    assert "href=" in msg
+
+
+def test_expiring_keyboard_has_three_actions_that_map():
+    kb = td.build_expiring_keyboard(ROW["id"])
+    btns = kb["inline_keyboard"][0]
+    assert len(btns) == 3
+    mapped = [td.parse_callback(b["callback_data"]) for b in btns]
+    assert mapped == [
+        (ROW["id"], "liked"),
+        (ROW["id"], "passed"),
+        (ROW["id"], "applied"),   # «уже подал» → applied
+    ]
+    for b in btns:
+        assert len(b["callback_data"].encode()) <= 64
+
+
+def test_expiring_alert_fires_once_per_role():
+    """fetch gates on expiring_alerted_at IS NULL; sending stamps it — so a
+    second run finds nothing to re-send."""
+    assert "expiring_alerted_at is null" in td.SELECT_EXPIRING_SQL.lower()
+    assert "status = 'expiring'" in td.SELECT_EXPIRING_SQL.lower()
+
+    captured = {}
+
+    class _Cur:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, sql, params=None):
+            captured["sql"] = sql
+            captured["params"] = params
+
+    class _Conn:
+        def cursor(self, *a, **k):
+            return _Cur()
+
+    td.mark_alerted(_Conn(), ROW["id"])
+    assert "expiring_alerted_at = now()" in captured["sql"].lower()
+    assert captured["params"] == (ROW["id"],)
+
+
+def test_send_expiring_alerts_empty_is_noop():
+    # No rows → no network call, returns 0.
+    assert td.send_expiring_alerts(None, "tok", "chat", []) == 0

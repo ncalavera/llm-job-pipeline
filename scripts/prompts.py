@@ -137,10 +137,12 @@ CUSTOM_BOOST_KEYS = tuple(dict.fromkeys([CUSTOM_BOOST_FIELD, "mpa_narrative_boos
 VACANCY_SCORING_PROMPT = _render(_load_template("vacancy-scoring.md"), _profile)
 COMPANY_SCORING_PROMPT = _render(_load_template("company-scoring.md"), _profile)
 
+# Vacancy scoring is strictly independent of company scoring (KTD4): the role's
+# fit is judged on its own merits, so the company alignment_score is deliberately
+# NOT passed in here.
 VACANCY_SCORING_USER_TEMPLATE = """Score this vacancy for the candidate:
 
 **Organization:** {org} (Tier {tier})
-**Company Alignment Score:** {alignment_score}
 **Job Title:** {title}
 **Location:** {location}
 

@@ -19,6 +19,9 @@
     <nav class="top-nav">
       <div class="top-nav-brand">Job Search Pipeline</div>
       <div class="mode-toggle">
+        <button class="mode-btn" id="modeToday" onclick="switchMode('today')">
+          &#9728; <span data-i18n="tab_today">Today</span>
+        </button>
         <button
           class="mode-btn"
           id="modeCompanies"
@@ -61,6 +64,10 @@
 
     <div class="container">
       <div id="syncIndicator" class="sync-indicator"></div>
+
+      <!-- === TODAY MODE === -->
+      <div class="today-section" id="todaySection"></div>
+      <!-- /today-section -->
 
       <!-- === CATALOG MODE === -->
       <div class="catalog-section active" id="catalogSection">
@@ -177,6 +184,13 @@
           >
             <span data-i18n="sort_score">Score</span>&#160;&#8595;
           </button>
+          <button
+            class="chip catalog-showall-btn"
+            onclick="toggleCatalogShowAll(this)"
+            data-i18n="catalog_show_all"
+          >
+            Show all
+          </button>
         </div>
 
         <div class="catalog-results-count" id="catalogResultsCount"></div>
@@ -252,10 +266,17 @@
           <div class="company-sort-chips">
             <button
               class="chip chip-sort active"
+              data-csort="applyable"
+              onclick="toggleCompanySort(this)"
+            >
+              <span data-i18n="csort_applyable">Applyable</span> &#8595;
+            </button>
+            <button
+              class="chip chip-sort"
               data-csort="liked"
               onclick="toggleCompanySort(this)"
             >
-              <span data-i18n="csort_liked">Liked</span> &#8595;
+              <span data-i18n="csort_liked">Liked</span>
             </button>
             <button
               class="chip chip-sort"
