@@ -713,13 +713,20 @@ def main() -> int:
 
         for source in sources:
             fn = _COLLECTORS[source]
-            if source == "careers":
-                ok = fn(conn, company_id, name, website=website,
-                        careers_url=careers_url, ats_slug=row["ats_slug"],
-                        ats_config=row["ats_config"],
-                        fetch_strategy=row["fetch_strategy"])
-            else:
-                ok = fn(conn, company_id, name, website=website, careers_url=careers_url)
+            try:
+                if source == "careers":
+                    ok = fn(conn, company_id, name, website=website,
+                            careers_url=careers_url, ats_slug=row["ats_slug"],
+                            ats_config=row["ats_config"],
+                            fetch_strategy=row["fetch_strategy"])
+                else:
+                    ok = fn(conn, company_id, name, website=website, careers_url=careers_url)
+            except Exception as e:
+                # Belt-and-suspenders: a timeout/network error that escapes a
+                # collector's own try/except must not kill the whole batch —
+                # mark this source FAILED and move on to the next.
+                print(f"  [{name}] {source}: ERROR caught — {type(e).__name__}: {e}")
+                ok = False
             results[name][source] = ok
 
         if manual_urls:
