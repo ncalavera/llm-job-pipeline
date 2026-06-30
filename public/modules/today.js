@@ -18,11 +18,14 @@ import {
   STATUS_BASKET,
   isGroupCompanyApproved,
 } from "./state.js";
-import { escHtml } from "./helpers.js";
+import { escHtml, isVacancyExpired } from "./helpers.js";
 import { T } from "./i18n.js";
 
 const SOON_DAYS = 7; // a deadline this close is "decide now"
 const NEW_HIGH_FIT = 70; // the rarest, loudest tier
+// A role not confirmed by its source for this long is probably closed (mirrors
+// STALE_SOURCE_DAYS in catalog.js / scripts/config.py).
+const STALE_SOURCE_DAYS = 14;
 const LAST_VISIT_KEY = "today_last_visit";
 
 // Captured ONCE per page load: the previous visit timestamp. We read it before
@@ -47,6 +50,28 @@ function _daysUntil(dateStr) {
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return null;
   return Math.floor((d.getTime() - Date.now()) / 86400000);
+}
+
+// A role belongs in Today only while it's still active and open. Returns false
+// for decided-out roles (archived/passed/skipped), lapsed deadlines, and stale
+// sources. status==='expiring' is intentionally protected — kept visible past
+// its deadline/source lapse awaiting a decision — so it's exempt from the
+// deadline + staleness checks, but still drops if it was decided out.
+function _isLiveRole(g) {
+  const status = getGroupStatus(g);
+  if (status === "archived" || status === "passed" || status === "skipped") {
+    return false;
+  }
+  if (status === "expiring") return true;
+  if (isVacancyExpired(g)) return false;
+  if (g.last_seen) {
+    const seen = new Date(g.last_seen);
+    if (!isNaN(seen.getTime())) {
+      const ageDays = Math.floor((Date.now() - seen.getTime()) / 86400000);
+      if (ageDays >= STALE_SOURCE_DAYS) return false;
+    }
+  }
+  return true;
 }
 
 function _vacUrl(g) {
@@ -156,7 +181,7 @@ export function renderToday() {
 
     if (status === "expiring") {
       expiring.push(_row(g, T("today_protected", "protected, decide")));
-    } else if (basket === "liked") {
+    } else if (basket === "liked" && _isLiveRole(g)) {
       const dleft = _daysUntil(g.deadline);
       if (dleft != null && dleft >= 0 && dleft <= SOON_DAYS) {
         expiring.push(
@@ -165,15 +190,17 @@ export function renderToday() {
       }
     }
 
-    if (status === "to_apply") {
+    if (status === "to_apply" && _isLiveRole(g)) {
       ready.push(_row(g));
     }
 
     if (
+      status === "unseen" &&
       g.llm_score != null &&
       g.llm_score >= NEW_HIGH_FIT &&
       g.first_seen &&
-      (!_prevVisit || g.first_seen > _prevVisit.slice(0, 10))
+      (!_prevVisit || g.first_seen > _prevVisit.slice(0, 10)) &&
+      _isLiveRole(g)
     ) {
       newHighFit.push(_row(g, "🎯 " + g.llm_score));
     }
