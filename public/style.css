@@ -2283,10 +2283,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
   width: 55px;
   text-align: center;
 }
-.ct-col-vac {
-  width: 7%;
-  text-align: center;
-}
 .ct-col-liked {
   width: 6%;
   text-align: center;
@@ -2721,7 +2717,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
   .ct-col-fit--archived {
     width: 13%;
   }
-  .ct-col-vac,
   .ct-col-vac--pending {
     width: 15%;
   }
