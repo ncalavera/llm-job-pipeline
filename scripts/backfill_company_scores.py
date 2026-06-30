@@ -78,13 +78,17 @@ def cmd_prepare(args):
     """Emit scoring payloads (stdout JSON) for all active companies."""
     import score_companies as sc
 
+    # DB connect + loaders print diagnostics to stdout; keep them off the JSON.
+    _real_stdout = sys.stdout
+    sys.stdout = sys.stderr
+
     names = _active_company_names()
     if not names:
+        sys.stdout = _real_stdout
         print("No active companies with a website.", file=sys.stderr)
         print("[]")
         return
 
-    # Snapshot the before-state for the eventual spot-check.
     print(f"Backfill: {len(names)} active companies to re-score.", file=sys.stderr)
 
     scrape_cache = sc._load_scrape_cache()
@@ -110,6 +114,7 @@ def cmd_prepare(args):
         print(f"  Skipped {skipped} not in scrape cache (run fetch_companies.py "
               f"to enrich them first).", file=sys.stderr)
     print(f"Prepared {len(output)} companies for scoring.", file=sys.stderr)
+    sys.stdout = _real_stdout
     json.dump(output, sys.stdout, ensure_ascii=False)
 
 
