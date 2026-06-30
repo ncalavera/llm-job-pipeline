@@ -17,6 +17,7 @@ import {
   getGroupStatus,
   STATUS_BASKET,
   isGroupCompanyApproved,
+  updateStatus,
 } from "./state.js";
 import { escHtml, isVacancyExpired } from "./helpers.js";
 import { T } from "./i18n.js";
@@ -79,7 +80,52 @@ function _vacUrl(g) {
   return (loc && loc.url) || g.org_url || "";
 }
 
-function _row(g, extra) {
+// One inline-action button per entry. `glyph` → icon button (title carries the
+// label); otherwise a text button. Mirrors catalog.js thumb-btn wiring: the
+// member ids are JSON-encoded into the attribute and the canonical id is passed
+// raw (it's a hash). All copy comes from T() with English fallbacks.
+function _actionBtns(g, actions) {
+  if (!actions || !actions.length) return "";
+  const mids = JSON.stringify(g.member_ids || []).replace(/"/g, "&quot;");
+  const btns = actions
+    .map(function (a) {
+      const onclick =
+        "onclick=\"event.stopPropagation();todayAction('" +
+        g.id +
+        "'," +
+        mids +
+        ",'" +
+        a.action +
+        "')\"";
+      const cls = "today-act " + (a.cls || "");
+      if (a.glyph) {
+        return (
+          '<button class="' +
+          cls +
+          '" ' +
+          onclick +
+          ' title="' +
+          escHtml(a.label) +
+          '">' +
+          a.glyph +
+          "</button>"
+        );
+      }
+      return (
+        '<button class="' +
+        cls +
+        '" ' +
+        onclick +
+        ">" +
+        escHtml(a.label) +
+        "</button>"
+      );
+    })
+    .join("");
+  return '<span class="today-actions">' + btns + "</span>";
+}
+
+function _row(g, extra, actions) {
   const url = _vacUrl(g);
   const head = escHtml(g.org || "") + " — " + escHtml(g.title || "");
   const link = url
@@ -93,7 +139,42 @@ function _row(g, extra) {
   const tail = extra
     ? ' · <span class="today-why">' + escHtml(extra) + "</span>"
     : "";
-  return '<li class="today-item">' + link + score + tail + "</li>";
+  return (
+    '<li class="today-item" data-id="' +
+    escHtml(g.id) +
+    '"><span class="today-lead">' +
+    link +
+    score +
+    tail +
+    "</span>" +
+    _actionBtns(g, actions) +
+    "</li>"
+  );
+}
+
+// Inline triage: flip a role's status through the same optimistic-update chain
+// the catalog uses. statusChanged (app.js) re-renders the Today tab, so the row
+// disappears once its new status no longer matches any list.
+export function todayAction(canonId, memberIds, action) {
+  const target =
+    action === "like"
+      ? "liked"
+      : action === "pass"
+        ? "passed"
+        : action === "apply"
+          ? "to_apply"
+          : action === "applied"
+            ? "applied"
+            : "unseen";
+  const row = document.querySelector('.today-item[data-id="' + canonId + '"]');
+  if (row) {
+    row.classList.add("dismissing");
+    setTimeout(function () {
+      updateStatus(canonId, memberIds, target);
+    }, 200);
+  } else {
+    updateStatus(canonId, memberIds, target);
+  }
 }
 
 function _list(title, items, emptyMsg) {
@@ -171,27 +252,34 @@ export function renderToday() {
 
   const visible = groups.filter((g) => isGroupCompanyApproved(g));
 
-  const expiring = [];
-  const ready = [];
-  const newHighFit = [];
+  // Collect role objects first so each list can be urgency-sorted before render.
+  const expiringRows = []; // { g, extra, sort } — sort < 0 = protected, else days-left
+  const readyRows = [];
+  const newRows = [];
 
   for (const g of visible) {
     const status = getGroupStatus(g);
     const basket = STATUS_BASKET[status] || "unseen";
 
     if (status === "expiring") {
-      expiring.push(_row(g, T("today_protected", "protected, decide")));
+      expiringRows.push({
+        g,
+        extra: T("today_protected", "protected, decide"),
+        sort: -1,
+      });
     } else if (basket === "liked" && _isLiveRole(g)) {
       const dleft = _daysUntil(g.deadline);
       if (dleft != null && dleft >= 0 && dleft <= SOON_DAYS) {
-        expiring.push(
-          _row(g, T("today_deadline_in", "deadline in") + " " + dleft + "d"),
-        );
+        expiringRows.push({
+          g,
+          extra: T("today_deadline_in", "deadline in") + " " + dleft + "d",
+          sort: dleft,
+        });
       }
     }
 
     if (status === "to_apply" && _isLiveRole(g)) {
-      ready.push(_row(g));
+      readyRows.push({ g });
     }
 
     if (
@@ -202,9 +290,49 @@ export function renderToday() {
       (!_prevVisit || g.first_seen > _prevVisit.slice(0, 10)) &&
       _isLiveRole(g)
     ) {
-      newHighFit.push(_row(g, "🎯 " + g.llm_score));
+      newRows.push({ g });
     }
   }
+
+  // Urgency order: Expiring — protected first, then soonest deadline; the rest
+  // by best fit (score descending).
+  const byScoreDesc = (a, b) => (b.g.llm_score || 0) - (a.g.llm_score || 0);
+  expiringRows.sort((a, b) => a.sort - b.sort);
+  readyRows.sort(byScoreDesc);
+  newRows.sort(byScoreDesc);
+
+  const passAction = {
+    action: "pass",
+    label: T("today_act_pass", "Pass"),
+    cls: "act-pass",
+  };
+  const expiringActions = [
+    { action: "apply", label: T("today_act_apply", "Apply"), cls: "act-apply" },
+    passAction,
+  ];
+  const readyActions = [
+    {
+      action: "applied",
+      label: T("today_act_applied", "Mark applied"),
+      cls: "act-apply",
+    },
+    passAction,
+  ];
+  const newActions = [
+    {
+      action: "like",
+      label: T("today_act_like", "Like"),
+      glyph: "👍",
+      cls: "act-like",
+    },
+    { ...passAction, glyph: "👎" },
+  ];
+
+  const expiring = expiringRows.map((r) => _row(r.g, r.extra, expiringActions));
+  const ready = readyRows.map((r) => _row(r.g, null, readyActions));
+  const newHighFit = newRows.map((r) =>
+    _row(r.g, "🎯 " + r.g.llm_score, newActions),
+  );
 
   root.innerHTML =
     _list(

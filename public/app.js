@@ -54,7 +54,7 @@ import {
   hideProfile,
 } from "./modules/companies.js";
 import { renderPipeline } from "./modules/pipeline.js";
-import { renderToday } from "./modules/today.js";
+import { renderToday, todayAction } from "./modules/today.js";
 import { initStats, renderStats } from "./modules/stats.js";
 import { initArchive, renderArchive } from "./modules/archive.js";
 import { initBoards } from "./modules/boards.js";
@@ -288,6 +288,7 @@ window.toggleCatalogLoc = toggleCatalogLoc;
 window.toggleCatalogSort = toggleCatalogSort;
 window.toggleCatalogShowAll = toggleCatalogShowAll;
 window.catalogThumbAction = catalogThumbAction;
+window.todayAction = todayAction;
 window.toggleCatalogExpand = toggleCatalogExpand;
 window.renderCatalog = renderCatalog;
 window.renderCompanies = renderCompanies;

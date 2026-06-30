@@ -861,13 +861,52 @@ body[data-dashboard-style="minimal"] .loading-illus {
   padding: 0;
 }
 .today-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 7px 10px;
   border-bottom: 1px solid var(--border, rgba(127, 127, 127, 0.15));
   font-size: var(--text-sm);
 }
+.today-lead {
+  flex: 1;
+  min-width: 0;
+}
 .today-why {
   color: var(--muted);
   font-size: var(--text-xs);
+}
+.today-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.today-act {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--surface);
+  background: var(--bg);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.today-act:hover {
+  box-shadow: var(--shadow-sm);
+}
+.today-act.act-apply:hover,
+.today-act.act-like:hover {
+  border-color: var(--emerald);
+  background: var(--emerald-tint);
+}
+.today-act.act-pass:hover {
+  border-color: var(--terracotta);
+  background: var(--rose-tint);
+}
+.today-item.dismissing {
+  animation: catalogCardDismiss 0.2s ease forwards;
+  pointer-events: none;
 }
 .today-empty {
   color: var(--muted);
