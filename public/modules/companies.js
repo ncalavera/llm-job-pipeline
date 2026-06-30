@@ -384,12 +384,6 @@ function _getColumns() {
       ? [{ key: "mpa", label: "MPA", sortable: true, cls: "ct-col-mpa" }]
       : []),
     {
-      key: "applyable",
-      label: T("col_applyable", "Applyable / Total"),
-      sortable: true,
-      cls: "ct-col-vac",
-    },
-    {
       key: "liked",
       label: T("col_liked", "Liked"),
       sortable: true,
@@ -964,16 +958,6 @@ function _buildApprovedRow(c) {
         (c.mpa_prestige != null ? llmScoreBadge(c.mpa_prestige) : "\u2014") +
         "</td>"
       : "") +
-    '<td class="ct-td ct-col-vac">' +
-    '<span class="ct-applyable">' +
-    (c.applyable_count || 0) +
-    " " +
-    T("badge_applyable", "applyable") +
-    "</span> / " +
-    (c.vacancy_count || 0) +
-    " " +
-    T("badge_total", "total") +
-    "</td>" +
     '<td class="ct-td ct-col-liked">' +
     likedHtml +
     "</td>" +

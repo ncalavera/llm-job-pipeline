@@ -137,6 +137,14 @@ _MAIN_ROOT = _get_main_repo_root()
 SCRAPE_CACHE_PATH = _MAIN_ROOT / ".firecrawl" / "scrape_cache.json"
 STRATEGY_PATH = _MAIN_ROOT / "strategy.md"
 
+# Source priority for company_evidence assembly (lowest index = shown first)
+# Allowlist AND display order. Perplexity is deliberately excluded — it returns
+# generated prose that invents facts (GiveWell "3 hours of Pacific" fabrication),
+# so it is never shown to the scorer. Sources not in this list are filtered out.
+_EVIDENCE_SOURCE_ORDER = ["website", "careers", "manual_url", "exa", "exa_offices", "deep_research"]
+# Generous total char cap for multi-source content (replaces old 10k per-source cut)
+_EVIDENCE_TOTAL_CAP = 120_000
+
 
 def _load_strategy_context() -> str:
     """Load relevant sections from strategy.md for scoring prompt."""
@@ -166,6 +174,77 @@ def _load_scrape_cache() -> dict[str, tuple[str, str]]:
         return {}
 
 
+def _load_company_evidence_map(company_ids: list) -> dict[str, list[dict]]:
+    """Load company_evidence rows for the given company IDs.
+
+    Returns {company_id_str: [{"source": ..., "url": ..., "content": ...}, ...]},
+    ordered by _EVIDENCE_SOURCE_ORDER. Companies with no rows are absent from the dict.
+    """
+    from db_conn import get_conn
+    if not company_ids:
+        return {}
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT company_id::text, source, url, content
+        FROM company_evidence
+        WHERE company_id = ANY(%s::uuid[])
+        """,
+        ([str(cid) for cid in company_ids],),
+    )
+    rows = cur.fetchall()
+    cur.close()
+
+    order = {s: i for i, s in enumerate(_EVIDENCE_SOURCE_ORDER)}
+    evidence: dict[str, list[dict]] = {}
+    for company_id_str, source, url, content in rows:
+        if source not in order:  # filter: only allowed primary sources reach the scorer
+            continue
+        evidence.setdefault(company_id_str, []).append(
+            {"source": source, "url": url or "", "content": content or ""}
+        )
+    for cid in evidence:
+        evidence[cid].sort(key=lambda r: order.get(r["source"], 99))
+    return evidence
+
+
+def _assemble_evidence_content(rows: list[dict]) -> str:
+    """Concatenate evidence rows into labeled sections, capped at _EVIDENCE_TOTAL_CAP chars.
+
+    If the combined content exceeds the cap, each source's content is trimmed
+    proportionally by its share of total content chars, and "[trimmed]" is appended.
+    """
+    if not rows:
+        return ""
+
+    labels = [f"### SOURCE: {r['source']} ({r['url']})\n" for r in rows]
+    contents = [r["content"] for r in rows]
+
+    # Fast path: fits within cap
+    combined = "\n\n".join(lbl + c for lbl, c in zip(labels, contents))
+    if len(combined) <= _EVIDENCE_TOTAL_CAP:
+        return combined
+
+    # Budget for content chars only (subtract labels + separators)
+    label_total = sum(len(lbl) for lbl in labels)
+    sep_total = (len(rows) - 1) * 2  # "\n\n" between parts
+    budget = max(0, _EVIDENCE_TOTAL_CAP - label_total - sep_total)
+    total_content = sum(len(c) for c in contents)
+
+    trimmed_parts = []
+    for lbl, content in zip(labels, contents):
+        if total_content > 0:
+            alloc = int(budget * len(content) / total_content)
+        else:
+            alloc = 0
+        if len(content) > alloc:
+            content = content[:alloc] + "\n[trimmed]"
+        trimmed_parts.append(lbl + content)
+
+    return "\n\n".join(trimmed_parts)
+
+
 def _build_csv_context(company: dict) -> str:
     """Build metadata context string from company DB row."""
     parts = []
@@ -186,14 +265,34 @@ def _build_csv_context(company: dict) -> str:
     return "Additional context:\n" + "\n".join(parts)
 
 
-def _build_user_msg(company: dict, scrape_cache: dict, strategy_context: str) -> str | None:
+def _build_user_msg(company: dict, scrape_cache: dict, strategy_context: str,
+                    evidence_map: dict | None = None) -> str | None:
     """Build user message — identical for all backends.
 
-    Returns None if company has no cached markdown (needs fetch_companies.py first).
+    Prefers company_evidence rows (evidence_map keyed by company_id str) over the
+    legacy scrape_cache. Falls back to scrape_cache when no evidence rows exist so
+    companies that haven't been re-collected continue to work unchanged.
+
+    Returns None if no usable content is found for the company.
     """
     name = company["canonical_name"]
     url = (company.get("website") or "").strip()
+    company_id = str(company.get("id", ""))
 
+    # Primary path: company_evidence table (multi-source, generous cap)
+    evidence_rows = (evidence_map or {}).get(company_id, [])
+    if evidence_rows:
+        content = _assemble_evidence_content(evidence_rows)
+        if content and len(content) >= 50:
+            csv_context = _build_csv_context(company)
+            return COMPANY_SCORING_USER_TEMPLATE.format(
+                name=name,
+                url=url,
+                csv_context=csv_context,
+                content=content,
+            )
+
+    # Fallback: legacy single-page scrape_cache (10k cap preserved for back-compat)
     if name not in scrape_cache:
         return None
 
@@ -354,6 +453,7 @@ def _extract_enrichment(result: dict) -> dict | None:
     keep_keys = (
         "alignment_score", "alignment_label", "dimensions", "strengths", "risks",
         "approach", "experience_match_reasoning", "mission_verdict",
+        "evidence_anchors", "culture_fit",
     ) + tuple(boost_keys)
     mission_fit = {
         k: mission_data[k]
@@ -380,10 +480,13 @@ def cmd_local(args):
 
     companies = _load_companies(company_filter=args.company, limit=args.limit)
     scrape_cache = _load_scrape_cache()
+    evidence_map = _load_company_evidence_map([c["id"] for c in companies])
     system_prompt = _get_system_prompt()
 
+    evidence_companies = sum(1 for c in companies if str(c["id"]) in evidence_map)
     print(
-        f"Loaded {len(companies)} candidates, {len(scrape_cache)} in scrape cache",
+        f"Loaded {len(companies)} candidates, {len(scrape_cache)} in scrape cache, "
+        f"{evidence_companies} with company_evidence rows",
         file=sys.stderr,
     )
 
@@ -396,7 +499,7 @@ def cmd_local(args):
     output = []
     skipped = 0
     for c in companies:
-        user_msg = _build_user_msg(c, scrape_cache, strategy_context)
+        user_msg = _build_user_msg(c, scrape_cache, strategy_context, evidence_map)
         if user_msg is None:
             skipped += 1
             continue
@@ -411,8 +514,28 @@ def cmd_local(args):
         })
 
     if skipped:
-        print(f"  Skipped {skipped} companies (not in scrape cache)", file=sys.stderr)
+        print(f"  Skipped {skipped} companies (not in scrape cache or evidence)", file=sys.stderr)
     print(f"Prepared {len(output)} companies for scoring", file=sys.stderr)
+
+    if args.dry_run:
+        # Diagnostic mode: print content stats + first 15 lines of each user_msg
+        for item in output:
+            name = item["canonical_name"]
+            msg = item["user_msg"]
+            cid = item["id"]
+            rows = evidence_map.get(cid, [])
+            print(f"\n=== DRY-RUN: {name} ===", file=_real_stdout)
+            print(f"  user_msg total chars: {len(msg)}", file=_real_stdout)
+            if rows:
+                print(f"  sources ({len(rows)}):", file=_real_stdout)
+                for r in rows:
+                    print(f"    {r['source']:20s}  {len(r['content']):>7,} chars  {r['url']}", file=_real_stdout)
+            else:
+                print(f"  source: scrape_cache (fallback)", file=_real_stdout)
+            print(f"  --- first 15 lines of user_msg ---", file=_real_stdout)
+            for line in msg.splitlines()[:15]:
+                print(f"  {line}", file=_real_stdout)
+        return
 
     sys.stdout = _real_stdout
     json.dump(output, _real_stdout, ensure_ascii=False)
@@ -570,6 +693,7 @@ def cmd_api(args):
 
     companies = _load_companies(company_filter=args.company, limit=args.limit)
     scrape_cache = _load_scrape_cache()
+    evidence_map = _load_company_evidence_map([c["id"] for c in companies])
     system_prompt = _get_system_prompt()
     strategy_context = _load_strategy_context()
 
@@ -589,9 +713,9 @@ def cmd_api(args):
 
     for i, c in enumerate(companies, 1):
         name = c["canonical_name"]
-        user_msg = _build_user_msg(c, scrape_cache, strategy_context)
+        user_msg = _build_user_msg(c, scrape_cache, strategy_context, evidence_map)
         if user_msg is None:
-            print(f"  [{i}/{len(companies)}] {name:40s} SKIP: not in scrape cache")
+            print(f"  [{i}/{len(companies)}] {name:40s} SKIP: no evidence or scrape cache")
             continue
 
         print(f"  [{i}/{len(companies)}] {name:40s}", end="", flush=True)
