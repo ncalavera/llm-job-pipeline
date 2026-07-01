@@ -284,15 +284,50 @@ function getFilteredSortedCompanies() {
 // keys are "dim_" + the fit_dimensions field name.
 // ---------------------------------------------------------------------------
 
-// [field, full name (header tooltip), short header code]
+// [field, full name, short header code, hover tip — what the dimension measures]
 var WANT_DIMS = [
-  ["mission_authenticity", "Mission", "Mis"],
-  ["domain_desirability", "Domain", "Dom"],
-  ["breadth_rotation", "Breadth", "Bre"],
-  ["builder_stage", "Stage 0→1", "Stg"],
-  ["career_entry_value", "Career", "Car"],
-  ["money_stability", "Money", "Mon"],
-  ["culture_fit", "Culture", "Cul"],
+  [
+    "mission_authenticity",
+    "Mission",
+    "Mis",
+    "Is the social good direct and real, or a marketing veneer?",
+  ],
+  [
+    "domain_desirability",
+    "Domain",
+    "Dom",
+    "How desirable the field is — dev / policy / growth over abstract causes.",
+  ],
+  [
+    "breadth_rotation",
+    "Breadth",
+    "Bre",
+    "Room to grow broad — many areas + role rotation vs one narrow lane.",
+  ],
+  [
+    "builder_stage",
+    "Stage 0→1",
+    "Stg",
+    "0→1 building inside a stable org, not a fragile startup or sleepy giant.",
+  ],
+  [
+    "career_entry_value",
+    "Career",
+    "Car",
+    "Brand, network and trajectory value — measured objectively.",
+  ],
+  [
+    "money_stability",
+    "Money",
+    "Mon",
+    "Financially safe, well-funded employer plus pay potential.",
+  ],
+  [
+    "culture_fit",
+    "Culture",
+    "Cul",
+    "Analytical, entrepreneurial, modern vs bureaucratic traditional-NGO.",
+  ],
 ];
 
 function _dimColor(v) {
@@ -321,7 +356,7 @@ function _dimColumns() {
     return {
       key: "dim_" + d[0],
       label: d[2],
-      title: d[1],
+      tip: d[1] + " — " + d[3],
       sortable: true,
       cls: "ct-col-dim",
     };
@@ -921,7 +956,9 @@ export function renderCompanies() {
     var isActive = state.companySortCol === c.key;
     var arrow = "";
     if (isActive) arrow = state.companySortAsc ? " \u2191" : " \u2193";
-    var titleAttr = c.title ? ' title="' + escHtml(c.title) + '"' : "";
+    // data-tip drives the instant CSS hover tooltip (.ct-th[data-tip]::after);
+    // no native title, so we don't get a second OS tooltip a second later.
+    var titleAttr = c.tip ? ' data-tip="' + escHtml(c.tip) + '"' : "";
     if (c.sortable) {
       thead +=
         '<th class="ct-th ' +

@@ -2280,8 +2280,8 @@ body[data-dashboard-style="minimal"] .loading-illus {
   text-align: center;
 }
 /* WANT aspect columns (Mission/Domain/…) — shared by Approved + Pending.
-   Narrow numeric columns: tight padding + clip so the short 3-letter headers
-   (full name on hover via title=) never overflow into neighbours. */
+   Narrow numeric columns with short 3-letter headers; the full name + a
+   one-line description show in an instant CSS tooltip on hover (data-tip). */
 .ct-col-dim {
   width: 4.4%;
   text-align: center;
@@ -2290,7 +2290,36 @@ body[data-dashboard-style="minimal"] .loading-illus {
 .ct-td.ct-col-dim {
   padding-left: 3px;
   padding-right: 3px;
+}
+.ct-td.ct-col-dim {
   overflow: hidden;
+}
+.ct-th.ct-col-dim {
+  position: relative;
+}
+/* Instant hover tooltip: full dimension name + what it measures. */
+.ct-th.ct-col-dim[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  width: max-content;
+  max-width: 230px;
+  padding: 7px 10px;
+  white-space: normal;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 500;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: #fff;
+  background: #1f2937;
+  border-radius: 7px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
 }
 .ct-dim-num {
   font-weight: 700;
