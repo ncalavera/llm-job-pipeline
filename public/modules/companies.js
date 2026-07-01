@@ -242,6 +242,16 @@ function getFilteredSortedCompanies() {
         return asc
           ? (a.name || "").localeCompare(b.name || "")
           : (b.name || "").localeCompare(a.name || "");
+    } else if (col && col.indexOf("dim_") === 0) {
+      var dk = col.slice(4);
+      va =
+        a.fit_dimensions && a.fit_dimensions[dk] != null
+          ? a.fit_dimensions[dk]
+          : -1;
+      vb =
+        b.fit_dimensions && b.fit_dimensions[dk] != null
+          ? b.fit_dimensions[dk]
+          : -1;
     } else {
       va = 0;
       vb = 0;
@@ -266,6 +276,67 @@ function getFilteredSortedCompanies() {
   }
 
   return filtered;
+}
+
+// ---------------------------------------------------------------------------
+// WANT aspect breakdown — shared between the profile chart, the sortable table
+// columns and the row cells so key order + labels stay in sync. Column sort
+// keys are "dim_" + the fit_dimensions field name.
+// ---------------------------------------------------------------------------
+
+var WANT_DIMS = [
+  ["mission_authenticity", "Mission"],
+  ["domain_desirability", "Domain"],
+  ["breadth_rotation", "Breadth"],
+  ["builder_stage", "Stage"],
+  ["career_entry_value", "Career"],
+  ["money_stability", "Money"],
+  ["culture_fit", "Culture"],
+];
+
+function _dimColor(v) {
+  return v >= 75
+    ? "#059669"
+    : v >= 55
+      ? "#0284C7"
+      : v >= 35
+        ? "#D97706"
+        : "#DC2626";
+}
+
+function _dimNumHtml(v) {
+  if (v == null) return '<span class="ct-dim-empty">—</span>';
+  return (
+    '<span class="ct-dim-num" style="color:' +
+    _dimColor(v) +
+    '">' +
+    v +
+    "</span>"
+  );
+}
+
+function _dimColumns() {
+  return WANT_DIMS.map(function (d) {
+    return {
+      key: "dim_" + d[0],
+      label: d[1],
+      sortable: true,
+      cls: "ct-col-dim",
+    };
+  });
+}
+
+function _dimCellsHtml(c) {
+  var fd = c.fit_dimensions || {};
+  var out = "";
+  for (var i = 0; i < WANT_DIMS.length; i++) {
+    var v = fd[WANT_DIMS[i][0]];
+    out +=
+      '<td class="ct-td ct-col-dim">' +
+      _dimNumHtml(v != null ? v : null) +
+      "</td>";
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -294,6 +365,7 @@ function _getColumns() {
         sortable: true,
         cls: "ct-col-fit ct-col-fit--pending",
       },
+      ..._dimColumns(),
       {
         key: "vacancies",
         label: T("col_vacancies", "Vacancies"),
@@ -380,6 +452,7 @@ function _getColumns() {
       sortable: true,
       cls: "ct-col-fit",
     },
+    ..._dimColumns(),
     ...(SHOW_MPA
       ? [{ key: "mpa", label: "MPA", sortable: true, cls: "ct-col-mpa" }]
       : []),
@@ -953,6 +1026,7 @@ function _buildApprovedRow(c) {
     '<td class="ct-td ct-col-fit">' +
     fitBadge +
     "</td>" +
+    _dimCellsHtml(c) +
     (SHOW_MPA
       ? '<td class="ct-td ct-col-mpa">' +
         (c.mpa_prestige != null ? llmScoreBadge(c.mpa_prestige) : "\u2014") +
@@ -1032,6 +1106,7 @@ function _buildPendingRow(c) {
     '<td class="ct-td ct-col-fit ct-col-fit--pending">' +
     fitBadge +
     "</td>" +
+    _dimCellsHtml(c) +
     '<td class="ct-td ct-col-vac ct-col-vac--pending">' +
     (c.vacancy_count || 0) +
     "</td>" +

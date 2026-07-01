@@ -157,6 +157,16 @@ export default async function handler(req, res) {
         funding_status: about.funding_status || "",
         hq_location: about.hq_location || "",
         alignment_label: mission.alignment_label || "",
+        // Per-aspect WANT scores (drives the profile "WANT breakdown" chart and
+        // the sortable aspect columns). Only emit when present so the snapshot
+        // merge in api.js still fills older rows; undefined keys are dropped by
+        // res.json, leaving live[f] === undefined for the merge to overwrite.
+        fit_dimensions:
+          mission.dimensions &&
+          typeof mission.dimensions === "object" &&
+          Object.keys(mission.dimensions).length
+            ? mission.dimensions
+            : undefined,
         fit_strengths: mission.strengths || [],
         fit_risks: mission.risks || [],
         fit_approach: mission.approach || "",
