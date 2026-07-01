@@ -497,6 +497,54 @@ def generate_report(audit: dict, desc_quality: dict | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Reconcile stale vacancy_count (U8 / WS6)
+# ---------------------------------------------------------------------------
+
+def reconcile_vacancy_counts(dry_run: bool = False) -> list[dict]:
+    """Persist the true vacancy-row count into company.vacancy_count.
+
+    The audit already computes count(v.id) via the join but never writes it
+    back, so the stored value drifts (e.g. Omidyar shows 4, has 0 rows). This
+    UPDATEs only companies whose stored value differs from the real count —
+    idempotent (a second run is a no-op). Returns the list of corrected
+    companies as dicts {name, stored, real}.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT c.id, c.canonical_name, c.vacancy_count, count(v.id) AS real_count
+        FROM company c
+        LEFT JOIN vacancy v ON v.company_id = c.id
+        GROUP BY c.id
+        ORDER BY c.canonical_name
+    """)
+    rows = cur.fetchall()
+
+    drift = []
+    for cid, name, stored, real_count in rows:
+        if (stored or 0) != real_count:
+            drift.append({"name": name, "stored": stored, "real": real_count})
+            if not dry_run:
+                cur.execute(
+                    "UPDATE company SET vacancy_count = %s WHERE id = %s",
+                    (real_count, cid),
+                )
+
+    if not dry_run and drift:
+        conn.commit()
+    cur.close()
+
+    if drift:
+        verb = "Would reconcile" if dry_run else "Reconciled"
+        print(f"  {verb} vacancy_count for {len(drift)} companies:", flush=True)
+        for d in drift:
+            print(f"    - {d['name']}: {d['stored']} → {d['real']}", flush=True)
+    else:
+        print("  vacancy_count already accurate for all companies.", flush=True)
+    return drift
+
+
+# ---------------------------------------------------------------------------
 # Fix mode — auto-remediate detected issues
 # ---------------------------------------------------------------------------
 
@@ -518,6 +566,16 @@ def _fix_issues(audit_result: dict, dry_run: bool = False) -> None:
             never_fetched.append(c)
 
     actions_taken = []
+
+    # --- Action 0: reconcile stale vacancy_count (U8) ---
+    print(f"\n{'='*50}")
+    print(f"  FIX: Reconcile stale vacancy_count")
+    print(f"{'='*50}")
+    drift = reconcile_vacancy_counts(dry_run=dry_run)
+    if drift:
+        actions_taken.append(
+            f"{'would reconcile' if dry_run else 'reconciled'} "
+            f"vacancy_count for {len(drift)} companies")
 
     # --- Action 1: ATS discovery for unsourced companies ---
     if unsourced:
