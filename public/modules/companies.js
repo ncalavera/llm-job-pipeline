@@ -284,14 +284,15 @@ function getFilteredSortedCompanies() {
 // keys are "dim_" + the fit_dimensions field name.
 // ---------------------------------------------------------------------------
 
+// [field, full name (header tooltip), short header code]
 var WANT_DIMS = [
-  ["mission_authenticity", "Mission"],
-  ["domain_desirability", "Domain"],
-  ["breadth_rotation", "Breadth"],
-  ["builder_stage", "Stage"],
-  ["career_entry_value", "Career"],
-  ["money_stability", "Money"],
-  ["culture_fit", "Culture"],
+  ["mission_authenticity", "Mission", "Mis"],
+  ["domain_desirability", "Domain", "Dom"],
+  ["breadth_rotation", "Breadth", "Bre"],
+  ["builder_stage", "Stage 0→1", "Stg"],
+  ["career_entry_value", "Career", "Car"],
+  ["money_stability", "Money", "Mon"],
+  ["culture_fit", "Culture", "Cul"],
 ];
 
 function _dimColor(v) {
@@ -319,7 +320,8 @@ function _dimColumns() {
   return WANT_DIMS.map(function (d) {
     return {
       key: "dim_" + d[0],
-      label: d[1],
+      label: d[2],
+      title: d[1],
       sortable: true,
       cls: "ct-col-dim",
     };
@@ -361,7 +363,7 @@ function _getColumns() {
       },
       {
         key: "fit",
-        label: T("col_fit", "Fit"),
+        label: T("col_want", "WANT"),
         sortable: true,
         cls: "ct-col-fit ct-col-fit--pending",
       },
@@ -408,7 +410,7 @@ function _getColumns() {
       },
       {
         key: "fit",
-        label: T("col_fit", "Fit"),
+        label: T("col_want", "WANT"),
         sortable: true,
         cls: "ct-col-fit ct-col-fit--archived",
       },
@@ -448,7 +450,7 @@ function _getColumns() {
     },
     {
       key: "fit",
-      label: T("col_fit", "Fit"),
+      label: T("col_want", "WANT"),
       sortable: true,
       cls: "ct-col-fit",
     },
@@ -919,19 +921,29 @@ export function renderCompanies() {
     var isActive = state.companySortCol === c.key;
     var arrow = "";
     if (isActive) arrow = state.companySortAsc ? " \u2191" : " \u2193";
+    var titleAttr = c.title ? ' title="' + escHtml(c.title) + '"' : "";
     if (c.sortable) {
       thead +=
         '<th class="ct-th ' +
         c.cls +
         (isActive ? " ct-th-active" : "") +
-        '" onclick="sortCompanyTable(\'' +
+        '"' +
+        titleAttr +
+        " onclick=\"sortCompanyTable('" +
         c.key +
         "')\">" +
         escHtml(c.label) +
         arrow +
         "</th>";
     } else {
-      thead += '<th class="ct-th ' + c.cls + '">' + escHtml(c.label) + "</th>";
+      thead +=
+        '<th class="ct-th ' +
+        c.cls +
+        '"' +
+        titleAttr +
+        ">" +
+        escHtml(c.label) +
+        "</th>";
     }
   }
   thead += "</tr></thead>";

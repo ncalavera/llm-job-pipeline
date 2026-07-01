@@ -2269,7 +2269,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 
 /* Column widths — Approved view */
 .ct-col-name {
-  width: 14%;
+  width: 11%;
 }
 .ct-col-tier {
   width: 5%;
@@ -2279,10 +2279,18 @@ body[data-dashboard-style="minimal"] .loading-illus {
   width: 6%;
   text-align: center;
 }
-/* WANT aspect columns (Mission/Domain/…) — shared by Approved + Pending */
+/* WANT aspect columns (Mission/Domain/…) — shared by Approved + Pending.
+   Narrow numeric columns: tight padding + clip so the short 3-letter headers
+   (full name on hover via title=) never overflow into neighbours. */
 .ct-col-dim {
-  width: 3.6%;
+  width: 4.4%;
   text-align: center;
+}
+.ct-th.ct-col-dim,
+.ct-td.ct-col-dim {
+  padding-left: 3px;
+  padding-right: 3px;
+  overflow: hidden;
 }
 .ct-dim-num {
   font-weight: 700;
@@ -2314,7 +2322,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 
 /* Column widths — Pending view */
 .ct-col-name--pending {
-  width: 16%;
+  width: 13%;
 }
 .ct-col-cat--pending {
   width: 15%;
