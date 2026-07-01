@@ -66,6 +66,7 @@ export default async function handler(req, res) {
         .select(
           "id, canonical_name, status, tier, alignment_score, mission_fit, " +
             "about, notes, experience_match, personal_interest, " +
+            "website, careers_url, " +
             "offices, category, fetch_strategy, fetch_status, last_fetched, " +
             "vacancy_count, new_count",
         )
@@ -133,6 +134,13 @@ export default async function handler(req, res) {
         calculated_tier: c.tier || null,
         alignment_score: alignmentScore,
         mpa_prestige: customBoost(c.mission_fit),
+        // website / careers_url are plain DB columns, not private-file fields —
+        // serve them live so a company's profile links stay current even when
+        // the snapshot is stale or lacks the row (e.g. pending/candidate orgs).
+        // Emit undefined (not "") when absent so the snapshot merge can still
+        // fill an older value; res.json drops undefined keys.
+        website: c.website || undefined,
+        careers_url: c.careers_url || undefined,
         offices: c.offices || "",
         category: c.category || "",
         strategy,
