@@ -83,7 +83,7 @@ from fetchers import (
     fetch_idealist_board, fetch_fastforward_board, fetch_linkedin_board,
     fetch_unops_widget,
     fetch_recruitee, fetch_teamtailor_rss, fetch_bamboohr,
-    fetch_amazon_jobs,
+    fetch_amazon_jobs, fetch_successfactors, fetch_adp_json,
     get_firecrawl_change_statuses,
     get_scrape_statuses,
 )
@@ -147,6 +147,30 @@ def _save_fetch_log(source_key: str, jobs: list, fetch_status: str = "ok") -> No
             "count": len(jobs),
             "jobs": jobs,
         }, f, indent=2, ensure_ascii=False)
+
+
+def _resolve_fetch_status(fetch_status: str, has_jobs: bool,
+                          scrape_status: str | None) -> str:
+    """Disambiguate an empty fetch into a specific reason code (U9 / WS6).
+
+    A successful fetch that yielded no jobs is not automatically "broken":
+
+      * scraper flagged a JS-rendered shell   -> ``js_required``   (unchanged)
+      * firecrawl skipped because credits == 0 -> ``credit_exhausted``
+      * a real, successful, empty listing      -> ``render_ok_zero``
+
+    Only rewrites the generic ``ok``; an ``error:``/other status and any run
+    that returned jobs pass through untouched. This replaces the old ambiguous
+    ``no_data`` so a monitor can tell genuinely-empty (``render_ok_zero``) from
+    broken (``credit_exhausted``/``js_required``/``error:``).
+    """
+    if fetch_status != "ok" or has_jobs:
+        return fetch_status
+    if scrape_status == "js_required":
+        return "js_required"
+    if scrape_status == "credit_exhausted":
+        return "credit_exhausted"
+    return "render_ok_zero"
 
 
 def _auto_enrich_candidates():
@@ -344,7 +368,8 @@ def main():
             if args.free_only and strategy not in (
                     "greenhouse", "lever", "ashby", "workable", "unops_widget",
                     "recruitee", "teamtailor_rss", "bamboohr",
-                    "amazon_jobs", "apple_jobs", "workday_api"):
+                    "amazon_jobs", "apple_jobs", "workday_api",
+                    "successfactors", "adp_json"):
                 print(f"  [{org_name}] Skipped (--free-only mode)")
                 continue
 
@@ -385,14 +410,18 @@ def main():
                     jobs = fetch_bamboohr(org_name, config["slug"])
                 elif strategy == "amazon_jobs":
                     jobs = fetch_amazon_jobs(org_name, config)
+                elif strategy == "successfactors":
+                    jobs = fetch_successfactors(org_name, config)
+                elif strategy == "adp_json":
+                    jobs = fetch_adp_json(org_name, config)
             except Exception as exc:
                 print(f"  [{org_name}] Fetch error: {exc}")
                 fetch_status = f"error: {exc}"
 
-            # Honest marking: local scraper flagged a JS-rendered shell page.
+            # Honest marking: disambiguate an empty result into a reason code
+            # (js_required / credit_exhausted / render_ok_zero) — see U9.
             scrape_status = get_scrape_statuses().get(org_name)
-            if scrape_status == "js_required" and fetch_status == "ok" and not jobs:
-                fetch_status = "js_required"
+            fetch_status = _resolve_fetch_status(fetch_status, bool(jobs), scrape_status)
 
             # Save raw fetch log
             _save_fetch_log(f"{strategy}_{org_name.lower().replace(' ', '_')}", jobs, fetch_status)
@@ -423,7 +452,9 @@ def main():
 
             # Gone-from-source: a complete direct-ATS listing is ground truth.
             # An unseen vacancy missing from a successful fetch was closed.
-            if fetch_status == "ok" and strategy in GONE_DETECTION_STRATEGIES:
+            # 'render_ok_zero' is a successful empty listing (U9) and must still
+            # trigger gone-detection — otherwise closed roles stay stale.
+            if fetch_status in ("ok", "render_ok_zero") and strategy in GONE_DETECTION_STRATEGIES:
                 archive_gone_vacancies(org_name, raw_jobs)
 
             # Commit per company so an interrupted run keeps finished orgs.

@@ -544,6 +544,243 @@ def fetch_bamboohr(org_name: str, slug: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# SAP SuccessFactors — Career Site Builder tile-search feed
+# ---------------------------------------------------------------------------
+
+def _sf_base_url(config: dict) -> str:
+    """Resolve the SuccessFactors site base (host + /<Site>) from config.
+
+    Supports both site shapes (KTD3): the Career Site Builder host
+    (``jobsearch.createyourowncareer.com/<Site>``) and any backend variant
+    supplied directly as ``config['url']`` (e.g. ILO's ``jobs.ilo.org`` /
+    ``career5.successfactors.eu`` portal). Falls back to building the default
+    CSB URL from ``ats_slug``/``slug``. A trailing ``/search`` or
+    ``/tile-search-results`` (and any querystring) is trimmed so the tile and
+    search endpoints can be derived cleanly.
+    """
+    base = (config.get("url") or "").strip()
+    if not base:
+        site = config.get("ats_slug") or config.get("slug") or ""
+        if site:
+            base = f"https://jobsearch.createyourowncareer.com/{site}"
+    if not base:
+        return ""
+    base = base.split("?")[0].rstrip("/")
+    base = re.sub(r"/(search|tile-search-results)$", "", base).rstrip("/")
+    return base
+
+
+def _parse_successfactors_tiles(html: str, base_url: str, org_name: str) -> list[dict]:
+    """Parse a SuccessFactors CSB tile-search HTML fragment into job dicts.
+
+    The endpoint is named "tile-search" but returns an HTML fragment of
+    ``<li class="job-tile job-id-<ID> ...">`` tiles, NOT JSON (see module note
+    on U4 drift). Each tile carries a ``data-url`` job path, a ``job-id-<ID>``
+    class and a ``jobTitle-link`` anchor; the title/anchor repeats across
+    responsive sub-sections, so we take the first per tile.
+    """
+    m_host = re.match(r"(https?://[^/]+)", base_url)
+    host = m_host.group(1) if m_host else base_url
+    jobs = []
+    for li in re.findall(r'<li class="job-tile\b.*?</li>', html, re.DOTALL):
+        m_url = re.search(r'data-url="([^"]+)"', li)
+        if not m_url:
+            continue
+        path = html_module.unescape(m_url.group(1))
+        job_url = urllib.parse.urljoin(host + "/", path.lstrip("/"))
+        m_id = re.search(r'job-id-(\d+)', li)
+        ext_id = m_id.group(1) if m_id else hashlib.md5(job_url.encode()).hexdigest()[:12]
+        m_title = re.search(r'jobTitle-link[^>]*>\s*(.*?)\s*</a>', li, re.DOTALL)
+        title = ""
+        if m_title:
+            title = html_module.unescape(re.sub(r'\s+', ' ', m_title.group(1))).strip()
+        if not title:
+            continue
+        # Location, when present, sits in a jobLocation/jobGeoLocation span.
+        location = ""
+        m_loc = re.search(
+            r'class="[^"]*job(?:Geo)?Location[^"]*"[^>]*>\s*(.*?)\s*</', li, re.DOTALL)
+        if m_loc:
+            location = html_module.unescape(re.sub(r'\s+', ' ', m_loc.group(1))).strip()
+        jobs.append({
+            "title": title,
+            "location": location,
+            "department": "",
+            "url": job_url,
+            "external_id": ext_id,
+            "snippet": "",
+        })
+    return jobs
+
+
+def fetch_successfactors(org_name: str, config: dict) -> list[dict]:
+    """Fetch jobs from a SAP SuccessFactors Career Site Builder tile feed (free).
+
+    Endpoint: ``<base>/tile-search-results/?q=&startrow=<N>`` paginated by
+    ``startrow`` (25 tiles/page). ``base`` comes from config via
+    :func:`_sf_base_url`, so both the ``createyourowncareer.com/<Site>`` host
+    and backend variants (ILO's ``jobs.ilo.org`` / ``career5.successfactors.eu``)
+    are supported. The tile endpoint returns an empty shell without a session
+    cookie, so we GET the search page first to establish one. Unblocks ILO,
+    reframe[Tech], Bertelsmann Stiftung, Robert Bosch (WS3/U4).
+    """
+    base = _sf_base_url(config)
+    if not base:
+        print(f"  [{org_name}] SuccessFactors: no url/ats_slug configured")
+        return []
+
+    search_url = f"{base}/search/"
+    tile_url = f"{base}/tile-search-results/"
+    print(f"  [{org_name}] SuccessFactors: {tile_url}")
+
+    # Establish a session cookie — the tile endpoint returns an empty shell
+    # (16-byte doctype) when careerSite cookies are absent.
+    cookies = None
+    try:
+        boot = requests.get(search_url, headers={"User-Agent": _LOCAL_UA}, timeout=20)
+        cookies = boot.cookies
+    except Exception as e:
+        print(f"  [{org_name}] SuccessFactors bootstrap failed ({e}); trying tiles anyway")
+
+    headers = {
+        "User-Agent": _LOCAL_UA,
+        "X-Requested-With": "XMLHttpRequest",
+        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+        "Referer": search_url,
+    }
+
+    jobs: list[dict] = []
+    seen: set[str] = set()
+    startrow, page_size = 0, 25
+    for _ in range(20):  # hard page cap
+        page_url = f"{tile_url}?q=&startrow={startrow}"
+        try:
+            resp = requests.get(page_url, headers=headers, cookies=cookies, timeout=20)
+            resp.raise_for_status()
+            text = resp.text
+        except Exception as e:
+            print(f"  [{org_name}] SuccessFactors page error: {e}")
+            break
+
+        page_new = 0
+        for j in _parse_successfactors_tiles(text, base, org_name):
+            if j["external_id"] in seen:
+                continue
+            seen.add(j["external_id"])
+            jobs.append(j)
+            page_new += 1
+        if page_new == 0:  # empty page / startrow past the end / all seen
+            break
+        startrow += page_size
+
+    print(f"  [{org_name}] Found {len(jobs)} vacancies")
+    return jobs
+
+
+# ---------------------------------------------------------------------------
+# ADP Workforce Now — public job-requisitions JSON feed
+# ---------------------------------------------------------------------------
+
+def _adp_cid(config: dict) -> str:
+    """Resolve the ADP career-center ``cid`` from config (ats_slug or ats_config)."""
+    return (config.get("ats_slug")
+            or (config.get("ats_config") or {}).get("cid")
+            or config.get("cid") or "").strip()
+
+
+def _adp_location(locs) -> str:
+    """Join ADP ``requisitionLocations`` into a display string."""
+    if not isinstance(locs, list):
+        return ""
+    names: list[str] = []
+    for loc in locs:
+        if not isinstance(loc, dict):
+            continue
+        name = ((loc.get("nameCode") or {}).get("shortName") or "").strip()
+        if not name:
+            addr = loc.get("address") or {}
+            parts = [addr.get("cityName", ""),
+                     (addr.get("countrySubdivisionLevel1") or {}).get("codeValue", "")]
+            name = ", ".join(p for p in parts if p)
+        if name:
+            names.append(name.strip())
+    return " | ".join(dict.fromkeys(names))
+
+
+def _adp_job_url(portal: str, cid: str, item_id: str) -> str:
+    """Build a per-requisition public URL, reusing the configured portal if given."""
+    if portal and "recruitment.html" in portal:
+        sep = "&" if "?" in portal else "?"
+        return f"{portal}{sep}jobId={item_id}" if item_id else portal
+    base = ("https://workforcenow.adp.com/mascsr/default/mdf/recruitment/"
+            f"recruitment.html?cid={cid}&type=MP&lang=en_US")
+    return f"{base}&jobId={item_id}" if item_id else base
+
+
+def _adp_snippet(location: str, pay) -> str:
+    """Build a short snippet from location + pay range (feed has no description)."""
+    parts = [location] if location else []
+    if isinstance(pay, dict):
+        lo = (pay.get("minimumRate") or {}).get("amountValue")
+        hi = (pay.get("maximumRate") or {}).get("amountValue")
+        currency = ((pay.get("minimumRate") or {}).get("currencyCode") or "").strip()
+        nums = [f"{int(v):,}" for v in (lo, hi) if isinstance(v, (int, float))]
+        if nums:
+            parts.append(f"{currency} {'-'.join(nums)}".strip())
+    return ". ".join(parts)
+
+
+def fetch_adp_json(org_name: str, config: dict) -> list[dict]:
+    """Fetch jobs from the ADP Workforce Now public requisitions feed (free, no auth).
+
+    Endpoint: ``workforcenow.adp.com/mascsr/default/careercenter/public/events/
+    staffing/v1/job-requisitions?cid=<CID>`` where ``cid`` comes from config.
+    Parses ``jobRequisitions`` into job dicts. The list feed carries no
+    description, so the snippet is built from location + pay range (a per-job
+    detail fetch is skipped — these boards are low-fit/US-only). Unblocks
+    Rockefeller and Carnegie (WS3/U5).
+    """
+    cid = _adp_cid(config)
+    if not cid:
+        print(f"  [{org_name}] ADP: no cid configured (ats_slug/ats_config.cid)")
+        return []
+    url = ("https://workforcenow.adp.com/mascsr/default/careercenter/public/"
+           f"events/staffing/v1/job-requisitions?cid={cid}")
+    print(f"  [{org_name}] ADP Workforce Now: {url}")
+    try:
+        resp = requests.get(
+            url, headers={"Accept": "application/json", "User-Agent": _LOCAL_UA},
+            timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"  [{org_name}] ERROR: {e}")
+        return []
+
+    portal = config.get("careers_url") or config.get("url") or ""
+    jobs = []
+    for r in (data.get("jobRequisitions") or []):
+        if not isinstance(r, dict):
+            continue
+        title = (r.get("requisitionTitle") or "").strip()
+        if not title:
+            continue
+        item_id = str(r.get("itemID") or "")
+        location = _adp_location(r.get("requisitionLocations"))
+        jobs.append({
+            "title": title,
+            "location": location,
+            "department": "",
+            "url": _adp_job_url(portal, cid, item_id),
+            "external_id": item_id or hashlib.md5(
+                f"{org_name}:{title}".encode()).hexdigest()[:12],
+            "snippet": _adp_snippet(location, r.get("payGradeRange")),
+        })
+    print(f"  [{org_name}] Found {len(jobs)} vacancies")
+    return jobs
+
+
+# ---------------------------------------------------------------------------
 # HTML helpers
 # ---------------------------------------------------------------------------
 
@@ -1223,7 +1460,11 @@ def fetch_firecrawl_scrape(org_name: str, url: str, *,
 
     # Quota guard: if credits are exhausted, skip Firecrawl entirely (saves
     # ~60s of latency per company) and go straight to the local scraper.
+    # Record the reason (U9) so an empty result is marked 'credit_exhausted'
+    # rather than an ambiguous no_data — the local fallback may override this
+    # with 'js_required' or clear it by returning rows.
     if not _firecrawl_credits_available():
+        _last_scrape_status[org_name] = "credit_exhausted"
         return _fetch_local_scrape(org_name, url, url_filter=url_filter)
 
     print(f"  [{org_name}] Firecrawl scrape: {url}")
@@ -1252,6 +1493,7 @@ def fetch_firecrawl_scrape(org_name: str, url: str, *,
             # Mark credits exhausted for the rest of the run, then go local.
             global _firecrawl_credits_remaining
             _firecrawl_credits_remaining = 0
+            _last_scrape_status[org_name] = "credit_exhausted"  # U9 reason code
             print(f"  [{org_name}] Quota/rate-limit error — switching to local scraper")
         else:
             print(f"  [{org_name}] Falling back to local scraper")

@@ -51,11 +51,21 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 FETCH_STATUS_OK = "ok"
 FETCH_STATUS_NO_DATA = "no_data"
+# Reason codes (U9 / WS6) that disambiguate the old, overloaded no_data.
+# render_ok_zero = a real successful fetch that is genuinely empty (healthy);
+# credit_exhausted / js_required stay in the "broken" bucket below.
+FETCH_STATUS_RENDER_OK_ZERO = "render_ok_zero"
+FETCH_STATUS_CREDIT_EXHAUSTED = "credit_exhausted"
+
+# Statuses that are NOT operational errors (a genuinely-empty listing is fine).
+_FETCH_STATUS_NON_ERROR = (
+    FETCH_STATUS_OK, FETCH_STATUS_NO_DATA, FETCH_STATUS_RENDER_OK_ZERO,
+)
 
 
 def is_fetch_error(status: str | None) -> bool:
-    """Check if fetch_status represents an error (not ok/no_data/empty)."""
-    return bool(status) and status not in (FETCH_STATUS_OK, FETCH_STATUS_NO_DATA)
+    """Check if fetch_status represents an error (not ok/no_data/render_ok_zero)."""
+    return bool(status) and status not in _FETCH_STATUS_NON_ERROR
 
 
 # ---------------------------------------------------------------------------
