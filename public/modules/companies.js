@@ -20,6 +20,7 @@ import {
 } from "./state.js";
 import {
   escHtml,
+  jsAttr,
   relativeTime,
   llmScoreBadge,
   ratingDotsHtml,
@@ -1062,7 +1063,7 @@ function _buildApprovedRow(c) {
     '<tr class="ct-row" style="--row-accent:' +
     fg +
     '" onclick="openCompanyProfile(\'' +
-    escHtml(c.slug) +
+    jsAttr(c.slug) +
     "')\">" +
     '<td class="ct-td ct-col-name"><span class="ct-name-text">' +
     escHtml(c.name) +
@@ -1142,7 +1143,7 @@ function _buildPendingRow(c) {
     '<tr class="ct-row" style="--row-accent:' +
     fg +
     '" onclick="openCompanyProfile(\'' +
-    escHtml(c.slug) +
+    jsAttr(c.slug) +
     "')\">" +
     '<td class="ct-td ct-col-name ct-col-name--pending"><span class="ct-name-text">' +
     escHtml(c.name) +
@@ -1181,7 +1182,7 @@ function _buildArchivedRow(c) {
 
   return (
     '<tr class="ct-row ct-row--archived" onclick="openCompanyProfile(\'' +
-    escHtml(c.slug) +
+    jsAttr(c.slug) +
     "')\">" +
     '<td class="ct-td ct-col-name ct-col-name--archived"><span class="ct-name-text">' +
     escHtml(c.name) +
@@ -2020,7 +2021,7 @@ function buildCompanyProfilePage(c) {
 
   var catalogBtn =
     '<button class="company-view-catalog-btn" onclick="viewOrgInCatalog(\'' +
-    escHtml(c.name) +
+    jsAttr(c.name) +
     "')\">\u2192 Vacancies</button>";
 
   // Review banner for pending companies

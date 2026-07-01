@@ -16,6 +16,16 @@ export function escHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+// Escape a value for use INSIDE a single-quoted JS string that itself sits in a
+// double-quoted HTML attribute, e.g. onclick="fn('<value>')". escHtml alone is
+// not enough: it leaves ' untouched, so a value like the slug "women's-world-
+// banking" or name "Women's World Banking" closes the JS string early and the
+// handler throws a SyntaxError (the row/button silently does nothing). Escape
+// backslash + apostrophe for JS on top of the HTML escaping.
+export function jsAttr(str) {
+  return escHtml(str).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
 // ---------------------------------------------------------------------------
 // Time formatting
 // ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ import {
 } from "./state.js";
 import {
   escHtml,
+  jsAttr,
   parseLocationChips,
   renderLocationChips,
   llmScoreBadge,
@@ -474,7 +475,7 @@ function buildCatalogCard(g) {
         ";background:" +
         bg +
         '" onclick="event.stopPropagation();openCompanyProfile(\'' +
-        escHtml(g.company_slug) +
+        jsAttr(g.company_slug) +
         "')\">"
       : '<span class="catalog-org" style="color:' +
         fg +
