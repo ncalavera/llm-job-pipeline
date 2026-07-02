@@ -202,7 +202,7 @@ SQLite — no code changes. Two things easy mode skipped are required now:
    fetch/score/filter run prints its backend; confirm it says
    `Backend: Postgres (Supabase)`.
 
-Then follow [INSTALL.md](INSTALL.md) from step 2 (create the Supabase project and
+Then follow [INSTALL.md](INSTALL.md) from step 3 (create the Supabase project and
 schema), and re-add your companies (or migrate the SQLite rows). Your commands
 (`/jobs-new`, `/jobs-review`, `/jobs-add`, …) keep working.
 

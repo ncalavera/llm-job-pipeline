@@ -9,19 +9,30 @@ full mode gives an actionable message instead of a raw ModuleNotFoundError.
 
 import io
 import os
+import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 import db_backend
+
+SCRIPTS_DIR = Path(db_backend.__file__).resolve().parent
 
 
 @pytest.fixture(autouse=True)
 def _restore_env():
     """load_dotenv mutates os.environ via setdefault (not through monkeypatch),
     so snapshot and restore the whole environment around every test to keep the
-    rest of the suite deterministic."""
+    rest of the suite deterministic.
+
+    conftest sets LLM_PIPELINE_DISABLE_DOTENV=1 suite-wide (so the import-time
+    load can't re-inject the maintainer's real .env). These tests exercise the
+    loader on purpose — against tmp paths only — so re-enable it locally; the
+    teardown restore puts the flag back for the rest of the suite.
+    """
     saved = os.environ.copy()
+    os.environ.pop("LLM_PIPELINE_DISABLE_DOTENV", None)
     yield
     os.environ.clear()
     os.environ.update(saved)
@@ -95,6 +106,78 @@ def test_empty_dotenv_is_silent(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
 
     assert db_backend.load_dotenv(tmp_path) == {}
+
+
+def test_disable_flag_makes_load_a_noop(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text("SUPABASE_DB_URL=postgresql://real/db\n")
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+    monkeypatch.setenv("LLM_PIPELINE_DISABLE_DOTENV", "1")
+
+    assert db_backend.load_dotenv(tmp_path) == {}
+    assert "SUPABASE_DB_URL" not in os.environ
+
+
+def test_dotenv_path_override_replaces_repo_root(tmp_path, monkeypatch):
+    custom = tmp_path / "custom.env"
+    custom.write_text("SUPABASE_DB_URL=postgresql://override/db\n")
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+    monkeypatch.setenv("LLM_PIPELINE_DOTENV_PATH", str(custom))
+
+    declared = db_backend.load_dotenv()  # no root arg -> honors the override
+
+    assert declared == {"SUPABASE_DB_URL": "postgresql://override/db"}
+    assert os.environ["SUPABASE_DB_URL"] == "postgresql://override/db"
+
+
+# --- first-import regression (fresh interpreter) ----------------------------
+#
+# The in-process tests above patch db_backend after it is already imported, so
+# they cannot catch a bug in the import-time load itself. These run a FRESH
+# python that imports db_backend for the first time — the exact moment
+# _DOTENV_VALUES = load_dotenv() executes. The fake .env lives in tmp_path and
+# is wired in via LLM_PIPELINE_DOTENV_PATH; the real repo root is never touched.
+
+_FIRST_IMPORT_CODE = (
+    "import os, db_backend; "
+    "print(os.environ.get('SUPABASE_DB_URL', '<unset>')); "
+    "print(db_backend.IS_SQLITE)"
+)
+
+
+def _first_import(tmp_path, *, disable: bool) -> list[str]:
+    dotenv = tmp_path / "fake.env"
+    dotenv.write_text("SUPABASE_DB_URL=postgresql://fake-first-import/db\n")
+
+    env = os.environ.copy()
+    for key in ("SUPABASE_DB_URL", "SUPABASE_DIRECT_URL", "LLM_PIPELINE_DISABLE_DOTENV"):
+        env.pop(key, None)
+    env["LLM_PIPELINE_DOTENV_PATH"] = str(dotenv)
+    env["PYTHONPATH"] = str(SCRIPTS_DIR)
+    if disable:
+        env["LLM_PIPELINE_DISABLE_DOTENV"] = "1"
+
+    result = subprocess.run(
+        [sys.executable, "-c", _FIRST_IMPORT_CODE],
+        env=env,
+        cwd=tmp_path,  # proves root resolution comes from __file__/override, not cwd
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.splitlines()
+
+
+def test_first_import_loads_dotenv_in_fresh_interpreter(tmp_path):
+    supabase_url, is_sqlite = _first_import(tmp_path, disable=False)
+    assert supabase_url == "postgresql://fake-first-import/db"
+    assert is_sqlite == "False"  # backend selection saw the .env value
+
+
+def test_first_import_respects_disable_flag(tmp_path):
+    supabase_url, is_sqlite = _first_import(tmp_path, disable=True)
+    assert supabase_url == "<unset>"  # nothing re-injected after a scrub
+    assert is_sqlite == "True"
 
 
 # --- backend banner --------------------------------------------------------

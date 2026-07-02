@@ -63,8 +63,26 @@ def load_dotenv(root: Path | None = None) -> dict[str, str]:
     environment variables win (``setdefault``), matching python-dotenv's default
     and letting a shell export or CI secret override the file. A missing ``.env``
     is silent: that is the local SQLite demo path.
+
+    Two neutral escape hatches, both primarily for the test suite:
+
+    * ``LLM_PIPELINE_DISABLE_DOTENV`` — any non-empty value makes this a no-op.
+      The offline pytest run sets it in ``tests/conftest.py`` BEFORE pipeline
+      modules import, so the maintainer's real ``.env`` can never re-inject
+      ``SUPABASE_DB_URL`` after conftest scrubbed it (which would silently point
+      the whole suite at live Supabase).
+    * ``LLM_PIPELINE_DOTENV_PATH`` — full path to an alternative ``.env`` file,
+      used instead of ``<repo root>/.env`` when no explicit ``root`` argument is
+      given. Lets tests exercise the real import-time load against a tmp file
+      without touching the repo root.
     """
-    path = (root or PROJECT_ROOT) / ".env"
+    if os.environ.get("LLM_PIPELINE_DISABLE_DOTENV"):
+        return {}
+    if root is not None:
+        path = root / ".env"
+    else:
+        override = os.environ.get("LLM_PIPELINE_DOTENV_PATH")
+        path = Path(override).expanduser() if override else PROJECT_ROOT / ".env"
     if not path.exists():
         return {}
     values = _parse_dotenv(path)

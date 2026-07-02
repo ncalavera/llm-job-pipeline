@@ -123,6 +123,12 @@ def load_dotenv_fallback():
     try:
         import db_backend
 
+        # Importing db_backend already ran load_dotenv() once; this explicit
+        # call is a harmless no-op then (setdefault never overwrites existing
+        # vars) and only matters if db_backend was imported before the .env
+        # existed or with loading disabled. Kept for clarity: this script's
+        # config contract is "repo-root .env is loaded by the time get_config
+        # runs", independent of import order.
         db_backend.load_dotenv()
         return
     except Exception:
