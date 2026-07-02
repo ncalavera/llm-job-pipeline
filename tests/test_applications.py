@@ -343,5 +343,55 @@ def test_dashboard_payload_carries_application_and_research(tmp_path, monkeypatc
     companies = prepare_company_data()
     northwind = next(c for c in companies if c["name"] == "Northwind Aid Trust")
     assert northwind["application_count"] == 1
-    assert northwind["applications"][0]["artifacts"]["cv_version"] == "v9.pdf"
+    proj = northwind["applications"][0]
+    # The dashboard payload carries the artifact KEY (display metadata) but not
+    # the private VALUE — see _project_application / the leak test below.
+    assert "cv_version" in proj["artifacts"]
+    assert proj["artifacts"]["cv_version"] is True
     assert northwind["research_count"] == 1
+
+
+def test_application_artifact_values_and_notes_never_reach_payload(tmp_path, monkeypatch):
+    """STRATEGY: application artifacts (inline answer prose, file paths, research
+    URLs) and free-text notes never enter public code or the public dashboard.
+    The payload must carry only the display shape — status/channel/applied_at and
+    the artifact KEYS. Prove no private VALUE or notes string rides along, on
+    BOTH boundaries (the vacancy card's `application` and the company profile's
+    `applications`)."""
+    dal = _fresh_sqlite(monkeypatch, tmp_path / "db.sqlite")
+    import applications
+
+    importlib.reload(applications)
+
+    cid = _company(dal, "Northwind Aid Trust")
+    vid = _vacancy(dal, "Northwind Aid Trust", "Programme Officer")
+    conn = dal.get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE vacancy SET llm_score = 72 WHERE id = %s", (vid,))
+    cur.close()
+    conn.commit()
+
+    secret = "PRIVATE_LEAK_MARKER_9f3a2b"
+    applications.record_application(
+        cid,
+        vid,
+        channel="email",
+        artifacts={
+            "cover_letter_path": f"/private/letters/{secret}.md",
+            "answers": f"My inline interview answer mentioning {secret}.",
+        },
+        notes=f"Recruiter is a friend of a friend — {secret}.",
+    )
+
+    import json
+    from report.data_prep import prepare_report_data, prepare_company_data
+
+    payload = json.dumps(prepare_report_data(), default=str) + json.dumps(
+        prepare_company_data(), default=str
+    )
+
+    # Private artifact VALUES and the free-text notes must NOT be in the payload.
+    assert secret not in payload
+    # ...but the artifact KEYS are display metadata and MUST survive.
+    assert "cover_letter_path" in payload
+    assert "answers" in payload

@@ -262,6 +262,34 @@ def _build_org_colors(org_names: list[str]) -> dict:
     return org_colors
 
 
+def _project_application(app: dict | None) -> dict | None:
+    """Public-payload projection of an application row.
+
+    The DAL (``applications.py``) returns the FULL row — artifact VALUES (inline
+    answer prose, cover_letter_path, cv_version, research_urls) and free-text
+    ``notes`` — for CLI/agent use. None of that may enter public code or the
+    public dashboard (STRATEGY: application artifacts never leave the machine).
+    The dashboard only ever renders status/channel/applied_at and the artifact
+    KEYS (see catalog.js, companies.js ``buildApplicationsSection``), so the
+    payload carries exactly that display shape and nothing more.
+
+    ``artifacts`` stays an object keyed by the (sorted) artifact keys with the
+    values blanked to ``True`` — the JS calls ``Object.keys(a.artifacts)`` and
+    never reads a value, so rendering is unchanged while no private string can
+    ride along.
+    """
+    if not app:
+        return app
+    artifacts = app.get("artifacts") or {}
+    return {
+        "status": app.get("status", ""),
+        "channel": app.get("channel", ""),
+        "applied_at": app.get("applied_at"),
+        "artifacts": {k: True for k in sorted(artifacts)},
+        "artifact_count": len(artifacts),
+    }
+
+
 def _build_group(
     v: dict,
     org_colors: dict,
@@ -414,7 +442,8 @@ def _build_group(
         "company_id": v.get("company_id", ""),
         # The application attached to this vacancy (1:1), or None. Card shows a
         # small "applied · <status>" block; the full section is a later ticket.
-        "application": (applications_by_vac or {}).get(v.get("id")),
+        # Projected to the display shape — artifact values and notes stay private.
+        "application": _project_application((applications_by_vac or {}).get(v.get("id"))),
     }
 
 
@@ -884,10 +913,11 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
                 "recent_news": social.get("recent_news", []),
                 # --- Applications + research ---
                 # Everything the user has done toward this company: applications
-                # (with status + artifact refs) and the research rows collected
-                # in company_evidence. Shown as a small block in the profile;
-                # the full standalone Applications section is a later ticket.
-                "applications": company_applications,
+                # (status + artifact KEYS only — values and notes stay private)
+                # and the research rows collected in company_evidence. Shown as a
+                # small block in the profile; the full standalone Applications
+                # section is a later ticket.
+                "applications": [_project_application(a) for a in company_applications],
                 "application_count": len(company_applications),
                 "research": company_research,
                 "research_count": len(company_research),
