@@ -47,9 +47,16 @@ def _resolve_dashboard_style() -> str:
 
 
 def _resolve_language() -> str:
-    """Pick the dashboard language: env DASHBOARD_LANGUAGE overrides config.
+    """Pick the dashboard's DEFAULT language — the baked ``config.language``.
 
-    Falls back to ``en`` when unset or not bundled.
+    This is the server-chosen default the frontend uses on first load; an
+    explicit client toggle (``localStorage['dashboard_lang']``) still wins in the
+    browser (see ``public/modules/i18n.js``). The default is the ONE product
+    language: the profile's ``## OUTPUT_LANGUAGE`` drives it via
+    ``product_language.resolve()``. ``DASHBOARD_LANGUAGE`` stays as an explicit
+    per-render override; ``product_language`` itself also honours the legacy
+    ``[dashboard] language`` knob when the profile is silent. Falls back to
+    ``en`` when nothing resolves to a bundled language.
     """
     import i18n
 
@@ -58,9 +65,9 @@ def _resolve_language() -> str:
     if env in available:
         return env
     try:
-        import settings
+        import product_language
 
-        lang = str(settings.dashboard().get("language", "en")).strip().lower()
+        lang = product_language.resolve()
         if lang in available:
             return lang
     except Exception:

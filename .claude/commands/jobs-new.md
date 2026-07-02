@@ -12,6 +12,13 @@ JUDGMENT it pauses for. Works with **any** coding agent that runs shell and
 follows this file: the driver does the Python; you do the LLM scoring and talk
 to the user at the gates.
 
+**Reply in the user's product language.** Before you say anything to the user,
+read the `## OUTPUT_LANGUAGE` section of `config/user_profile.md` (resolve it
+with `python3 -c "import sys;sys.path.insert(0,'scripts');import product_language as p;print(p.resolve())"` → `en`/`ru`). Write ALL your chat, gate summaries and
+progress notes in that language. The driver already prints its banner/summary in
+it; match it. (Scoring/verdict *data* stays as the pipeline emits it — you are
+translating your own words, not the DB.)
+
 ---
 
 ## The loop

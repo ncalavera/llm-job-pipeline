@@ -102,7 +102,12 @@ def test_settings_payload_groups_and_shape(tmp_path, monkeypatch):
 
     payload = prepare_settings_payload()
     keys = [g["key"] for g in payload["groups"]]
-    assert keys == ["settings_grp_volume", "settings_grp_scoring", "settings_grp_thresholds"]
+    assert keys == [
+        "settings_grp_product",
+        "settings_grp_volume",
+        "settings_grp_scoring",
+        "settings_grp_thresholds",
+    ]
 
     for group in payload["groups"]:
         assert group["rows"], "every settings group has rows"
@@ -215,6 +220,7 @@ def test_generated_data_js_carries_section_payloads(tmp_path, monkeypatch):
     payload = json.loads(text.split("= ", 1)[1].rstrip().rstrip(";"))
     assert isinstance(payload["boards_catalog"], list) and payload["boards_catalog"]
     assert [g["key"] for g in payload["settings"]["groups"]] == [
+        "settings_grp_product",
         "settings_grp_volume",
         "settings_grp_scoring",
         "settings_grp_thresholds",

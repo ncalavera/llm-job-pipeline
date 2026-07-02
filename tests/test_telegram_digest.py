@@ -93,12 +93,44 @@ EXPIRING_ROW = dict(
 
 
 def test_expiring_message_is_loud_and_complete():
+    # Default product language (the example profile is English) → English copy.
     msg = td.build_expiring_message(dict(EXPIRING_ROW))
-    assert "Вот-вот пропадёт" in msg  # loud, distinct header
+    assert "About to disappear" in msg  # loud, distinct header
     assert "Example Org — Senior Advisor" in msg
     assert "🎯 89/100" in msg
-    assert "виден 2026-06-20" in msg  # why it is expiring
+    assert "last seen 2026-06-20" in msg  # why it is expiring
     assert "href=" in msg
+
+
+# --- The digest speaks the ONE product language ---
+
+
+def test_digest_default_language_is_english():
+    """With no override + the example (English) profile, copy is English."""
+    msg = td.build_message(dict(ROW), 1)
+    assert "Open vacancy →" in msg
+    assert td.build_keyboard(ROW["id"])["inline_keyboard"][0][0]["text"] == "👍 Liked"
+
+
+def test_digest_switches_to_russian(monkeypatch):
+    """PRODUCT_LANGUAGE=ru flips every user-facing string to Russian."""
+    monkeypatch.setenv("PRODUCT_LANGUAGE", "ru")
+    msg = td.build_message(dict(ROW), 1)
+    assert "Открыть вакансию →" in msg
+
+    expiring = td.build_expiring_message(dict(EXPIRING_ROW))
+    assert "Вот-вот пропадёт" in expiring
+    assert "последний раз виден 2026-06-20" in expiring
+
+    kb = td.build_keyboard(ROW["id"])
+    assert kb["inline_keyboard"][0][0]["text"] == "👍 В избранное"
+    assert kb["inline_keyboard"][0][1]["text"] == "👎 Отказ"
+
+    # Buttons still carry the same callback contract — only the label changed.
+    assert td.parse_callback(kb["inline_keyboard"][0][0]["callback_data"]) == (
+        ROW["id"],
+        "liked",
+    )
 
 
 def test_expiring_keyboard_has_three_actions_that_map():
