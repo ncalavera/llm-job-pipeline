@@ -137,6 +137,13 @@ def screen_model() -> str:
     return val
 
 
+# A configured floor at/above this effectively turns the strong pass off: real
+# screen scores rarely if ever land this high, so escalation becomes a
+# theoretical possibility rather than a practical one. See
+# escalation_threshold_warning().
+NEAR_CEILING_THRESHOLD = 95
+
+
 def escalation_threshold() -> int:
     """Return the screen-score floor at/above which a role is escalated to the
     strong model.
@@ -144,8 +151,11 @@ def escalation_threshold() -> int:
     Calibrated against the golden set so the cheap screen drops zero of the strong
     model's true positives (the default, 50, sits 20 points under the lowest such
     golden role's screen score of 70). A garbage / empty value falls back to the
-    default; the result is clamped to 0..100 so it can never resolve to "escalate
-    nothing" or an impossible bound.
+    default; the result is clamped to 0..100 so the bound itself is never
+    impossible — but the clamp does NOT guarantee escalation stays live: 100 (or
+    anything close to it) is a valid, silently-accepted value that in practice
+    escalates nothing, since real screen scores rarely reach it. Callers that act
+    on a fresh value should also check escalation_threshold_warning().
     """
     val = _volume_fields().get("escalate_threshold", "").strip()
     if val.lower() in _EMPTY_TOKENS:
@@ -155,6 +165,21 @@ def escalation_threshold() -> int:
     except ValueError:
         return DEFAULT_ESCALATION_THRESHOLD
     return min(100, max(0, n))
+
+
+def escalation_threshold_warning(threshold: int) -> str | None:
+    """A loud one-liner when ``threshold`` means the strong pass will realistically
+    escalate nothing (clamping accepts it, but it is never what a user wants) —
+    ``None`` otherwise.
+    """
+    if threshold >= NEAR_CEILING_THRESHOLD:
+        return (
+            f"⚠  escalate_threshold is {threshold} — at or above the near-ceiling cutoff "
+            f"({NEAR_CEILING_THRESHOLD}). Real screen scores rarely reach that high, so the "
+            "strong pass will effectively escalate nothing this run; every role keeps its "
+            "cheap screen score. If that's not intended, lower '[## VOLUME] escalate_threshold'."
+        )
+    return None
 
 
 def max_per_run() -> int:

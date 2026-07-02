@@ -155,6 +155,26 @@ def test_escalation_threshold_clamped_to_0_100(use_profile):
 
 
 # ---------------------------------------------------------------------------
+# escalation_threshold_warning — the clamp accepts 100, but that silently
+# disables the strong pass; this is the loud one-liner that says so.
+# ---------------------------------------------------------------------------
+
+
+def test_escalation_threshold_warning_none_for_a_normal_floor():
+    assert ss.escalation_threshold_warning(50) is None
+    assert ss.escalation_threshold_warning(70) is None
+    # Just under the near-ceiling cutoff — still no warning.
+    assert ss.escalation_threshold_warning(ss.NEAR_CEILING_THRESHOLD - 1) is None
+
+
+def test_escalation_threshold_warning_fires_at_and_above_near_ceiling():
+    warn_at = ss.escalation_threshold_warning(ss.NEAR_CEILING_THRESHOLD)
+    warn_100 = ss.escalation_threshold_warning(100)
+    assert warn_at is not None and "escalate nothing" in warn_at
+    assert warn_100 is not None and "escalate nothing" in warn_100
+
+
+# ---------------------------------------------------------------------------
 # max_per_run
 # ---------------------------------------------------------------------------
 

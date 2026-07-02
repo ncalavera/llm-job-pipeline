@@ -959,7 +959,12 @@ def _h_vacancy_scoring(state, entry, opts):
     row already scored), so it stays single-pass.
     """
     import run_status
-    from scoring_settings import escalation_threshold, scoring_model, screen_model
+    from scoring_settings import (
+        escalation_threshold,
+        escalation_threshold_warning,
+        scoring_model,
+        screen_model,
+    )
 
     # ---- First entry: emit the SCREEN pass (or a full-rescore one-shot) ----
     if not entry.get("emitted"):
@@ -1030,6 +1035,9 @@ def _h_vacancy_scoring(state, entry, opts):
 
         # Screen complete — pick the finalists for the strong pass.
         threshold = escalation_threshold()
+        threshold_warn = escalation_threshold_warning(threshold)
+        if threshold_warn:
+            print(threshold_warn, flush=True)
         scores = _vacancy_scores(entry.get("target_ids", []))
         escalate = select_escalation_payloads(payloads, scores, threshold)
         screened = len(payloads)
