@@ -122,6 +122,29 @@ def thresholds() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Scoring cost/quality knobs
+# ---------------------------------------------------------------------------
+
+
+def scoring() -> dict:
+    """Scoring cost/quality knobs. Neutral fallbacks (today's numbers).
+
+    Keys:
+      company_evidence_char_cap — max chars of company_evidence text sent to the
+      WANT scorer per company (across ALL sources, labels included). This is the
+      single dial trading input cost against evidence completeness: higher keeps
+      more of each source's tail, lower cuts tokens per scoring call. The
+      assembler trims each source proportionally by its share, keeping every
+      source's HEAD (where the material anchors — funding, HQ, remote policy,
+      leadership — sit), so a lower cap loses tails first. Default 25000.
+    """
+    sec = _section("scoring")
+    return {
+        "company_evidence_char_cap": int(_num(sec, "company_evidence_char_cap", 25000)),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Dashboard presentation knobs
 # ---------------------------------------------------------------------------
 
