@@ -50,8 +50,8 @@ running one seed fetch.
 
 ### B0. Out-of-scope guard
 
-Adding a **brand-new** board (one not already in the 6 built-ins) is **out of
-scope** for this command — it needs a new `[boards.<id>]` block in
+Adding a **brand-new** board (one not already in `config._ALL_JOB_BOARDS`) is
+**out of scope** for this command — it needs a new `[boards.<id>]` block in
 `config/defaults.toml` plus a matching `fetch_*_board` strategy. If the user
 wants a board that is not listed below, say so plainly and stop.
 
@@ -69,7 +69,8 @@ for bid in _ALL_JOB_BOARDS:
 "
 ```
 
-Present them with their sector fit and any extra env knobs:
+Present them with their sector fit and any extra env knobs (the full catalogue
+with every board's audience is `docs/job-boards-catalogue.md`; a common subset):
 
 | Board id | Sector fit | Extra env |
 | --- | --- | --- |

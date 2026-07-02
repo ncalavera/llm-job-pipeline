@@ -21,57 +21,62 @@ need can be left empty or removed.
 
 ## USER_PROFILE
 
-**Name:** Jane Doe
-**Current location:** Lisbon, Portugal
-**Target locations:** Berlin (DE), London (UK), remote-EU
-**Target start:** within 6 months
-**Salary benchmark:** target ~€5,500/month, hard floor ~€4,000/month
-**Visa status:** EU passport — no sponsorship needed. (If you need a sponsor,
-say so here — the prompt uses this to weight visa-friendly companies.)
+Replace everything in this section with your own details. The `[brackets]` show
+what goes where — delete the guidance once you have filled them in. Nothing here
+is a default: your field is whatever you type.
 
-### Professional experience (~7 years)
+**Name:** [your name]
+**Current location:** [city, country]
+**Target locations:** [where you'd work — cities, countries, or "remote-EU" style]
+**Target start:** [e.g. within 6 months]
+**Salary benchmark:** [target and hard floor in your currency — or leave blank]
+**Visa status:** [e.g. "EU passport — no sponsorship needed", or "need sponsorship
+for the EU/UK". The prompt uses this to weight visa-friendly employers.]
 
-- 2022–2026, Senior Programme Manager at Example Foundation — built a
-  €2M/year grants programme, managed cross-functional team of 6.
-- 2019–2022, Operations Manager at Example Startup (Series B) — scaled
-  ops from 30 to 120 people.
-- 2017–2019, Project Manager at Example NGO — ran a youth education
-  programme across 4 countries.
+### Professional experience
 
-### Core skills (in priority order)
+One line per role: years, title, employer — plus one line on what you actually
+did. Honest beats impressive; the scorer reads this. A few shapes across
+different fields, so you can see the format (replace with your own):
 
-- Programme / project management at scale
-- Operations & process design
-- Stakeholder management (foundations, government, partners)
-- Team building (0→1 hires)
-- Languages: English (native), Portuguese (C1), Spanish (B2)
+- 2021–2026, [your title] at [employer] — [the result you're proudest of].
+- 2018–2021, [earlier title] at [employer] — [scope: team size, budget, output].
+- e.g. "Charge Nurse at [hospital] — ran a 20-bed ward, cut handover errors."
+- e.g. "Backend Engineer at [company] — owned the payments service, 5→50 req/s."
+- e.g. "Operations Manager at [org] — scaled ops from 30 to 120 people."
+
+### Core skills (strongest first)
+
+- [your strongest skill]
+- [next skill]
+- [and so on]
+- Languages: [language (level), language (level)]
 
 ### What energises you
 
-- Building 0→1 programmes with measurable impact
-- Roles with budget ownership
-- Mission-driven organisations (climate, education, public health)
-- Cross-cultural, international teams
+- [the kind of work you want more of — e.g. building 0→1, deep hands-on craft,
+  leading people, owning a budget, a mission you care about]
 
 ### Domain preferences
 
-**Want to work in:** climate adaptation, philanthropy/grantmaking, public
-health, education access, civic tech.
+**Want to work in:** [the fields you're targeting — any sector works: healthcare,
+games, climate, fintech, developer tools, public policy, manufacturing, …].
 
-**Open but not first choice:** general operations at scaling startups,
-foundation strategy roles.
+**Open but not first choice:** [adjacent fields you'd still consider].
 
 ## TARGET_ROLES
 
-- **Operations track:** Director of Operations, Head of Operations,
-  Chief of Staff, Operations Manager.
-- **Programme track:** Senior Programme Manager, Programme Director,
-  Project Director (mission-driven).
-- **Product track:** Product Manager / Senior PM at mission-driven
-  products (donations, civic, edtech).
+The exact job titles you want to see — one per line or comma-separated. Any
+field; pick your own. The lines below are only format examples from different
+careers, not a default set — replace them:
 
-**Not a target:** pure engineering roles, sales/BD, very junior
-(coordinator/assistant), VP/C-level requiring 15+ years.
+- [your target title], [a more senior version], [an adjacent title]
+- e.g. "Registered Nurse, Charge Nurse, Nurse Manager"
+- e.g. "Backend Engineer, Senior Software Engineer, Staff Engineer"
+- e.g. "Operations Manager, Head of Operations, Chief of Staff"
+
+**Not a target:** [titles or levels to steer away from — e.g. very junior
+(coordinator/assistant), or roles far outside your track].
 
 ## LINKEDIN_QUERIES
 
@@ -87,9 +92,9 @@ LinkedIn's default, worldwide). Works for any field — a nurse might write
 config carries NO queries: they always come from here or from your TARGET_ROLES,
 never from a default someone else picked.
 
-    Director of Operations | Berlin
-    Chief of Staff | London
-    Programme Manager | Remote
+    Backend Engineer | Berlin
+    ICU Nurse | Manchester
+    Operations Manager | Remote
 
 Leave the block empty (or delete it) to use the derived queries.
 -->
@@ -109,15 +114,18 @@ that never once collided with a role you liked → a hard filter); it never move
 one itself, and every move needs your yes.
 -->
 
-These reduce the score by -15 to -25 even when the title superficially
-matches a target role:
+These reduce the score by -15 to -25 even when the title superficially matches a
+target role. Put YOUR OWN here — the examples below span different fields on
+purpose, so none is an exclusion you inherit by leaving it in:
 
-- Counter-terrorism, peacekeeping, drug control.
-- Defence, gambling, tobacco, crypto/web3.
-- Pure M&E (monitoring & evaluation) without programme design ownership.
-- Roles requiring fluent German, French or Arabic at native level.
-- US-only roles that don't accept European employees.
-- AI safety research roles at non-prestigious orgs (cap at 35).
+- [a sub-area you'd rather avoid — e.g. "night-shift-only roles", "pure
+  maintenance work", "on-call-heavy positions"].
+- [an industry you'd score down but not hard-block — e.g. gambling, tobacco,
+  defence, crypto — your call, not a shipped default].
+- [a missing-skill signal — e.g. "requires a language you don't speak at native
+  level"].
+- [a seniority/scope mismatch — e.g. "individual-contributor only when you want
+  to manage", or the reverse].
 
 ## NOTES
 
@@ -131,8 +139,8 @@ display-only, the scoring prompt is built WITHOUT this section — moving a fact
 here is how you stop it influencing the score without deleting it.
 -->
 
-- Prefer a written-work culture, but do not down-rank a role for lacking it.
-- Flag roles that mention frequent travel.
+- [something to surface but not score on — e.g. "flag roles with frequent
+  travel", "note fully-remote vs hybrid", "highlight a written-work culture"].
 
 ## HARD_FILTERS
 

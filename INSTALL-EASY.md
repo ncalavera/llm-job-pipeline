@@ -177,9 +177,10 @@ your machine (gitignored `evals/`). Runbook: `.claude/commands/jobs-eval.md`.
 
 ## Optional: job boards
 
-The pipeline can also pull from six free job boards. They are **off by
-default** because each is niche and noisy outside its sector. Pick the ones
-that match your search and turn them on per run with `JOB_BOARDS`:
+Besides your tracked companies, the pipeline ships a set of free job boards, all
+**off by default** (each is niche and noisy outside its sector). The full list
+with per-board audience is [docs/job-boards-catalogue.md](docs/job-boards-catalogue.md);
+a few common starters:
 
 | Board | Relevant if you search in | Extra env |
 | --- | --- | --- |
@@ -190,12 +191,15 @@ that match your search and turn them on per run with `JOB_BOARDS`:
 | `weworkremotely` | remote product / business roles | `WWR_CATEGORIES=product,marketing` picks the RSS feeds |
 | `hn_whoishiring` | startups (monthly Hacker News thread) | — |
 
+Enable one so it sticks across runs, or turn some on for a single run:
+
 ```bash
-JOB_BOARDS=arbeitnow,remotive python3 scripts/fetch_vacancies.py
-# or JOB_BOARDS=all to enable every defined board
+python3 scripts/sources.py enable-board arbeitnow   # persists — fetches every run
+JOB_BOARDS=arbeitnow,remotive python3 scripts/fetch_vacancies.py   # one-off, this run only
 ```
 
-Leave `JOB_BOARDS` unset and only your tracked companies are fetched.
+`python3 scripts/sources.py recommend` suggests the boards that fit your profile.
+Leave boards disabled and only your tracked companies are fetched.
 
 **Boards behind logins (LinkedIn, Devex, …):** the pipeline deliberately ships
 no importers for them; if you accept the terms-of-service risk, ask your agent

@@ -43,12 +43,11 @@ and asks you only for the things it can't do itself.
 - **Fetching:** native ATS integrations — Greenhouse, Lever, Ashby, Workable,
   Workday, Recruitee, Teamtailor, BambooHR, Personio, PageUp, Wagtail — plus a
   local scraper for everything else. Optional Firecrawl enrichment for JS-heavy
-  career pages. Ten opt-in job boards, all free APIs/feeds: impact-aligned
-  ones (80,000 Hours, Impactpool, Idealist, Fast Forward) plus LinkedIn's
-  guest API (targeted query set) and general boards (ReliefWeb, Arbeitnow,
-  Remotive, We Work Remotely, HN "Who is hiring?") — enable per run with e.g.
-  `JOB_BOARDS=80k_hours,idealist`. Full reference and per-board fit notes:
-  [`docs/job-boards-catalogue.md`](docs/job-boards-catalogue.md).
+  career pages. A set of opt-in job boards, all free APIs/feeds — impact,
+  remote-first, European-tech, startup and general boards, plus LinkedIn's guest
+  API (queries derived from your profile). All off by default; enable the ones
+  that fit you and they persist across runs. Full list, per-board audience and
+  how to enable: [`docs/job-boards-catalogue.md`](docs/job-boards-catalogue.md).
 - **Quality gate:** every job description passes a single validation layer
   (`scripts/quality.py`) that strips cookie banners, navigation junk and
   non-vacancy pages before they reach your database.
@@ -67,9 +66,9 @@ and asks you only for the things it can't do itself.
 - **Company-first review:** new companies arrive as candidates; strong
   vacancies at not-yet-reviewed companies get rescued and flagged hot, so you
   approve companies with evidence in front of you.
-- **Triage:** dashboard (companies / catalog / pipeline / archive views),
-  `/jobs-review` terminal CLI, or a daily Telegram digest with 👍/👎 buttons that
-  write statuses straight back to the database.
+- **Triage:** dashboard (Today, Vacancies, Companies, Applications, Boards,
+  Settings sections), `/jobs-review` terminal CLI, or a daily Telegram digest
+  with 👍/👎 buttons that write statuses straight back to the database.
 
 ## Flow
 
@@ -109,9 +108,11 @@ the dial you set to match your plan.
   can afford **Opus**. You pick the models at onboarding and change them in one
   line — the `## VOLUME` section of your profile. A quiet day scores 20-30
   vacancies; a spike day is capped (`max_per_run`, default 150) so it can't
-  silently drain your plan — the overflow is offered on the next run. The saving
-  from the cheap screen depends on your plan tier and how many roles escalate;
-  the strong-model tier remains the main cost dial.
+  silently drain your plan — the overflow is offered on the next run. Because the
+  cheap screen escalates only the finalists, a typical Sonnet-tier day runs
+  roughly a third cheaper than scoring everything with the strong model (more on
+  an Opus tier) — the exact saving depends on how many roles clear the floor, and
+  the strong-model tier stays the main cost dial.
 - **Supabase** — only in full mode; free tier covers ~5,000 vacancies
   comfortably. Simple mode uses a local SQLite file: no account needed.
 - **Firecrawl** — optional and off by default. The local fetcher covers most
@@ -171,7 +172,8 @@ cp config/user_profile.example.md config/user_profile.md
 Fill in your experience, target roles, domains and exclusions — or generate
 this file from the [onboarding questionnaire](https://ncalavera.github.io/llm-job-pipeline/).
 The file feeds the scoring prompts via placeholders (`{{USER_PROFILE}}`,
-`{{TARGET_ROLES}}`, `{{EXCLUDE_PATTERNS}}`). See [docs/PROMPTS.md](docs/PROMPTS.md).
+`{{TARGET_ROLES}}`, `{{EXCLUDE_PATTERNS}}`) — the prompt templates live in
+`scripts/prompts/` (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#prompts--neutrality)).
 
 ### 5. Add companies to monitor
 
@@ -242,28 +244,22 @@ Runbooks live in `.claude/commands/` — slash commands in Claude Code, plain
 markdown runbooks for any other agent (see [AGENTS.md](AGENTS.md)). "Works with
 any agent" is real because the deterministic core is Python: any agent that can
 run shell drives the daily loop with `python3 scripts/run_daily.py` and only
-does the LLM scoring + user verdicts at the gates it prints. Full reference:
-[docs/SKILLS.md](docs/SKILLS.md).
+does the LLM scoring + user verdicts at the gates it prints. Full command
+reference: [AGENTS.md](AGENTS.md).
 
-## Command changes (old → new)
+<details>
+<summary><b>Upgrading from before the command restructure?</b> — old → new mapping</summary>
 
-If you used this pipeline before the 6-command restructure, here is the mapping:
+The many single-stage commands collapsed into the six above:
 
-| Old command | New command |
+| Old command(s) | Now |
 | --- | --- |
-| `jobs` | `/jobs-new` |
-| `jobs-fetch` | `/jobs-new` |
-| `jobs-filter` | `/jobs-new` |
-| `jobs-score` | `/jobs-new` |
-| `jobs-start` | `/jobs-new` |
-| `jobs-finish` | `/jobs-new` |
-| `jobs-apply` | `/jobs-review` |
-| `jobs-archive` | `/jobs-review` |
-| `jobs-vac` | `/jobs-review` |
+| `jobs`, `jobs-fetch`, `jobs-filter`, `jobs-score`, `jobs-start`, `jobs-finish` | `/jobs-new` |
+| `jobs-apply`, `jobs-archive`, `jobs-vac` | `/jobs-review` |
 | `jobs-rules` | `/jobs-profile` |
-| `jobs-add` | `/jobs-add` (unchanged) |
-| `jobs-digest` | `/jobs-digest` (unchanged) |
-| `jobs-update` | `/jobs-update` (unchanged) |
+| `jobs-add`, `jobs-digest`, `jobs-update` | unchanged |
+
+</details>
 
 ## Updating
 
@@ -285,11 +281,13 @@ there is nothing pending, it prints "Up to date" and exits.
 
 ## Documentation
 
-- [INSTALL.md](INSTALL.md) — agent-friendly install runbook
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — data structures, modules, dataflow
-- [docs/SKILLS.md](docs/SKILLS.md) — all slash commands
-- [docs/PROMPTS.md](docs/PROMPTS.md) — scoring prompt templates and placeholders
-- [docs/DATABASE.md](docs/DATABASE.md) — tables, indexes, access policies
+- [INSTALL-EASY.md](INSTALL-EASY.md) — simple-mode install (zero signups)
+- [INSTALL.md](INSTALL.md) — full-mode install runbook (Supabase + Vercel)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module map, pipeline stages, the two backends
+- [docs/job-boards-catalogue.md](docs/job-boards-catalogue.md) — the built-in boards, generated from config
+- [AGENTS.md](AGENTS.md) — the runbooks / slash commands, for any coding agent
+- [CONCEPTS.md](CONCEPTS.md) — domain vocabulary (entities, statuses, processes)
+- [sql/schema.sql](sql/schema.sql) — the database schema (Postgres; SQLite variant alongside)
 
 ## License
 
