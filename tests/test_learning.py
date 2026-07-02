@@ -402,3 +402,20 @@ def test_move_factor_promotes_penalty_to_filter_and_logs(learn_db):
 
     assert "casino" in hard_filters.load_hard_filters()["exclude_title_keywords"]
     assert any(e["kind"] == "move_factor" for e in lrn.applied_log())
+
+
+def test_apply_disable_board_clears_the_persisted_flag_and_logs(learn_db):
+    """Closing the loop: an approved disable actually flips the board's
+    persisted enabled flag (not just prints advice), and logs the decision."""
+    lrn, _ = learn_db
+    import database_supabase as db
+
+    db.set_board_enabled("fictive_board", True)
+    assert db.get_enabled_boards() == ["fictive_board"]
+
+    lrn.apply_disable_board("fictive_board")
+    assert db.get_enabled_boards() == []  # the flag was cleared
+    assert any(
+        e["kind"] == "disable_board" and e["detail"]["board"] == "fictive_board"
+        for e in lrn.applied_log()
+    )
