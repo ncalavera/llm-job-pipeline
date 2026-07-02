@@ -29,6 +29,15 @@ answers the gates. Exit codes: 0 done, 10 gate, 20 abort, 30 stage error.
 Install guides: `INSTALL-EASY.md` (simple mode, zero signups) and
 `INSTALL.md` (full mode, Supabase + Vercel).
 
+`CONCEPTS.md` at the repo root defines the project's shared domain
+vocabulary (entities, named processes, status concepts) — relevant when
+orienting to the codebase or naming things. A local, untracked
+`docs/solutions/` folder may also exist on maintainer checkouts: documented
+solutions to past problems (bugs, best practices, workflow patterns),
+organized by category with YAML frontmatter (`module`, `tags`,
+`problem_type`) — worth searching when implementing or debugging in
+documented areas.
+
 ## The scoring contract (any LLM agent)
 
 Scoring does not call any LLM API from Python — the orchestrating agent IS
