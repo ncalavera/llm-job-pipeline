@@ -77,6 +77,7 @@ def ensure_private_dirs() -> None:
     for d in (CASE_BANK_DIR, APPLICATION_ARTIFACTS_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
+
 # ---------------------------------------------------------------------------
 # Firecrawl SDK client (lazy singleton)
 # ---------------------------------------------------------------------------

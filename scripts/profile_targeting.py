@@ -99,7 +99,9 @@ def _profile_text(sections: dict[str, str]) -> str:
 
 def _board_tags(cfg: dict) -> list[str]:
     tags = cfg.get("audience_tags")
-    return [str(t).lower().strip() for t in tags if str(t).strip()] if isinstance(tags, list) else []
+    return (
+        [str(t).lower().strip() for t in tags if str(t).strip()] if isinstance(tags, list) else []
+    )
 
 
 def _tag_in_text(tag: str, text: str) -> bool:
@@ -108,7 +110,9 @@ def _tag_in_text(tag: str, text: str) -> bool:
     return re.search(r"\b" + re.escape(tag) + r"\b", text) is not None
 
 
-def recommend_boards(sections: dict[str, str] | None = None, boards: dict | None = None) -> list[dict]:
+def recommend_boards(
+    sections: dict[str, str] | None = None, boards: dict | None = None
+) -> list[dict]:
     """Boards whose audience overlaps the profile — ``[{id, name, reason}]``.
 
     A board matches when one of its ``audience_tags`` (a neutral fact about the
@@ -141,7 +145,11 @@ def recommend_boards(sections: dict[str, str] | None = None, boards: dict | None
         name = str(cfg.get("name", bid))
         if cfg.get("general"):
             general.append(
-                {"id": bid, "name": name, "reason": "works for any field (queries come from your profile)"}
+                {
+                    "id": bid,
+                    "name": name,
+                    "reason": "works for any field (queries come from your profile)",
+                }
             )
             continue
         hits = [t for t in _board_tags(cfg) if t and _tag_in_text(t, text)]

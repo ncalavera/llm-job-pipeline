@@ -21,7 +21,14 @@ SCRIPTS = str(REPO / "scripts")
 if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
-_CHAIN = ("database_supabase", "config", "company_registry", "db_conn", "db_backend", "applications")
+_CHAIN = (
+    "database_supabase",
+    "config",
+    "company_registry",
+    "db_conn",
+    "db_backend",
+    "applications",
+)
 
 
 def _fresh_sqlite(monkeypatch, db_file: Path, *, migrate: bool = True):
@@ -37,8 +44,11 @@ def _fresh_sqlite(monkeypatch, db_file: Path, *, migrate: bool = True):
     # Drop the backend chain AND every report.* submodule (data_prep binds
     # load_vacancies/config at import; a stale copy would query a prior DB).
     for mod in list(sys.modules):
-        if mod in _CHAIN or mod == "scoring_settings" or mod == "report" or mod.startswith(
-            "report."
+        if (
+            mod in _CHAIN
+            or mod == "scoring_settings"
+            or mod == "report"
+            or mod.startswith("report.")
         ):
             sys.modules.pop(mod, None)
     import db_backend

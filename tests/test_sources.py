@@ -28,7 +28,14 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
     # Reload the whole chain BEFORE importing sources so its module-level DAL
     # bindings land on this backend.
-    for mod in ("sources", "database_supabase", "config", "company_registry", "db_conn", "db_backend"):
+    for mod in (
+        "sources",
+        "database_supabase",
+        "config",
+        "company_registry",
+        "db_conn",
+        "db_backend",
+    ):
         sys.modules.pop(mod, None)
 
     import db_backend
@@ -105,7 +112,14 @@ def env_unmigrated(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
     monkeypatch.delenv("JOB_BOARDS", raising=False)
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
-    for mod in ("sources", "database_supabase", "config", "company_registry", "db_conn", "db_backend"):
+    for mod in (
+        "sources",
+        "database_supabase",
+        "config",
+        "company_registry",
+        "db_conn",
+        "db_backend",
+    ):
         sys.modules.pop(mod, None)
 
     import db_backend

@@ -236,8 +236,7 @@ def record_application(
         raise ValueError(f"status must be one of {VALID_STATUSES}, got {status!r}")
     if not table_ready():
         raise RuntimeError(
-            "application table missing — run `python3 scripts/migrate.py` first "
-            "(migration 0010)."
+            "application table missing — run `python3 scripts/migrate.py` first (migration 0010)."
         )
 
     from db_backend import Json

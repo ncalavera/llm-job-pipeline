@@ -1286,9 +1286,7 @@ def _print_summary(state: dict) -> None:
     print(bar)
     if new is not None:
         print("  • " + t("summary_new_vac", n=new))
-    print(
-        "  • " + t("summary_companies", active=active, candidates=candidates, scored=cand_scored)
-    )
+    print("  • " + t("summary_companies", active=active, candidates=candidates, scored=cand_scored))
     print("  • " + t("summary_verdicts", scored_unseen=scored_unseen, liked=liked))
     print("  • " + t("summary_publish", note=publish_note))
     print("  • " + t("summary_review_hint"))

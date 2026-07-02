@@ -72,6 +72,7 @@ def _default_max_per_run() -> int:
     except Exception:
         return DEFAULT_MAX_PER_RUN
 
+
 # The cheap two-pass screen model and the escalation floor. haiku is
 # the cheapest tier — it maximises the two-pass saving (Haiku 4.5 costs ~1/5 of
 # Opus 4.8 and ~1/3 of Sonnet 5 per token). The 50 floor was calibrated against

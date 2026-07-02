@@ -101,7 +101,10 @@ def test_short_tag_does_not_substring_false_match():
         "un_board": {"name": "UN Board", "strategy": "reliefweb_api", "audience_tags": ["un"]},
         "ai_board": {"name": "AI Board", "strategy": "remotive_api", "audience_tags": ["ai"]},
     }
-    sections = {"USER_PROFILE": "Nurse with a clinical background; handles email.", "TARGET_ROLES": "- ICU Nurse"}
+    sections = {
+        "USER_PROFILE": "Nurse with a clinical background; handles email.",
+        "TARGET_ROLES": "- ICU Nurse",
+    }
     ids = {r["id"] for r in pt.recommend_boards(sections, boards)}
     assert ids == {"linkedin"}  # neither un_board nor ai_board false-matched
 
@@ -137,7 +140,11 @@ def test_unfetchable_catalogue_boards_are_never_recommended():
     for r in recs:
         strategy = str(real_boards[r["id"]].get("strategy", ""))
         assert strategy in BOARD_FETCHERS, f"recommended unfetchable board {r['id']} ({strategy})"
-    unfetchable = {bid for bid, cfg in real_boards.items() if str(cfg.get("strategy", "")) not in BOARD_FETCHERS}
+    unfetchable = {
+        bid
+        for bid, cfg in real_boards.items()
+        if str(cfg.get("strategy", "")) not in BOARD_FETCHERS
+    }
     assert not unfetchable & {r["id"] for r in recs}
 
 

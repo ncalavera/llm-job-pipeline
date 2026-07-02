@@ -265,7 +265,9 @@ class TestSfJobDetail:
         assert "unify-apply-now:focus" not in job["full_description"]
 
     def test_missing_title_returns_none(self, monkeypatch):
-        fake = FakeSitemapRequests(sitemap=SITEMAP_XML, details={JOB_URL_1: "<html>no job here</html>"})
+        fake = FakeSitemapRequests(
+            sitemap=SITEMAP_XML, details={JOB_URL_1: "<html>no job here</html>"}
+        )
         monkeypatch.setattr(fetchers, "requests", fake)
         assert _sf_job_detail(JOB_URL_1) is None
 
@@ -282,9 +284,7 @@ class TestFetchSuccessfactorsSitemapBackend:
             details={JOB_URL_1: JOB_DETAIL_HTML, JOB_URL_2: JOB_DETAIL_HTML},
         )
         monkeypatch.setattr(fetchers, "requests", fake)
-        jobs = fetch_successfactors(
-            "ILO", {"url": "https://jobs.ilo.org", "sf_backend": "sitemap"}
-        )
+        jobs = fetch_successfactors("ILO", {"url": "https://jobs.ilo.org", "sf_backend": "sitemap"})
         assert len(jobs) == 2
         assert {j["external_id"] for j in jobs} == {"1399744233", "1409512033"}
         assert all(j["title"] and j["full_description"] for j in jobs)
@@ -308,12 +308,12 @@ class TestFetchSuccessfactorsSitemapBackend:
     def test_one_job_detail_failure_skips_only_that_job(self, monkeypatch):
         fake = FakeSitemapRequests(
             sitemap=SITEMAP_XML,
-            details={JOB_URL_1: JOB_DETAIL_HTML},  # JOB_URL_2 has no entry -> empty text -> no title
+            details={
+                JOB_URL_1: JOB_DETAIL_HTML
+            },  # JOB_URL_2 has no entry -> empty text -> no title
         )
         monkeypatch.setattr(fetchers, "requests", fake)
-        jobs = fetch_successfactors(
-            "ILO", {"url": "https://jobs.ilo.org", "sf_backend": "sitemap"}
-        )
+        jobs = fetch_successfactors("ILO", {"url": "https://jobs.ilo.org", "sf_backend": "sitemap"})
         assert len(jobs) == 1
         assert jobs[0]["external_id"] == "1399744233"
 
@@ -360,9 +360,7 @@ class TestSfSitemapIndexShape:
         )
         monkeypatch.setattr(fetchers, "requests", fake)
         fetchers._last_fetch_errors.pop("ILO", None)  # drop any cross-test residue
-        jobs = fetch_successfactors(
-            "ILO", {"url": "https://jobs.ilo.org", "sf_backend": "sitemap"}
-        )
+        jobs = fetch_successfactors("ILO", {"url": "https://jobs.ilo.org", "sf_backend": "sitemap"})
         assert jobs == []  # no jobs, but not a silent success:
         assert "sitemap_index" in fetchers.get_fetch_errors().get("ILO", "")
 
@@ -378,9 +376,7 @@ class TestSfSitemapDetailCap:
         details = {u: _detail_page(f"Role {i}") for i, u in enumerate(urls)}
         fake = FakeSitemapRequests(sitemap=_urlset(urls), details=details)
         monkeypatch.setattr(fetchers, "requests", fake)
-        jobs = fetch_successfactors(
-            "ILO", {"url": "https://jobs.ilo.org", "sf_backend": "sitemap"}
-        )
+        jobs = fetch_successfactors("ILO", {"url": "https://jobs.ilo.org", "sf_backend": "sitemap"})
         assert len(jobs) == 3  # capped, not all 5
         detail_calls = [u for u in fake.calls if "/job/" in u]
         assert len(detail_calls) == 3  # the loop stopped at the cap
