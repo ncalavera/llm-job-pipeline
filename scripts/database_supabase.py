@@ -212,6 +212,233 @@ def make_vacancy_id(org: str, title: str, location: str = "") -> str:
     return hashlib.md5(key.encode()).hexdigest()[:16]
 
 
+# ---------------------------------------------------------------------------
+# Cross-variant dedup: catch the SAME role re-listed under a renamed title (a
+# seniority word added/removed), a re-punctuated title, or as a same-company
+# duplicate in another language. This is an ADDITIVE layer — make_vacancy_id()'s
+# exact dedup_hash formula is unchanged, so every already-stored row and every
+# archived tombstone keeps matching by the OLD hash (no mass resurrection of
+# buried roles, no self-duplication of live rows on the next fetch). The
+# normalized key and the description fingerprint are computed on the fly and
+# checked ALONGSIDE the exact hash, never instead of it.
+# ---------------------------------------------------------------------------
+
+# Seniority / level qualifiers that do not change role identity. Removed as
+# whole words so "Senior Product Manager" and "Product Manager" collapse to one
+# role. Deliberately small — only unambiguous *modifiers*. Words that NAME a
+# role rather than grade it are excluded on purpose: "staff", "head of" and
+# "chief" would corrupt distinct titles — "Staff Engineer"→"Engineer", "Head of
+# Product"→"Product", "Chief of Staff"→"of" — collapsing genuinely different
+# roles. Trade-off: "Lead" is kept as a modifier, so "Lead Generation Manager"
+# also loses "Lead"; the risk is bounded because matching is per-company and
+# that exact pair coexisting is rare.
+_LEVEL_WORDS = (
+    "senior",
+    "sr",
+    "snr",
+    "junior",
+    "jr",
+    "jnr",
+    "lead",
+    "principal",
+)
+_LEVEL_RE = re.compile(r"\b(?:" + "|".join(_LEVEL_WORDS) + r")\b")
+# Any non-word, non-space char is a separator, so dash vs comma vs slash vs
+# double space vs case never fork the key ("Innovation - Generative" ==
+# "Innovation, Generative"). \w keeps accented letters and digits.
+_PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
+
+#: A normalized description shorter than this is too boilerplate-prone to trust
+#: as a same-company language-duplicate signal; description_fingerprint()
+#: returns None below it. Set high on purpose: a real full job description is
+#: long AND role-specific, so two distinct roles almost never share an identical
+#: body this size — whereas a short "about us / how to apply" blurb reused
+#: across several postings would. The guard trades a few missed medium-length
+#: language dupes for never collapsing two genuinely different roles that happen
+#: to share a boilerplate stub.
+_MIN_DESC_FP_CHARS = 1000
+
+# Statuses that carry a user decision — a renamed/language variant must inherit
+# one of these rather than resurface as 'unseen'.
+_DECIDED_STATUSES = frozenset(
+    {"applied", "liked", "to_apply", "to_research", "to_network", "passed", "skipped"}
+)
+
+
+def _normalize_title_strong(title: str) -> str:
+    """Aggressively normalize a title for cross-variant dedup.
+
+    On top of _normalize_title_for_dedup (geo-suffix strip + whitespace
+    collapse): lowercase, fold '&'->'and', drop punctuation, and remove
+    standalone seniority words. An empty result (the title was only level
+    words) falls back to the punctuation-normalized form so unrelated stub
+    titles don't all collapse together.
+    """
+    base = _normalize_title_for_dedup(title).lower()
+    base = base.replace("&", " and ")
+    base = _PUNCT_RE.sub(" ", base).replace("_", " ")
+    base = re.sub(r"\s+", " ", base).strip()
+    stripped = re.sub(r"\s+", " ", _LEVEL_RE.sub(" ", base)).strip()
+    return stripped or base
+
+
+def make_normalized_id(org: str, title: str) -> str:
+    """Cross-variant dedup key: md5(org | strongly-normalized title).
+
+    Additive companion to make_vacancy_id(): same 16-char md5 shape and same
+    org scoping (so two companies with the same role never collide in the
+    global archived-hash set), but a title normalized hard enough that renamed
+    or re-punctuated variants of one role produce ONE key.
+    """
+    key = f"{org}|{_normalize_title_strong(title)}".lower()
+    return hashlib.md5(key.encode()).hexdigest()[:16]
+
+
+def description_fingerprint(description: str | None) -> str | None:
+    """Stable fingerprint of a description body, or None when too short.
+
+    Cheap and deterministic (no LLM, no network): strip HTML, unescape
+    entities, lowercase, drop punctuation, collapse whitespace, md5. Two
+    same-company postings whose bodies match — e.g. an English and a French
+    listing that carry the same description — share a fingerprint and dedup to
+    one role. Short/boilerplate bodies return None so unrelated roles are never
+    merged on a stub.
+
+    HTML stripping reuses filter_vacancies._strip_html (it also removes the
+    *contents* of <script>/<style> blocks, which a bare tag-strip would leave
+    behind and skew the fingerprint). Imported lazily: filter_vacancies imports
+    this module at load time, so a top-level import would be circular.
+    """
+    if not description:
+        return None
+    from filter_vacancies import _strip_html
+
+    text = _strip_html(description).lower()
+    text = _PUNCT_RE.sub(" ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) < _MIN_DESC_FP_CHARS:
+        return None
+    return hashlib.md5(text.encode()).hexdigest()[:16]
+
+
+def _index_row(index: dict, org: str, row_id, dedup_hash: str, title: str, description, status):
+    """Register one row's normalized-title and description keys into `index`.
+
+    The stored entry carries the row's own exact dedup_hash so the caller can
+    tell whether that row's exact title is also live in the current fetch (the
+    batch-alive guard in _find_existing_vacancy).
+    """
+    entry = {"id": row_id, "status": status, "dedup_hash": dedup_hash}
+    index["norm"].setdefault(make_normalized_id(org, title or ""), entry)
+    fp = description_fingerprint(description)
+    if fp:
+        index["desc"].setdefault(fp, entry)
+
+
+def _build_dedup_index(cur, org: str, company_id) -> dict:
+    """Index a company's EXISTING rows by normalized title and description body.
+
+    Returns {"norm": {hash: {"id","status","dedup_hash"}}, "desc": {fp: {...}}}.
+    When several rows share a key (a pre-existing duplicate), the one carrying a
+    user decision wins so a later variant inherits it. The index reflects the
+    pre-batch state only: rows inserted during the save loop are deliberately
+    NOT added, so two variants that appear together in one fetch stay two rows
+    (a same-time level pair is not a rename — see _find_existing_vacancy).
+    """
+    cur.execute(
+        "SELECT id, dedup_hash, title, full_description, status FROM vacancy WHERE company_id = %s",
+        (company_id,),
+    )
+    rows = cur.fetchall()
+    # Decided-status rows first so setdefault keeps them as the canonical target.
+    rows.sort(key=lambda r: (0 if r.get("status") in _DECIDED_STATUSES else 1, str(r.get("id"))))
+    index: dict = {"norm": {}, "desc": {}}
+    for r in rows:
+        _index_row(
+            index,
+            org,
+            r["id"],
+            r.get("dedup_hash") or "",
+            r.get("title") or "",
+            r.get("full_description"),
+            r.get("status"),
+        )
+    return index
+
+
+def _consume_index_entry(index: dict, row_id) -> None:
+    """Drop every key pointing at row_id after it is claimed by a rename match.
+
+    Prevents a SECOND batch variant of the same vanished title from collapsing
+    onto the same existing row: e.g. an old "Program Officer" is gone and this
+    fetch lists both "Senior Program Officer" and "Junior Program Officer" — the
+    first claims the old row (rename); the second must fork its own row, not
+    overwrite the first.
+    """
+    for bucket in ("norm", "desc"):
+        for key in [k for k, entry in index[bucket].items() if entry["id"] == row_id]:
+            del index[bucket][key]
+
+
+def _row_apply_urls(row) -> set:
+    """Non-empty apply/job URLs recorded on an existing row's locations[]."""
+    urls = set()
+    for loc in row.get("locations") or []:
+        u = (loc.get("url") or "").strip()
+        if u:
+            urls.add(u)
+    return urls
+
+
+def _find_existing_vacancy(
+    cur, index: dict, batch_hashes: set, dedup_hash: str, norm_hash: str, desc_fp, candidate_url
+):
+    """Return (existing row, match_kind) for this signature, or (None, None).
+
+    match_kind is "exact", "norm" or "desc".
+
+    The exact dedup_hash is authoritative and checked first — unchanged legacy
+    behaviour, no guard applies to it. The additive normalized-title /
+    description keys model a rename OVER TIME (the old title vanished from the
+    source, a new one appeared), so they only fire when that story holds:
+
+      * batch-alive guard — if the matched existing row's OWN exact title is
+        also present in this fetch (its hash is in batch_hashes), both roles are
+        live right now, so this is a same-time level pair, not a rename: skip.
+        (A fund can list "Program Officer" and "Senior Program Officer" at once
+        — losing one would drop a genuinely open role.)
+      * URL guard — if both the candidate and the existing row carry non-empty
+        apply URLs and none overlap, they are two distinct reqs: skip.
+
+    A claimed inexact match is consumed from the index so a second batch variant
+    of the same vanished title forks its own row instead of collapsing again.
+    """
+    cur.execute("SELECT * FROM vacancy WHERE dedup_hash = %s", (dedup_hash,))
+    row = cur.fetchone()
+    if row is not None:
+        return row, "exact"
+    candidate_url = (candidate_url or "").strip()
+    for kind, key in (("norm", norm_hash), ("desc", desc_fp)):
+        if not key:
+            continue
+        hit = index[kind].get(key)
+        if hit is None:
+            continue
+        # Both live in the current fetch → a same-time pair, not a rename.
+        if hit["dedup_hash"] in batch_hashes:
+            continue
+        cur.execute("SELECT * FROM vacancy WHERE id = %s", (hit["id"],))
+        cand = cur.fetchone()
+        if cand is None:
+            continue
+        existing_urls = _row_apply_urls(cand)
+        if candidate_url and existing_urls and candidate_url not in existing_urls:
+            continue  # two distinct reqs — do not merge
+        _consume_index_entry(index, hit["id"])
+        return cand, kind
+    return None, None
+
+
 def _make_location_entry(job: dict) -> dict:
     """Build a v2 location entry from a fetcher job dict."""
     loc_str = job.get("location", "")
@@ -678,6 +905,13 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     # re-archived each run when the ATS still lists it. Loaded
     # once (not per row).
     archived_hashes = get_archived_hashes(include_gone=False)
+    # Index this company's existing rows once so a renamed / re-punctuated /
+    # language variant merges onto the live row instead of forking a new one.
+    dedup_index = _build_dedup_index(cur, org_name, company_id)
+    # Exact hashes of every title in THIS fetch. If an existing row's own exact
+    # title is in here it is still live, so a variant of it is a same-time pair
+    # (keep both), not a rename (see _find_existing_vacancy's batch-alive guard).
+    batch_hashes = {make_vacancy_id(org_name, _sanitize_title(j.get("title", ""))) for j in jobs}
 
     skipped_archived = 0
     skipped_junk = 0
@@ -701,8 +935,12 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
             continue
 
         dedup_hash = make_vacancy_id(org_name, title)
+        norm_hash = make_normalized_id(org_name, title)
+        desc_fp = description_fingerprint(job.get("full_description"))
 
-        if filters.is_recently_archived(archived_hashes, dedup_hash):
+        if filters.is_recently_archived(
+            archived_hashes, dedup_hash
+        ) or filters.is_recently_archived(archived_hashes, norm_hash):
             skipped_archived += 1
             continue
 
@@ -711,12 +949,15 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
             loc_entry.get("city") or loc_entry.get("country") or loc_entry.get("work_mode") or ""
         )
 
-        # Check existing
-        cur.execute("SELECT * FROM vacancy WHERE dedup_hash = %s", (dedup_hash,))
-        existing = cur.fetchone()
+        # Check existing: exact hash first, then a same-company renamed/language variant.
+        existing, match_kind = _find_existing_vacancy(
+            cur, dedup_index, batch_hashes, dedup_hash, norm_hash, desc_fp, job.get("url")
+        )
 
         if existing:
             updates = {"last_seen": today}
+            is_rename = match_kind in ("norm", "desc")
+            decided = existing.get("status") in _DECIDED_STATUSES
 
             # A re-listed role is alive again: resurrect a row we had archived
             # (gone from source) OR protected as 'expiring' back to 'unseen'.
@@ -726,11 +967,21 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
                 updates["expiring_alerted_at"] = None
                 resurrected += 1
 
+            # A true rename over time: point the surviving row at the new title
+            # (and its hash) so a later exact fetch matches directly and
+            # archive_gone keeps it live. Status is inherited (same row).
+            if is_rename:
+                updates["title"] = title
+                updates["dedup_hash"] = dedup_hash
+
             if job.get("snippet") and not existing.get("snippet"):
                 updates["snippet"] = job["snippet"]
             new_desc = job.get("full_description") or ""
             old_desc = existing.get("full_description") or ""
-            if new_desc and len(new_desc) > len(old_desc) + 100:
+            # Never overwrite a DECIDED row's description on an inexact match: the
+            # rename/language match could be a false positive and we'd corrupt a
+            # role the user already acted on.
+            if new_desc and len(new_desc) > len(old_desc) + 100 and not (is_rename and decided):
                 updates["full_description"] = new_desc
             if job.get("deadline") and not existing.get("deadline"):
                 parsed_dl = _safe_deadline(job["deadline"])
@@ -825,6 +1076,18 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
     # Board path: full archived set (include_gone=True) so a lagging feed cannot
     # resurrect a posting the source already closed. Loaded once (not per row).
     archived_hashes = get_archived_hashes(include_gone=True)
+    # Per-company dedup index, built lazily (a board batch spans many orgs) so a
+    # renamed / re-punctuated / language variant merges onto the live row.
+    dedup_index_cache: dict = {}
+    # Exact hashes present in THIS fetch, per canonical org — the batch-alive
+    # guard: a variant of a title that is itself live in the fetch is a
+    # same-time pair (keep both), not a rename.
+    batch_hashes_by_org: dict[str, set] = {}
+    for j in jobs:
+        o = resolve_canonical_name(j.get("org_override") or board_cfg["name"])
+        batch_hashes_by_org.setdefault(o, set()).add(
+            make_vacancy_id(o, _sanitize_title(j.get("title", "")))
+        )
 
     seen_ext_ids: set[str] = set()
 
@@ -879,26 +1142,53 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
             continue
 
         dedup_hash = make_vacancy_id(org, title)
+        norm_hash = make_normalized_id(org, title)
+        desc_fp = description_fingerprint(job.get("full_description"))
 
-        if filters.is_recently_archived(archived_hashes, dedup_hash):
+        if filters.is_recently_archived(
+            archived_hashes, dedup_hash
+        ) or filters.is_recently_archived(archived_hashes, norm_hash):
             skipped_archived += 1
             continue
+
+        dedup_index = dedup_index_cache.get(company_id)
+        if dedup_index is None:
+            dedup_index = _build_dedup_index(cur, org, company_id)
+            dedup_index_cache[company_id] = dedup_index
+
         loc_entry = _make_location_entry(job)
         loc_key = (
             loc_entry.get("city") or loc_entry.get("country") or loc_entry.get("work_mode") or ""
         )
 
-        cur.execute("SELECT * FROM vacancy WHERE dedup_hash = %s", (dedup_hash,))
-        existing = cur.fetchone()
+        # Check existing: exact hash first, then a same-company renamed/language variant.
+        existing, match_kind = _find_existing_vacancy(
+            cur,
+            dedup_index,
+            batch_hashes_by_org.get(org, set()),
+            dedup_hash,
+            norm_hash,
+            desc_fp,
+            job.get("url"),
+        )
 
         if existing:
             updates = {"last_seen": today}
+            is_rename = match_kind in ("norm", "desc")
+            decided = existing.get("status") in _DECIDED_STATUSES
             if existing.get("status") in ("archived", "expiring"):
                 updates["status"] = "unseen"
                 updates["expiring_alerted_at"] = None
                 resurrected += 1
+            # A true rename over time: repoint the surviving row at the new title.
+            if is_rename:
+                updates["title"] = title
+                updates["dedup_hash"] = dedup_hash
             for field in ("snippet", "full_description"):
                 if job.get(field) and not existing.get(field):
+                    # Don't fill a decided row's description from an inexact match.
+                    if field == "full_description" and is_rename and decided:
+                        continue
                     updates[field] = job[field]
             if job.get("deadline") and not existing.get("deadline"):
                 parsed_dl = _safe_deadline(job["deadline"])
@@ -1348,15 +1638,34 @@ def get_archived_hashes(ttl_days: int = ARCHIVE_TTL_DAYS, *, include_gone: bool 
     return result
 
 
-def record_archived_hashes(entries: list[tuple[str, str]]):
-    """Bulk-insert archived hashes. entries = [(dedup_hash, reason), ...]."""
+def record_archived_hashes(entries: list[tuple]):
+    """Bulk-insert archived tombstones. entries = [(dedup_hash, reason[, norm_hash]), ...].
+
+    Each entry may carry an optional third element — the role's normalized dedup
+    key. When present (and distinct), it is tombstoned as a SECOND row under the
+    same reason, so a renamed / re-punctuated variant of a buried role stays
+    buried on the next fetch. The archived-hash set is keyed only by the hash
+    column, so a normalized key lives there as its own row rather than needing a
+    schema change — backward-compatible with every existing tombstone and with
+    2-tuple callers.
+    """
     if not entries:
+        return
+    rows: list[tuple[str, str]] = []
+    for entry in entries:
+        dedup_hash, reason = entry[0], entry[1]
+        norm_hash = entry[2] if len(entry) > 2 else None
+        if dedup_hash:
+            rows.append((dedup_hash, reason))
+        if norm_hash and norm_hash != dedup_hash:
+            rows.append((norm_hash, reason))
+    if not rows:
         return
     conn = get_conn()
     cur = conn.cursor()
     cur.executemany(
         "INSERT INTO archived_hash (dedup_hash, reason) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-        entries,
+        rows,
     )
     cur.close()
 
@@ -1400,9 +1709,9 @@ def archive_gone_vacancies(org_name: str, fetched_jobs: list[dict]) -> "Archived
     company_id = resolve_company_id(org)
     if company_id is None:
         return ArchivedCount(0)
-    fetched_hashes = {
-        make_vacancy_id(org, _sanitize_title(j.get("title", ""))) for j in fetched_jobs
-    }
+    fetched_titles = [_sanitize_title(j.get("title", "")) for j in fetched_jobs]
+    fetched_hashes = {make_vacancy_id(org, t) for t in fetched_titles}
+    fetched_norm = {make_normalized_id(org, t) for t in fetched_titles}
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     cur.execute(
@@ -1410,7 +1719,16 @@ def archive_gone_vacancies(org_name: str, fetched_jobs: list[dict]) -> "Archived
         "WHERE company_id = %s AND status = 'unseen'",
         (company_id,),
     )
-    gone = [r for r in cur.fetchall() if r["dedup_hash"] not in fetched_hashes]
+    # A row is gone only if NEITHER its exact hash NOR its normalized key is in
+    # the fresh listing — so a role re-listed under a renamed / re-punctuated
+    # title (already merged onto this row by save_vacancies) is kept, not
+    # archived.
+    gone = [
+        r
+        for r in cur.fetchall()
+        if r["dedup_hash"] not in fetched_hashes
+        and make_normalized_id(org, r["title"] or "") not in fetched_norm
+    ]
     if not gone:
         cur.close()
         return ArchivedCount(0)
@@ -1436,7 +1754,12 @@ def archive_gone_vacancies(org_name: str, fetched_jobs: list[dict]) -> "Archived
         )
     cur.close()
     if to_archive:
-        record_archived_hashes([(r["dedup_hash"], "gone_from_source") for r in to_archive])
+        record_archived_hashes(
+            [
+                (r["dedup_hash"], "gone_from_source", make_normalized_id(org, r["title"] or ""))
+                for r in to_archive
+            ]
+        )
         titles = ", ".join(sorted(r["title"] for r in to_archive)[:3])
         print(f"  [{org}] archived {len(to_archive)} gone from source: {titles}", flush=True)
     if protected:
@@ -1493,6 +1816,30 @@ def pass_expired_vacancies() -> int:
 # ---------------------------------------------------------------------------
 # Archive
 # ---------------------------------------------------------------------------
+
+
+def serialize_vacancy_rows(rows) -> dict:
+    """Map vacancy rows to a JSON-safe {id: {...}} archive payload.
+
+    Shared by archive_vacancies and scripts/dedup_sweep.py so both write the
+    same on-disk record. Dates/datetimes become ISO strings; id and company_id
+    become strings (UUIDs on Postgres, ints on SQLite).
+    """
+    out: dict = {}
+    for r in rows:
+        uid = str(r["id"])
+        vac = dict(r)
+        for df in ("first_seen", "last_seen", "deadline"):
+            if isinstance(vac.get(df), date):
+                vac[df] = vac[df].isoformat()
+        for df in ("status_updated_at", "created_at", "updated_at"):
+            if isinstance(vac.get(df), datetime):
+                vac[df] = vac[df].isoformat()
+        vac["id"] = uid
+        if vac.get("company_id") is not None:
+            vac["company_id"] = str(vac["company_id"])
+        out[uid] = vac
+    return out
 
 
 def archive_vacancies(threshold: int = LLM_SCORE_THRESHOLD, force: bool = False) -> list[str]:
@@ -1560,19 +1907,7 @@ def archive_vacancies(threshold: int = LLM_SCORE_THRESHOLD, force: bool = False)
     archive_dir.mkdir(parents=True, exist_ok=True)
     archive_path = archive_dir / f"archived_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
 
-    archived_data = {}
-    for r in to_remove:
-        uid = str(r["id"])
-        vac = dict(r)
-        for df in ("first_seen", "last_seen", "deadline"):
-            if isinstance(vac.get(df), date):
-                vac[df] = vac[df].isoformat()
-        for df in ("status_updated_at", "created_at", "updated_at"):
-            if isinstance(vac.get(df), datetime):
-                vac[df] = vac[df].isoformat()
-        vac["id"] = uid
-        vac["company_id"] = str(vac["company_id"])
-        archived_data[uid] = vac
+    archived_data = serialize_vacancy_rows(to_remove)
 
     # (2) Serialize to a temp file BEFORE touching the DB (see contract above):
     # if this raises, the vacancies are still in the database, untouched.
@@ -1602,17 +1937,24 @@ def archive_vacancies(threshold: int = LLM_SCORE_THRESHOLD, force: bool = False)
     uuids = [r["id"] for r in to_remove]
     cur = conn.cursor()
     cur.execute("DELETE FROM vacancy WHERE id = ANY(%s::uuid[])", (uuids,))
-
-    # Record archived hashes for dedup (prevents re-fetch → re-score → re-archive)
-    archive_hashes = [
-        (r.get("dedup_hash"), "score_below_threshold") for r in to_remove if r.get("dedup_hash")
-    ]
-    if archive_hashes:
-        cur.executemany(
-            "INSERT INTO archived_hash (dedup_hash, reason) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-            archive_hashes,
-        )
     cur.close()
+
+    # Record archived hashes for dedup (prevents re-fetch → re-score → re-archive).
+    # record_archived_hashes tombstones the normalized key too (3-tuple) so a
+    # renamed/re-punctuated variant of the buried role stays buried; it shares
+    # this connection and does NOT commit, so the tombstones land in the same
+    # transaction as the DELETE above (r carries c.canonical_name AS org).
+    record_archived_hashes(
+        [
+            (
+                r["dedup_hash"],
+                "score_below_threshold",
+                make_normalized_id(r.get("org", "") or "", r.get("title", "") or ""),
+            )
+            for r in to_remove
+            if r.get("dedup_hash")
+        ]
+    )
     conn.commit()
 
     # (4) Atomically publish the already-written archive under its final name.
