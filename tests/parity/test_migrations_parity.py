@@ -16,10 +16,19 @@ from _bootstrap import (
 
 pytestmark = pytest.mark.parity
 
-# Tables both dialects ship (dashboard_snapshot / company_evidence are
-# Postgres-only by design -- full mode's live-dashboard read path and
-# evidence store, never touched by SQLite/simple mode; not compared here).
-SHARED_TABLES = ("company", "vacancy", "archived_hash", "board")
+# Tables both dialects ship. ``dashboard_snapshot`` is Postgres-only by design
+# (full mode's live-dashboard read path, never touched by SQLite/simple mode;
+# not compared here). ``company_evidence`` (Postgres migration 0006 / SQLite
+# baseline + migration 0007) and ``application`` (migration 0010) each ship as a
+# dialect pair that SQLite/simple mode reads and writes, so both ARE compared.
+SHARED_TABLES = (
+    "company",
+    "vacancy",
+    "archived_hash",
+    "board",
+    "company_evidence",
+    "application",
+)
 
 
 # ---------------------------------------------------------------------------

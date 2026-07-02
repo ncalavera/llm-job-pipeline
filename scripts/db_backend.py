@@ -249,6 +249,7 @@ _JSON_COLUMNS = frozenset(
         "aliases",
         "llm_tags",
         "llm_hard_requirements",
+        "artifacts",
     }
 )
 

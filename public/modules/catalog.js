@@ -383,6 +383,22 @@ function buildCatalogCard(g) {
       "</span>"
     : "";
 
+  // Application badge: a small "applied · <status>" marker when this
+  // vacancy has an application attached. Full Applications section is later.
+  const appBadge =
+    g.application && g.application.status
+      ? '<span class="badge app-badge" title="' +
+        escHtml(
+          T("application_marker", "Application") +
+            (g.application.applied_at
+              ? " · " + escHtml(g.application.applied_at)
+              : ""),
+        ) +
+        '">✉ ' +
+        escHtml(g.application.status) +
+        "</span>"
+      : "";
+
   const llmBadge = llmScoreBadge(g.llm_score) + screenScoreBadge(g);
 
   const catTierVal = g.calculated_tier || null;
@@ -499,6 +515,7 @@ function buildCatalogCard(g) {
     compHtml +
     '<div class="catalog-badges">' +
     regionBadge +
+    appBadge +
     "</div>" +
     hardReqHtml(g) +
     summaryHtml +

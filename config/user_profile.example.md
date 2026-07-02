@@ -227,3 +227,31 @@ field, story you can tell at the next interview?
 ## CUSTOM_BOOST_FIELD
 
 career_narrative_boost
+
+## CASE_BANK
+
+<!--
+Your case bank is a private folder of personal stories, worked examples and
+typical answers the agent pulls from when it helps you draft a cover letter or
+answer application questions — so you tell your OWN stories, not generic filler.
+It sits in the gitignored private zone next to this profile; nothing personal
+ever enters git or the public dashboard.
+
+It is a CONFIG KEY, never a hardcoded path. Point JOBSEARCH_PRIVATE_DIR at your
+private space (e.g. a separate private repo); the default is a gitignored
+`private/` under the project root, holding:
+
+    private/case_bank/       <- your stories / cases / typical answers
+    private/applications/    <- the CV versions, cover letters and answers sent
+
+What lives in the case bank is entirely yours and sector-neutral:
+- a nurse: a de-escalation story, a patient-safety catch, a night-shift example;
+- a game designer: a shipped-feature retro, a playtest-driven redesign, a jam win;
+- a policy analyst: a brief that changed a decision, a stakeholder negotiation.
+
+This section is just a reminder; the files themselves are private. Fill the
+folder with one short story per file and the agent will reach for them by name
+when you run `/jobs-review apply`.
+-->
+
+(your case bank lives in JOBSEARCH_PRIVATE_DIR/case_bank — see the note above)

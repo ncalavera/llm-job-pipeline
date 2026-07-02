@@ -58,8 +58,8 @@ def bootstrap_sqlite(monkeypatch, tmp_path):
     test suite already does it: a bare first connection (auto-applies the
     frozen baseline), then the migrations SQLite genuinely still needs on
     top of that baseline -- the board table (0002), the scored_by provenance
-    column (0009), and the board.enabled persistence flag (0011), none of
-    which the frozen baseline declares.
+    column (0009), the application table (0010), and the board.enabled
+    persistence flag (0011), none of which the frozen baseline declares.
 
     Deliberately NOT routed through migrate.py's ledger-driven replay: that
     path now works (migrate.py's SQLite runner tolerates the duplicate-column
@@ -84,14 +84,22 @@ def bootstrap_sqlite(monkeypatch, tmp_path):
     assert db_backend.IS_SQLITE, "bootstrap_sqlite must land on the SQLite backend"
 
     conn = db_backend.get_conn()  # first connection -> auto-applies schema.sqlite.sql
-    cur = conn.cursor()
-    # Order matters: 0011 ALTERs the board table 0002 creates.
-    for post_baseline in ("0002_board_table", "0009_add_scored_by", "0011_board_enabled"):
+    # Apply via the RAW sqlite3 connection's executescript, the way migrate.py's
+    # _Sqlite.run does: a migration file can hold several statements (0010 =
+    # CREATE TABLE + indexes) and the psycopg2-compatible cursor.execute runs
+    # only one statement at a time. Order matters: 0011 ALTERs the board table
+    # that 0002 creates.
+    raw = conn._conn
+    for post_baseline in (
+        "0002_board_table",
+        "0009_add_scored_by",
+        "0010_application",
+        "0011_board_enabled",
+    ):
         sql = (REPO_ROOT / "sql" / "migrations" / f"{post_baseline}.sqlite.sql").read_text(
             encoding="utf-8"
         )
-        cur.execute(sql)
-    cur.close()
+        raw.executescript(sql)
     conn.commit()
 
     import database_supabase as dal

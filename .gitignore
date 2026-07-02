@@ -9,6 +9,12 @@ vacancies/
 .firecrawl/
 public/data.js
 
+# Private artifact zone — application artifacts + personal case bank. Default
+# location for JOBSEARCH_PRIVATE_DIR (config.PRIVATE_DIR). Only file references
+# live in the DB; the CV versions, cover letters, answers and case-bank stories
+# themselves never enter git or the public dashboard.
+private/
+
 # Personal labelled eval set — never publish
 evals/
 
