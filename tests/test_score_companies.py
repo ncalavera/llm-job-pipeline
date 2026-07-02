@@ -11,11 +11,9 @@ What's exercised:
   * save_company_enrichment — the persistence the --api backend calls, asserted
     to round-trip alignment_score, mission_fit and tier.
 
-Note on cmd_save: score_companies.cmd_save imports the real
-``psycopg2.extras.Json`` directly (not db_backend's SQLite-aware shim), so on
-the SQLite backend its parameter binding fails — it is a Postgres-only code
-path. We therefore test the scoring logic through the same DAL boundary the
---api path uses, which is backend-agnostic. See test_cmd_save_is_postgres_only.
+Note on cmd_save: score_companies.cmd_save now imports ``Json`` from
+``db_backend`` (the backend-aware shim), so its parameter binding works on both
+the SQLite and Postgres backends. See test_cmd_save_persists_on_sqlite.
 """
 
 import importlib
@@ -172,16 +170,15 @@ def test_calculate_company_tier_assigns_letter(sc):
 
 
 # ---------------------------------------------------------------------------
-# cmd_save is a Postgres-only path on this backend — document, don't fail.
+# cmd_save persists on the SQLite backend via db_backend's Json shim.
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_save_is_postgres_only_on_sqlite(sc):
-    """score_companies.cmd_save binds parameters with the real psycopg2 Json
-    wrapper, which the SQLite shim does not adapt, so it cannot persist on the
-    SQLite backend. We assert that limitation explicitly (rather than skip
-    silently) so a future fix that makes it backend-agnostic flips this test
-    and prompts updating it."""
+def test_cmd_save_persists_on_sqlite(sc):
+    """score_companies.cmd_save binds JSON columns with db_backend's Json shim,
+    which the SQLite cursor serializes, so the full stdin→DB save path persists
+    on the SQLite backend (previously a Postgres-only path that silently no-op'd
+    because it used the real psycopg2 Json)."""
     import io
     import json
     import types
@@ -206,11 +203,12 @@ def test_cmd_save_is_postgres_only_on_sqlite(sc):
     old_stdin = sys.stdin
     sys.stdin = monkeypatch_stdin
     try:
-        # Runs without raising (errors are caught per-entry), but persists
-        # nothing on SQLite because the Json bind fails.
         sc.mod.cmd_save(types.SimpleNamespace(no_auto_review=True))
     finally:
         sys.stdin = old_stdin
 
-    # Nothing was written — confirms the Postgres-only nature on this backend.
-    assert db.load_company_enrichment("Acme Robotics")["alignment_score"] is None
+    saved = db.load_company_enrichment("Acme Robotics")
+    assert saved["alignment_score"] == 70
+    assert saved["mission_fit"]["alignment_label"] == "ok"
+    assert saved["about"]["description"] == "x"
+    assert saved["about"]["about_source"] == "llm_subagent"

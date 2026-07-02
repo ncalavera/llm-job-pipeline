@@ -414,3 +414,102 @@ def test_baseline_records_without_running(mig):
     assert "thing" not in _columns(mig.db_path, "company")  # recorded, not run
     # A subsequent normal run sees nothing pending.
     assert mig.m.cmd_migrate(allow_destructive=False, do_backup=False) == 0
+
+
+# ---------------------------------------------------------------------------
+# Postgres init ordering (fake connection — no live Supabase).
+#
+# _connect_supabase leaves a transaction open from its identity SELECT.
+# psycopg2 forbids assigning `autocommit` while a transaction is in progress
+# ("set_session cannot be used inside a transaction"), so _Postgres.__init__
+# must rollback() BEFORE it flips autocommit. These fakes model that one
+# invariant so the ordering is locked without touching a real database.
+# ---------------------------------------------------------------------------
+
+
+class _FakePgCursor:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params=None):
+        self._conn.calls.append(("execute", sql.strip().split()[0].upper()))
+        self._conn._open_txn = True  # any statement opens a transaction
+        self._conn._last_sql = sql
+
+    def fetchone(self):
+        # to_regclass(...) → ledger absent (None); any other SELECT → benign row.
+        if "to_regclass" in (self._conn._last_sql or ""):
+            return (None,)
+        return (1,)
+
+    def fetchall(self):
+        return []
+
+    def close(self):
+        pass
+
+
+class _FakePgConn:
+    """psycopg2-connection stand-in enforcing the mid-transaction autocommit
+    guard. Starts life mid-transaction, mirroring _connect_supabase's
+    uncommitted identity SELECT."""
+
+    def __init__(self):
+        self.calls = []
+        self._open_txn = True  # identity SELECT left a txn open
+        self._autocommit = False
+        self._last_sql = None
+
+    @property
+    def autocommit(self):
+        return self._autocommit
+
+    @autocommit.setter
+    def autocommit(self, value):
+        if self._open_txn:
+            raise RuntimeError("set_session cannot be used inside a transaction")
+        self.calls.append(("autocommit", value))
+        self._autocommit = value
+
+    def cursor(self, cursor_factory=None):
+        return _FakePgCursor(self)
+
+    def rollback(self):
+        self.calls.append(("rollback", None))
+        self._open_txn = False
+
+    def commit(self):
+        self.calls.append(("commit", None))
+        self._open_txn = False
+
+    def close(self):
+        self.calls.append(("close", None))
+
+
+def test_postgres_init_rolls_back_before_flipping_autocommit(mig, monkeypatch):
+    """_Postgres.__init__ must clear the open identity-SELECT transaction with
+    rollback() before assigning autocommit, or psycopg2 raises "set_session
+    cannot be used inside a transaction". The fake connection reproduces that
+    guard, so constructing _Postgres without the rollback would raise here."""
+    import db_backend
+
+    fake = _FakePgConn()
+    monkeypatch.setattr(db_backend, "_connect_supabase", lambda: fake)
+
+    pg = mig.m._Postgres()  # must not raise
+
+    kinds = [c[0] for c in fake.calls]
+    assert "rollback" in kinds, fake.calls
+    assert "autocommit" in kinds, fake.calls
+    # The regression lock: rollback strictly precedes the autocommit flip.
+    assert kinds.index("rollback") < kinds.index("autocommit")
+    # Ledger bootstrap ran and was committed inside the fresh transaction.
+    assert ("commit", None) in fake.calls
+    # Ledger absent (to_regclass → None) → treated as an existing-DB adoption.
+    assert pg.adopted_existing is True
