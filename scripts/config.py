@@ -39,6 +39,45 @@ REPORT_PATH = PUBLIC_DIR / "index.html"
 DATA_JS_PATH = PUBLIC_DIR / "data.js"
 
 # ---------------------------------------------------------------------------
+# Private artifact zone — application artifacts + the personal case bank.
+#
+# Application prep is private data: which CV version was sent, cover letters,
+# interview-question answers, links to research, and the case bank of personal
+# stories/typical answers the agent pulls when drafting a letter. It lives ONLY
+# in this gitignored zone and the database — never in public code or on the
+# public dashboard (STRATEGY: "Application artifacts are private data ... never
+# in public code").
+#
+# The location is a CONFIG KEY, never a hardcoded personal path: point
+# JOBSEARCH_PRIVATE_DIR at your private space (e.g. a separate private repo).
+# The default is a gitignored ``private/`` under the project root, so a fresh
+# clone works out of the box for a nurse, a game designer or a policy analyst
+# alike. Dirs are created on demand (ensure_private_dirs), not at import.
+# ---------------------------------------------------------------------------
+
+PRIVATE_DIR = Path(
+    os.environ.get("JOBSEARCH_PRIVATE_DIR", str(PROJECT_ROOT / "private"))
+).expanduser()
+
+#: Personal stories / cases / typical answers, pulled by the agent when it drafts
+#: a cover letter or question answers. Sits next to your user_profile.md.
+CASE_BANK_DIR = PRIVATE_DIR / "case_bank"
+
+#: Per-application artifacts (the CV version sent, the cover letter, saved
+#: answers, research notes). Referenced from the ``application`` DB rows.
+APPLICATION_ARTIFACTS_DIR = PRIVATE_DIR / "applications"
+
+
+def ensure_private_dirs() -> None:
+    """Create the private zone (case bank + application artifacts) on demand.
+
+    Called by the writers (never at import — a plain read of config must not
+    touch the filesystem). Idempotent.
+    """
+    for d in (CASE_BANK_DIR, APPLICATION_ARTIFACTS_DIR):
+        d.mkdir(parents=True, exist_ok=True)
+
+# ---------------------------------------------------------------------------
 # Firecrawl SDK client (lazy singleton)
 # ---------------------------------------------------------------------------
 

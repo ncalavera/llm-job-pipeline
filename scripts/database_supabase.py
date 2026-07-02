@@ -1422,6 +1422,82 @@ def auto_review_candidates(approve_threshold=None, reject_threshold=None, enable
     return {"approved": approved, "rejected": rejected, "pending": pending}
 
 
+def save_company_evidence(
+    company_id: str,
+    source: str,
+    *,
+    url: str = "",
+    content: str = "",
+    meta: "dict | None" = None,
+) -> None:
+    """Save one piece of company research into ``company_evidence`` and commit.
+
+    Pre-application research lands in the SAME table that feeds WANT-scoring, so
+    what you learn while preparing an application also enriches the company's
+    desirability signal and is visible in the company profile — instead of
+    rotting in a folder. Idempotent by (company_id, source, url): re-saving the
+    same page refreshes it in place rather than duplicating.
+
+    ``source`` is free-form; note ``score_companies`` only feeds a fixed set of
+    primary sources to the scorer (website/careers/manual_url/exa/...), so use
+    ``manual_url`` for research you want the scorer to weigh, or a custom label
+    (e.g. ``application_research``) for profile-only notes. The DAL leaves that
+    choice to the caller and never auto-commits elsewhere — this write does.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM company_evidence WHERE company_id = %s AND source = %s AND url = %s",
+        (company_id, source, url or ""),
+    )
+    cur.execute(
+        """INSERT INTO company_evidence (company_id, source, url, content, meta)
+           VALUES (%s, %s, %s, %s, %s)""",
+        (
+            company_id,
+            source,
+            url or "",
+            content or "",
+            json.dumps(meta) if meta is not None else None,
+        ),
+    )
+    cur.close()
+    conn.commit()
+
+
+def load_company_evidence_summary() -> dict[str, list[dict]]:
+    """Return {company_id_str: [{source, url, fetched_at}]} for every company.
+
+    Metadata only (no ``content`` — the raw scraped text can be large): enough
+    for the company profile to show what research exists and link out to it.
+    Ordered newest-first. Empty when the table is absent (fresh DB, pre-migration
+    on the Postgres baseline)."""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT company_id, source, url, fetched_at FROM company_evidence "
+            "ORDER BY fetched_at DESC"
+        )
+        rows = cur.fetchall()
+    except Exception:
+        cur.close()
+        return {}
+    cur.close()
+    out: dict[str, list[dict]] = {}
+    for company_id_val, source, url, fetched_at in rows:
+        out.setdefault(str(company_id_val), []).append(
+            {
+                "source": source or "",
+                "url": url or "",
+                "fetched_at": fetched_at.isoformat()
+                if hasattr(fetched_at, "isoformat")
+                else (str(fetched_at) if fetched_at else ""),
+            }
+        )
+    return out
+
+
 def get_company_fitness_map() -> dict[str, dict]:
     """Return {canonical_name: {alignment_score, status}} for all companies."""
     conn = get_conn()
