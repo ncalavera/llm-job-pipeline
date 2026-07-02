@@ -109,6 +109,60 @@ Deep review of `liked` vacancies — walks through them one by one and helps mak
    - Include: location, deadline, CV notes, preparation checklist, apply link
    - One issue per company (multiple roles in one issue), not one per vacancy.
 
+7a. **Record the application as a DB entity** (only for `to_apply`, once the user
+    decides to actually prepare/submit). An application is a first-class row in
+    the `application` table — vacancy, company, channel, status and the attached
+    artifacts — so nothing lives loose in folders. The artifact FILES stay in the
+    private zone (`config.APPLICATION_ARTIFACTS_DIR`), gitignored; only their
+    references live in the DB.
+
+    ```python
+    import applications
+    from config import CASE_BANK_DIR, APPLICATION_ARTIFACTS_DIR
+
+    app_id = applications.record_application(
+        company_id,               # from the vacancy's company_id
+        vacancy_id,               # the liked vacancy
+        channel="site",           # site | email | form | referral | other
+        status="applied",         # or "draft" while you are still preparing
+        artifacts={
+            "cv_version": "cv_ops_v3.pdf",        # which CV version was sent
+            "cover_letter_path": "cover_acme.md", # file in the private zone
+            "answers": {"why_us": "..."},          # saved question answers
+            "research_urls": ["https://…"],        # links used to prepare
+        },
+        notes="drafted from the case bank",
+    )
+    ```
+
+    - **Drafting the letter / answers** — the case bank (personal stories, cases,
+      typical answers) lives in `CASE_BANK_DIR`, next to `user_profile.md` in the
+      private zone. Read it there when you help write a cover letter or question
+      answers; never hardcode a personal path — always go through the config key.
+      Do NOT write the CV from scratch — only link which version was sent and help
+      with the letter/answers (STRATEGY: not an auto-applier; the human submits).
+    - **Idempotent per vacancy** — re-running merges new artifacts into the same
+      row rather than duplicating.
+    - **Move the status later** as the process advances:
+      `applications.set_status(app_id, "interview")` (or `offer` / `rejected` /
+      `withdrawn`). Attach more artifacts anytime with
+      `applications.attach_artifacts(app_id, {...})`.
+
+7b. **Pre-application research → `company_evidence`.** Anything you dig up about
+    the company while preparing is saved into the SAME evidence table that feeds
+    WANT-scoring and is shown in the company profile — not a throwaway note:
+
+    ```python
+    from database_supabase import save_company_evidence
+    save_company_evidence(company_id, "manual_url",
+                          url="https://example.org/impact-report",
+                          content="<primary-source text you read>")
+    ```
+
+    Use `manual_url` for research you want the scorer to weigh; a custom label
+    (e.g. `application_research`) keeps it profile-only. Both surface in the
+    company profile's "Applications & Research" block and on the vacancy card.
+
 8. After all companies are reviewed — update vacancy statuses in Supabase:
 
    | Verdict | Status |
@@ -149,6 +203,11 @@ The auto-archive by score threshold is currently paused under pure-fit scoring �
 ### Files (apply)
 
 - `scripts/triage.py` — helpers (load, group, persist).
+- `scripts/applications.py` — the `application` DB entity (create, status move, artifacts).
+- `application` table — one row per application (vacancy, company, channel, status, artifact refs).
+- `company_evidence` table — where pre-application research lands (via `save_company_evidence`).
+- `config.CASE_BANK_DIR` / `config.APPLICATION_ARTIFACTS_DIR` — the gitignored private zone
+  (`JOBSEARCH_PRIVATE_DIR`) for the case bank + application artifacts. Never a hardcoded path.
 - `vacancy.triage` JSONB column — stores notes and decision metadata.
 - `triage/jobs-apply.json` — session history (metadata only; Supabase `vacancy.status` is the source of truth).
 - `triage/session-notes-{date}.md` — running Markdown notes for the session.
