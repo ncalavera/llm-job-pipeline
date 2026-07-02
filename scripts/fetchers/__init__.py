@@ -54,6 +54,20 @@ from fetchers.registry import (
     get_fetch_errors,
     record_fetch_error,
 )
+from fetchers.html_utils import (
+    _html_to_text,
+    _html_to_snippet,
+    _html_to_markdown,
+    _html_to_multiline,
+)
+from fetchers.parsing import (
+    parse_markdown_jobs,
+    _parse_json_jobs,
+    _is_non_job_url,
+    _looks_like_job_title,
+    _blacklist_filter,
+    _is_generic_pipeline_title,
+)
 from fetchers.legacy import (
     # ATS / company fetchers
     fetch_greenhouse,
@@ -89,13 +103,7 @@ from fetchers.legacy import (
     fetch_idealist_board,
     fetch_fastforward_board,
     fetch_linkedin_board,
-    # Parsing + helpers used by tests / sibling scripts
-    parse_markdown_jobs,
-    _parse_json_jobs,
-    _is_non_job_url,
-    _looks_like_job_title,
-    _blacklist_filter,
-    _is_generic_pipeline_title,
+    # Adapter-specific helpers used by tests / sibling scripts
     _parse_hn_comment,
     _parse_successfactors_tiles,
     _sf_base_url,
@@ -104,8 +112,4 @@ from fetchers.legacy import (
     _adp_job_url,
     _adp_snippet,
     _fetch_unops_job_detail,
-    _html_to_text,
-    _html_to_snippet,
-    _html_to_markdown,
-    _html_to_multiline,
 )
