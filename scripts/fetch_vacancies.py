@@ -400,6 +400,184 @@ def _filter_companies(args) -> dict:
     return filtered
 
 
+def _fetch_one_company(org_name, config, tier, strategy, fetch_stats) -> int:
+    """Fetch one tracked company, save its vacancies, and record source tracking
+    + gone-detection telemetry. Returns the count of new vacancies added."""
+    print(f"\n--- {org_name} (Tier {tier}) ---")
+
+    jobs = []
+    fetch_status = "ok"
+    try:
+        if strategy == "greenhouse":
+            jobs = fetch_greenhouse(org_name, config["slug"], eu=config.get("eu", False))
+        elif strategy == "firecrawl_scrape":
+            jobs = fetch_firecrawl_scrape(
+                org_name, config["url"], url_filter=config.get("url_filter", "")
+            )
+        elif strategy == "workday_api":
+            jobs = fetch_workday_api(
+                org_name, config["tenant"], config["board"], config["base_url"], config
+            )
+        elif strategy == "lever":
+            jobs = fetch_lever(org_name, config["slug"])
+        elif strategy == "ashby":
+            jobs = fetch_ashby(org_name, config["slug"])
+        elif strategy == "workable":
+            jobs = fetch_workable(org_name, config["slug"])
+        elif strategy == "unops_widget":
+            jobs = fetch_unops_widget(
+                org_name,
+                config["url"],
+                title_blacklist=config.get("title_blacklist"),
+                seniority_filter=config.get("seniority_filter"),
+                location_keywords=config.get("location_keywords"),
+                fetch_descriptions=config.get("fetch_descriptions", True),
+            )
+        elif strategy == "recruitee":
+            jobs = fetch_recruitee(org_name, config["slug"])
+        elif strategy == "teamtailor_rss":
+            jobs = fetch_teamtailor_rss(org_name, config["slug"])
+        elif strategy == "bamboohr":
+            jobs = fetch_bamboohr(org_name, config["slug"])
+        elif strategy == "amazon_jobs":
+            jobs = fetch_amazon_jobs(org_name, config)
+        elif strategy == "successfactors":
+            jobs = fetch_successfactors(org_name, config)
+        elif strategy == "adp_json":
+            jobs = fetch_adp_json(org_name, config)
+        elif strategy in COMPANY_FETCHERS:
+            # Registry dispatch: any strategy registered by a fetchers/ats/*
+            # module (new one-file adapters) without touching this chain.
+            jobs = COMPANY_FETCHERS[strategy](org_name, config)
+    except Exception as exc:
+        print(f"  [{org_name}] Fetch error: {exc}")
+        fetch_status = f"error: {exc}"
+
+    # Honest marking: disambiguate an empty result into a reason code
+    # (js_required / credit_exhausted / error: <reason> / render_ok_zero).
+    scrape_status = get_scrape_statuses().get(org_name)
+    fetch_error = get_fetch_errors().get(org_name)
+    fetch_status = _resolve_fetch_status(fetch_status, bool(jobs), scrape_status, fetch_error)
+
+    # Save raw fetch log
+    _save_fetch_log(f"{strategy}_{org_name.lower().replace(' ', '_')}", jobs, fetch_status)
+
+    # Full pre-filter listing — gone-detection must diff against what
+    # the source actually lists, not the department-filtered subset.
+    raw_jobs = jobs
+
+    # Department exclusion filter (configured per-company in ats_config)
+    dept_exclude = config.get("department_exclude", [])
+    if dept_exclude and jobs:
+        dept_exclude_lower = [d.lower() for d in dept_exclude]
+        before = len(jobs)
+        seen_depts = {j.get("department", "") for j in jobs if j.get("department")}
+        new_depts = seen_depts - {d for d in dept_exclude}
+        if new_depts:
+            print(f"  [{org_name}] new departments (not excluded): {sorted(new_depts)}")
+        jobs = [j for j in jobs if j.get("department", "").lower() not in dept_exclude_lower]
+        excluded = before - len(jobs)
+        if excluded:
+            print(
+                f"  [{org_name}] department filter: {excluded}/{before} excluded, {len(jobs)} remaining"
+            )
+
+    new_count = save_vacancies(org_name, tier, jobs)
+    update_source_tracking(org_name, tier, strategy, new_count, fetch_status)
+    if new_count > 0:
+        print(f"  [{org_name}] {new_count} NEW vacancies added")
+
+    if is_fetch_error(fetch_status):
+        fetch_stats["errors"][org_name] = fetch_status
+
+    # Gone-from-source: a complete direct-ATS listing is ground truth.
+    # An unseen vacancy missing from a successful fetch was closed.
+    # 'render_ok_zero' is a successful empty listing (U9) and must still
+    # trigger gone-detection — otherwise closed roles stay stale.
+    if fetch_status in ("ok", "render_ok_zero") and strategy in GONE_DETECTION_STRATEGIES:
+        gone = archive_gone_vacancies(org_name, raw_jobs)
+        # Share = vanished-from-source / (vanished + still-live-this-fetch).
+        # "Vanished" is archived PLUS protected-expiring (high-fit roles
+        # that flip to 'expiring' instead of archived, but still left the
+        # source) — otherwise a truncated fetch that happens to hit mostly
+        # protected roles would undercount and slip past the gate. A
+        # truncated fetch returns few live jobs but loses many → high
+        # share → the driver's publish gate blocks a corrupting publish.
+        protected = getattr(gone, "protected", 0)
+        fetch_stats["orgs"][org_name] = {
+            "gone": int(gone or 0) + protected,
+            "live": len(raw_jobs),
+        }
+
+    return new_count
+
+
+def _fetch_one_board(board_id, board_cfg, strategy) -> int:
+    """Fetch one job board, save its vacancies, update source tracking and mark
+    the board fetched. Returns the count of new vacancies added."""
+    board_name = board_cfg["name"]
+    print(f"\n--- {board_name} (board, tier {board_cfg.get('tier', 'C')}) ---")
+
+    jobs = []
+    board_fetch_status = "ok"
+    try:
+        if strategy == "algolia_api":
+            jobs = fetch_algolia_board(board_cfg)
+        elif strategy == "firecrawl_board":
+            jobs = fetch_firecrawl_board(board_cfg)
+        elif strategy == "reliefweb_api":
+            jobs = fetch_reliefweb_board(board_cfg)
+        elif strategy == "impactpool_html":
+            jobs = fetch_impactpool_board(board_cfg)
+        elif strategy == "datadotorg_wp":
+            jobs = fetch_datadotorg_board(board_cfg)
+        elif strategy == "arbeitnow_api":
+            jobs = fetch_arbeitnow_board(board_cfg)
+        elif strategy == "remotive_api":
+            jobs = fetch_remotive_board(board_cfg)
+        elif strategy == "wwr_rss":
+            jobs = fetch_wwr_board(board_cfg)
+        elif strategy == "hn_whoishiring":
+            jobs = fetch_hn_whoishiring_board(board_cfg)
+        elif strategy == "idealist_algolia":
+            jobs = fetch_idealist_board(board_cfg)
+        elif strategy == "fastforward_board":
+            jobs = fetch_fastforward_board(board_cfg)
+        elif strategy == "linkedin_guest":
+            jobs = fetch_linkedin_board(board_cfg)
+        elif strategy in BOARD_FETCHERS:
+            # Registry dispatch: any strategy registered by a
+            # fetchers/boards/* module (new one-file boards).
+            jobs = BOARD_FETCHERS[strategy](board_cfg)
+    except Exception as exc:
+        print(f"  [{board_name}] Fetch error: {exc}")
+        board_fetch_status = f"error: {exc}"
+
+    # Honest marking: an empty board that actually FAILED keeps its
+    # recorded reason (error: timeout / http_500 / …), it does not
+    # masquerade as a healthy zero.
+    board_fetch_error = get_fetch_errors().get(board_name)
+    if board_fetch_status == "ok" and not jobs and board_fetch_error:
+        board_fetch_status = board_fetch_error
+
+    # Save raw fetch log
+    _save_fetch_log(f"{strategy}_{board_id}", jobs, board_fetch_status)
+
+    new_count = save_board_vacancies(board_cfg, jobs)
+    update_source_tracking(
+        board_name,
+        board_cfg.get("tier", "C"),
+        strategy,
+        new_count,
+        board_fetch_status,
+    )
+    if new_count > 0:
+        print(f"  [{board_name}] {new_count} NEW vacancies added")
+
+    mark_board_fetched(board_id)
+    return new_count
+
+
 def main():
     parser = build_parser()
     args = parser.parse_args()
@@ -489,116 +667,7 @@ def main():
                 print(f"  [{org_name}] Skipped (--free-only mode)")
                 continue
 
-            print(f"\n--- {org_name} (Tier {tier}) ---")
-
-            jobs = []
-            fetch_status = "ok"
-            try:
-                if strategy == "greenhouse":
-                    jobs = fetch_greenhouse(org_name, config["slug"], eu=config.get("eu", False))
-                elif strategy == "firecrawl_scrape":
-                    jobs = fetch_firecrawl_scrape(
-                        org_name, config["url"], url_filter=config.get("url_filter", "")
-                    )
-                elif strategy == "workday_api":
-                    jobs = fetch_workday_api(
-                        org_name, config["tenant"], config["board"], config["base_url"], config
-                    )
-                elif strategy == "lever":
-                    jobs = fetch_lever(org_name, config["slug"])
-                elif strategy == "ashby":
-                    jobs = fetch_ashby(org_name, config["slug"])
-                elif strategy == "workable":
-                    jobs = fetch_workable(org_name, config["slug"])
-                elif strategy == "unops_widget":
-                    jobs = fetch_unops_widget(
-                        org_name,
-                        config["url"],
-                        title_blacklist=config.get("title_blacklist"),
-                        seniority_filter=config.get("seniority_filter"),
-                        location_keywords=config.get("location_keywords"),
-                        fetch_descriptions=config.get("fetch_descriptions", True),
-                    )
-                elif strategy == "recruitee":
-                    jobs = fetch_recruitee(org_name, config["slug"])
-                elif strategy == "teamtailor_rss":
-                    jobs = fetch_teamtailor_rss(org_name, config["slug"])
-                elif strategy == "bamboohr":
-                    jobs = fetch_bamboohr(org_name, config["slug"])
-                elif strategy == "amazon_jobs":
-                    jobs = fetch_amazon_jobs(org_name, config)
-                elif strategy == "successfactors":
-                    jobs = fetch_successfactors(org_name, config)
-                elif strategy == "adp_json":
-                    jobs = fetch_adp_json(org_name, config)
-                elif strategy in COMPANY_FETCHERS:
-                    # Registry dispatch: any strategy registered by a fetchers/ats/*
-                    # module (new one-file adapters) without touching this chain.
-                    jobs = COMPANY_FETCHERS[strategy](org_name, config)
-            except Exception as exc:
-                print(f"  [{org_name}] Fetch error: {exc}")
-                fetch_status = f"error: {exc}"
-
-            # Honest marking: disambiguate an empty result into a reason code
-            # (js_required / credit_exhausted / error: <reason> / render_ok_zero).
-            scrape_status = get_scrape_statuses().get(org_name)
-            fetch_error = get_fetch_errors().get(org_name)
-            fetch_status = _resolve_fetch_status(
-                fetch_status, bool(jobs), scrape_status, fetch_error
-            )
-
-            # Save raw fetch log
-            _save_fetch_log(f"{strategy}_{org_name.lower().replace(' ', '_')}", jobs, fetch_status)
-
-            # Full pre-filter listing — gone-detection must diff against what
-            # the source actually lists, not the department-filtered subset.
-            raw_jobs = jobs
-
-            # Department exclusion filter (configured per-company in ats_config)
-            dept_exclude = config.get("department_exclude", [])
-            if dept_exclude and jobs:
-                dept_exclude_lower = [d.lower() for d in dept_exclude]
-                before = len(jobs)
-                seen_depts = {j.get("department", "") for j in jobs if j.get("department")}
-                new_depts = seen_depts - {d for d in dept_exclude}
-                if new_depts:
-                    print(f"  [{org_name}] new departments (not excluded): {sorted(new_depts)}")
-                jobs = [
-                    j for j in jobs if j.get("department", "").lower() not in dept_exclude_lower
-                ]
-                excluded = before - len(jobs)
-                if excluded:
-                    print(
-                        f"  [{org_name}] department filter: {excluded}/{before} excluded, {len(jobs)} remaining"
-                    )
-
-            new_count = save_vacancies(org_name, tier, jobs)
-            update_source_tracking(org_name, tier, strategy, new_count, fetch_status)
-            total_new += new_count
-            if new_count > 0:
-                print(f"  [{org_name}] {new_count} NEW vacancies added")
-
-            if is_fetch_error(fetch_status):
-                fetch_stats["errors"][org_name] = fetch_status
-
-            # Gone-from-source: a complete direct-ATS listing is ground truth.
-            # An unseen vacancy missing from a successful fetch was closed.
-            # 'render_ok_zero' is a successful empty listing (U9) and must still
-            # trigger gone-detection — otherwise closed roles stay stale.
-            if fetch_status in ("ok", "render_ok_zero") and strategy in GONE_DETECTION_STRATEGIES:
-                gone = archive_gone_vacancies(org_name, raw_jobs)
-                # Share = vanished-from-source / (vanished + still-live-this-fetch).
-                # "Vanished" is archived PLUS protected-expiring (high-fit roles
-                # that flip to 'expiring' instead of archived, but still left the
-                # source) — otherwise a truncated fetch that happens to hit mostly
-                # protected roles would undercount and slip past the gate. A
-                # truncated fetch returns few live jobs but loses many → high
-                # share → the driver's publish gate blocks a corrupting publish.
-                protected = getattr(gone, "protected", 0)
-                fetch_stats["orgs"][org_name] = {
-                    "gone": int(gone or 0) + protected,
-                    "live": len(raw_jobs),
-                }
+            total_new += _fetch_one_company(org_name, config, tier, strategy, fetch_stats)
 
             # Commit per company so an interrupted run keeps finished orgs.
             get_conn().commit()
@@ -633,66 +702,7 @@ def main():
                     print(f"  [{board_name}] Skipped (recent, ttl={ttl_days}d)")
                     continue
 
-                print(f"\n--- {board_name} (board, tier {board_cfg.get('tier', 'C')}) ---")
-
-                jobs = []
-                board_fetch_status = "ok"
-                try:
-                    if strategy == "algolia_api":
-                        jobs = fetch_algolia_board(board_cfg)
-                    elif strategy == "firecrawl_board":
-                        jobs = fetch_firecrawl_board(board_cfg)
-                    elif strategy == "reliefweb_api":
-                        jobs = fetch_reliefweb_board(board_cfg)
-                    elif strategy == "impactpool_html":
-                        jobs = fetch_impactpool_board(board_cfg)
-                    elif strategy == "datadotorg_wp":
-                        jobs = fetch_datadotorg_board(board_cfg)
-                    elif strategy == "arbeitnow_api":
-                        jobs = fetch_arbeitnow_board(board_cfg)
-                    elif strategy == "remotive_api":
-                        jobs = fetch_remotive_board(board_cfg)
-                    elif strategy == "wwr_rss":
-                        jobs = fetch_wwr_board(board_cfg)
-                    elif strategy == "hn_whoishiring":
-                        jobs = fetch_hn_whoishiring_board(board_cfg)
-                    elif strategy == "idealist_algolia":
-                        jobs = fetch_idealist_board(board_cfg)
-                    elif strategy == "fastforward_board":
-                        jobs = fetch_fastforward_board(board_cfg)
-                    elif strategy == "linkedin_guest":
-                        jobs = fetch_linkedin_board(board_cfg)
-                    elif strategy in BOARD_FETCHERS:
-                        # Registry dispatch: any strategy registered by a
-                        # fetchers/boards/* module (new one-file boards).
-                        jobs = BOARD_FETCHERS[strategy](board_cfg)
-                except Exception as exc:
-                    print(f"  [{board_name}] Fetch error: {exc}")
-                    board_fetch_status = f"error: {exc}"
-
-                # Honest marking: an empty board that actually FAILED keeps its
-                # recorded reason (error: timeout / http_500 / …), it does not
-                # masquerade as a healthy zero.
-                board_fetch_error = get_fetch_errors().get(board_name)
-                if board_fetch_status == "ok" and not jobs and board_fetch_error:
-                    board_fetch_status = board_fetch_error
-
-                # Save raw fetch log
-                _save_fetch_log(f"{strategy}_{board_id}", jobs, board_fetch_status)
-
-                new_count = save_board_vacancies(board_cfg, jobs)
-                update_source_tracking(
-                    board_name,
-                    board_cfg.get("tier", "C"),
-                    strategy,
-                    new_count,
-                    board_fetch_status,
-                )
-                total_new += new_count
-                if new_count > 0:
-                    print(f"  [{board_name}] {new_count} NEW vacancies added")
-
-                mark_board_fetched(board_id)
+                total_new += _fetch_one_board(board_id, board_cfg, strategy)
                 # Commit per board so an interrupted run keeps finished boards.
                 get_conn().commit()
 
