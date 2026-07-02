@@ -136,20 +136,29 @@ def test_dotenv_path_override_replaces_repo_root(tmp_path, monkeypatch):
 # python that imports db_backend for the first time — the exact moment
 # _DOTENV_VALUES = load_dotenv() executes. The fake .env lives in tmp_path and
 # is wired in via LLM_PIPELINE_DOTENV_PATH; the real repo root is never touched.
+#
+# The probe variable is deliberately NEUTRAL (not SUPABASE_DB_URL): a Supabase
+# URL would flip IS_SQLITE and make the import require psycopg2, which the easy
+# / SQLite-only contributor setup (INSTALL-EASY.md) intentionally does not
+# install — the test must stay green there, without a skip. Injection is proven
+# just as strictly by the probe; the backend must remain SQLite throughout.
+
+_PROBE = "LLM_PIPELINE_DOTENV_PROBE"
+_PROBE_VALUE = "hello-from-dotenv"
 
 _FIRST_IMPORT_CODE = (
     "import os, db_backend; "
-    "print(os.environ.get('SUPABASE_DB_URL', '<unset>')); "
+    f"print(os.environ.get('{_PROBE}', '<unset>')); "
     "print(db_backend.IS_SQLITE)"
 )
 
 
 def _first_import(tmp_path, *, disable: bool) -> list[str]:
     dotenv = tmp_path / "fake.env"
-    dotenv.write_text("SUPABASE_DB_URL=postgresql://fake-first-import/db\n")
+    dotenv.write_text(f"{_PROBE}={_PROBE_VALUE}\n")
 
     env = os.environ.copy()
-    for key in ("SUPABASE_DB_URL", "SUPABASE_DIRECT_URL", "LLM_PIPELINE_DISABLE_DOTENV"):
+    for key in ("SUPABASE_DB_URL", "SUPABASE_DIRECT_URL", "LLM_PIPELINE_DISABLE_DOTENV", _PROBE):
         env.pop(key, None)
     env["LLM_PIPELINE_DOTENV_PATH"] = str(dotenv)
     env["PYTHONPATH"] = str(SCRIPTS_DIR)
@@ -169,14 +178,14 @@ def _first_import(tmp_path, *, disable: bool) -> list[str]:
 
 
 def test_first_import_loads_dotenv_in_fresh_interpreter(tmp_path):
-    supabase_url, is_sqlite = _first_import(tmp_path, disable=False)
-    assert supabase_url == "postgresql://fake-first-import/db"
-    assert is_sqlite == "False"  # backend selection saw the .env value
+    probe, is_sqlite = _first_import(tmp_path, disable=False)
+    assert probe == _PROBE_VALUE  # import-time load injected the .env value
+    assert is_sqlite == "True"  # backend untouched — no psycopg2 needed
 
 
 def test_first_import_respects_disable_flag(tmp_path):
-    supabase_url, is_sqlite = _first_import(tmp_path, disable=True)
-    assert supabase_url == "<unset>"  # nothing re-injected after a scrub
+    probe, is_sqlite = _first_import(tmp_path, disable=True)
+    assert probe == "<unset>"  # nothing re-injected after a scrub
     assert is_sqlite == "True"
 
 
