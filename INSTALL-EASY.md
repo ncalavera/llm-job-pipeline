@@ -160,6 +160,21 @@ open while you review; press Ctrl+C to stop.
 
 Auto-detects the ATS, adds it, runs a test fetch — same as hardcore mode.
 
+## Optional: check the scoring quality (`/jobs-eval`)
+
+After a week or two of like/pass verdicts, ask whether the scorer actually
+agrees with you:
+
+```
+/jobs-eval
+```
+
+It seeds a small **golden set** from the verdicts you've already made (your
+likes and passes are the labels — no upfront labelling), scores them with the
+current prompt, and prints one number: how often the model's verdict matches
+yours, plus the disagreements worth fixing. The set is personal and stays on
+your machine (gitignored `evals/`). Runbook: `.claude/commands/jobs-eval.md`.
+
 ## Optional: job boards
 
 The pipeline can also pull from six free job boards. They are **off by
