@@ -13,6 +13,12 @@ from fetchers.registry import company_fetcher, register_company
 
 _SITEMAP_NS = {"sm": "http://www.google.com/schemas/sitemap/0.9"}
 
+# Hard cap on per-job detail-page GETs from the sitemap backend. Each <loc>
+# costs one request (20s timeout), so an uncapped sitemap would stall the daily
+# loop; 500 mirrors the CSB tile ceiling (20 pages × 25 tiles/page) and sits far
+# above any single org's real open-role count.
+_SITEMAP_MAX_DETAIL_FETCHES = 500
+
 
 def _sf_base_url(config: dict) -> str:
     """Resolve the SuccessFactors site base (host + /<Site>) from config.
@@ -97,6 +103,17 @@ def _sf_sitemap_job_urls(base: str) -> list[str]:
         root = ET.fromstring(resp.text)
     except ET.ParseError:
         return []
+    tag = root.tag.split("}")[-1].lower()
+    if tag == "sitemapindex":
+        # A <sitemapindex> nests child sitemaps rather than listing job URLs
+        # directly, so findall("sm:url") would silently return zero. This backend
+        # expects the flat <urlset> shape (verified against ILO); fail loudly
+        # instead of no-op'ing — an index host needs a deliberate crawl, not a
+        # silent empty result ("отказ ≠ пусто").
+        raise FetchError(
+            "sitemap_index",
+            f"{base}/sitemap.xml is a <sitemapindex> (nested sitemaps), not a flat <urlset>",
+        )
     return [
         loc.strip()
         for el in root.findall("sm:url", _SITEMAP_NS)
@@ -164,6 +181,12 @@ def _fetch_successfactors_sitemap(org_name: str, base: str) -> list[dict]:
     """Backend variant for SF hosts whose CSB tile-search returns nothing:
     walk the SEO sitemap.xml and fetch each job's detail page directly."""
     urls = _sf_sitemap_job_urls(base)
+    if len(urls) > _SITEMAP_MAX_DETAIL_FETCHES:
+        print(
+            f"  [{org_name}] SuccessFactors sitemap lists {len(urls)} URLs; "
+            f"capping detail fetches at {_SITEMAP_MAX_DETAIL_FETCHES}"
+        )
+        urls = urls[:_SITEMAP_MAX_DETAIL_FETCHES]
     jobs: list[dict] = []
     for url in urls:
         job = _sf_job_detail(url)

@@ -11,6 +11,7 @@ saved fixture is that real HTML fragment (not JSON).
 import os
 import re
 
+import pytest
 
 import fetchers
 from fetchers import (
@@ -20,6 +21,7 @@ from fetchers import (
     _sf_sitemap_job_urls,
     _sf_job_detail,
 )
+from fetchers.http import FetchError
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -314,3 +316,77 @@ class TestFetchSuccessfactorsSitemapBackend:
         )
         assert len(jobs) == 1
         assert jobs[0]["external_id"] == "1399744233"
+
+
+# ---------------------------------------------------------------------------
+# sitemap backend — shape handling (<sitemapindex>) + N+1 detail-fetch cap
+# ---------------------------------------------------------------------------
+
+_SM_NS = 'xmlns="http://www.google.com/schemas/sitemap/0.9"'
+
+
+def _urlset(urls: list[str]) -> str:
+    body = "".join(f"<url><loc>{u}</loc></url>" for u in urls)
+    return f'<?xml version="1.0" encoding="UTF-8"?><urlset {_SM_NS}>{body}</urlset>'
+
+
+def _sitemapindex(locs: list[str]) -> str:
+    body = "".join(f"<sitemap><loc>{u}</loc></sitemap>" for u in locs)
+    return f'<?xml version="1.0" encoding="UTF-8"?><sitemapindex {_SM_NS}>{body}</sitemapindex>'
+
+
+def _detail_page(title: str) -> str:
+    return (
+        f'<html><span itemprop="title">{title}</span>'
+        f'<div class="job"><span itemprop="description">Body</span></div></html>'
+    )
+
+
+class TestSfSitemapIndexShape:
+    def test_sitemapindex_root_raises_fetch_error(self, monkeypatch):
+        # A <sitemapindex> nests sub-sitemaps; findall("sm:url") would return 0.
+        # The raw helper must fail loudly instead of silently yielding nothing.
+        fake = FakeSitemapRequests(
+            sitemap=_sitemapindex(["https://jobs.ilo.org/sitemap-1.xml"]), details={}
+        )
+        monkeypatch.setattr(fetchers, "requests", fake)
+        with pytest.raises(FetchError) as exc:
+            _sf_sitemap_job_urls("https://jobs.ilo.org")
+        assert exc.value.reason == "sitemap_index"
+
+    def test_sitemapindex_backend_records_error_not_silent_zero(self, monkeypatch):
+        fake = FakeSitemapRequests(
+            sitemap=_sitemapindex(["https://jobs.ilo.org/sitemap-1.xml"]), details={}
+        )
+        monkeypatch.setattr(fetchers, "requests", fake)
+        fetchers._last_fetch_errors.pop("ILO", None)  # drop any cross-test residue
+        jobs = fetch_successfactors(
+            "ILO", {"url": "https://jobs.ilo.org", "sf_backend": "sitemap"}
+        )
+        assert jobs == []  # no jobs, but not a silent success:
+        assert "sitemap_index" in fetchers.get_fetch_errors().get("ILO", "")
+
+
+class TestSfSitemapDetailCap:
+    def test_detail_fetches_are_capped(self, monkeypatch):
+        # More job URLs than the cap → only the first N detail pages are fetched.
+        # An uncapped one-GET-per-<loc> loop would stall the daily run.
+        from fetchers.ats import successfactors as sf
+
+        monkeypatch.setattr(sf, "_SITEMAP_MAX_DETAIL_FETCHES", 3)
+        urls = [f"https://jobs.ilo.org/job/Role-{i}/{1000 + i}/" for i in range(5)]
+        details = {u: _detail_page(f"Role {i}") for i, u in enumerate(urls)}
+        fake = FakeSitemapRequests(sitemap=_urlset(urls), details=details)
+        monkeypatch.setattr(fetchers, "requests", fake)
+        jobs = fetch_successfactors(
+            "ILO", {"url": "https://jobs.ilo.org", "sf_backend": "sitemap"}
+        )
+        assert len(jobs) == 3  # capped, not all 5
+        detail_calls = [u for u in fake.calls if "/job/" in u]
+        assert len(detail_calls) == 3  # the loop stopped at the cap
+
+    def test_cap_constant_is_a_sane_positive_int(self):
+        from fetchers.ats import successfactors as sf
+
+        assert isinstance(sf._SITEMAP_MAX_DETAIL_FETCHES, int)
+        assert sf._SITEMAP_MAX_DETAIL_FETCHES > 0
