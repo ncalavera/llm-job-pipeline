@@ -20,6 +20,8 @@ import {
   formatDeadlineHtml,
   relativeTime,
   isVacancyExpired,
+  sourceAgeDays,
+  STALE_SOURCE_DAYS,
   hardReqHtml,
 } from "./helpers.js";
 import { T } from "./i18n.js";
@@ -30,16 +32,11 @@ const CATALOG_MIN_SCORE = 40;
 // UI-only toggle: when true, the score floor is lifted and everything shows.
 let catalogShowAll = false;
 
-// A role not confirmed by its source for this many days is shown as probably
-// closed (mirrors STALE_SOURCE_DAYS in scripts/config.py).
-const STALE_SOURCE_DAYS = 14;
-
 // Source-freshness label from a role's last_seen date. Null when unknown.
+// STALE_SOURCE_DAYS + the age math are shared with the Triage "Expired" column.
 function catalogFreshness(lastSeen) {
-  if (!lastSeen) return null;
-  const seen = new Date(lastSeen);
-  if (isNaN(seen.getTime())) return null;
-  const ageDays = Math.floor((Date.now() - seen.getTime()) / 86400000);
+  const ageDays = sourceAgeDays(lastSeen);
+  if (ageDays == null) return null;
   // Boundary: exactly STALE_SOURCE_DAYS counts as stale.
   if (ageDays >= STALE_SOURCE_DAYS) {
     return {

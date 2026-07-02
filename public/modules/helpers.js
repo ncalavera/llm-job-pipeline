@@ -720,7 +720,9 @@ export function formatDeadlineHtml(deadline, cssPrefix) {
   } else if (diffDays <= 7) {
     label += " (in " + diffDays + "d)";
   }
-  const cls = isExpired ? "expired" : "active";
+  // Urgency tiers: past = expired (red), within a week = soon (amber),
+  // further out = active (default).
+  const cls = isExpired ? "expired" : diffDays <= 7 ? "soon" : "active";
   return (
     '<span class="' +
     cssPrefix +
@@ -744,6 +746,57 @@ export function isVacancyExpired(g) {
   if (isNaN(dl.getTime())) return false;
   const todayD = new Date(new Date().toISOString().slice(0, 10));
   return dl < todayD;
+}
+
+// ---------------------------------------------------------------------------
+// Source freshness + Triage "no longer actual" classification
+// ---------------------------------------------------------------------------
+
+// A role not confirmed by its source for this many days is treated as gone /
+// probably closed (mirrors STALE_SOURCE_DAYS in scripts/config.py). Shared by
+// the Catalog freshness badge and the Triage "Expired" column.
+export const STALE_SOURCE_DAYS = 14;
+
+// Whole days since a role's source last confirmed it. null when unknown/invalid.
+export function sourceAgeDays(lastSeen) {
+  if (!lastSeen) return null;
+  const seen = new Date(lastSeen);
+  if (isNaN(seen.getTime())) return null;
+  return Math.floor((Date.now() - seen.getTime()) / 86400000);
+}
+
+// The source stopped confirming the role for STALE_SOURCE_DAYS+ days.
+// Boundary: exactly STALE_SOURCE_DAYS counts as stale.
+export function isVacancyStale(g) {
+  const age = sourceAgeDays(g && g.last_seen);
+  return age != null && age >= STALE_SOURCE_DAYS;
+}
+
+// "No longer actual": the deadline has lapsed OR the source went quiet.
+export function isVacancyGone(g) {
+  return isVacancyExpired(g) || isVacancyStale(g);
+}
+
+// Statuses pulled into the shared "Expired" column once the role is no longer
+// actual. applied/skipped are terminal decisions and stay in their columns.
+export const EXPIRABLE_STATUSES = new Set([
+  "liked",
+  "to_apply",
+  "to_research",
+  "to_network",
+]);
+
+// Decide which Triage board column a deduped entry (carrying _status) belongs
+// to, given the set of real column keys. Returns null when the entry has no
+// place on the board:
+//   - DB status 'expiring' lives in the Today tab, never on the board;
+//   - unseen/passed and any unknown status have no column.
+// Gone EXPIRABLE_STATUSES collapse into 'expired'; everything else maps 1:1.
+export function triageColumnFor(entry, columnKeys) {
+  const status = entry && entry._status;
+  if (status === "expiring") return null;
+  if (EXPIRABLE_STATUSES.has(status) && isVacancyGone(entry)) return "expired";
+  return columnKeys && columnKeys.has(status) ? status : null;
 }
 
 export function hardReqHtml(g) {
