@@ -539,9 +539,13 @@ def _owner_trace_files() -> list[Path]:
     # All python under scripts/ + tests/ (minus this guard + caches).
     files.extend(_py_files(SCRIPTS, TESTS))
     # The whole .claude/ tree (commands, skills, configs — any text file).
+    # Skip .claude/worktrees/: live agent worktrees are local orchestration
+    # state, never shipped, and their .git link files carry absolute gitdir:
+    # paths by design — scanning them makes every guard run red while any
+    # agent is working (see the wave-1 execution notes in the refactor plan).
     if CLAUDE.exists():
         for p in CLAUDE.rglob("*"):
-            if p.is_file() and "__pycache__" not in p.parts:
+            if p.is_file() and "__pycache__" not in p.parts and "worktrees" not in p.parts:
                 files.append(p)
     # Public dashboard HTML.
     if DOCS_INDEX.exists():
