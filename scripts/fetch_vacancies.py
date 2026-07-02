@@ -561,11 +561,16 @@ def main():
             # trigger gone-detection — otherwise closed roles stay stale.
             if fetch_status in ("ok", "render_ok_zero") and strategy in GONE_DETECTION_STRATEGIES:
                 gone = archive_gone_vacancies(org_name, raw_jobs)
-                # Share = archived-as-gone / (gone + still-live-this-fetch). A
-                # truncated fetch returns few live jobs but archives many → high
+                # Share = vanished-from-source / (vanished + still-live-this-fetch).
+                # "Vanished" is archived PLUS protected-expiring (high-fit roles
+                # that flip to 'expiring' instead of archived, but still left the
+                # source) — otherwise a truncated fetch that happens to hit mostly
+                # protected roles would undercount and slip past the gate. A
+                # truncated fetch returns few live jobs but loses many → high
                 # share → the driver's publish gate blocks a corrupting publish.
+                protected = getattr(gone, "protected", 0)
                 fetch_stats["orgs"][org_name] = {
-                    "gone": int(gone or 0),
+                    "gone": int(gone or 0) + protected,
                     "live": len(raw_jobs),
                 }
 
