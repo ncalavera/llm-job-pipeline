@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import handler from "./vacancies.js";
+import handler, { computeETag, isNotModified } from "./vacancies.js";
 
 /** Minimal Vercel-style res double that records status, body, and headers. */
 function fakeRes() {
@@ -98,4 +98,39 @@ test("returns 500 (not a payload) when Supabase config is missing but auth is se
     assert.equal(res.statusCode, 500);
     assert.deepEqual(res.body, { error: "Server misconfigured" });
   });
+});
+
+// Conditional-GET (polling) — pure decision logic. The 200/304 branch itself
+// needs a live Supabase (queries dashboard_snapshot twice) and is covered by
+// manual/integration verification like the rest of the happy path above; what
+// IS unit-tested here is the version-token math the branch relies on.
+
+test("computeETag: quotes the updated_at timestamp as an opaque token", () => {
+  assert.equal(
+    computeETag("2026-07-02T10:15:30.123456+00:00"),
+    '"2026-07-02T10:15:30.123456+00:00"',
+  );
+});
+
+test("computeETag: null/undefined/empty updated_at -> no ETag", () => {
+  assert.equal(computeETag(null), null);
+  assert.equal(computeETag(undefined), null);
+  assert.equal(computeETag(""), null);
+});
+
+test("isNotModified: matching If-None-Match -> true (304, skip the payload query)", () => {
+  assert.equal(isNotModified('"abc"', '"abc"'), true);
+});
+
+test("isNotModified: stale If-None-Match -> false (snapshot changed since)", () => {
+  assert.equal(isNotModified('"old"', '"new"'), false);
+});
+
+test("isNotModified: missing If-None-Match (first poll) -> false", () => {
+  assert.equal(isNotModified(undefined, '"abc"'), false);
+  assert.equal(isNotModified(null, '"abc"'), false);
+});
+
+test("isNotModified: no etag available -> false (never claim unchanged with nothing to compare)", () => {
+  assert.equal(isNotModified('"abc"', null), false);
 });
