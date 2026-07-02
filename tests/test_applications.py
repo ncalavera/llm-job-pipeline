@@ -170,6 +170,47 @@ def test_record_application_is_idempotent_per_vacancy(tmp_path, monkeypatch):
     assert app["artifacts"]["cover_letter_path"] == "cl.md"
 
 
+def test_re_record_preserves_channel_and_applied_at_when_none(tmp_path, monkeypatch):
+    """Re-recording to add an artifact or move status (channel/applied_at not
+    passed) must NOT NULL the channel or reset applied_at to today -- the
+    docstring's overwrite-if-given / preserve-if-None contract."""
+    dal = _fresh_sqlite(monkeypatch, tmp_path / "db.sqlite")
+    import applications
+
+    importlib.reload(applications)
+    cid = _company(dal, "Northwind Aid Trust")
+    vid = _vacancy(dal, "Northwind Aid Trust", "Programme Officer")
+
+    applications.record_application(cid, vid, channel="site", applied_at="2026-01-10")
+    # Re-record with neither channel nor applied_at, only a status move + artifact.
+    applications.record_application(
+        cid, vid, status="interview", artifacts={"cover_letter_path": "cl.md"}
+    )
+
+    app = applications.get_for_vacancy(vid)
+    assert app["status"] == "interview"  # the explicitly-set field still moves
+    assert app["channel"] == "site"  # preserved, not clobbered to NULL
+    assert app["applied_at"] == "2026-01-10"  # preserved, not reset to today
+    assert app["artifacts"]["cover_letter_path"] == "cl.md"  # merged in
+
+
+def test_re_record_explicit_channel_and_date_override(tmp_path, monkeypatch):
+    """An explicitly passed channel / applied_at on a re-record still wins."""
+    dal = _fresh_sqlite(monkeypatch, tmp_path / "db.sqlite")
+    import applications
+
+    importlib.reload(applications)
+    cid = _company(dal, "Northwind Aid Trust")
+    vid = _vacancy(dal, "Northwind Aid Trust", "Programme Officer")
+
+    applications.record_application(cid, vid, channel="site", applied_at="2026-01-10")
+    applications.record_application(cid, vid, channel="referral", applied_at="2026-02-20")
+
+    app = applications.get_for_vacancy(vid)
+    assert app["channel"] == "referral"
+    assert app["applied_at"] == "2026-02-20"
+
+
 def test_attach_artifacts_merges(tmp_path, monkeypatch):
     dal = _fresh_sqlite(monkeypatch, tmp_path / "db.sqlite")
     import applications

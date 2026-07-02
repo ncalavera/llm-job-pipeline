@@ -163,6 +163,36 @@ def test_application_lifecycle_parity(backend):
     assert applications.get(app_id)["status"] == "offer"
 
 
+def test_application_re_record_preserves_fields_parity(backend):
+    """Re-recording without channel/applied_at preserves both (never NULLs the
+    channel, never resets applied_at to today); an explicit value still wins.
+    Identical on SQLite (TEXT) and Postgres (DATE), the adapter boundary aside."""
+    dal = backend
+    import applications
+
+    cid = dal.ensure_company("Northwind Aid Trust", status="active")
+    _commit(dal)
+    dal.save_vacancies("Northwind Aid Trust", "B", [_job("Programme Officer")])
+    _commit(dal)
+    vid = _by_title(dal, "Programme Officer")
+
+    applications.record_application(cid, vid, channel="site", applied_at="2026-01-10")
+    # Re-record to move status / add an artifact, passing neither field.
+    applications.record_application(
+        cid, vid, status="interview", artifacts={"cover_letter_path": "cl.md"}
+    )
+    app = applications.get_for_vacancy(vid)
+    assert app["status"] == "interview"
+    assert app["channel"] == "site"  # preserved, not clobbered to NULL
+    assert app["applied_at"] == "2026-01-10"  # preserved, not reset to today
+
+    # A later re-record with explicit values still overwrites.
+    applications.record_application(cid, vid, channel="referral", applied_at="2026-02-20")
+    app = applications.get_for_vacancy(vid)
+    assert app["channel"] == "referral"
+    assert app["applied_at"] == "2026-02-20"
+
+
 def test_company_evidence_research_write_parity(backend):
     """save_company_evidence lands research in the same table the WANT scorer
     reads, idempotent by (company_id, source, url), on both backends."""

@@ -220,13 +220,17 @@ def record_application(
     """Create (or update) the application for a vacancy and return its id.
 
     Idempotent per vacancy: one vacancy has at most one application, so if a row
-    already exists for ``vacancy_id`` it is UPDATED (new artifacts are MERGED
-    into the existing ones, non-None fields overwrite) rather than duplicated.
+    already exists for ``vacancy_id`` it is UPDATED rather than duplicated. On an
+    update, new artifacts are MERGED into the existing ones and every other field
+    is overwrite-if-given / preserve-if-None: passing ``channel``/``applied_at``/
+    ``notes`` as None leaves the stored value untouched, an explicit value wins.
     A ``vacancy_id`` of None (a hand-added application with no tracked vacancy)
     always inserts.
 
-    ``applied_at`` defaults to today's date unless the status is ``draft``.
-    Commits before returning; the write is durable across connections.
+    ``applied_at`` defaults to today's date on INSERT (unless the status is
+    ``draft``); on UPDATE it is preserved when None, so re-recording — to add an
+    artifact or move status — never resets it. Commits before returning; the
+    write is durable across connections.
     """
     if status not in VALID_STATUSES:
         raise ValueError(f"status must be one of {VALID_STATUSES}, got {status!r}")
@@ -235,8 +239,6 @@ def record_application(
             "application table missing — run `python3 scripts/migrate.py` first "
             "(migration 0010)."
         )
-    if applied_at is None and status != "draft":
-        applied_at = date.today().isoformat()
 
     from db_backend import Json
 
@@ -255,8 +257,9 @@ def record_application(
         if artifacts:
             merged.update(artifacts)
         cur.execute(
-            "UPDATE application SET channel = %s, status = %s, applied_at = %s, "
-            "artifacts = %s, notes = COALESCE(%s, notes), updated_at = now() "
+            "UPDATE application SET channel = COALESCE(%s, channel), status = %s, "
+            "applied_at = COALESCE(%s, applied_at), artifacts = %s, "
+            "notes = COALESCE(%s, notes), updated_at = now() "
             "WHERE id = %s",
             (channel, status, applied_at, Json(merged), notes, existing_id),
         )
@@ -264,6 +267,10 @@ def record_application(
         conn.commit()
         return existing_id
 
+    # INSERT: stamp today's date unless this is a draft (a draft has no
+    # submission date yet). On UPDATE the stored applied_at is preserved above.
+    if applied_at is None and status != "draft":
+        applied_at = date.today().isoformat()
     cur.execute(
         "INSERT INTO application "
         "(vacancy_id, company_id, channel, status, applied_at, artifacts, notes) "
