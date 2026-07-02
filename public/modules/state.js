@@ -144,7 +144,14 @@ export const state = {
   companySortAsc: false,
   statsSortCol: "count",
   statsSortAsc: false,
-  currentMode: "companies",
+  // The active LEAF view (render dispatch keys on this). Today is the default
+  // entry (DHA-348). The six-section chrome derives from it via nav.js.
+  currentMode: "today",
+  // Remembered Vacancies sub-view (Browse/Triage/Geo/Archive) so re-opening the
+  // Vacancies section returns to where the user was.
+  vacancyView: "catalog",
+  // Applications section status filter ("all" | applied | interview | …).
+  appStatusFilter: "all",
   companyStatuses: {},
   companyStatusesLoaded: false,
   companySubTab: "approved",
@@ -288,10 +295,20 @@ export function applySnapshot(payload) {
   replaceArrayContents(archivedGroups, payload.archived_groups || []);
   replaceArrayContents(triageReviews, payload.triage_reviews || []);
 
-  // No dedicated const export — today.js reads these straight off the
-  // global at render time, so keep window.VACANCY_DATA itself current too.
+  // No dedicated const export — today.js / boards.js / settings.js read these
+  // straight off the global at render time, so keep window.VACANCY_DATA itself
+  // current too (Boards catalogue, resolved Settings, Today's learning hint).
   window.VACANCY_DATA.enrichment_stats = payload.enrichment_stats;
   window.VACANCY_DATA.latency_metrics = payload.latency_metrics;
+  // Keep the last-good baked values when a polled payload predates these keys
+  // (old server, new client) — blanking a rendered section is worse than
+  // showing slightly stale read-only catalogue/settings data.
+  if (payload.boards_catalog !== undefined)
+    window.VACANCY_DATA.boards_catalog = payload.boards_catalog;
+  if (payload.settings !== undefined)
+    window.VACANCY_DATA.settings = payload.settings;
+  if (payload.learning !== undefined)
+    window.VACANCY_DATA.learning = payload.learning;
 
   groupsById.clear();
   for (const g of groups) {

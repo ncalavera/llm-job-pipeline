@@ -22,6 +22,9 @@
         <button class="mode-btn" id="modeToday" onclick="switchMode('today')">
           &#9728; <span data-i18n="tab_today">Today</span>
         </button>
+        <button class="mode-btn" id="modeVacancies" onclick="switchVacancies()">
+          &#9636; <span data-i18n="tab_vacancies">Vacancies</span>
+        </button>
         <button
           class="mode-btn"
           id="modeCompanies"
@@ -31,30 +34,20 @@
         </button>
         <button
           class="mode-btn"
-          id="modeCatalog"
-          onclick="switchMode('catalog')"
+          id="modeApplications"
+          onclick="switchMode('applications')"
         >
-          &#9636; <span data-i18n="tab_vacancies">Vacancies</span>
-        </button>
-        <button
-          class="mode-btn"
-          id="modePipeline"
-          onclick="switchMode('pipeline')"
-        >
-          &#9654; <span data-i18n="tab_triage">Triage</span>
-        </button>
-        <button class="mode-btn" id="modeStats" onclick="switchMode('stats')">
-          &#128205; <span data-i18n="tab_geo">Geo</span>
-        </button>
-        <button
-          class="mode-btn"
-          id="modeArchive"
-          onclick="switchMode('archive')"
-        >
-          &#128230; <span data-i18n="tab_archive">Archive</span>
+          &#9993; <span data-i18n="tab_applications">Applications</span>
         </button>
         <button class="mode-btn" id="modeBoards" onclick="switchMode('boards')">
           &#128202; <span data-i18n="tab_boards">Boards</span>
+        </button>
+        <button
+          class="mode-btn"
+          id="modeSettings"
+          onclick="switchMode('settings')"
+        >
+          &#9965; <span data-i18n="tab_settings">Settings</span>
         </button>
       </div>
       <div class="top-nav-right">
@@ -64,6 +57,41 @@
 
     <div class="container">
       <div id="syncIndicator" class="sync-indicator"></div>
+
+      <!-- === VACANCIES SUB-NAV (Browse / Triage / Geo / Archive) ===
+           Shown only while the Vacancies section is active. These four leaf
+           views used to be top-level tabs; they now live under Vacancies so the
+           top nav stays at six sections. -->
+      <div class="vacancy-sub-nav" id="vacancySubNav" style="display: none">
+        <button
+          class="vacancy-sub-tab"
+          id="vsubBrowse"
+          onclick="switchMode('catalog')"
+        >
+          <span data-i18n="vsub_browse">Browse</span>
+        </button>
+        <button
+          class="vacancy-sub-tab"
+          id="vsubTriage"
+          onclick="switchMode('pipeline')"
+        >
+          <span data-i18n="tab_triage">Triage</span>
+        </button>
+        <button
+          class="vacancy-sub-tab"
+          id="vsubGeo"
+          onclick="switchMode('stats')"
+        >
+          <span data-i18n="tab_geo">Geo</span>
+        </button>
+        <button
+          class="vacancy-sub-tab"
+          id="vsubArchive"
+          onclick="switchMode('archive')"
+        >
+          <span data-i18n="tab_archive">Archive</span>
+        </button>
+      </div>
 
       <!-- === TODAY MODE === -->
       <div class="today-section" id="todaySection"></div>
@@ -385,6 +413,20 @@
         <div class="boards-grid" id="boardsGrid"></div>
       </div>
       <!-- /boards-section -->
+
+      <!-- === APPLICATIONS MODE ===
+           Roles you've applied to, grouped by company. Rendered from the baked
+           payload (groups[].application) — status + channel + date + artifact
+           KEYS only, never private values. -->
+      <div class="applications-section" id="applicationsSection"></div>
+      <!-- /applications-section -->
+
+      <!-- === SETTINGS MODE ===
+           Read-only display of the RESOLVED dials baked by the generator
+           (volume, scoring model tier, thresholds), each with the one line to
+           change it. No editing UI. -->
+      <div class="settings-section" id="settingsSection"></div>
+      <!-- /settings-section -->
 
       <!-- === COMPANY PROFILE PAGE === -->
       <div class="company-profile-page" id="companyProfile"></div>

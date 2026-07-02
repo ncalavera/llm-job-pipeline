@@ -3910,3 +3910,310 @@ a.pipe-grp-role-title:hover {
   font-weight: 600;
   color: #6b7280;
 }
+
+/* =========================================================================
+   DHA-348 — six-section restructure: Vacancies sub-nav, Applications,
+   Settings, and the Boards catalogue additions.
+   ========================================================================= */
+
+/* Vacancies sub-navigation (Browse / Triage / Geo / Archive). Mirrors the
+   company sub-tabs look. Visibility is toggled inline (display:none) by app.js
+   when the Vacancies section is not active. */
+.vacancy-sub-nav {
+  display: flex;
+  gap: 0;
+  margin-bottom: 14px;
+  background: var(--card);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.vacancy-sub-tab {
+  flex: 1;
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  font-family: "Onest", sans-serif;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  border-bottom: 2px solid transparent;
+}
+.vacancy-sub-tab:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+.vacancy-sub-tab.active {
+  color: var(--coral);
+  border-bottom-color: var(--coral);
+  background: var(--coral-tint);
+}
+
+/* Today — pending-companies + learning-cycle nudges. */
+.today-pending-cta {
+  margin: 6px 0 0;
+}
+.today-learning-line {
+  color: var(--muted);
+  margin: 4px 0 0;
+}
+
+/* Applications section. */
+.applications-section,
+.settings-section {
+  display: none;
+}
+.applications-section.active,
+.settings-section.active {
+  display: block;
+  position: relative;
+}
+.apps-intro,
+.settings-intro {
+  margin: 8px 0 16px;
+}
+.apps-h2,
+.settings-h2 {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 4px;
+}
+.apps-sub,
+.settings-sub {
+  color: var(--muted);
+  margin: 0;
+}
+.apps-empty,
+.settings-empty {
+  color: var(--muted);
+  padding: 24px 0;
+  text-align: center;
+}
+.apps-empty-icon {
+  font-size: 32px;
+  margin-bottom: 8px;
+}
+.apps-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 16px;
+}
+.apps-chip {
+  padding: 5px 12px;
+  border: 1px solid var(--surface);
+  border-radius: 9999px;
+  background: var(--card);
+  font-family: "Onest", sans-serif;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+.apps-chip.active {
+  background: var(--coral-tint);
+  color: var(--coral);
+  border-color: var(--coral);
+}
+.apps-chip-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+.apps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.apps-company {
+  background: var(--card);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px;
+}
+.apps-company-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.apps-company-name {
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 8px;
+  border: none;
+  cursor: default;
+  font-family: "Onest", sans-serif;
+  font-size: var(--text-md);
+}
+.apps-company-link {
+  cursor: pointer;
+}
+.apps-company-count {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 9999px;
+  background: var(--surface);
+  color: var(--muted);
+}
+.apps-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.apps-table th,
+.apps-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--surface);
+  vertical-align: top;
+}
+.apps-table th {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.apps-td-role a {
+  color: #1e40af;
+  text-decoration: none;
+}
+.apps-td-role a:hover {
+  text-decoration: underline;
+}
+.apps-score {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 12px;
+}
+.apps-status {
+  display: inline-block;
+  text-transform: capitalize;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #ecfdf5;
+  color: #047857;
+  white-space: nowrap;
+}
+.apps-status-rejected,
+.apps-status-withdrawn {
+  background: #fef2f2;
+  color: #991b1b;
+}
+.apps-status-offer {
+  background: #fffbeb;
+  color: #b45309;
+}
+.apps-status-interview {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+.apps-status-draft {
+  background: #f3f4f6;
+  color: #4b5563;
+}
+.apps-artifacts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.apps-artifact {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: #f3f4f6;
+  color: #4b5563;
+}
+.apps-artifact-none {
+  color: var(--muted);
+}
+
+/* Settings section. */
+.settings-group {
+  margin-bottom: 24px;
+}
+.settings-group-title {
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 8px;
+}
+.settings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  background: var(--card);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.settings-table th,
+.settings-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--surface);
+}
+.settings-table th {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.settings-td-value code {
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 600;
+  color: var(--text);
+}
+.settings-td-source code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Boards catalogue additions (audience, enabled, id, hints). */
+.board-audience {
+  color: var(--muted);
+  max-width: 320px;
+}
+.board-id code {
+  font-size: 11px;
+  color: var(--muted);
+}
+.board-enabled {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.board-enabled-on {
+  background: #d1fae5;
+  color: #065f46;
+}
+.board-enabled-off {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+.boards-cli-hint {
+  margin: 0 0 8px;
+}
+.boards-cli-hint code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  color: #8a5a2a;
+  background: var(--surface);
+  padding: 4px 8px;
+  border-radius: 6px;
+  display: inline-block;
+}
+.boards-live-note {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0 0 12px;
+}
