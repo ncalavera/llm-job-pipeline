@@ -58,6 +58,12 @@ import { renderToday, todayAction } from "./modules/today.js";
 import { initStats, renderStats } from "./modules/stats.js";
 import { initArchive, renderArchive } from "./modules/archive.js";
 import { initBoards } from "./modules/boards.js";
+import {
+  initApplications,
+  renderApplications,
+} from "./modules/applications.js";
+import { initSettings, renderSettings } from "./modules/settings.js";
+import { sectionForMode, isVacancyView } from "./modules/nav.js";
 
 // ---------------------------------------------------------------------------
 // Initialize UI elements (toast, scroll-to-top)
@@ -124,6 +130,8 @@ on("render", () => {
   if (state.currentMode === "companies") renderCompanies();
   if (state.currentMode === "pipeline") renderPipeline();
   if (state.currentMode === "stats") renderStats();
+  if (state.currentMode === "applications") renderApplications();
+  if (state.currentMode === "settings") renderSettings();
   if (state.currentProfileSlug) renderProfileForSlug(state.currentProfileSlug);
 });
 
@@ -157,58 +165,61 @@ function switchMode(mode) {
   }
 
   state.currentMode = mode;
-  const todaySection = document.getElementById("todaySection");
-  const catalogSection = document.getElementById("catalogSection");
-  const companiesSection = document.getElementById("companiesSection");
-  const pipelineSection = document.getElementById("pipelineSection");
-  const statsSection = document.getElementById("statsSection");
-  const archiveSection = document.getElementById("archiveSection");
-  const boardsSection = document.getElementById("boardsSection");
+  // Remember the Vacancies sub-view so re-opening Vacancies returns to it.
+  if (isVacancyView(mode)) state.vacancyView = mode;
+  var section = sectionForMode(mode);
 
-  var modeTodayBtn = document.getElementById("modeToday");
-  if (modeTodayBtn) modeTodayBtn.classList.toggle("active", mode === "today");
-  document
-    .getElementById("modeCatalog")
-    .classList.toggle("active", mode === "catalog");
-  document
-    .getElementById("modeCompanies")
-    .classList.toggle("active", mode === "companies");
-  document
-    .getElementById("modePipeline")
-    .classList.toggle("active", mode === "pipeline");
-  var modeStatsBtn = document.getElementById("modeStats");
-  if (modeStatsBtn) modeStatsBtn.classList.toggle("active", mode === "stats");
-  var modeArchiveBtn = document.getElementById("modeArchive");
-  if (modeArchiveBtn)
-    modeArchiveBtn.classList.toggle("active", mode === "archive");
-  var modeBoardsBtn = document.getElementById("modeBoards");
-  if (modeBoardsBtn)
-    modeBoardsBtn.classList.toggle("active", mode === "boards");
-
-  if (todaySection) todaySection.classList.toggle("active", mode === "today");
-  catalogSection.classList.toggle("active", mode === "catalog");
-  companiesSection.classList.toggle("active", mode === "companies");
-  if (pipelineSection)
-    pipelineSection.classList.toggle("active", mode === "pipeline");
-  if (statsSection) statsSection.classList.toggle("active", mode === "stats");
-  if (archiveSection)
-    archiveSection.classList.toggle("active", mode === "archive");
-  if (boardsSection)
-    boardsSection.classList.toggle("active", mode === "boards");
-
-  // Lazy-load images for the activated section
+  // DOM section per leaf mode (each is a sibling under .container).
   var sectionMap = {
-    today: todaySection,
-    catalog: catalogSection,
-    companies: companiesSection,
-    pipeline: pipelineSection,
-    stats: statsSection,
-    archive: archiveSection,
-    boards: boardsSection,
+    today: document.getElementById("todaySection"),
+    catalog: document.getElementById("catalogSection"),
+    companies: document.getElementById("companiesSection"),
+    pipeline: document.getElementById("pipelineSection"),
+    stats: document.getElementById("statsSection"),
+    archive: document.getElementById("archiveSection"),
+    boards: document.getElementById("boardsSection"),
+    applications: document.getElementById("applicationsSection"),
+    settings: document.getElementById("settingsSection"),
   };
-  var section = sectionMap[mode];
-  if (section) {
-    section.querySelectorAll("img[data-src]").forEach(function (img) {
+  Object.keys(sectionMap).forEach(function (leaf) {
+    var el = sectionMap[leaf];
+    if (el) el.classList.toggle("active", leaf === mode);
+  });
+
+  // Top-nav active state follows the SECTION, not the leaf (so the whole
+  // Vacancies hub stays highlighted across its sub-views).
+  var navBtns = {
+    today: "modeToday",
+    vacancies: "modeVacancies",
+    companies: "modeCompanies",
+    applications: "modeApplications",
+    boards: "modeBoards",
+    settings: "modeSettings",
+  };
+  Object.keys(navBtns).forEach(function (sec) {
+    var btn = document.getElementById(navBtns[sec]);
+    if (btn) btn.classList.toggle("active", sec === section);
+  });
+
+  // Vacancies sub-nav: visible only inside the Vacancies section; the active
+  // sub-tab tracks the leaf.
+  var subNav = document.getElementById("vacancySubNav");
+  if (subNav) subNav.style.display = section === "vacancies" ? "" : "none";
+  var subBtns = {
+    catalog: "vsubBrowse",
+    pipeline: "vsubTriage",
+    stats: "vsubGeo",
+    archive: "vsubArchive",
+  };
+  Object.keys(subBtns).forEach(function (leaf) {
+    var btn = document.getElementById(subBtns[leaf]);
+    if (btn) btn.classList.toggle("active", leaf === mode);
+  });
+
+  // Lazy-load images for the activated section.
+  var activeSection = sectionMap[mode];
+  if (activeSection) {
+    activeSection.querySelectorAll("img[data-src]").forEach(function (img) {
       img.src = img.dataset.src;
       img.removeAttribute("data-src");
     });
@@ -228,7 +239,16 @@ function switchMode(mode) {
     initArchive();
   } else if (mode === "boards") {
     initBoards();
+  } else if (mode === "applications") {
+    initApplications();
+  } else if (mode === "settings") {
+    initSettings();
   }
+}
+
+// The Vacancies top-nav button opens the remembered sub-view (default Browse).
+function switchVacancies() {
+  switchMode(state.vacancyView || "catalog");
 }
 
 // ---------------------------------------------------------------------------
@@ -283,6 +303,7 @@ window.addEventListener("popstate", function () {
 // ---------------------------------------------------------------------------
 
 window.switchMode = switchMode;
+window.switchVacancies = switchVacancies;
 window.switchBasket = switchBasket;
 window.toggleCatalogLoc = toggleCatalogLoc;
 window.toggleCatalogSort = toggleCatalogSort;
@@ -306,6 +327,8 @@ window.closeCompanyProfile = closeCompanyProfile;
 window.renderPipeline = renderPipeline;
 window.renderToday = renderToday;
 window.renderArchive = renderArchive;
+window.renderApplications = renderApplications;
+window.renderSettings = renderSettings;
 
 // ---------------------------------------------------------------------------
 // Init sequence
