@@ -13,6 +13,9 @@ from .data_prep import (
     prepare_company_data,
     prepare_triage_data,
     prepare_archived_data,
+    prepare_boards_catalog,
+    prepare_settings_payload,
+    prepare_learning_hint,
 )
 
 from config import PUBLIC_DIR, resolve_canonical_name
@@ -186,6 +189,14 @@ def generate_dashboard(db: dict = None) -> None:
 
     # --- Build archived vacancies for Archive tab ---
     archived_groups = prepare_archived_data()
+
+    # --- Boards catalogue (Boards section) + resolved dials (Settings section) ---
+    # Both are read-only, baked so the sections render in simple mode without the
+    # live API. Settings carries RESOLVED values only (no profile prose/secrets).
+    boards_catalog = prepare_boards_catalog()
+    settings_payload = prepare_settings_payload()
+    # A light "verdicts pending" flag for the Today section (deterministic, no LLM).
+    learning_hint = prepare_learning_hint()
     for g in archived_groups:
         canonical = resolve_canonical_name(g["org"])
         g["calculated_tier"] = tier_lookup.get(canonical)
@@ -225,6 +236,10 @@ def generate_dashboard(db: dict = None) -> None:
         "companies": companies,
         "triage_reviews": triage_reviews,
         "archived_groups": archived_groups,
+        # Read-only catalogue + resolved dials for the Boards / Settings sections.
+        "boards_catalog": boards_catalog,
+        "settings": settings_payload,
+        "learning": learning_hint,
     }
 
     # --- Persist the payload to the active sink ---

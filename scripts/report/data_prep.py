@@ -511,9 +511,7 @@ def prepare_report_data(db: dict = None) -> dict:
     # --- Build grouped list (each vacancy is already unique by org+title) ---
     strong_model = scoring_model()
     apps_by_vac = applications.applications_by_vacancy()
-    groups = [
-        _build_group(v, org_colors, company_hq, strong_model, apps_by_vac) for v in vacancies
-    ]
+    groups = [_build_group(v, org_colors, company_hq, strong_model, apps_by_vac) for v in vacancies]
 
     # --- Stats ---
     total_postings = len(vacancies)
@@ -938,3 +936,183 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
     _TIER_ORDER = {"S": 0, "A": 1, "B": 2, "C": 3}
     companies.sort(key=lambda c: (_TIER_ORDER.get(c["calculated_tier"], 4), c["name"]))
     return companies
+
+
+# ---------------------------------------------------------------------------
+# Boards catalogue — for the dashboard's Boards section (baked, works offline).
+# ---------------------------------------------------------------------------
+
+
+def prepare_boards_catalog() -> list:
+    """The job-board catalogue for the dashboard's Boards section.
+
+    Every board defined in ``config/defaults.toml [boards.*]`` with its neutral
+    ``audience`` description, source strategy, tier, TTL, url, whether it is
+    persisted as ENABLED (``board.enabled``, PR #39), and its ``last_fetched``
+    when the board table has one. This is baked into the payload so the Boards
+    section renders its full read-only catalogue (audience + enabled state) in
+    simple mode too — the live ``/api/board-statuses`` endpoint only adds the
+    vacancy counts on top. Never raises: a missing board table (fork on an old
+    schema) degrades to ``enabled=False`` and no ``last_fetched``.
+    """
+    import settings
+
+    boards_cfg = settings.boards()
+
+    enabled_ids: set[str] = set()
+    last_fetched: dict[str, str] = {}
+    try:
+        import database_supabase as _dal
+
+        enabled_ids = set(_dal.get_enabled_boards())
+    except Exception:
+        enabled_ids = set()
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT id, last_fetched FROM board")
+        for bid, lf in cur.fetchall():
+            if lf:
+                last_fetched[bid] = lf.isoformat() if hasattr(lf, "isoformat") else str(lf)
+        cur.close()
+    except Exception:
+        last_fetched = {}
+
+    catalog = []
+    for board_id in sorted(boards_cfg):
+        cfg = boards_cfg[board_id]
+        catalog.append(
+            {
+                "id": board_id,
+                "name": cfg.get("name", board_id),
+                "audience": cfg.get("audience", ""),
+                "strategy": cfg.get("strategy", ""),
+                "tier": cfg.get("tier", ""),
+                "ttl_days": cfg.get("ttl_days"),
+                "url": cfg.get("url", ""),
+                "enabled": board_id in enabled_ids,
+                "last_fetched": last_fetched.get(board_id, ""),
+            }
+        )
+    return catalog
+
+
+# ---------------------------------------------------------------------------
+# Settings — RESOLVED config dials for the dashboard's Settings section.
+# ---------------------------------------------------------------------------
+
+
+def prepare_settings_payload() -> dict:
+    """Resolved, read-only dials for the dashboard's Settings section.
+
+    Only RESOLVED VALUES leave here — never personal profile prose, secrets or
+    artifact values (guard tests enforce that). Each row carries a neutral
+    ``source`` pointer (a file + section) so the user knows the one line to edit.
+    Grouped into volume / scoring / thresholds. Never raises: every value falls
+    back to its neutral default.
+    """
+    import settings as _settings
+    import scoring_settings
+
+    def _safe(fn, fallback):
+        try:
+            return fn()
+        except Exception:
+            return fallback
+
+    vol = _safe(_settings.volume, {})
+    th = _safe(_settings.thresholds, {})
+
+    def _row(key, value, source):
+        return {"key": key, "value": value, "source": source}
+
+    volume_rows = [
+        _row(
+            "set_max_active_companies",
+            vol.get("max_active_companies"),
+            "config/defaults.toml → [volume] max_active_companies",
+        ),
+        _row(
+            "set_daily_scoring_limit",
+            vol.get("daily_scoring_limit"),
+            "config/defaults.toml → [volume] daily_scoring_limit",
+        ),
+        _row(
+            "set_digest_size",
+            vol.get("digest_size"),
+            "config/defaults.toml → [volume] digest_size",
+        ),
+    ]
+
+    scoring_rows = [
+        _row(
+            "set_scoring_model",
+            _safe(scoring_settings.scoring_model, "sonnet"),
+            "config/user_profile.md → ## VOLUME scoring_model (else default sonnet)",
+        ),
+        _row(
+            "set_screen_model",
+            _safe(scoring_settings.screen_model, "haiku"),
+            "config/user_profile.md → ## VOLUME screen_model (else default haiku)",
+        ),
+        _row(
+            "set_escalate_threshold",
+            _safe(scoring_settings.escalation_threshold, 50),
+            "config/user_profile.md → ## VOLUME escalate_threshold (else default 50)",
+        ),
+        _row(
+            "set_max_per_run",
+            _safe(scoring_settings.max_per_run, 150),
+            "config/user_profile.md → ## VOLUME max_per_run (else [volume] daily_scoring_limit)",
+        ),
+    ]
+
+    threshold_rows = [
+        _row(
+            "set_llm_score_threshold",
+            th.get("llm_score_threshold"),
+            "config/defaults.toml → [thresholds] llm_score_threshold",
+        ),
+        _row("set_tier_s", th.get("tier_s"), "config/defaults.toml → [thresholds] tier_s"),
+        _row("set_tier_a", th.get("tier_a"), "config/defaults.toml → [thresholds] tier_a"),
+        _row("set_tier_b", th.get("tier_b"), "config/defaults.toml → [thresholds] tier_b"),
+        _row("set_tier_c", th.get("tier_c"), "config/defaults.toml → [thresholds] tier_c"),
+    ]
+
+    return {
+        "groups": [
+            {"key": "settings_grp_volume", "rows": volume_rows},
+            {"key": "settings_grp_scoring", "rows": scoring_rows},
+            {"key": "settings_grp_thresholds", "rows": threshold_rows},
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Learning-cycle hint — a light "there are verdicts to review" flag for Today.
+# ---------------------------------------------------------------------------
+
+
+def prepare_learning_hint() -> dict | None:
+    """A tiny, deterministic hint for the Today section: is a learning cycle
+    pending? Reuses ``learning.build_review()`` (no LLM, the same seam the
+    ``/jobs-new`` gate calls) and keeps only the counts — never the proposal
+    text. Returns ``None`` (no hint shown) when unavailable or nothing pending.
+    """
+    try:
+        import learning
+
+        review = learning.build_review()
+    except Exception:
+        return None
+    if not review or not review.get("has_content"):
+        return None
+    props = review.get("proposals", {}) or {}
+    proposal_count = len(props.get("filter_words", []) or []) + len(
+        props.get("factor_moves", []) or []
+    )
+    return {
+        "pending": True,
+        "verdicts": int(review.get("verdicts_since_last_review", 0) or 0),
+        "proposals": proposal_count,
+    }
