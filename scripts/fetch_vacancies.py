@@ -663,6 +663,7 @@ def main():
                 "workday_api",
                 "successfactors",
                 "adp_json",
+                "smartrecruiters",
             ):
                 print(f"  [{org_name}] Skipped (--free-only mode)")
                 continue

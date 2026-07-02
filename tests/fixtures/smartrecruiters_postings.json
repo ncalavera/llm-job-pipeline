@@ -1,0 +1,67 @@
+{
+  "offset": 0,
+  "limit": 100,
+  "totalFound": 3,
+  "content": [
+    {
+      "id": "744000135044794",
+      "name": "Partnership for Battery Action, Research and Methods Lead",
+      "company": {
+        "identifier": "GlobalDevelopmentIncubator",
+        "name": "Global Development Incubator"
+      },
+      "location": {
+        "city": "Washington",
+        "region": "DC",
+        "country": "us",
+        "remote": true,
+        "hybrid": false,
+        "fullLocation": "Washington, DC, United States"
+      },
+      "department": {},
+      "function": { "id": "science", "label": "Science" },
+      "typeOfEmployment": { "id": "contract", "label": "Contract" },
+      "releasedDate": "2026-06-30T14:50:27.982Z"
+    },
+    {
+      "id": "744000129560010",
+      "name": "Deputy Executive Director, Institute for Law & Organizing",
+      "company": {
+        "identifier": "GlobalDevelopmentIncubator",
+        "name": "Global Development Incubator"
+      },
+      "location": {
+        "city": "Detroit",
+        "region": "MI",
+        "country": "us",
+        "remote": false,
+        "hybrid": true,
+        "fullLocation": "Detroit, MI, United States"
+      },
+      "department": {},
+      "function": { "id": "legal", "label": "Legal" },
+      "typeOfEmployment": { "id": "permanent", "label": "Full-time" },
+      "releasedDate": "2026-06-01T17:45:23.154Z"
+    },
+    {
+      "id": "744000088841155",
+      "name": "Chief Executive Officer – British Columbia Forestry Investment Platform",
+      "company": {
+        "identifier": "GlobalDevelopmentIncubator",
+        "name": "Global Development Incubator"
+      },
+      "location": {
+        "city": "Vancouver",
+        "region": "BC",
+        "country": "ca",
+        "remote": false,
+        "hybrid": false,
+        "fullLocation": "Vancouver, BC, Canada"
+      },
+      "department": { "id": "executive", "label": "Executive" },
+      "function": { "id": "general_management", "label": "General Management" },
+      "typeOfEmployment": { "id": "permanent", "label": "Full-time" },
+      "releasedDate": "2026-05-15T09:10:00.000Z"
+    }
+  ]
+}

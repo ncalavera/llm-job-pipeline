@@ -1,23 +1,51 @@
 """Teamtailor RSS feed (free, no auth)."""
 
 import hashlib
+import urllib.parse
 
 from fetchers import http
 from fetchers.html_utils import _html_to_snippet, _html_to_text
+from fetchers.http import FetchError
 from fetchers.registry import company_fetcher, register_company
 
 
+def _teamtailor_hosts(slug: str, careers_url: str = "") -> list[str]:
+    """Candidate RSS hosts, custom domain first: some Teamtailor customers
+    (e.g. Chatham House) publish their feed on a custom career-site domain
+    (``careers.chathamhouse.org``) rather than ``<slug>.teamtailor.com``.
+    Falls back to the default host so unconfigured companies are unaffected.
+    """
+    default = f"{slug}.teamtailor.com"
+    hosts = []
+    if careers_url:
+        netloc = urllib.parse.urlparse(careers_url).netloc
+        if netloc and netloc != default:
+            hosts.append(netloc)
+    hosts.append(default)
+    return hosts
+
+
 @company_fetcher
-def fetch_teamtailor_rss(org_name: str, slug: str) -> list[dict]:
+def fetch_teamtailor_rss(org_name: str, slug: str, careers_url: str = "") -> list[dict]:
     """Fetch jobs from Teamtailor RSS feed (free, no auth).
-    Feed URL: https://{slug}.teamtailor.com/jobs.rss
+    Feed URL: https://{host}/jobs.rss, where {host} is either a configured
+    custom domain (``careers_url``) or the default ``{slug}.teamtailor.com``.
     Returns full HTML descriptions, locations, departments.
     """
     import xml.etree.ElementTree as ET
 
-    url = f"https://{slug}.teamtailor.com/jobs.rss"
-    print(f"  [{org_name}] Teamtailor RSS: {url}")
-    resp = http.get(url, timeout=15)
+    hosts = _teamtailor_hosts(slug, careers_url)
+    resp = None
+    for i, host in enumerate(hosts):
+        url = f"https://{host}/jobs.rss"
+        print(f"  [{org_name}] Teamtailor RSS: {url}")
+        try:
+            resp = http.get(url, timeout=15)
+            break
+        except FetchError as exc:
+            if i == len(hosts) - 1:
+                raise
+            print(f"  [{org_name}] {host} failed ({exc.reason}); trying next host")
 
     root = ET.fromstring(resp.text)
     # RSS 2.0: channel > item
@@ -91,4 +119,4 @@ def fetch_teamtailor_rss(org_name: str, slug: str) -> list[dict]:
 
 @register_company("teamtailor_rss")
 def _entry(org_name: str, config: dict) -> list[dict]:
-    return fetch_teamtailor_rss(org_name, config["slug"])
+    return fetch_teamtailor_rss(org_name, config["slug"], careers_url=config.get("careers_url", ""))

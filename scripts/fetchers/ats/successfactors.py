@@ -4,10 +4,14 @@ import hashlib
 import html as html_module
 import re
 import urllib.parse
+import xml.etree.ElementTree as ET
 
 from fetchers import http
+from fetchers.html_utils import _html_to_snippet, _html_to_text
 from fetchers.http import FetchError, _LOCAL_UA
 from fetchers.registry import company_fetcher, register_company
+
+_SITEMAP_NS = {"sm": "http://www.google.com/schemas/sitemap/0.9"}
 
 
 def _sf_base_url(config: dict) -> str:
@@ -79,22 +83,125 @@ def _parse_successfactors_tiles(html: str, base_url: str, org_name: str) -> list
     return jobs
 
 
+def _sf_sitemap_job_urls(base: str) -> list[str]:
+    """Return the job URLs listed in the host's SEO ``sitemap.xml``.
+
+    Some SuccessFactors hosts serve a live, auto-generated sitemap even when
+    their Career Site Builder ``tile-search-results`` endpoint returns an
+    empty shell — e.g. ILO, whose actual candidate-facing backend is the
+    classic Recruiting (RCM) UI rather than CSB. The sitemap stays accurate
+    because it is generated straight from the same job-requisition data.
+    """
+    resp = http.get(f"{base}/sitemap.xml", headers={"User-Agent": _LOCAL_UA}, timeout=20)
+    try:
+        root = ET.fromstring(resp.text)
+    except ET.ParseError:
+        return []
+    return [
+        loc.strip()
+        for el in root.findall("sm:url", _SITEMAP_NS)
+        if (loc := (el.findtext("sm:loc", namespaces=_SITEMAP_NS) or "").strip())
+    ]
+
+
+def _sf_job_detail(url: str) -> dict | None:
+    """Fetch one SF RCM job detail page and pull it via the page's
+    schema.org ``JobPosting`` microdata (``itemprop="title"``/``"description"``).
+
+    The description is split across several ``itemprop="description"`` spans
+    (one per content block: header, body, conditions of employment, …), all
+    nested inside a single ``<div class="job">`` container — so instead of
+    chasing each span's own boundary, this grabs that container's full
+    (depth-balanced) inner HTML, strips embedded ``<style>``/``<script>``
+    blocks, and flattens the rest to text.
+    """
+    try:
+        resp = http.get(url, headers={"User-Agent": _LOCAL_UA}, timeout=20)
+    except FetchError:
+        return None
+    page = resp.text
+
+    m_title = re.search(r'itemprop="title"[^>]*>\s*(.*?)\s*<', page, re.DOTALL)
+    title = html_module.unescape(m_title.group(1)).strip() if m_title else ""
+    if not title:
+        return None
+
+    full_desc = ""
+    m_job_div = re.search(r'<div class="job">', page)
+    if m_job_div:
+        inner = _extract_balanced_div(page, m_job_div.end())
+        inner = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", inner)
+        full_desc = _html_to_text(inner)
+
+    m_id = re.search(r"/(\d+)/?$", url)
+    external_id = m_id.group(1) if m_id else hashlib.md5(url.encode()).hexdigest()[:12]
+
+    return {
+        "title": title,
+        "location": "",
+        "department": "",
+        "url": url,
+        "external_id": external_id,
+        "snippet": _html_to_snippet(full_desc) if full_desc else "",
+        "full_description": full_desc,
+    }
+
+
+def _extract_balanced_div(html: str, content_start: int) -> str:
+    """Return the inner HTML of a ``<div ...>`` whose opening tag ends at
+    ``content_start``, up to its matching closing ``</div>`` (a simple
+    depth counter — good enough for well-formed adapter-controlled HTML,
+    no need for a full parser dependency)."""
+    depth = 1
+    for m in re.finditer(r"<(/?)div\b", html[content_start:], re.IGNORECASE):
+        depth += -1 if m.group(1) else 1
+        if depth == 0:
+            return html[content_start : content_start + m.start()]
+    return html[content_start:]
+
+
+def _fetch_successfactors_sitemap(org_name: str, base: str) -> list[dict]:
+    """Backend variant for SF hosts whose CSB tile-search returns nothing:
+    walk the SEO sitemap.xml and fetch each job's detail page directly."""
+    urls = _sf_sitemap_job_urls(base)
+    jobs: list[dict] = []
+    for url in urls:
+        job = _sf_job_detail(url)
+        if job:
+            jobs.append(job)
+    return jobs
+
+
 @company_fetcher
 def fetch_successfactors(org_name: str, config: dict) -> list[dict]:
-    """Fetch jobs from a SAP SuccessFactors Career Site Builder tile feed (free).
+    """Fetch jobs from a SAP SuccessFactors company career site (free).
 
-    Endpoint: ``<base>/tile-search-results/?q=&startrow=<N>`` paginated by
-    ``startrow`` (25 tiles/page). ``base`` comes from config via
-    :func:`_sf_base_url`, so both the ``createyourowncareer.com/<Site>`` host
-    and backend variants (ILO's ``jobs.ilo.org`` / ``career5.successfactors.eu``)
-    are supported. The tile endpoint returns an empty shell without a session
-    cookie, so we GET the search page first to establish one. Unblocks ILO,
-    reframe[Tech], Bertelsmann Stiftung, Robert Bosch (WS3/U4).
+    Two backends, selected by ``config["sf_backend"]``:
+
+    * default ("csb") — Career Site Builder tile feed at
+      ``<base>/tile-search-results/?q=&startrow=<N>``, paginated by
+      ``startrow`` (25 tiles/page). The tile endpoint returns an empty shell
+      without a session cookie, so we GET the search page first to establish
+      one. Unblocks reframe[Tech], Bertelsmann Stiftung, Robert Bosch (WS3/U4).
+    * "sitemap" — for hosts where the CSB tile feed is a dead end (e.g. ILO,
+      whose live backend is the classic RCM UI, not CSB): walk
+      ``<base>/sitemap.xml`` and fetch each job detail page directly. See
+      :func:`_fetch_successfactors_sitemap`.
+
+    ``base`` comes from config via :func:`_sf_base_url`, so both the
+    ``createyourowncareer.com/<Site>`` host and a directly configured
+    ``config["url"]`` backend host are supported either way.
     """
     base = _sf_base_url(config)
     if not base:
         print(f"  [{org_name}] SuccessFactors: no url/ats_slug configured")
         return []
+
+    if config.get("sf_backend") == "sitemap":
+        print(f"  [{org_name}] SuccessFactors (sitemap backend): {base}/sitemap.xml")
+        jobs = _fetch_successfactors_sitemap(org_name, base)
+        print(f"  [{org_name}] Found {len(jobs)} vacancies")
+        return jobs
 
     search_url = f"{base}/search/"
     tile_url = f"{base}/tile-search-results/"

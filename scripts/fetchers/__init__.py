@@ -88,11 +88,14 @@ from fetchers.ats.successfactors import (
     fetch_successfactors,
     _parse_successfactors_tiles,
     _sf_base_url,
+    _sf_sitemap_job_urls,
+    _sf_job_detail,
 )
 from fetchers.ats.adp import fetch_adp_json, _adp_cid, _adp_location, _adp_job_url, _adp_snippet
 from fetchers.ats.amazon import fetch_amazon_jobs
 from fetchers.ats.apple import fetch_apple_jobs
 from fetchers.ats.unops import fetch_unops_widget, _fetch_unops_job_detail
+from fetchers.ats.smartrecruiters import fetch_smartrecruiters, _sr_location, _sr_department
 from fetchers.boards.algolia import fetch_algolia_board
 from fetchers.boards.firecrawl_board import fetch_firecrawl_board
 from fetchers.boards.reliefweb import fetch_reliefweb_board
