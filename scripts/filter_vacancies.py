@@ -1313,7 +1313,7 @@ def main():
     print(f"  Ready to score: {stats['ready_count']}", file=sys.stderr, flush=True)
     print("--- End Filter Summary ---\n", file=sys.stderr, flush=True)
 
-    report_path = Path("REPORT-filter.html")
+    report_path = PROJECT_ROOT / "reports" / "REPORT-filter.html"
     generate_html_report(categories, stats, report_path)
 
     # Collect all delete IDs by category

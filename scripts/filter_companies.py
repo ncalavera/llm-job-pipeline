@@ -281,7 +281,9 @@ def main():
         apply_deletions(classified)
     else:
         report = generate_report(classified)
-        report_path = PROJECT_ROOT / "REPORT-company-filter.md"
+        reports_dir = PROJECT_ROOT / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        report_path = reports_dir / "REPORT-company-filter.md"
         report_path.write_text(report, encoding="utf-8")
         print(report)
         print(f"\nReport saved: {report_path.name}")

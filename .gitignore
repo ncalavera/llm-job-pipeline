@@ -55,6 +55,7 @@ node_modules/
 .next/
 
 # Local dashboards & reports
+reports/
 REPORT-*.html
 REPORT-*.md
 *.local.json

@@ -738,7 +738,9 @@ def main():
         desc_quality = audit_description_quality(sample_size=30)
 
     report = generate_report(audit_result, desc_quality=desc_quality)
-    report_path = PROJECT_ROOT / "REPORT-company-audit.md"
+    reports_dir = PROJECT_ROOT / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    report_path = reports_dir / "REPORT-company-audit.md"
     report_path.write_text(report, encoding="utf-8")
 
     stats = audit_result["stats"]
