@@ -93,3 +93,11 @@ benchmarked with Claude models; other models work but calibration may differ.
 - Run `python3 -m pytest tests/ -q` after changing pipeline code — the suite
   runs offline. (`pytest` and `pydantic` are not in the easy-mode install; add
   them with `pip install pytest pydantic` to run the full suite.)
+- `docs/solutions/` — local knowledge store (gitignored, not in the
+  public repo): documented solutions to past problems (bugs, best
+  practices, patterns), organized by category with YAML frontmatter
+  (`module`, `tags`, `problem_type`). Relevant when implementing or
+  debugging in documented areas.
+- `CONCEPTS.md` — shared domain vocabulary (entities, named processes,
+  status concepts). Relevant when orienting to the codebase or
+  discussing domain concepts.
