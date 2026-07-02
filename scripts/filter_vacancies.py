@@ -54,6 +54,7 @@ from database_supabase import (
     load_vacancies,
     delete_vacancies as db_delete_vacancies,
     get_conn,
+    make_normalized_id,
     update_vacancy_fields,
     get_archived_hashes,
     record_archived_hashes,
@@ -1083,9 +1084,17 @@ def delete_vacancies_filtered(ids_to_delete: list[str]) -> Path:
             default=str,
         )
 
-    # Record archived hashes for dedup (prevents re-fetch → re-score → re-archive)
+    # Record archived hashes for dedup (prevents re-fetch → re-score → re-archive).
+    # Tombstone the normalized key too so a renamed variant stays buried
+    # (rows carry c.canonical_name AS org from the delete-mode join above).
     archive_entries = [
-        (v.get("dedup_hash"), "filter_deleted") for v in found.values() if v.get("dedup_hash")
+        (
+            v.get("dedup_hash"),
+            "filter_deleted",
+            make_normalized_id(v.get("org", "") or "", v.get("title", "") or ""),
+        )
+        for v in found.values()
+        if v.get("dedup_hash")
     ]
     record_archived_hashes(archive_entries)
 
