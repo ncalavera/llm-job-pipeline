@@ -161,18 +161,35 @@ exclude_title_keywords: (none)
 Cost/volume knobs tied to YOUR plan tier. The scoring model is the main cost
 dial; the per-run cap is a spike-day safety net.
 
-- scoring_model: which model tier scores each vacancy — haiku | sonnet | opus.
-  Scoring is one LLM request per vacancy and runs inside your coding-agent plan,
-  so match the model to your plan: a budget plan (~$20) → sonnet; a bigger plan
-  (~$100-200) → opus. Empty/omitted → sonnet (the cheap default).
+Scoring runs in two passes: a cheap model SCREENS every new vacancy, then the
+strong model RE-SCORES only the finalists that clear a floor. Everything else
+keeps its cheap score, sorted out of view.
+
+- scoring_model: the STRONG model tier that scores the finalists — haiku | sonnet
+  | opus. This is the main cost dial: match it to your plan — a budget plan (~$20)
+  → sonnet; a bigger plan (~$100-200) → opus. Empty/omitted → sonnet (the cheap
+  default).
+- screen_model: the CHEAP model that gives every new vacancy a fast first score —
+  haiku | sonnet | opus. Only roles that clear escalate_threshold are re-scored by
+  scoring_model. Empty/omitted → haiku (the cheapest tier). Clamped so it can
+  never cost more than scoring_model (a screen as dear as the final pass would
+  erase the saving).
+- escalate_threshold: the screen-score floor (0-100) at/above which a role is
+  escalated to the strong model. Calibrated so the cheap screen drops none of the
+  roles the strong model would surface; the default (50) also diverts the weak
+  majority. Lower it for more caution (more escalations, less saving); raise it to
+  save more. Empty/omitted or out of range → 50.
 - max_per_run: the most vacancies (and candidate companies) to score in one run
   when you don't pass --limit. A quiet day scores 20-30; this cap keeps a burst
   day (hundreds of new roles) from silently draining your plan — the overflow is
-  offered on the next run, and the run prints "scored X of Y". Empty/omitted or a
-  non-positive value → 150.
+  offered on the next run, and the run prints "scored X of Y". In the two-pass
+  flow the cap bounds the SCREEN set (the strong pass is a subset). Empty/omitted
+  or a non-positive value → 150.
 -->
 
 scoring_model: sonnet
+screen_model: haiku
+escalate_threshold: 50
 max_per_run: 150
 
 ## SHORT_SUMMARY_INSTRUCTION

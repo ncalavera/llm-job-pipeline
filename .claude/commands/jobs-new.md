@@ -113,24 +113,33 @@ python3 scripts/score_companies.py --save < chunk.json   # wrap each result unde
 Scored companies land in **Companies → Pending** for approval (deeper review in
 `/jobs-review companies --status candidate`). Then `--resume`.
 
-### Vacancy scoring (the scoring contract)
-The driver prints per-vacancy payloads to
-`vacancies/score_vacancies_payload.json`, already capped for the day. For
-**each** vacancy, run **one** subagent with the model from your profile's
-`[## VOLUME] scoring_model` (Sonnet on a budget plan, Opus on a bigger one) and
-the payload's `system_prompt` + `user_msg`. **Critical: 1 vacancy = 1 subagent**
-— batching over-scores by +20–50. At most **5 subagents at a time**. Save
-incrementally with the flat fields (`member_ids`, `score`, `reasoning`, `tags`,
-`hard_requirements`, `short_summary`):
+### Vacancy scoring (the scoring contract — two passes)
+Scoring runs in **two passes** to cut cost: a cheap model screens every new role,
+then the strong model re-scores only the finalists. The driver walks you through
+two gates in order, each printing per-vacancy payloads to
+`vacancies/score_vacancies_payload.json` (already capped for the day). For **each**
+vacancy in either gate, run **one** subagent with the payload's `system_prompt` +
+`user_msg`. **Critical: 1 vacancy = 1 subagent** — batching over-scores by +20–50.
+At most **5 subagents at a time**. Save incrementally with the flat fields
+(`member_ids`, `score`, `reasoning`, `tags`, `hard_requirements`, `short_summary`):
 
 ```bash
 python3 scripts/score_vacancies.py --save < chunk.json
 ```
 
-Then `--resume`; the driver re-checks and re-prompts only for anything still
-unscored. Pure-fit scoring: the prompt judges role fit only — geography/visa
-were handled in the filter stage, so a great role in the wrong place still
-scores high.
+1. **Screen** — score every vacancy with `[## VOLUME] screen_model` (default
+   Haiku, the cheapest tier). Fast, cheap first pass.
+2. **Escalate** — the driver keeps only the roles whose screen score clears
+   `[## VOLUME] escalate_threshold` (default 50) and re-scores just those with the
+   strong `scoring_model` (Sonnet on a budget plan, Opus on a bigger one).
+   Everything below the floor keeps its cheap score, sorted out of view.
+
+The gate text names the model and pass for you; use exactly the one it prints (do
+not "upgrade" the screen to the strong model — that erases the saving). After each
+gate, `--resume`; the driver re-checks and re-prompts only for anything still
+unscored, then reports "screened N, escalated M, kept-cheap K". Pure-fit scoring:
+the prompt judges role fit only — geography/visa were handled in the filter stage,
+so a great role in the wrong place still scores high.
 
 ### Verdicts (quick daily triage)
 List the freshly scored, still-unseen vacancies (highest score first) and, for

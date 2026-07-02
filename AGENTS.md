@@ -49,9 +49,9 @@ the scorer. The loop:
    `user_msg` and `member_ids`.
 2. For EACH vacancy independently (never batch several into one request —
    batching causes systematic over-scoring), evaluate `system_prompt` +
-   `user_msg` with your strongest available model and produce the JSON object
-   the prompt requests (score, reasoning, tags, hard_requirements,
-   short_summary).
+   `user_msg` with the model tier from your profile's `## VOLUME` settings and
+   produce the JSON object the prompt requests (score, reasoning, tags,
+   hard_requirements, short_summary).
 3. Collect results as a JSON array and pipe it to
    `python3 scripts/score_vacancies.py --save` (stdin). Use `member_ids` from
    step 1 to address vacancies — not your own ids.
@@ -61,6 +61,17 @@ the scorer. The loop:
 Claude Code does this with one subagent per vacancy; Codex and others should
 replicate the same one-vacancy-per-request discipline. Scoring quality was
 benchmarked with Claude models; other models work but calibration may differ.
+
+**Two-pass scoring (the daily driver).** To spend the strong model only where it
+matters, the daily driver scores in two passes: a cheap `screen_model` (default
+Haiku) scores every new vacancy, then the strong `scoring_model` re-scores only
+the finalists whose screen score clears `escalate_threshold` (default 50);
+everything below the floor keeps its cheap score. Both passes keep the
+one-vacancy-per-subagent rule. Because model calibration differs, the cheap
+screen uses its own floor, not score parity: the floor was tuned against the
+golden set so the screen drops none of the roles the strong model would surface.
+The direct `score_vacancies.py --local` contract above is the single-pass
+fallback for agents not driven by the daily runner.
 
 ## Ground rules
 
