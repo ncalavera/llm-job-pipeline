@@ -69,6 +69,19 @@ foundation strategy roles.
 
 ## EXCLUDE_PATTERNS
 
+<!--
+FACTOR STRENGTH: penalty. Every taste factor you declare has a STRENGTH —
+filter (blocks a role before scoring), penalty (subtracts points during
+scoring), or note (display-only, never touches the score). The same factor is a
+filter for one person and a penalty for another; choose the strength that fits.
+This section holds your PENALTY factors: they are fed to the scorer and lower
+the score, but a role can still surface if it is strong on everything else.
+Hard blocks go in HARD_FILTERS below; display-only reminders go in NOTES.
+The learning loop may PROPOSE moving a factor between strengths (e.g. a penalty
+that never once collided with a role you liked → a hard filter); it never moves
+one itself, and every move needs your yes.
+-->
+
 These reduce the score by -15 to -25 even when the title superficially
 matches a target role:
 
@@ -78,6 +91,21 @@ matches a target role:
 - Roles requiring fluent German, French or Arabic at native level.
 - US-only roles that don't accept European employees.
 - AI safety research roles at non-prestigious orgs (cap at 35).
+
+## NOTES
+
+<!--
+FACTOR STRENGTH: note. Display-only factors. A note NEVER reaches the scorer and
+NEVER changes whether a role passes — it is only a highlight in the dashboard and
+in explanations, a reminder to yourself. Put here the things you want flagged but
+not judged on. (A nurse might note "night shifts" to see it called out without
+letting it lower the score.) Leave empty if you have none. Because notes are
+display-only, the scoring prompt is built WITHOUT this section — moving a factor
+here is how you stop it influencing the score without deleting it.
+-->
+
+- Prefer a written-work culture, but do not down-rank a role for lacking it.
+- Flag roles that mention frequent travel.
 
 ## HARD_FILTERS
 
