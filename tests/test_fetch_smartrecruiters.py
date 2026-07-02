@@ -9,6 +9,7 @@ Global Development Incubator's public postings feed (3 live roles, no auth).
 
 import json
 import os
+from urllib.parse import parse_qs, urlparse
 
 import fetchers
 from fetchers import fetch_smartrecruiters, _sr_location, _sr_department
@@ -122,3 +123,36 @@ class TestFetchSmartrecruiters:
         monkeypatch.setattr(fetchers, "requests", fake)
         fetch_smartrecruiters("Global Development Incubator", SLUG)
         assert len(fake.calls) == 1
+
+
+class PagingFakeRequests:
+    """Serves postings paginated by the URL's ``offset``/``limit`` params, so a
+    real multi-page traversal (totalFound > limit) can be exercised end-to-end."""
+
+    def __init__(self, postings: list, total: int):
+        self.postings = postings
+        self.total = total
+        self.calls = []
+
+    def get(self, url, headers=None, timeout=None, **kwargs):
+        self.calls.append(url)
+        q = parse_qs(urlparse(url).query)
+        offset = int(q.get("offset", ["0"])[0])
+        limit = int(q.get("limit", ["100"])[0])
+        page = self.postings[offset : offset + limit]
+        return FakeResponse(json_data={"totalFound": self.total, "content": page})
+
+
+class TestSmartrecruitersMultiPage:
+    def test_traverses_all_pages_and_terminates(self, monkeypatch):
+        # 150 roles over a 100-per-page feed → page @0 (100) then @100 (50);
+        # offset 200 >= totalFound 150 stops the loop. Proves traversal both
+        # collects every page AND terminates (no infinite loop, no early stop).
+        postings = [{"id": str(1000 + i), "name": f"Role {i}"} for i in range(150)]
+        fake = PagingFakeRequests(postings, total=150)
+        monkeypatch.setattr(fetchers, "requests", fake)
+        jobs = fetch_smartrecruiters("Big Org", "BigOrg")
+        assert len(jobs) == 150
+        assert len({j["external_id"] for j in jobs}) == 150  # all unique, no dupes
+        offsets = [int(parse_qs(urlparse(u).query)["offset"][0]) for u in fake.calls]
+        assert offsets == [0, 100]  # exactly two pages, then stops
