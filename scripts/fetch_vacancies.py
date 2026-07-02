@@ -77,9 +77,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-boards", action="store_true", help="Skip job boards, fetch companies only"
     )
     parser.add_argument(
-        "--include-paused", action="store_true", help="Include paused companies in fetch"
-    )
-    parser.add_argument(
         "--auto-score",
         action="store_true",
         help="Auto-run filter + score after fetch (if new vacancies found)",
@@ -304,13 +301,6 @@ def _filter_companies(args) -> dict:
         return {}
 
     filtered = dict(COMPANIES)
-
-    # Skip paused companies unless --include-paused
-    if not args.include_paused:
-        paused = [n for n, c in filtered.items() if c.get("status") == "paused"]
-        if paused:
-            print(f"  Skipping {len(paused)} paused companies (use --include-paused to include)")
-        filtered = {n: c for n, c in filtered.items() if c.get("status") != "paused"}
 
     # --companies "X,Y" → resolve via canonical names
     if args.companies:

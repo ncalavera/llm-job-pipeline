@@ -8,8 +8,8 @@
 -- written by mark_board_fetched().
 --
 -- The data move (backfill last_fetched from the old company rows, then delete
--- those rows) is config-dependent, so it runs once via
--- scripts/migrate_boards_out_of_company.py — not here.
+-- those rows) was config-dependent, so it ran once via a one-off script
+-- (since removed) — not here.
 CREATE TABLE IF NOT EXISTS board (
     id            TEXT PRIMARY KEY,
     name          TEXT NOT NULL,
