@@ -1,0 +1,14 @@
+-- 0011_board_enabled — persist which job boards participate in every run.
+--
+-- Until now a board was opt-in per run via the JOB_BOARDS env var / --boards
+-- flag ONLY: nothing survived the shell, so an enabled board had to be
+-- re-declared on every run (see the old /jobs-add Mode B "remember this env
+-- var" note). This flag makes "enabled" durable state on the board catalog;
+-- run_daily.py unions the persisted-enabled set with the JOB_BOARDS / --boards
+-- override, so the env var stays a manual override applied ON TOP of the
+-- persisted set. Default FALSE preserves the shipped behaviour (boards are off
+-- until the user opts one in).
+--
+-- Guarded with IF NOT EXISTS so replaying the chain against a DB that already
+-- has the column is a clean no-op (matches 0006/0009).
+ALTER TABLE board ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT FALSE;

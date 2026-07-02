@@ -1701,6 +1701,44 @@ def mark_board_fetched(board_id: str):
     cur.close()
 
 
+def set_board_enabled(board_id: str, enabled: bool = True) -> None:
+    """Persist whether a job board participates in future runs.
+
+    Enabled boards are unioned into every run's board set by run_daily.py, so an
+    enabled board keeps fetching with no env var and no reminder; JOB_BOARDS /
+    --boards stays a manual override applied ON TOP. Upserts a bare catalog row
+    when the board has never been synced (sync_boards backfills name/strategy/
+    ttl on the next fetch), mirroring mark_board_fetched.
+
+    Commits: the status writers in this module deliberately do NOT commit and
+    lean on a caller commit, but this is a discrete user action ("enable this
+    board") whose whole point is to survive the process -- a forgotten caller
+    commit would silently lose it, so the persistence is committed here.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO board (id, name, enabled)
+           VALUES (%s, %s, %s)
+           ON CONFLICT (id) DO UPDATE SET
+               enabled = EXCLUDED.enabled, updated_at = now()""",
+        (board_id, board_id, bool(enabled)),
+    )
+    cur.close()
+    conn.commit()
+
+
+def get_enabled_boards() -> list[str]:
+    """Board ids persisted as enabled -- they participate in every run until
+    disabled (see set_board_enabled). Sorted for stable, diffable output."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM board WHERE enabled ORDER BY id")
+    ids = [r[0] for r in cur.fetchall()]
+    cur.close()
+    return ids
+
+
 # ---------------------------------------------------------------------------
 # Archive hash dedup
 # ---------------------------------------------------------------------------

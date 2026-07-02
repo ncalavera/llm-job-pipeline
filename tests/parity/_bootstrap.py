@@ -57,8 +57,9 @@ def bootstrap_sqlite(monkeypatch, tmp_path):
     """Fresh temp-file SQLite DB, brought up the way the rest of this repo's
     test suite already does it: a bare first connection (auto-applies the
     frozen baseline), then the migrations SQLite genuinely still needs on
-    top of that baseline -- the board table (0002) and the scored_by
-    provenance column (0009), neither of which the frozen baseline declares.
+    top of that baseline -- the board table (0002), the scored_by provenance
+    column (0009), and the board.enabled persistence flag (0011), none of
+    which the frozen baseline declares.
 
     Deliberately NOT routed through migrate.py's ledger-driven replay: that
     path now works (migrate.py's SQLite runner tolerates the duplicate-column
@@ -84,7 +85,8 @@ def bootstrap_sqlite(monkeypatch, tmp_path):
 
     conn = db_backend.get_conn()  # first connection -> auto-applies schema.sqlite.sql
     cur = conn.cursor()
-    for post_baseline in ("0002_board_table", "0009_add_scored_by"):
+    # Order matters: 0011 ALTERs the board table 0002 creates.
+    for post_baseline in ("0002_board_table", "0009_add_scored_by", "0011_board_enabled"):
         sql = (REPO_ROOT / "sql" / "migrations" / f"{post_baseline}.sqlite.sql").read_text(
             encoding="utf-8"
         )
