@@ -56,17 +56,18 @@ def _reload_chain():
 def bootstrap_sqlite(monkeypatch, tmp_path):
     """Fresh temp-file SQLite DB, brought up the way the rest of this repo's
     test suite already does it: a bare first connection (auto-applies the
-    frozen baseline), then the one migration SQLite genuinely still needs on
-    top of that baseline -- the board table (0002).
+    frozen baseline), then the migrations SQLite genuinely still needs on
+    top of that baseline -- the board table (0002) and the scored_by
+    provenance column (0009), neither of which the frozen baseline declares.
 
     Deliberately NOT routed through migrate.py's ledger-driven replay: that
     path now works (migrate.py's SQLite runner tolerates the duplicate-column
     overlap between sql/schema.sqlite.sql and migrations 0003/0005), but it
     also runs a pre-migration backup via the SQLite online-backup API on
     every call. This helper is the cheap path used by every OTHER parity
-    test: a bare connection (auto-applies the frozen baseline) plus the one
-    migration SQLite still needs on top (the board table, 0002) -- no
-    backup, no full ledger replay. See raw_migrate_fresh_sqlite() below and
+    test: a bare connection (auto-applies the frozen baseline) plus the
+    post-baseline migrations applied directly -- no backup, no full ledger
+    replay. See raw_migrate_fresh_sqlite() below and
     test_migrations_parity.py::test_migrate_py_converges_a_never_migrated_sqlite_db
     for the real, unguarded migrate.py path.
     """
@@ -82,11 +83,12 @@ def bootstrap_sqlite(monkeypatch, tmp_path):
     assert db_backend.IS_SQLITE, "bootstrap_sqlite must land on the SQLite backend"
 
     conn = db_backend.get_conn()  # first connection -> auto-applies schema.sqlite.sql
-    board_sql = (REPO_ROOT / "sql" / "migrations" / "0002_board_table.sqlite.sql").read_text(
-        encoding="utf-8"
-    )
     cur = conn.cursor()
-    cur.execute(board_sql)
+    for post_baseline in ("0002_board_table", "0009_add_scored_by"):
+        sql = (REPO_ROOT / "sql" / "migrations" / f"{post_baseline}.sqlite.sql").read_text(
+            encoding="utf-8"
+        )
+        cur.execute(sql)
     cur.close()
     conn.commit()
 
