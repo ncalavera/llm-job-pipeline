@@ -154,6 +154,50 @@ def test_company_scoring_skips_when_firecrawl_unset(rd, monkeypatch):
     assert calls == [], "no find/collect/score subprocess should run without Firecrawl"
 
 
+def test_backfill_caps_ghost_search_at_max_per_run(rd, monkeypatch):
+    """_backfill_candidate_websites must never let find_company_urls.py run
+    unbounded: it fires one paid Firecrawl search() per ghost candidate
+    (STRATEGY guardrail 3: cost), so it is capped at the same per-run safety
+    net already used for scoring (scoring_settings.max_per_run). More ghosts
+    than the cap must still call find_company_urls.py once with --limit set
+    to the cap, and print how many were deferred (no silent caps)."""
+    import scoring_settings
+
+    monkeypatch.setattr(scoring_settings, "max_per_run", lambda: 2)
+    run_daily, dal = rd
+    for i in range(5):
+        _seed_candidate(dal, f"Ghost Org {i}", "")  # no website -> ghost
+
+    calls = []
+    monkeypatch.setattr(run_daily, "_run", lambda cmd, opts: calls.append(cmd) or 0)
+
+    run_daily._backfill_candidate_websites(run_daily.Opts())
+
+    assert len(calls) == 1
+    cmd = calls[0]
+    assert "find_company_urls.py" in " ".join(cmd)
+    assert cmd[-2:] == ["--limit", "2"], cmd
+
+
+def test_backfill_skips_limit_flag_reasoning_when_under_cap(rd, monkeypatch, capsys):
+    """Fewer ghosts than the cap still passes the exact ghost count as --limit
+    (a no-op cap) and prints the plain (uncapped) message, not the deferred one."""
+    import scoring_settings
+
+    monkeypatch.setattr(scoring_settings, "max_per_run", lambda: 50)
+    run_daily, dal = rd
+    _seed_candidate(dal, "Ghost Org", "")
+
+    calls = []
+    monkeypatch.setattr(run_daily, "_run", lambda cmd, opts: calls.append(cmd) or 0)
+
+    run_daily._backfill_candidate_websites(run_daily.Opts())
+
+    assert calls[0][-2:] == ["--limit", "1"]
+    out = capsys.readouterr().out
+    assert "deferred" not in out
+
+
 def test_company_scoring_advances_when_no_candidates(rd, monkeypatch):
     run_daily, dal = rd
     monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")

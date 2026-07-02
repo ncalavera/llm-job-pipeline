@@ -340,14 +340,30 @@ def _prefilter_junk_companies(opts: Opts) -> None:
 
 def _backfill_candidate_websites(opts: Opts) -> None:
     """Find official websites for ghost candidates (board-discovered, no URL) so
-    they enter scoring instead of hanging unscored. Best-effort
-    — a company whose site can't be found stays unscored and is reported by the
-    stage note, not silently dropped."""
+    they enter scoring instead of hanging unscored. Capped at the same per-run
+    safety net already used for the scoring set (``scoring_settings.max_per_run``
+    — STRATEGY guardrail 3: cost) — without it, a board dump of hundreds of
+    ghost candidates would fire one paid Firecrawl search() per ghost in a
+    single run. Best-effort: a company whose site can't be found stays
+    unscored and is reported by the stage note, not silently dropped; anything
+    past the cap simply waits for a later run (no silent caps — we say how
+    many)."""
     ghosts = _ghost_candidate_count()
     if ghosts == 0:
         return
-    print(f"  Ghost candidates without a website: {ghosts} — searching for URLs", flush=True)
-    rc = _run(_py("find_company_urls.py"), opts)
+    from scoring_settings import max_per_run
+
+    cap = max_per_run()
+    capped = min(ghosts, cap)
+    if ghosts > cap:
+        print(
+            f"  Ghost candidates without a website: {ghosts} — searching for the "
+            f"first {cap} (per-run cap); {ghosts - cap} deferred to a later run",
+            flush=True,
+        )
+    else:
+        print(f"  Ghost candidates without a website: {ghosts} — searching for URLs", flush=True)
+    rc = _run(_py("find_company_urls.py") + ["--limit", str(capped)], opts)
     if rc != 0:
         print("  ⚠  website backfill exited non-zero — continuing", flush=True)
 
