@@ -27,6 +27,14 @@ def _load(name: str) -> str:
 
 RSS_FEED = _load("teamtailor_chatham_house_jobs.rss")
 
+# A custom career-site domain answering 200 with a marketing/SPA page instead
+# of the feed — must NOT be mistaken for an empty feed (it has to fall through).
+SPA_HTML = "<!DOCTYPE html>\n<html><head><title>Careers</title></head><body>Apply now</body></html>"
+
+# A genuine but empty RSS feed (a real Teamtailor org with zero openings): a
+# valid feed, so it must be accepted as [] and stop the host fallback.
+EMPTY_RSS = '<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Jobs</title></channel></rss>'
+
 
 class FakeResponse:
     def __init__(self, *, text="", status=200):
@@ -130,3 +138,35 @@ class TestFetchTeamtailorRss:
         assert jobs == []
         # both candidate hosts were tried before giving up.
         assert len(fake.calls) == 2
+
+    def test_custom_domain_200_html_falls_through_to_default_host(self, monkeypatch):
+        # The custom career-site domain answers 200 with a marketing/SPA page,
+        # not the RSS feed. A plain 200 must NOT end the fallback: the fetcher
+        # has to reject the non-feed body and try the default host, which works.
+        fake = FakeRequests(
+            {
+                "careers.acme.example": FakeResponse(text=SPA_HTML),
+                "acme.teamtailor.com": FakeResponse(text=RSS_FEED),
+            }
+        )
+        monkeypatch.setattr(fetchers, "requests", fake)
+        jobs = fetch_teamtailor_rss(
+            "Acme", "acme", careers_url="https://careers.acme.example/jobs"
+        )
+        assert len(jobs) == 2  # the working default host's feed, not the SPA
+        assert fake.calls == [
+            "https://careers.acme.example/jobs.rss",  # tried first, rejected
+            "https://acme.teamtailor.com/jobs.rss",  # fell through to the real feed
+        ]
+
+    def test_valid_empty_feed_on_custom_domain_returns_empty_without_default(self, monkeypatch):
+        # A real Teamtailor org with zero openings serves a valid but empty feed
+        # on its custom domain. That is a legitimate feed, so it must be accepted
+        # as [] and the default host must never be touched (no false failure).
+        fake = FakeRequests({"careers.acme.example": FakeResponse(text=EMPTY_RSS)})
+        monkeypatch.setattr(fetchers, "requests", fake)
+        jobs = fetch_teamtailor_rss(
+            "Acme", "acme", careers_url="https://careers.acme.example/jobs"
+        )
+        assert jobs == []
+        assert fake.calls == ["https://careers.acme.example/jobs.rss"]

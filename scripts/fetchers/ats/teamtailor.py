@@ -2,6 +2,7 @@
 
 import hashlib
 import urllib.parse
+import xml.etree.ElementTree as ET
 
 from fetchers import http
 from fetchers.html_utils import _html_to_snippet, _html_to_text
@@ -25,6 +26,24 @@ def _teamtailor_hosts(slug: str, careers_url: str = "") -> list[str]:
     return hosts
 
 
+def _parse_teamtailor_feed(text: str) -> ET.Element | None:
+    """Return the parsed root iff ``text`` is a genuine RSS/Atom feed.
+
+    A custom career-site domain can answer ``/jobs.rss`` with HTTP 200 and an
+    SPA/marketing HTML page instead of the feed. That HTML must NOT be mistaken
+    for an empty feed (which would stop the host fallback dead), so anything
+    that fails to parse as XML or lacks an ``<rss>``/``<feed>`` root is rejected
+    → the caller tries the next host. A valid but empty feed IS accepted: a real
+    Teamtailor org with zero openings must not be misread as a failure.
+    """
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return None
+    tag = root.tag.split("}")[-1].lower()
+    return root if tag in ("rss", "feed") else None
+
+
 @company_fetcher
 def fetch_teamtailor_rss(org_name: str, slug: str, careers_url: str = "") -> list[dict]:
     """Fetch jobs from Teamtailor RSS feed (free, no auth).
@@ -32,22 +51,30 @@ def fetch_teamtailor_rss(org_name: str, slug: str, careers_url: str = "") -> lis
     custom domain (``careers_url``) or the default ``{slug}.teamtailor.com``.
     Returns full HTML descriptions, locations, departments.
     """
-    import xml.etree.ElementTree as ET
-
     hosts = _teamtailor_hosts(slug, careers_url)
-    resp = None
+    root = None
     for i, host in enumerate(hosts):
         url = f"https://{host}/jobs.rss"
         print(f"  [{org_name}] Teamtailor RSS: {url}")
+        last_host = i == len(hosts) - 1
         try:
             resp = http.get(url, timeout=15)
-            break
         except FetchError as exc:
-            if i == len(hosts) - 1:
+            if last_host:
                 raise
             print(f"  [{org_name}] {host} failed ({exc.reason}); trying next host")
+            continue
+        # A 200 alone is not enough: the custom host must actually serve a feed,
+        # not a career-site landing page.
+        root = _parse_teamtailor_feed(resp.text)
+        if root is not None:
+            break
+        if last_host:
+            raise FetchError(
+                "not_a_feed", f"{url} returned a non-feed response (career-site page?)"
+            )
+        print(f"  [{org_name}] {host} returned non-feed content; trying next host")
 
-    root = ET.fromstring(resp.text)
     # RSS 2.0: channel > item
     channel = root.find("channel")
     if channel is None:
