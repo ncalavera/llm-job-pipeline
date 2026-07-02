@@ -96,6 +96,50 @@ def test_disable_board_clears_the_flag(env):
     assert dal.get_enabled_boards() == []
 
 
+@pytest.fixture()
+def env_unmigrated(tmp_path, monkeypatch):
+    """Same chain as `env`, but with a board table that predates 0011 — the
+    shape a user has after `git pull` but before `python3 scripts/migrate.py`."""
+    db_file = tmp_path / "jobsearch.db"
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
+    monkeypatch.delenv("JOB_BOARDS", raising=False)
+    monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
+    for mod in ("sources", "database_supabase", "config", "company_registry", "db_conn", "db_backend"):
+        sys.modules.pop(mod, None)
+
+    import db_backend
+
+    importlib.reload(db_backend)
+    assert db_backend.IS_SQLITE
+
+    conn = db_backend.get_conn()
+    cur = conn.cursor()
+    cur.execute((MIGRATIONS / "0002_board_table.sqlite.sql").read_text(encoding="utf-8"))
+    cur.close()
+    conn.commit()
+
+    import database_supabase
+    import sources
+
+    yield sources, database_supabase
+    database_supabase.close_conn()
+
+
+def test_unmigrated_schema_gets_migrate_hint_not_traceback(env_unmigrated, capsys):
+    """Review finding on #39: pre-0011 schema must answer with the migrate
+    command, not a raw OperationalError."""
+    sources, dal = env_unmigrated
+    board = _a_known_board(sources)
+
+    assert sources.main(["enable-board", board]) == 1
+    out = capsys.readouterr().out
+    assert "scripts/migrate.py" in out
+
+    with pytest.raises(dal.BoardPersistenceUnavailable, match="migrate.py"):
+        dal.get_enabled_boards()
+
+
 def test_list_reports_active_companies(env, capsys):
     sources, dal = env
     dal.ensure_company("Fictive Aid Trust", status="active")

@@ -335,17 +335,19 @@ def _resolve_boards(cli_boards: str | None) -> str | None:
     or ``None`` when nothing is selected (fetch stays boards-off, unchanged).
 
     Resolved ONCE per fresh run and frozen into the run state, so ``--resume``
-    replays a consistent board set. Best-effort: if the board table isn't
-    reachable yet (a fresh clone, before onboarding runs migrate.py) fall back to
-    the override alone -- a missing persistence layer must never break the daily
-    run (STRATEGY goal 1)."""
+    replays a consistent board set. A schema that predates board persistence (a
+    fresh clone before onboarding runs migrate.py) falls back to the override
+    alone -- that must never break the daily run (STRATEGY goal 1). Any OTHER
+    failure (DB down, real regression) propagates: degrading it silently to
+    boards-off would be indistinguishable from the fresh-clone case."""
     persisted: list[str] = []
     try:
-        from database_supabase import get_enabled_boards
+        from database_supabase import BoardPersistenceUnavailable, get_enabled_boards
 
-        persisted = list(get_enabled_boards())
-    except Exception as exc:  # table missing / DB down -> override-only
-        print(f"  (persisted board set unavailable: {exc}; using override only)", flush=True)
+        try:
+            persisted = list(get_enabled_boards())
+        except BoardPersistenceUnavailable as exc:
+            print(f"  (persisted board set unavailable: {exc}; using override only)", flush=True)
     finally:
         _close_db()
 

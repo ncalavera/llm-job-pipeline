@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import _ALL_JOB_BOARDS  # noqa: E402
 from database_supabase import (  # noqa: E402
+    BoardPersistenceUnavailable,
     get_company_fitness_map,
     get_enabled_boards,
     set_board_enabled,
@@ -104,6 +105,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "disable-board":
             return cmd_disable(args.board_id)
         return cmd_list()
+    except BoardPersistenceUnavailable as exc:
+        print(exc)
+        return 1
     finally:
         try:
             close_conn()

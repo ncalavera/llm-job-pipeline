@@ -241,18 +241,34 @@ def test_resolve_boards_nothing_selected_is_none(rd, monkeypatch):
     assert rd._resolve_boards(None) is None  # boards stay off, unchanged default
 
 
-def test_resolve_boards_survives_unreachable_board_table(rd, monkeypatch):
+def test_resolve_boards_survives_unmigrated_schema(rd, monkeypatch):
     """A fresh clone has no board table until onboarding runs migrate.py, yet a
-    --boards run must still work: the DB failure falls back to the override."""
+    --boards run must still work: the typed schema-missing signal falls back to
+    the override."""
     import database_supabase
 
-    def _boom():
-        raise RuntimeError("no such table: board")
+    def _unmigrated():
+        raise database_supabase.BoardPersistenceUnavailable("run: python3 scripts/migrate.py")
 
-    monkeypatch.setattr(database_supabase, "get_enabled_boards", _boom)
+    monkeypatch.setattr(database_supabase, "get_enabled_boards", _unmigrated)
     monkeypatch.delenv("JOB_BOARDS", raising=False)
     assert rd._resolve_boards("idealist") == "idealist"
     assert rd._resolve_boards(None) is None
+
+
+def test_resolve_boards_propagates_real_db_failures(rd, monkeypatch):
+    """Only the schema-missing case degrades to override-only. A genuine DB
+    failure must propagate — silently running boards-off would be
+    indistinguishable from the fresh-clone case (review finding on #39)."""
+    import database_supabase
+
+    def _boom():
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(database_supabase, "get_enabled_boards", _boom)
+    monkeypatch.delenv("JOB_BOARDS", raising=False)
+    with pytest.raises(RuntimeError, match="connection refused"):
+        rd._resolve_boards("idealist")
 
 
 # ---------------------------------------------------------------------------
