@@ -30,12 +30,81 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
+def _parse_dotenv(path: Path) -> dict[str, str]:
+    """Parse a ``.env`` file into a plain key/value dict (stdlib only).
+
+    Ignores blanks and ``#`` comments, strips one layer of surrounding quotes,
+    and tolerates an ``export KEY=value`` prefix. Values are taken verbatim
+    after the first ``=`` so connection strings with ``:``/``@``/``/`` survive.
+    """
+    values: dict[str, str] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return values
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key.startswith("export "):
+            key = key[len("export ") :].strip()
+        if key:
+            values[key] = value.strip().strip("'\"")
+    return values
+
+
+def load_dotenv(root: Path | None = None) -> dict[str, str]:
+    """Load a repo-root ``.env`` into ``os.environ`` and return what it declared.
+
+    Runs once at import, before the backend is chosen, so filling ``.env`` with
+    Supabase credentials is enough — no manual ``export``. Already-set
+    environment variables win (``setdefault``), matching python-dotenv's default
+    and letting a shell export or CI secret override the file. A missing ``.env``
+    is silent: that is the local SQLite demo path.
+    """
+    path = (root or PROJECT_ROOT) / ".env"
+    if not path.exists():
+        return {}
+    values = _parse_dotenv(path)
+    for key, value in values.items():
+        os.environ.setdefault(key, value)
+    return values
+
+
+#: Keys the repo-root ``.env`` file declared (before ``setdefault``), used to
+#: flag a file-vs-runtime backend mismatch in the banner below.
+_DOTENV_VALUES = load_dotenv()
+
+
 def _supabase_url() -> str | None:
     return os.environ.get("SUPABASE_DB_URL") or os.environ.get("SUPABASE_DIRECT_URL")
 
 
 #: True when running on the local SQLite backend (no Supabase configured).
 IS_SQLITE = _supabase_url() is None
+
+
+def _psycopg2_missing(exc: ImportError) -> None:
+    """Exit with an actionable message instead of a raw ModuleNotFoundError.
+
+    Fires when Supabase is selected (SUPABASE_DB_URL set) but psycopg2 is not
+    installed — the classic simple->full upgrade where the URL was set but the
+    full requirements were never installed.
+    """
+    import sys
+
+    print(
+        "ERROR: SUPABASE_DB_URL / SUPABASE_DIRECT_URL is set (full/cloud mode), "
+        "but the Postgres driver psycopg2 is not installed.\n"
+        "  Fix: pip install -r requirements.txt   (or: pip install psycopg2-binary)\n"
+        "  Or run the local no-account demo instead: "
+        "unset SUPABASE_DB_URL SUPABASE_DIRECT_URL",
+        file=sys.stderr,
+        flush=True,
+    )
+    raise SystemExit(1) from exc
 
 
 def print_backend_banner(stream=None) -> None:
@@ -53,6 +122,40 @@ def print_backend_banner(stream=None) -> None:
         print(f"Backend: local SQLite ({sqlite_db_path()})", file=out, flush=True)
     else:
         print("Backend: Postgres (Supabase)", file=out, flush=True)
+    _warn_backend_mismatch(out)
+
+
+def _warn_backend_mismatch(out) -> None:
+    """Loudly flag when a filled ``.env`` and the resolved backend disagree.
+
+    Silent full->simple degradation is the bug this guards: a ``.env`` set up
+    for Supabase that still lands on SQLite, or an empty ``.env`` that lands on a
+    Postgres URL inherited from the shell. Only fires when a ``.env`` file
+    exists — a bare default run (no file) has nothing to contradict.
+    """
+    if not _DOTENV_VALUES:
+        return
+    env_declares_supabase = bool(
+        _DOTENV_VALUES.get("SUPABASE_DB_URL") or _DOTENV_VALUES.get("SUPABASE_DIRECT_URL")
+    )
+    banner = None
+    if env_declares_supabase and IS_SQLITE:
+        banner = (
+            "WARNING: .env is configured for Supabase, but this run is on local SQLite.\n"
+            "  Reason: SUPABASE_DB_URL is empty/unset in the active environment and\n"
+            "  overrides the .env value (an already-exported shell var wins over .env).\n"
+            "  Fix: unset the empty SUPABASE_DB_URL in this shell, or export a real one."
+        )
+    elif not env_declares_supabase and not IS_SQLITE:
+        banner = (
+            "WARNING: .env is NOT configured for Supabase, but this run connects to Postgres.\n"
+            "  Reason: SUPABASE_DB_URL is set in your shell environment (inherited from\n"
+            "  another project) and takes priority over .env.\n"
+            "  Fix: `unset SUPABASE_DB_URL SUPABASE_DIRECT_URL` to use the local SQLite demo."
+        )
+    if banner:
+        rule = "!" * 78
+        print(f"\n{rule}\n{banner}\n{rule}\n", file=out, flush=True)
 
 
 def sqlite_db_path() -> Path:
@@ -103,8 +206,13 @@ if IS_SQLITE:
 
 else:
     # Supabase backend — re-export the genuine psycopg2 helpers so call sites
-    # importing them from db_backend behave identically to before.
-    from psycopg2.extras import Json, RealDictCursor  # noqa: F401
+    # importing them from db_backend behave identically to before. This import
+    # is the first thing to fail on a simple->full upgrade with no driver, so
+    # turn the raw ModuleNotFoundError into the actionable message.
+    try:
+        from psycopg2.extras import Json, RealDictCursor  # noqa: F401
+    except ImportError as _exc:
+        _psycopg2_missing(_exc)
 
 
 # ---------------------------------------------------------------------------
@@ -427,10 +535,21 @@ def _apply_sqlite_schema(raw_conn):
     raw_conn.commit()
 
 
+def _require_psycopg2():
+    """Import psycopg2 or exit with a fix, not a raw ModuleNotFoundError."""
+    try:
+        import psycopg2
+
+        return psycopg2
+    except ImportError as exc:
+        _psycopg2_missing(exc)
+
+
 def _connect_supabase():
     db_url = _supabase_url()
     import sys
-    import psycopg2
+
+    psycopg2 = _require_psycopg2()
 
     for attempt in range(2):
         try:
@@ -475,7 +594,7 @@ def get_conn():
         return _conn
 
     # Supabase: verify liveness, reconnect if the pooler dropped us.
-    import psycopg2
+    psycopg2 = _require_psycopg2()
 
     if _conn is not None and _conn.closed == 0:
         try:

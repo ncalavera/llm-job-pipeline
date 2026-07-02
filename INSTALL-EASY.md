@@ -187,10 +187,24 @@ public forks.
 
 ## Upgrading to hardcore later
 
-Set `SUPABASE_DB_URL` (and the dashboard env vars) and the exact same scripts
-talk to Supabase instead of SQLite — no code changes. Follow
-[INSTALL.md](INSTALL.md) from step 3, then re-add your companies (or migrate the
-SQLite rows). Your commands (`/jobs-new`, `/jobs-review`, `/jobs-add`, …) keep working.
+Point `.env` at Supabase and the exact same scripts talk to Postgres instead of
+SQLite — no code changes. Two things easy mode skipped are required now:
+
+1. **Install the Postgres driver.** Easy mode never installed `psycopg2`, so the
+   full-mode scripts would fail with a driver error. Install everything:
+   ```bash
+   python3 -m pip install -r requirements.txt
+   ```
+   (Skip this and you get a clear "psycopg2 is not installed — pip install -r
+   requirements.txt" error, not a crash.)
+2. **Fill `.env` with Supabase.** Set `SUPABASE_DB_URL` (and the dashboard env
+   vars). The scripts auto-load the repo-root `.env` — no manual `export`. Every
+   fetch/score/filter run prints its backend; confirm it says
+   `Backend: Postgres (Supabase)`.
+
+Then follow [INSTALL.md](INSTALL.md) from step 2 (create the Supabase project and
+schema), and re-add your companies (or migrate the SQLite rows). Your commands
+(`/jobs-new`, `/jobs-review`, `/jobs-add`, …) keep working.
 
 ## Troubleshooting
 

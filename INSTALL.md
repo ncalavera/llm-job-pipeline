@@ -60,10 +60,10 @@ After creating the database (step 3), apply any pending schema changes:
 python3 scripts/migrate.py
 ```
 
-`migrate.py` reads `SUPABASE_DB_URL` from your environment (or `.env` once
-you fill it in step 4) to pick the right backend — run it after step 4 if
-you haven't set the env var yet. It takes an automatic backup before any
-change and is safe to re-run; already-applied migrations are skipped.
+`migrate.py` auto-loads `SUPABASE_DB_URL` from the repo-root `.env` (or the
+environment) to pick the right backend, so run it any time after you fill in
+`.env` (step 4). It takes an automatic backup before any change and is safe to
+re-run; already-applied migrations are skipped.
 
 ## 4. Configure environment
 
@@ -78,7 +78,9 @@ Fill in `.env`:
   (only needed if you deploy the dashboard)
 - `FIRECRAWL_API_KEY` — optional (see prerequisites)
 
-The Python scripts read `.env` from the repo root. Never commit it.
+The Python scripts auto-load `.env` from the repo root — no manual `export`
+needed. A variable you already exported in your shell takes priority over the
+file. Never commit `.env`.
 
 ## 5. Create your profile
 
