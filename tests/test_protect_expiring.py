@@ -108,9 +108,7 @@ def test_archived_count_is_backward_compatible_int_with_protected_extra(dal):
     is what lets fetch_vacancies.py fold protected-expiring into its "gone"
     telemetry without breaking any existing caller."""
     dal.ensure_company("Acme Robotics", status="active")
-    dal.save_vacancies(
-        "Acme Robotics", "A", [_job("Head of Programmes"), _job("Filing Assistant")]
-    )
+    dal.save_vacancies("Acme Robotics", "A", [_job("Head of Programmes"), _job("Filing Assistant")])
     _commit(dal)
     _set(dal, _id_by_title(dal, "Head of Programmes"), llm_score=72)  # protected
     _set(dal, _id_by_title(dal, "Filing Assistant"), llm_score=30)  # archived
