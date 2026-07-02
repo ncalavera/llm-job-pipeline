@@ -8,6 +8,12 @@ The whole pipeline reads from this one file:
 - **Filtering** — `scripts/hard_filters.py` reads `## HARD_FILTERS`
   (exclude_countries / exclude_title_keywords) to drop vacancies before
   scoring.
+- **Product language** — `## OUTPUT_LANGUAGE` picks the ONE language of the
+  whole product: the agent's replies in `/jobs-new` and `/jobs-review`, the run
+  reports, the Telegram digest, and the dashboard's default. Change it here (or
+  via `/jobs-profile`) and everything switches at once. `English`/`en` and
+  `Russian`/`ru` ship with UI translations; any other value still sets the
+  language of the scored text fields but leaves the UI chrome in English.
 
 Machine mechanics you do NOT edit (thresholds, geo tables, job boards,
 universal junk words) live in `config/defaults.toml`. Sections you don't

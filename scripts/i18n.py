@@ -243,6 +243,51 @@ STRINGS: dict[str, dict[str, str]] = {
         # and {vacs} are substituted on the client.
         "companies_pending_hidden": "ℹ️ {orgs} companies here have {vacs} vacancies hidden from your job list — approve a company to surface its roles.",
         "catalog_hidden_pending": "ℹ️ {vacs} vacancies from {orgs} not-yet-approved companies are hidden here — approve the company on the Companies tab to see its roles.",
+        # Settings — product language row. One choice, changed in one place.
+        "settings_grp_product": "Product",
+        "set_product_language": "Product language",
+        # -------------------------------------------------------------------
+        # Product-language surfaces OUTSIDE the dashboard chrome.
+        # These keys feed scripts/run_daily.py (run banner + summary) and
+        # scripts/telegram_digest.py through product_language.t(); they ride in
+        # the same table so there is ONE place to translate the whole product.
+        # Command paths inside a value are literal (not translated).
+        # -------------------------------------------------------------------
+        # run_daily.py — run-start banner
+        "banner_title": "/jobs-new — today's volume",
+        "banner_active": "Active companies tracked: {n}  (per-run fetch cap: {cap})",
+        "banner_boards": "Job boards this run: {boards}",
+        "banner_scoring": "Scoring limit: {limit} roles/run   ·   Digest size: {digest}",
+        "boards_summary_none": "none (tracked companies only)",
+        "boards_summary_all": "all defined boards",
+        "overload_head": "⚠  Review backlog: {backlog} scored roles still await a verdict (≥ {threshold}). New roles are arriving faster than you review them.",
+        "overload_hint": "Consider dialing volume DOWN (suggestion only — nothing changes unless you do it):",
+        "overload_lever_boards": "• fewer boards          →  python3 scripts/sources.py disable-board <id>",
+        "overload_lever_limit": "• lower the daily limit  →  [volume] daily_scoring_limit in config/defaults.toml",
+        "overload_lever_filters": "• stricter hard filters  →  ## HARD_FILTERS in config/user_profile.md",
+        # run_daily.py — end-of-run summary
+        "summary_done": "✓ /jobs-new complete",
+        "summary_new_vac": "{n} new vacancies saved this run",
+        "summary_companies": "{active} active companies, {candidates} candidate ({scored} scored, in Pending)",
+        "summary_verdicts": "{scored_unseen} scored matches await your verdict; {liked} liked so far",
+        "summary_publish": "publish: {note}",
+        "summary_review_hint": "deeper review of liked roles: /jobs-review",
+        # telegram_digest.py — user-facing digest copy + buttons
+        "digest_status_liked": "👍 Liked",
+        "digest_status_passed": "👎 Passed",
+        "digest_status_applied": "✅ Already applied",
+        "digest_open": "Open vacancy →",
+        "digest_open_short": "open →",
+        "digest_loc_unspecified": "location not specified",
+        "digest_deadline": "deadline {date}",
+        "digest_hot_header": "🔥 <b>Unreviewed companies with score {score}+</b>",
+        "digest_hot_sub": "These companies aren't reviewed yet — take a look before the deadline passes.",
+        "digest_expiring_header": "⚠️ <b>About to disappear — decide today</b>",
+        "digest_last_seen": "👁 last seen {date}",
+        "digest_header": "🗞 <b>Vacancy digest</b> — {n} fresh. Tap 👍 or 👎 under each.",
+        "digest_nothing": "🗞 No fresh vacancies for the digest today.",
+        "digest_recorded": "Recorded: {label}",
+        "digest_save_error": "⚠️ Couldn't save your choice, please tap again.",
     },
     # Russian — verbatim from the maintainer's prior dashboard build.
     "ru": {
@@ -460,6 +505,45 @@ STRINGS: dict[str, dict[str, str]] = {
         "archive_empty": "Архив пуст",
         "companies_pending_hidden": "ℹ️ {orgs} компаний здесь держат {vacs} вакансий, скрытых из вашего списка — одобрите компанию, чтобы её вакансии появились.",
         "catalog_hidden_pending": "ℹ️ {vacs} вакансий из {orgs} ещё не одобренных компаний скрыты — одобрите компанию на вкладке «Компании», чтобы увидеть их.",
+        # Settings — product language row.
+        "settings_grp_product": "Продукт",
+        "set_product_language": "Язык продукта",
+        # --- Surfaces outside the dashboard chrome (banner / summary / digest) ---
+        # run_daily.py — run-start banner
+        "banner_title": "/jobs-new — объём на сегодня",
+        "banner_active": "Активных компаний отслеживается: {n}  (лимит выборки за прогон: {cap})",
+        "banner_boards": "Доски вакансий в этом прогоне: {boards}",
+        "banner_scoring": "Лимит скоринга: {limit} ролей/прогон   ·   Размер дайджеста: {digest}",
+        "boards_summary_none": "нет (только отслеживаемые компании)",
+        "boards_summary_all": "все заданные доски",
+        "overload_head": "⚠  Очередь на разбор: {backlog} оценённых ролей всё ещё ждут вердикта (≥ {threshold}). Новые роли приходят быстрее, чем вы их разбираете.",
+        "overload_hint": "Подумайте, не снизить ли объём (это только подсказка — ничего не меняется, пока вы сами не сделаете):",
+        "overload_lever_boards": "• меньше досок           →  python3 scripts/sources.py disable-board <id>",
+        "overload_lever_limit": "• ниже дневной лимит      →  [volume] daily_scoring_limit в config/defaults.toml",
+        "overload_lever_filters": "• строже жёсткие фильтры   →  ## HARD_FILTERS в config/user_profile.md",
+        # run_daily.py — end-of-run summary
+        "summary_done": "✓ /jobs-new завершён",
+        "summary_new_vac": "{n} новых вакансий сохранено за прогон",
+        "summary_companies": "{active} активных компаний, {candidates} кандидатов ({scored} оценено, в Pending)",
+        "summary_verdicts": "{scored_unseen} оценённых совпадений ждут вашего вердикта; {liked} в избранном",
+        "summary_publish": "публикация: {note}",
+        "summary_review_hint": "глубокий разбор избранного: /jobs-review",
+        # telegram_digest.py — дайджест и кнопки
+        "digest_status_liked": "👍 В избранное",
+        "digest_status_passed": "👎 Отказ",
+        "digest_status_applied": "✅ Уже подал",
+        "digest_open": "Открыть вакансию →",
+        "digest_open_short": "открыть →",
+        "digest_loc_unspecified": "локация не указана",
+        "digest_deadline": "дедлайн {date}",
+        "digest_hot_header": "🔥 <b>Неразобранные компании со скором {score}+</b>",
+        "digest_hot_sub": "Эти компании ещё не разобраны — загляните до дедлайна.",
+        "digest_expiring_header": "⚠️ <b>Вот-вот пропадёт — реши сегодня</b>",
+        "digest_last_seen": "👁 последний раз виден {date}",
+        "digest_header": "🗞 <b>Дайджест вакансий</b> — {n} свежих. Жми 👍 или 👎 под каждой.",
+        "digest_nothing": "🗞 Свежих вакансий для дайджеста сегодня нет.",
+        "digest_recorded": "Записал: {label}",
+        "digest_save_error": "⚠️ Не удалось сохранить выбор, нажмите ещё раз.",
     },
 }
 
