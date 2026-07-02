@@ -1701,6 +1701,88 @@ def mark_board_fetched(board_id: str):
     cur.close()
 
 
+class BoardPersistenceUnavailable(RuntimeError):
+    """The schema predates board persistence (no board table / enabled column).
+
+    Raised instead of the backend's raw column/table error so callers can tell
+    "not migrated yet" (expected on a fresh clone; run_daily degrades to the
+    manual override) apart from a real DB failure, and so the user-facing
+    message says what to run instead of a traceback."""
+
+
+def _board_schema_missing(exc: Exception) -> bool:
+    """True when the error means migration 0011 hasn't been applied (either
+    dialect), as opposed to a genuine query/connection failure."""
+    msg = str(exc).lower()
+    return (
+        "no such table: board" in msg
+        or "has no column named enabled" in msg
+        or "no such column: enabled" in msg
+        or ("does not exist" in msg and ("enabled" in msg or 'relation "board"' in msg))
+    )
+
+
+_MIGRATE_HINT = (
+    "board persistence is not set up in this database yet "
+    "(missing board.enabled, added by migration 0011) — run: python3 scripts/migrate.py"
+)
+
+
+def set_board_enabled(board_id: str, enabled: bool = True) -> None:
+    """Persist whether a job board participates in future runs.
+
+    Enabled boards are unioned into every run's board set by run_daily.py, so an
+    enabled board keeps fetching with no env var and no reminder; JOB_BOARDS /
+    --boards stays a manual override applied ON TOP. Upserts a bare catalog row
+    when the board has never been synced (sync_boards backfills name/strategy/
+    ttl on the next fetch), mirroring mark_board_fetched.
+
+    Commits: the status writers in this module deliberately do NOT commit and
+    lean on a caller commit, but this is a discrete user action ("enable this
+    board") whose whole point is to survive the process -- a forgotten caller
+    commit would silently lose it, so the persistence is committed here.
+
+    Raises BoardPersistenceUnavailable (with the migrate command) on a schema
+    that predates migration 0011."""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """INSERT INTO board (id, name, enabled)
+               VALUES (%s, %s, %s)
+               ON CONFLICT (id) DO UPDATE SET
+                   enabled = EXCLUDED.enabled, updated_at = now()""",
+            (board_id, board_id, bool(enabled)),
+        )
+    except Exception as exc:
+        conn.rollback()
+        if _board_schema_missing(exc):
+            raise BoardPersistenceUnavailable(_MIGRATE_HINT) from exc
+        raise
+    cur.close()
+    conn.commit()
+
+
+def get_enabled_boards() -> list[str]:
+    """Board ids persisted as enabled -- they participate in every run until
+    disabled (see set_board_enabled). Sorted for stable, diffable output.
+
+    Raises BoardPersistenceUnavailable (with the migrate command) on a schema
+    that predates migration 0011."""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id FROM board WHERE enabled ORDER BY id")
+    except Exception as exc:
+        conn.rollback()
+        if _board_schema_missing(exc):
+            raise BoardPersistenceUnavailable(_MIGRATE_HINT) from exc
+        raise
+    ids = [r[0] for r in cur.fetchall()]
+    cur.close()
+    return ids
+
+
 # ---------------------------------------------------------------------------
 # Archive hash dedup
 # ---------------------------------------------------------------------------

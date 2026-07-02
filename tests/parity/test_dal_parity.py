@@ -271,6 +271,33 @@ def test_board_ttl_just_fetched_is_not_due(backend):
     assert dal.should_fetch_board("fictive_board", ttl_days=7) is False
 
 
+def test_board_enabled_flag_round_trips(backend):
+    """A board is enabled/disabled by a persisted flag, identical on both
+    backends. Syncing the catalog does NOT enable it (boards stay opt-in);
+    only set_board_enabled(..., True) does."""
+    dal = backend
+    dal.sync_boards({"fictive_board": _BOARD_CFG})
+    _commit(dal)
+    assert dal.get_enabled_boards() == []  # synced != enabled -- boards are opt-in
+
+    dal.set_board_enabled("fictive_board", True)  # commits internally
+    assert dal.get_enabled_boards() == ["fictive_board"]
+
+    dal.set_board_enabled("fictive_board", False)
+    assert dal.get_enabled_boards() == []
+
+
+def test_set_board_enabled_persists_across_reconnect(backend):
+    """The whole point of the feature: an enabled board survives the process. Prove
+    the write is committed (not merely held in the session) by dropping the
+    connection and reading back on a fresh one -- and that enabling a board that
+    was never synced upserts a bare catalog row rather than failing."""
+    dal = backend
+    dal.set_board_enabled("fictive_ghost_board", True)  # never synced -> bare upsert + commit
+    dal.close_conn()
+    assert "fictive_ghost_board" in dal.get_enabled_boards()
+
+
 def test_board_ttl_boundary_math_matches_across_backends(backend):
     """The exact TTL boundary (days-elapsed >= ttl_days) must resolve the
     same way on both backends -- the specific arithmetic the backend audit

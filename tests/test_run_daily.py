@@ -200,6 +200,78 @@ def test_resume_keeps_checkpointed_opts_even_with_cli_overrides(rd):
 
 
 # ---------------------------------------------------------------------------
+# 2c. Effective board set = persisted enabled UNION manual override
+# ---------------------------------------------------------------------------
+
+
+def _patch_persisted(rd, monkeypatch, ids):
+    """Stub the DB read _resolve_boards does lazily, so these are DB-free unit
+    tests of the union math (the DAL round-trip is covered in the parity suite)."""
+    import database_supabase
+
+    monkeypatch.setattr(database_supabase, "get_enabled_boards", lambda: list(ids))
+    monkeypatch.delenv("JOB_BOARDS", raising=False)
+
+
+def test_resolve_boards_persisted_alone_needs_no_flag(rd, monkeypatch):
+    _patch_persisted(rd, monkeypatch, ["idealist", "80k_hours"])
+    # Sorted DAL output is preserved; no --boards flag required to keep them on.
+    assert rd._resolve_boards(None) == "idealist,80k_hours"
+
+
+def test_resolve_boards_override_unions_on_top_without_duplicating(rd, monkeypatch):
+    _patch_persisted(rd, monkeypatch, ["idealist"])
+    # --boards adds a NEW board and must not duplicate one already persisted.
+    assert rd._resolve_boards("reliefweb,idealist") == "idealist,reliefweb"
+
+
+def test_resolve_boards_env_var_is_an_override_on_top(rd, monkeypatch):
+    _patch_persisted(rd, monkeypatch, ["idealist"])
+    monkeypatch.setenv("JOB_BOARDS", "reliefweb")  # the shell-env override path
+    assert rd._resolve_boards(None) == "idealist,reliefweb"
+
+
+def test_resolve_boards_all_short_circuits(rd, monkeypatch):
+    _patch_persisted(rd, monkeypatch, ["idealist"])
+    assert rd._resolve_boards("all") == "all"
+
+
+def test_resolve_boards_nothing_selected_is_none(rd, monkeypatch):
+    _patch_persisted(rd, monkeypatch, [])
+    assert rd._resolve_boards(None) is None  # boards stay off, unchanged default
+
+
+def test_resolve_boards_survives_unmigrated_schema(rd, monkeypatch):
+    """A fresh clone has no board table until onboarding runs migrate.py, yet a
+    --boards run must still work: the typed schema-missing signal falls back to
+    the override."""
+    import database_supabase
+
+    def _unmigrated():
+        raise database_supabase.BoardPersistenceUnavailable("run: python3 scripts/migrate.py")
+
+    monkeypatch.setattr(database_supabase, "get_enabled_boards", _unmigrated)
+    monkeypatch.delenv("JOB_BOARDS", raising=False)
+    assert rd._resolve_boards("idealist") == "idealist"
+    assert rd._resolve_boards(None) is None
+
+
+def test_resolve_boards_propagates_real_db_failures(rd, monkeypatch):
+    """Only the schema-missing case degrades to override-only. A genuine DB
+    failure must propagate — silently running boards-off would be
+    indistinguishable from the fresh-clone case (review finding on #39)."""
+    import database_supabase
+
+    def _boom():
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(database_supabase, "get_enabled_boards", _boom)
+    monkeypatch.delenv("JOB_BOARDS", raising=False)
+    with pytest.raises(RuntimeError, match="connection refused"):
+        rd._resolve_boards("idealist")
+
+
+# ---------------------------------------------------------------------------
 # 3. Publish gate
 # ---------------------------------------------------------------------------
 

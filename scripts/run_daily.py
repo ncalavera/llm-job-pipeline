@@ -324,6 +324,49 @@ def _reset_escalation_scores(member_ids: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_boards(cli_boards: str | None) -> str | None:
+    """The effective JOB_BOARDS value for a fresh run.
+
+    The persisted enabled set (survives sessions -- see
+    database_supabase.set_board_enabled) UNION the manual override (the
+    ``--boards`` flag and any inherited ``JOB_BOARDS`` env), so an enabled board
+    keeps fetching with no reminder while the env var stays an override applied
+    ON TOP. Returns a comma-joined id list, ``"all"`` if any override says all,
+    or ``None`` when nothing is selected (fetch stays boards-off, unchanged).
+
+    Resolved ONCE per fresh run and frozen into the run state, so ``--resume``
+    replays a consistent board set. A schema that predates board persistence (a
+    fresh clone before onboarding runs migrate.py) falls back to the override
+    alone -- that must never break the daily run (STRATEGY goal 1). Any OTHER
+    failure (DB down, real regression) propagates: degrading it silently to
+    boards-off would be indistinguishable from the fresh-clone case."""
+    persisted: list[str] = []
+    try:
+        from database_supabase import BoardPersistenceUnavailable, get_enabled_boards
+
+        try:
+            persisted = list(get_enabled_boards())
+        except BoardPersistenceUnavailable as exc:
+            print(f"  (persisted board set unavailable: {exc}; using override only)", flush=True)
+    finally:
+        _close_db()
+
+    tokens = list(persisted)
+    for raw in (cli_boards, os.environ.get("JOB_BOARDS")):
+        if not raw:
+            continue
+        for tok in raw.split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            if tok.lower() == "all":
+                return "all"
+            if tok not in tokens:
+                tokens.append(tok)
+
+    return ",".join(tokens) if tokens else None
+
+
 def _child_env(opts: Opts) -> dict:
     env = dict(os.environ)
     if opts.job_boards is not None:
@@ -1275,7 +1318,10 @@ def _parser() -> argparse.ArgumentParser:
         "--boards",
         type=str,
         default=None,
-        help="JOB_BOARDS value for the fetch stage (e.g. '80k_hours,idealist'). Boards are opt-in.",
+        help=(
+            "Extra boards for THIS run (e.g. '80k_hours,idealist'), unioned ON TOP of the "
+            "persisted enabled set (scripts/sources.py). Use enable-board to make one stick."
+        ),
     )
     p.add_argument(
         "--full-rescore",
@@ -1300,7 +1346,9 @@ def main(argv: list[str] | None = None) -> int:
     existing = _load_state()
     if args.new:
         opts = Opts(
-            job_boards=args.boards, full_rescore=args.full_rescore, no_publish=args.no_publish
+            job_boards=_resolve_boards(args.boards),
+            full_rescore=args.full_rescore,
+            no_publish=args.no_publish,
         )
         state = _new_state(opts)
     elif args.resume:
@@ -1321,7 +1369,9 @@ def main(argv: list[str] | None = None) -> int:
             opts.no_publish = True
     else:
         opts = Opts(
-            job_boards=args.boards, full_rescore=args.full_rescore, no_publish=args.no_publish
+            job_boards=_resolve_boards(args.boards),
+            full_rescore=args.full_rescore,
+            no_publish=args.no_publish,
         )
         state = _new_state(opts)
 

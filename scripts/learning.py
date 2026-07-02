@@ -713,12 +713,18 @@ def apply_factor_move(factor_text: str, keyword: str) -> dict:
 
 
 def apply_disable_board(board: str) -> dict:
-    """Record an approved 'disable board' decision. The board set is opt-in per
-    run via JOB_BOARDS, so 'disable' means: stop enabling it. We log the decision
-    (the audit trail) and surface it so the runbook drops it from the boards
-    flag — we never silently rewrite the user's run command."""
+    """Apply an approved 'disable board' decision: clear the board's persisted
+    ``enabled`` flag so it stops participating in future runs, and log the
+    decision (the audit trail). This closes the loop — the proposal
+    (propose_board_disables) → user approval → this apply — instead of only
+    printing advice. It changes just the durable default; the board can still be
+    re-enabled for a one-off run via JOB_BOARDS / --boards. Applied only on the
+    user's explicit yes (guardrail 8: never a silent self-edit)."""
+    from database_supabase import set_board_enabled
+
+    set_board_enabled(board, False)
     record_applied("disable_board", {"board": board})
-    return {"board": board, "note": "logged — drop it from your --boards / JOB_BOARDS set"}
+    return {"board": board, "note": "disabled — removed from the persisted board set"}
 
 
 # ---------------------------------------------------------------------------
