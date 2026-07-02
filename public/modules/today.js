@@ -19,14 +19,16 @@ import {
   isGroupCompanyApproved,
   updateStatus,
 } from "./state.js";
-import { escHtml, isVacancyExpired } from "./helpers.js";
+import {
+  escHtml,
+  isVacancyExpired,
+  STALE_SOURCE_DAYS,
+  sourceAgeDays,
+} from "./helpers.js";
 import { T } from "./i18n.js";
 
 const SOON_DAYS = 7; // a deadline this close is "decide now"
 const NEW_HIGH_FIT = 70; // the rarest, loudest tier
-// A role not confirmed by its source for this long is probably closed (mirrors
-// STALE_SOURCE_DAYS in catalog.js / scripts/config.py).
-const STALE_SOURCE_DAYS = 14;
 const LAST_VISIT_KEY = "today_last_visit";
 
 // Captured ONCE per page load: the previous visit timestamp. We read it before
@@ -65,13 +67,8 @@ function _isLiveRole(g) {
   }
   if (status === "expiring") return true;
   if (isVacancyExpired(g)) return false;
-  if (g.last_seen) {
-    const seen = new Date(g.last_seen);
-    if (!isNaN(seen.getTime())) {
-      const ageDays = Math.floor((Date.now() - seen.getTime()) / 86400000);
-      if (ageDays >= STALE_SOURCE_DAYS) return false;
-    }
-  }
+  const ageDays = sourceAgeDays(g.last_seen);
+  if (ageDays != null && ageDays >= STALE_SOURCE_DAYS) return false;
   return true;
 }
 

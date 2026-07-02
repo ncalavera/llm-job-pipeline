@@ -18,8 +18,11 @@ import {
 import {
   escHtml,
   normalizeDedupeText,
-  getTriageDedupeKey,
-  isVacancyExpired,
+  dedupeTriageEntries,
+  formatDeadlineHtml,
+  isVacancyStale,
+  sourceAgeDays,
+  triageColumnFor,
 } from "./helpers.js";
 import { T } from "./i18n.js";
 import Sortable from "../vendor/sortable.esm.js";
@@ -180,7 +183,8 @@ function buildMoveBtns(curColKey) {
   return (
     '<div class="triage-move-btns">' +
     TRIAGE_COLUMNS.filter(function (c) {
-      return c.key !== curColKey;
+      // Derived columns ('expired') aren't real statuses — no move-to button.
+      return c.key !== curColKey && !c.derived;
     })
       .map(function (c) {
         const lbl = MOVE_LABELS[c.key] || c.label;
@@ -201,6 +205,33 @@ function buildMoveBtns(curColKey) {
       .join("") +
     "</div>"
   );
+}
+
+// Deadline (urgency-coloured) or, when a role has no deadline but its source
+// went quiet, a staleness line reusing the Catalog freshness badge look.
+function buildTriageFreshness(g) {
+  const dl = formatDeadlineHtml(g.deadline, "pipe-deadline");
+  if (dl) return '<div class="pipe-card-fresh">' + dl + "</div>";
+  if (isVacancyStale(g)) {
+    const age = sourceAgeDays(g.last_seen);
+    const text = T(
+      "triage_stale_seen",
+      "not seen at source for {n} days",
+    ).replace("{n}", age);
+    return (
+      '<div class="pipe-card-fresh"><span class="card-freshness stale" title="' +
+      escHtml(
+        T(
+          "freshness_stale_hint",
+          "based on the last time the source confirmed the role; direct ATS is exact, aggregators approximate",
+        ),
+      ) +
+      '">' +
+      escHtml(text) +
+      "</span></div>"
+    );
+  }
+  return "";
 }
 
 function buildTriageCard(g, col, review) {
@@ -286,6 +317,7 @@ function buildTriageCard(g, col, review) {
     (g.llm_score != null
       ? '<span class="pipe-card-score">' + g.llm_score + "</span>"
       : "") +
+    buildTriageFreshness(g) +
     openLinkHtml +
     meta +
     buildMoveBtns(col.key) +
@@ -347,6 +379,7 @@ function buildTriageGroupCard(entries, col) {
         (locs
           ? '<div class="pipe-grp-role-loc">' + escHtml(locs) + "</div>"
           : "") +
+        buildTriageFreshness(g) +
         "</li>"
       );
     })
@@ -418,7 +451,7 @@ export function renderPipeline() {
     buckets[col.key] = [];
   });
 
-  const deduped = new Map();
+  const catalogEntries = [];
   let catalogRejectedTotal = 0;
   const visibleGroups = groups.filter((g) => isGroupCompanyApproved(g));
   visibleGroups.forEach(function (g) {
@@ -429,31 +462,18 @@ export function renderPipeline() {
     var entry = Object.assign({}, g);
     entry._status = status;
     entry._review = getReviewForGroup(g, reviewByVid);
-    const key = getTriageDedupeKey(g);
-    const prev = deduped.get(key);
-    if (!prev) {
-      deduped.set(key, entry);
-      return;
-    }
-    const prevP = STATUS_PRI[prev._status] ?? 99;
-    const nextP = STATUS_PRI[entry._status] ?? 99;
-    if (nextP < prevP) {
-      if (!entry._review && prev._review) entry._review = prev._review;
-      deduped.set(key, entry);
-    } else if (!prev._review && entry._review) {
-      prev._review = entry._review;
-    }
+    catalogEntries.push(entry);
   });
+  // Collapse cross-board copies onto one card, carrying the freshest last_seen
+  // across duplicates so a stale copy can't route a live role into "Expired".
+  const deduped = dedupeTriageEntries(catalogEntries, STATUS_PRI);
+  const columnKeys = new Set(TRIAGE_COLUMNS.map((c) => c.key));
   deduped.forEach(function (entry) {
-    // A liked role past its deadline is no longer auto-passed (U9): surface it
-    // in the "Expiring" column for an explicit decision instead of hiding it.
-    if (entry._status === "liked" && isVacancyExpired(entry)) {
-      if (buckets.expiring !== undefined) buckets.expiring.push(entry);
-      return;
-    }
-    if (buckets[entry._status] !== undefined) {
-      buckets[entry._status].push(entry);
-    }
+    // 'expiring' roles live in the Today tab, not the board; liked/to_apply/
+    // to_research/to_network that are no longer actual collapse into the shared
+    // "Expired" column; applied/skipped stay put (see triageColumnFor).
+    const col = triageColumnFor(entry, columnKeys);
+    if (col && buckets[col] !== undefined) buckets[col].push(entry);
   });
 
   const metrics = {
@@ -558,15 +578,24 @@ export function renderPipeline() {
 
   // Drag-and-drop: each column's card list is a Sortable connected to the
   // shared "triage" group, so cards drag between columns. Dropping into a
-  // different column moves the role(s) to that column's status.
+  // different column moves the role(s) to that column's status. Derived columns
+  // ('expired') accept no drops — cards drag OUT to a decision but never IN.
   sortableInstances.forEach(function (s) {
     s.destroy();
   });
   sortableInstances = [];
+  const derivedKeys = new Set(
+    TRIAGE_COLUMNS.filter((c) => c.derived).map((c) => c.key),
+  );
   board.querySelectorAll(".pipe-col-cards").forEach(function (listEl) {
+    const colEl = listEl.closest(".pipe-col");
+    const colKey =
+      colEl && colEl.id.startsWith("triageCol-")
+        ? colEl.id.slice("triageCol-".length)
+        : "";
     sortableInstances.push(
       Sortable.create(listEl, {
-        group: "triage",
+        group: { name: "triage", pull: true, put: !derivedKeys.has(colKey) },
         animation: 150,
         draggable: ".pipe-card",
         ghostClass: "pipe-card-ghost",

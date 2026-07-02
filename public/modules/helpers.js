@@ -720,7 +720,9 @@ export function formatDeadlineHtml(deadline, cssPrefix) {
   } else if (diffDays <= 7) {
     label += " (in " + diffDays + "d)";
   }
-  const cls = isExpired ? "expired" : "active";
+  // Urgency tiers: past = expired (red), within a week = soon (amber),
+  // further out = active (default).
+  const cls = isExpired ? "expired" : diffDays <= 7 ? "soon" : "active";
   return (
     '<span class="' +
     cssPrefix +
@@ -744,6 +746,57 @@ export function isVacancyExpired(g) {
   if (isNaN(dl.getTime())) return false;
   const todayD = new Date(new Date().toISOString().slice(0, 10));
   return dl < todayD;
+}
+
+// ---------------------------------------------------------------------------
+// Source freshness + Triage "no longer actual" classification
+// ---------------------------------------------------------------------------
+
+// A role not confirmed by its source for this many days is treated as gone /
+// probably closed (mirrors STALE_SOURCE_DAYS in scripts/config.py). Shared by
+// the Catalog freshness badge and the Triage "Expired" column.
+export const STALE_SOURCE_DAYS = 14;
+
+// Whole days since a role's source last confirmed it. null when unknown/invalid.
+export function sourceAgeDays(lastSeen) {
+  if (!lastSeen) return null;
+  const seen = new Date(lastSeen);
+  if (isNaN(seen.getTime())) return null;
+  return Math.floor((Date.now() - seen.getTime()) / 86400000);
+}
+
+// The source stopped confirming the role for STALE_SOURCE_DAYS+ days.
+// Boundary: exactly STALE_SOURCE_DAYS counts as stale.
+export function isVacancyStale(g) {
+  const age = sourceAgeDays(g && g.last_seen);
+  return age != null && age >= STALE_SOURCE_DAYS;
+}
+
+// "No longer actual": the deadline has lapsed OR the source went quiet.
+export function isVacancyGone(g) {
+  return isVacancyExpired(g) || isVacancyStale(g);
+}
+
+// Statuses pulled into the shared "Expired" column once the role is no longer
+// actual. applied/skipped are terminal decisions and stay in their columns.
+export const EXPIRABLE_STATUSES = new Set([
+  "liked",
+  "to_apply",
+  "to_research",
+  "to_network",
+]);
+
+// Decide which Triage board column a deduped entry (carrying _status) belongs
+// to, given the set of real column keys. Returns null when the entry has no
+// place on the board:
+//   - DB status 'expiring' lives in the Today tab, never on the board;
+//   - unseen/passed and any unknown status have no column.
+// Gone EXPIRABLE_STATUSES collapse into 'expired'; everything else maps 1:1.
+export function triageColumnFor(entry, columnKeys) {
+  const status = entry && entry._status;
+  if (status === "expiring") return null;
+  if (EXPIRABLE_STATUSES.has(status) && isVacancyGone(entry)) return "expired";
+  return columnKeys && columnKeys.has(status) ? status : null;
 }
 
 export function hardReqHtml(g) {
@@ -798,6 +851,46 @@ export function getTriageDedupeKey(g) {
     locs,
     normalizeDedupeText(g.deadline || ""),
   ].join("::");
+}
+
+// When the same role reaches Triage from two boards it dedupes to a single
+// card. The survivor must reflect the FRESHEST sighting across every copy —
+// otherwise a stale duplicate can wrongly route a still-live role into the
+// "Expired" column. Returns the more recent of two last_seen values; either
+// may be null / blank / invalid.
+export function freshestLastSeen(a, b) {
+  const ta = a ? new Date(a).getTime() : NaN;
+  const tb = b ? new Date(b).getTime() : NaN;
+  if (isNaN(tb)) return a;
+  if (isNaN(ta)) return b;
+  return ta >= tb ? a : b;
+}
+
+// Reduce triage entries (each carrying _status and _review) to one per dedupe
+// key. The survivor is the entry with the lowest status priority; ties keep the
+// first-inserted. Across all duplicates the survivor inherits any _review and
+// the freshest last_seen, so a stale copy can never send a live role to the
+// "Expired" column. `statusPri` maps a status string → number (lower = higher).
+export function dedupeTriageEntries(entries, statusPri) {
+  const pri = (e) => statusPri[e._status] ?? 99;
+  const deduped = new Map();
+  entries.forEach(function (entry) {
+    const key = getTriageDedupeKey(entry);
+    const prev = deduped.get(key);
+    if (!prev) {
+      deduped.set(key, entry);
+      return;
+    }
+    if (pri(entry) < pri(prev)) {
+      if (!entry._review && prev._review) entry._review = prev._review;
+      entry.last_seen = freshestLastSeen(entry.last_seen, prev.last_seen);
+      deduped.set(key, entry);
+    } else {
+      if (!prev._review && entry._review) prev._review = entry._review;
+      prev.last_seen = freshestLastSeen(prev.last_seen, entry.last_seen);
+    }
+  });
+  return deduped;
 }
 
 // ---------------------------------------------------------------------------

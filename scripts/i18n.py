@@ -42,6 +42,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "freshness_stale": "stale, likely closed",
         "freshness_fresh_hint": "the source confirmed this role recently",
         "freshness_stale_hint": "based on the last time the source confirmed the role; direct ATS is exact, aggregators approximate",
+        # Triage "Expired" column staleness line
+        "triage_stale_seen": "not seen at source for {n} days",
         # Today cockpit (U10/U11)
         "today_expiring": "Expiring, needs a decision",
         "today_ready": "Ready to send",
@@ -210,6 +212,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "freshness_stale": "давно не видели, вероятно закрыта",
         "freshness_fresh_hint": "источник подтверждал роль недавно",
         "freshness_stale_hint": "оценка по дате последнего показа в источнике; прямые ATS точны, агрегаторы приблизительны",
+        # Triage "Expired" column staleness line
+        "triage_stale_seen": "нет в источнике уже {n} дн.",
         # Today cockpit (U10/U11)
         "today_expiring": "Истекает, нужно решение",
         "today_ready": "Готово к отправке",
