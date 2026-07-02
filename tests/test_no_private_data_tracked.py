@@ -28,6 +28,7 @@ SENSITIVE = [
     re.compile(r"^config/user_profile\.md$"),
     re.compile(r"^public/data\.js$"),
     re.compile(r"^vacancies/"),
+    re.compile(r"^evals/"),  # personal golden set (labelled vacancies + reasons)
     re.compile(r"^\.firecrawl/"),
     re.compile(r"^architecture-notes/"),
     re.compile(r"^\.claude-session-acceptance\.md$"),
@@ -71,6 +72,7 @@ def test_patterns_allow_safe_files_and_block_unsafe():
     assert hit("config/user_profile.md")
     assert hit("public/data.js")
     assert hit("vacancies/jobs-archive/x.json")
+    assert hit("evals/golden_set.jsonl")
     assert hit("architecture-notes/lesson.md")
     assert hit("data/jobsearch.db")
     assert hit("local.sqlite")
