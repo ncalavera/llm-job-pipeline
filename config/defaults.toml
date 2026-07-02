@@ -68,6 +68,42 @@ show_mpa_column = false
 company_evidence_char_cap = 25000
 
 # ===========================================================================
+# Volume — ONE window for "how many vacancies do I want to see?".
+#
+# Daily flow was spread across four unrelated levers (company re-fetch cooldown,
+# the scoring --limit, which boards are on, the hard filters). These three dials
+# gather the neutral, tool-mechanics part of that into one place; each is wired
+# to the REAL lever it names (no parallel mechanism). Lower any one and the daily
+# flow measurably shrinks; run_daily.py prints the current values at run start.
+#
+# These are OWNER-AGNOSTIC caps (a nurse, a game designer and a policy analyst
+# all want "show me roughly N a day"), so they ship here — unlike the plan-tier
+# cost knobs (scoring model, spike cap) which are personal and live in the
+# profile's ## VOLUME section. Where both exist (scoring limit), the profile's
+# ## VOLUME max_per_run OVERRIDES daily_scoring_limit below.
+# ===========================================================================
+[volume]
+# The most ACTIVE companies fetched for new vacancies in a single run. When more
+# are due (their re-fetch cooldown elapsed), the rest defer to the next run — a
+# per-run flow cap, never a status change (STRATEGY guardrail 8). Real lever:
+# the company selection in fetch_vacancies.py. Default 200 is a spike-day guard,
+# not a throttle: a hand-curated active set is far smaller, so a normal run is
+# untouched; lower it to deliberately slow company-sourced volume.
+max_active_companies = 200
+
+# The most vacancies scored in one run when no explicit --limit is passed. Real
+# lever: score_vacancies.py --limit (via scoring_settings.max_per_run). This is
+# the neutral default; a profile ## VOLUME max_per_run (plan-tier personal knob)
+# overrides it. A quiet day scores 20-30; the cap keeps a burst day from draining
+# the plan, and the overflow is offered next run ("scored X of Y").
+daily_scoring_limit = 150
+
+# How many vacancies the Telegram digest sends by default (no --limit). Real
+# lever: telegram_digest.py --limit (via settings.digest default_limit). Lower it
+# for a shorter daily message.
+digest_size = 5
+
+# ===========================================================================
 # Numeric thresholds — scoring, tiers, auto-archive, auto-review.
 # ===========================================================================
 [thresholds]
@@ -578,7 +614,8 @@ location_hint_cities = [
 [digest]
 hot_vacancy_score = 55
 deadline_soon_days = 7
-default_limit = 5
+# NB: the digest's default size lives in [volume] digest_size (the single volume
+# window) — settings.digest() reads it from there, not from a key here.
 default_min_score = 40
 summary_fallback_chars = 600
 summary_max_chars = 1500
@@ -594,6 +631,8 @@ message_max_chars = 4000
 [boards.80k_hours]
 strategy = "algolia_api"
 name = "80,000 Hours"
+audience = "Effective altruism, AI safety, global-priorities policy and research."
+audience_tags = ["effective altruism", "ai safety", "policy", "research", "global health", "biosecurity", "nonprofit"]
 url = "https://jobs.80000hours.org"
 algolia_app_id = "W6KM1UDIB3"
 algolia_api_key = "d1d7f2c8696e7b36837d5ed337c4a319"
@@ -606,6 +645,8 @@ free = true
 [boards.reliefweb]
 strategy = "reliefweb_api"
 name = "ReliefWeb"
+audience = "Humanitarian relief and international-development NGOs."
+audience_tags = ["humanitarian", "development", "ngo", "aid", "relief", "global health"]
 url = "https://reliefweb.int/jobs"
 board_blacklist = []
 ttl_days = 3
@@ -615,6 +656,8 @@ free = true
 [boards.arbeitnow]
 strategy = "arbeitnow_api"
 name = "Arbeitnow"
+audience = "European tech; remote roles and (when listed) visa-sponsorship jobs."
+audience_tags = ["engineering", "software", "developer", "tech", "remote", "europe", "data"]
 url = "https://www.arbeitnow.com"
 pages = 3
 board_blacklist = []
@@ -625,6 +668,8 @@ free = true
 [boards.remotive]
 strategy = "remotive_api"
 name = "Remotive"
+audience = "Remote-first roles across engineering, product, design, marketing, support."
+audience_tags = ["remote", "software", "engineering", "product", "marketing", "design", "customer support", "sales"]
 url = "https://remotive.com"
 board_blacklist = []
 ttl_days = 3
@@ -634,6 +679,8 @@ free = true
 [boards.weworkremotely]
 strategy = "wwr_rss"
 name = "We Work Remotely"
+audience = "Remote jobs across programming, design, ops, marketing, sales, support."
+audience_tags = ["remote", "software", "engineering", "developer", "product", "design", "devops", "marketing", "sales", "customer support"]
 url = "https://weworkremotely.com"
 # WWR has no single "all jobs" feed — one RSS feed per category — so the neutral
 # default is ALL public categories. Narrow with WWR_CATEGORIES (comma list).
@@ -651,6 +698,8 @@ free = true
 [boards.hn_whoishiring]
 strategy = "hn_whoishiring"
 name = "HN Who is hiring"
+audience = "Startups, engineering-heavy; the monthly Hacker News hiring thread."
+audience_tags = ["engineering", "software", "developer", "startup", "tech", "data"]
 url = "https://news.ycombinator.com/submitted?id=whoishiring"
 board_blacklist = []
 # The thread is monthly — a 30-day TTL stops daily refetches.
@@ -663,6 +712,8 @@ free = true
 [boards.impactpool]
 strategy = "impactpool_html"
 name = "Impactpool"
+audience = "Nonprofit, UN and multilateral / international-organisation roles."
+audience_tags = ["nonprofit", "development", "humanitarian", "multilateral", "un", "policy", "global health"]
 url = "https://www.impactpool.org/search"
 max_pages = 5
 board_blacklist = []
@@ -676,6 +727,8 @@ free = true
 [boards.datadotorg]
 strategy = "datadotorg_wp"
 name = "data.org"
+audience = "Data-for-social-impact and AI-for-good: data science / analytics roles."
+audience_tags = ["data", "data science", "analytics", "ai", "social impact", "nonprofit", "engineering"]
 url = "https://data.org/jobs/"
 api_url = "https://data.org/wp-json/wp/v2/job"
 max_jobs = 60
@@ -690,6 +743,8 @@ free = true
 [boards.idealist]
 strategy = "idealist_algolia"
 name = "Idealist"
+audience = "Nonprofit and social-impact jobs: programmes, advocacy, community, ops."
+audience_tags = ["nonprofit", "social impact", "community", "advocacy", "policy", "development", "operations"]
 url = "https://www.idealist.org/en/jobs"
 remote_zone = "WORLD"
 max_pages = 20
@@ -703,6 +758,8 @@ free = true
 [boards.fast_forward]
 strategy = "fastforward_board"
 name = "Fast Forward"
+audience = "Tech-nonprofits: engineering, product and ops at mission-driven startups."
+audience_tags = ["nonprofit", "tech", "engineering", "software", "product", "social impact", "data"]
 url = "https://jobs.ffwd.org/jobs"
 getro_collection_id = 997
 max_pages = 20
@@ -712,8 +769,13 @@ ttl_days = 2
 tier = "B"
 free = true
 
-# LinkedIn — public guest jobs API (free, no login). Merges the old "LinkedIn" +
-# "LinkedIn Non-profits" sources: the nonprofit slant is just extra queries.
+# LinkedIn — public guest jobs API (free, no login). A GENERAL board: it fits
+# ANY field because its search queries are derived from the user profile (target
+# roles + geography), not baked here. Resolution order, in
+# scripts/profile_targeting.py: an explicit ## LINKEDIN_QUERIES profile section
+# wins; else queries are derived from ## TARGET_ROLES (+ target geography); else
+# the board fetches nothing and says how to fix it. The shipped config carries NO
+# queries on purpose (STRATEGY guardrail 1: no maintainer taste in defaults).
 # LinkedIn throttles hard — keep pages low and request_delay generous.
 [boards.linkedin]
 strategy = "linkedin_guest"
@@ -726,26 +788,18 @@ free = true
 pages = 2
 request_delay = 3.0
 fetch_detail = true
-queries = [
-  { keywords = "Chief of Staff", location = "London" },
-  { keywords = "Chief of Staff", location = "European Union" },
-  { keywords = "Head of Operations", location = "London" },
-  { keywords = "Director of Operations", location = "Berlin" },
-  { keywords = "Programme Manager", location = "London" },
-  { keywords = "Program Manager", location = "European Union" },
-  { keywords = "Product Manager impact", location = "Remote" },
-  { keywords = "Chief of Staff nonprofit", location = "London" },
-  { keywords = "Programme Manager nonprofit", location = "European Union" },
-  { keywords = "Head of Programmes foundation", location = "London" },
-]
+general = true
+audience = "Any field — queries are built from your profile's target roles + geography."
 
 # Consider portfolio boards (a16z, Sequoia) — VC job aggregators. Defined here so
 # they appear in the dashboard's Boards tab, but OFF by default (not in
-# JOB_BOARDS): past runs found ~0 mission-fit roles. The consider_board fetcher
-# is not implemented in this repo, so do not enable these without restoring it.
+# JOB_BOARDS). The consider_board fetcher is not implemented in this repo, so do
+# not enable these without restoring it.
 [boards.a16z]
 strategy = "consider_board"
 name = "a16z Portfolio"
+audience = "Venture-backed startup roles (a16z portfolio): engineering, product, GTM."
+audience_tags = ["startup", "engineering", "software", "product", "tech", "venture"]
 url = "https://jobs.a16z.com"
 board_blacklist = []
 ttl_days = 3
@@ -755,6 +809,8 @@ free = true
 [boards.sequoia]
 strategy = "consider_board"
 name = "Sequoia Portfolio"
+audience = "Venture-backed startup roles (Sequoia portfolio): engineering, product, GTM."
+audience_tags = ["startup", "engineering", "software", "product", "tech", "venture"]
 url = "https://jobs.sequoiacap.com"
 board_blacklist = []
 ttl_days = 3
@@ -771,6 +827,8 @@ free = true
 [boards.consultants_for_impact]
 strategy = "cfi_board_json"
 name = "Consultants for Impact"
+audience = "Strategy / management consultants moving into social-impact work."
+audience_tags = ["consulting", "strategy", "social impact", "nonprofit", "operations", "policy"]
 url = "https://www.consultantsforimpact.org/job-board"
 data_url = "https://cfi-job-board.netlify.app/board-data.json"
 max_jobs = 150

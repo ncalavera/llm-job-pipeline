@@ -34,6 +34,11 @@ to the user at the gates.
    enabled board on. See what's enabled with `python3 scripts/sources.py`
    (catalogue in `docs/job-boards-catalogue.md`).
 
+   Not sure which boards fit? `python3 scripts/sources.py recommend` proposes the
+   ones that match **your** profile (target field, roles, geography) — an
+   engineer is proposed engineering boards, not six impact boards. It only
+   suggests; enable what you want with `enable-board`. Boards never auto-enable.
+
 2. **When it stops, read WHY.** The driver exits with a code and a printed block:
 
    | Exit | Meaning | You do |
@@ -70,6 +75,10 @@ probing the public ATS APIs with `curl`
 yes**, then `migrate.py` and insert the approved companies as `active`. Then
 `--resume`. (The driver only reaches this gate when the company table is empty
 AND the registry loaded fine — a DB outage aborts instead, never onboards.)
+
+Also surface the boards that fit this profile —
+`python3 scripts/sources.py recommend` (derived from the same profile) — and
+enable only the ones the user confirms. Never enable boards for them by default.
 
 ### Learning review (verdict-driven corrections — before the fetch)
 Runs before fetching when there are verdicts to learn from (skipped on the first

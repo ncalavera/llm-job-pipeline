@@ -67,6 +67,27 @@ foundation strategy roles.
 **Not a target:** pure engineering roles, sales/BD, very junior
 (coordinator/assistant), VP/C-level requiring 15+ years.
 
+## LINKEDIN_QUERIES
+
+<!--
+Search terms for the LinkedIn board (enable it with `sources.py enable-board
+linkedin`). OPTIONAL — leave this section empty and the pipeline DERIVES queries
+from your TARGET_ROLES above + your target locations, defaulting to Remote. Fill
+it in only when you want exact control (specific phrasing, specific cities).
+
+One query per line: `keywords | location`. The location is optional (blank =
+LinkedIn's default, worldwide). Works for any field — a nurse might write
+`ICU Nurse | Manchester`; a game designer `Level Designer | Remote`. The shipped
+config carries NO queries: they always come from here or from your TARGET_ROLES,
+never from a default someone else picked.
+
+    Director of Operations | Berlin
+    Chief of Staff | London
+    Programme Manager | Remote
+
+Leave the block empty (or delete it) to use the derived queries.
+-->
+
 ## EXCLUDE_PATTERNS
 
 <!--
@@ -189,8 +210,16 @@ keeps its cheap score, sorted out of view.
   when you don't pass --limit. A quiet day scores 20-30; this cap keeps a burst
   day (hundreds of new roles) from silently draining your plan — the overflow is
   offered on the next run, and the run prints "scored X of Y". In the two-pass
-  flow the cap bounds the SCREEN set (the strong pass is a subset). Empty/omitted
-  or a non-positive value → 150.
+  flow the cap bounds the SCREEN set (the strong pass is a subset). This PERSONAL,
+  plan-tier value OVERRIDES the neutral `[volume] daily_scoring_limit` in
+  config/defaults.toml; leave it empty/omitted to inherit that shared default
+  (150). A non-positive value also falls back to the shared default.
+
+The neutral "how many do I see" dials (how many active companies fetch per run,
+the shared scoring limit, the digest size) live in one place —
+config/defaults.toml `[volume]` — and `/jobs-new` prints the current values at
+run start. This section holds only the parts tied to YOUR plan (model tier + the
+per-run cap).
 -->
 
 scoring_model: sonnet

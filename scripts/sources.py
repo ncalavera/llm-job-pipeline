@@ -9,12 +9,18 @@ no env var and no reminder. ``JOB_BOARDS`` / ``--boards`` stays a manual overrid
 applied ON TOP of this persisted set for a single run.
 
     python3 scripts/sources.py                    # list enabled boards + active companies
-    python3 scripts/sources.py enable-board <id>  # make a board stick across runs
-    python3 scripts/sources.py disable-board <id> # stop a board fetching by default
+    python3 scripts/sources.py recommend          # boards that fit YOUR profile
+    python3 scripts/sources.py enable-board <id>   # make a board stick across runs
+    python3 scripts/sources.py disable-board <id>  # stop a board fetching by default
 
 Board ids come from config (config._ALL_JOB_BOARDS); an unknown id on enable is
 rejected with the known list, mirroring /jobs-add Mode B. Active-company status
 is managed in /jobs-review, not here -- this command only reports it.
+
+``recommend`` derives its suggestions from the user profile (target field, roles,
+geography) via scripts/profile_targeting.py -- an engineer is proposed
+engineering boards, not six impact boards. It only PROPOSES: nothing is enabled
+until the user runs enable-board (STRATEGY guardrail 8).
 """
 
 from __future__ import annotations
@@ -63,6 +69,29 @@ def cmd_list() -> int:
     return 0
 
 
+def cmd_recommend() -> int:
+    """Propose the boards that fit the user's profile (never enables any)."""
+    from profile_targeting import recommend_boards
+
+    recs = recommend_boards()
+    try:
+        enabled = set(get_enabled_boards())
+    except BoardPersistenceUnavailable:
+        enabled = set()  # a pre-board schema still shows recommendations
+
+    print("Boards recommended for your profile (target field + roles + geography):")
+    if not recs:
+        print("  (none — add a ## TARGET_ROLES section to config/user_profile.md)")
+        return 0
+    for r in recs:
+        mark = "  [enabled]" if r["id"] in enabled else ""
+        print(f"  {r['id']:<24} {r['reason']}{mark}")
+    print()
+    print("Enable the ones you want (they then fetch every run):")
+    print("  python3 scripts/sources.py enable-board <id>")
+    return 0
+
+
 def cmd_enable(board_id: str) -> int:
     if board_id not in _ALL_JOB_BOARDS:
         known = ", ".join(sorted(_ALL_JOB_BOARDS)) or "(none)"
@@ -93,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = p.add_subparsers(dest="cmd")
     sub.add_parser("list", help="Show enabled boards + active companies (default).")
+    sub.add_parser("recommend", help="Propose boards that fit your profile (enables nothing).")
     en = sub.add_parser("enable-board", help="Persist a board as enabled (survives sessions).")
     en.add_argument("board_id")
     di = sub.add_parser("disable-board", help="Clear a board's enabled flag.")
@@ -100,6 +130,8 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     try:
+        if args.cmd == "recommend":
+            return cmd_recommend()
         if args.cmd == "enable-board":
             return cmd_enable(args.board_id)
         if args.cmd == "disable-board":

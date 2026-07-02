@@ -108,6 +108,7 @@ from cli_help import wants_help
 if __name__ == "__main__" and wants_help():
     build_parser().parse_args()
 
+import settings
 from config import (
     COMPANIES,
     JOB_BOARDS,
@@ -338,6 +339,20 @@ def _auto_enrich_candidates():
         )
 
 
+def _apply_company_cap(ordered_names: list[str], companies: dict, cap: int) -> tuple[dict, int]:
+    """Keep at most ``cap`` companies, chosen from the front of ``ordered_names``.
+
+    Pure (unit-tested): given a priority order (most-overdue first) it returns
+    ``(kept_dict, deferred_count)``. ``cap <= 0`` or a set already within the cap
+    means "keep everything, defer nothing".
+    """
+    if cap <= 0 or len(companies) <= cap:
+        return companies, 0
+    keep = [n for n in ordered_names if n in companies][:cap]
+    kept = {n: companies[n] for n in keep}
+    return kept, len(companies) - len(kept)
+
+
 def _filter_companies(args) -> dict:
     """Filter COMPANIES dict based on CLI arguments.
 
@@ -378,11 +393,13 @@ def _filter_companies(args) -> dict:
         cur = conn.cursor()
         stale = {}
         skipped_count = 0
+        staleness: dict[str, float] = {}  # name -> last_fetched epoch (never = 0.0)
         for n, c in filtered.items():
             cur.execute("SELECT last_fetched FROM company WHERE canonical_name = %s", (n,))
             row = cur.fetchone()
             if not row or not row[0]:
                 stale[n] = c  # never fetched
+                staleness[n] = 0.0
             else:
                 last_dt = row[0]
                 days = (datetime.now(last_dt.tzinfo) - last_dt).days
@@ -390,11 +407,25 @@ def _filter_companies(args) -> dict:
                 ttl = _TTL_BY_TIER.get(tier, 7)
                 if days >= ttl:
                     stale[n] = c
+                    staleness[n] = last_dt.timestamp()
                 else:
                     skipped_count += 1
         cur.close()
         if skipped_count:
             print(f"  Skipped {skipped_count} companies (fetched recently), fetching {len(stale)}")
+
+        # Per-run volume cap ([volume] max_active_companies): if more companies are
+        # due than the cap, fetch the MOST OVERDUE ones (oldest last_fetched first,
+        # never-fetched first) and defer the rest to the next run — so the set
+        # rotates instead of starving late-alphabet orgs. A cap, never a delete.
+        cap = int(settings.volume()["max_active_companies"])
+        ordered = sorted(stale, key=lambda n: (staleness.get(n, 0.0), n))
+        stale, deferred = _apply_company_cap(ordered, stale, cap)
+        if deferred:
+            print(
+                f"  Volume cap: {len(stale)} of {len(stale) + deferred} due companies fetched "
+                f"this run ([volume] max_active_companies={cap}); {deferred} defer to the next run"
+            )
         filtered = stale
 
     return filtered

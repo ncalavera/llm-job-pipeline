@@ -159,6 +159,40 @@ def scoring() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Volume — the single "how many vacancies do I want to see?" window.
+# ---------------------------------------------------------------------------
+
+# Neutral fallbacks (today's numbers) so a deleted [volume] section keeps the
+# pipeline running at its historical volume. daily_scoring_limit mirrors
+# scoring_settings.DEFAULT_MAX_PER_RUN; digest_size mirrors the old
+# [digest] default_limit.
+_VOLUME_DEFAULTS = {
+    "max_active_companies": 200,
+    "daily_scoring_limit": 150,
+    "digest_size": 5,
+}
+
+
+def volume() -> dict:
+    """The [volume] dials with neutral fallbacks. Never raises.
+
+    Keys (each wired to a real lever, see config/defaults.toml [volume]):
+      max_active_companies — per-run cap on active companies fetched.
+      daily_scoring_limit  — default scoring cap (profile ## VOLUME overrides).
+      digest_size          — default Telegram digest size.
+
+    A non-positive or non-numeric value falls back to the neutral default: a
+    volume dial must never resolve to "do nothing" or crash a run.
+    """
+    sec = _section("volume")
+    out = {}
+    for key, default in _VOLUME_DEFAULTS.items():
+        val = int(_num(sec, key, default))
+        out[key] = val if val > 0 else default
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Dashboard presentation knobs
 # ---------------------------------------------------------------------------
 
@@ -291,12 +325,17 @@ def parsing_location_hint_cities() -> list:
 
 
 def digest() -> dict:
-    """Digest defaults (env vars still override at the call site)."""
+    """Digest defaults (env vars still override at the call site).
+
+    ``default_limit`` is the digest SIZE — it comes from the single volume
+    window ([volume] digest_size), not from a key in [digest], so "how many
+    vacancies do I see" lives in one place.
+    """
     sec = _section("digest")
     return {
         "hot_vacancy_score": int(_num(sec, "hot_vacancy_score", 55)),
         "deadline_soon_days": int(_num(sec, "deadline_soon_days", 7)),
-        "default_limit": int(_num(sec, "default_limit", 5)),
+        "default_limit": volume()["digest_size"],
         "default_min_score": int(_num(sec, "default_min_score", 40)),
         "summary_fallback_chars": int(_num(sec, "summary_fallback_chars", 600)),
         "summary_max_chars": int(_num(sec, "summary_max_chars", 1500)),

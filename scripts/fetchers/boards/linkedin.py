@@ -63,10 +63,25 @@ def fetch_linkedin_board(board_cfg: dict) -> list[dict]:
 
     LinkedIn throttles hard (429 after ~10 rapid requests) so every request is
     spaced by ``request_delay`` seconds with back-off on 429.
+
+    Queries come from the user profile, never a shipped default: an explicit
+    query set in ``board_cfg["queries"]`` (a one-off override) wins; otherwise
+    they are resolved from the profile's target roles + geography via
+    ``profile_targeting.resolve_linkedin_queries`` (STRATEGY guardrail 1).
     """
     board_name = board_cfg["name"]
     list_url = f"{_LINKEDIN_GUEST}/seeMoreJobPostings/search"
-    queries = board_cfg.get("queries") or []
+    queries = board_cfg.get("queries")
+    if not queries:
+        from profile_targeting import resolve_linkedin_queries
+
+        queries = resolve_linkedin_queries()
+    if not queries:
+        print(
+            f"  [{board_name}] no LinkedIn queries — add a ## TARGET_ROLES (or an explicit "
+            "## LINKEDIN_QUERIES) section to config/user_profile.md, then re-run"
+        )
+        return []
     pages = int(board_cfg.get("pages", 2))
     delay = float(board_cfg.get("request_delay", 3.0))
     want_detail = bool(board_cfg.get("fetch_detail", True))
