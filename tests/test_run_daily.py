@@ -157,6 +157,48 @@ def test_stage_error_stops_with_error_code_and_is_resumable(rd):
 
 
 # ---------------------------------------------------------------------------
+# 2b. Resume silently freezes options — flag the ones the CLI can't change
+# ---------------------------------------------------------------------------
+
+
+def test_resume_with_full_rescore_warns_it_is_ignored(rd, capsys):
+    args = rd._parser().parse_args(["--resume", "--full-rescore"])
+    rd._warn_ignored_resume_flags(args)
+    out = capsys.readouterr().out
+    assert "--full-rescore" in out
+    assert "IGNORED" in out
+
+
+def test_resume_with_boards_warns_it_is_ignored(rd, capsys):
+    args = rd._parser().parse_args(["--resume", "--boards", "80k_hours"])
+    rd._warn_ignored_resume_flags(args)
+    out = capsys.readouterr().out
+    assert "--boards" in out
+    assert "IGNORED" in out
+
+
+def test_resume_without_ignored_flags_stays_silent(rd, capsys):
+    args = rd._parser().parse_args(["--resume"])
+    rd._warn_ignored_resume_flags(args)
+    assert capsys.readouterr().out == ""
+
+
+def test_resume_keeps_checkpointed_opts_even_with_cli_overrides(rd):
+    """The warning is cosmetic — resume must still replay the checkpoint's
+    options, never the CLI's, so behaviour is unchanged."""
+    state = rd._new_state(rd.Opts(job_boards="idealist", full_rescore=False))
+    rd._save_state(state)
+
+    rd.HANDLERS = {name: (lambda state, entry, opts: ("advance", "ok")) for name in rd.STAGE_ORDER}
+    code = rd.main(["--resume", "--boards", "80k_hours", "--full-rescore"])
+    assert code == rd.EXIT_DONE
+
+    reloaded = rd._load_state()
+    assert reloaded["options"]["job_boards"] == "idealist"
+    assert reloaded["options"]["full_rescore"] is False
+
+
+# ---------------------------------------------------------------------------
 # 3. Publish gate
 # ---------------------------------------------------------------------------
 

@@ -160,6 +160,27 @@ def _opts_from_state(state: dict) -> Opts:
     )
 
 
+def _warn_ignored_resume_flags(args: argparse.Namespace) -> None:
+    """Resuming replays the options frozen in the checkpoint, not the CLI's.
+
+    ``--boards`` and ``--full-rescore`` are silently dropped on resume unless we
+    say so — a user re-running with ``--full-rescore`` to lift the scoring cap
+    would otherwise get a normal-cap run with no indication anything changed.
+    """
+    flags = []
+    if args.boards is not None:
+        flags.append("--boards")
+    if args.full_rescore:
+        flags.append("--full-rescore")
+    for flag in flags:
+        print(
+            f"⚠  {flag} is IGNORED on resume: this run's options are locked in "
+            "at the checkpoint, not re-read from the CLI. To apply it, finish "
+            "or discard the current run (--new) and start over.",
+            flush=True,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Small DB helpers (backend-agnostic — plain ANSI SQL, no ::casts)
 # ---------------------------------------------------------------------------
@@ -896,12 +917,14 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_ABORT
         state = existing
         opts = _opts_from_state(state)
+        _warn_ignored_resume_flags(args)
         if args.no_publish:
             opts.no_publish = True
     elif existing and not existing.get("finished"):
         print(f"Resuming interrupted run {existing.get('run_id')} …", flush=True)
         state = existing
         opts = _opts_from_state(state)
+        _warn_ignored_resume_flags(args)
         if args.no_publish:
             opts.no_publish = True
     else:
