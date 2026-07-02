@@ -1,0 +1,283 @@
+"""Tests for the deterministic /jobs-new driver (scripts/run_daily.py).
+
+Covers the four things the driver MUST get right (acceptance criteria):
+  1. stage order is fixed and cannot be violated,
+  2. checkpoint + resume continues from where it stopped,
+  3. the publish gate blocks a dirty run,
+  4. the per-run scoring cap is a fuse; a full re-score is an explicit opt-in.
+
+Plus a network-free integration slice over the first real stages (validate
+profile -> preflight -> onboarding gate) on an isolated temp SQLite DB.
+
+Everything is place- and person-agnostic: invented orgs, a throwaway DB, no
+network and no real model.
+"""
+
+import importlib
+import sys
+
+import pytest
+
+
+@pytest.fixture()
+def rd(monkeypatch, tmp_path):
+    """Fresh run_daily module with its state file redirected to a temp path."""
+    sys.modules.pop("run_daily", None)
+    import run_daily
+
+    importlib.reload(run_daily)
+    monkeypatch.setattr(run_daily, "STATE_PATH", tmp_path / "run_state.json")
+    monkeypatch.setattr(run_daily, "FETCH_STATS_PATH", tmp_path / "fetch_stats.json")
+    return run_daily
+
+
+# ---------------------------------------------------------------------------
+# 1. Stage order
+# ---------------------------------------------------------------------------
+
+
+def test_stage_order_is_the_documented_sequence(rd):
+    assert rd.STAGE_ORDER == [
+        "validate_profile",
+        "preflight",
+        "onboarding",
+        "learning_review",
+        "fetch",
+        "enrich",
+        "filter",
+        "company_scoring",
+        "vacancy_scoring",
+        "verdicts",
+        "publish",
+    ]
+
+
+def test_every_stage_has_exactly_one_handler(rd):
+    assert set(rd.HANDLERS) == set(rd.STAGE_ORDER)
+    assert len(rd.STAGE_ORDER) == len(set(rd.STAGE_ORDER)), "no duplicate stages"
+
+
+def test_driver_runs_stages_strictly_in_order(rd):
+    """With every stage stubbed to 'advance', the driver visits them in order."""
+    seen = []
+
+    def recorder(name):
+        def handler(state, entry, opts):
+            seen.append(name)
+            return ("advance", "ok")
+
+        return handler
+
+    rd.HANDLERS = {name: recorder(name) for name in rd.STAGE_ORDER}
+    state = rd._new_state(rd.Opts())
+    code = rd.drive(state, rd.Opts())
+
+    assert code == rd.EXIT_DONE
+    assert seen == rd.STAGE_ORDER
+    assert state["finished"] is True
+    assert state["cursor"] == len(rd.STAGE_ORDER)
+
+
+# ---------------------------------------------------------------------------
+# 2. Checkpoint + resume
+# ---------------------------------------------------------------------------
+
+
+def test_gate_stops_the_run_and_resume_continues(rd):
+    """A gate halts the driver mid-sequence; --resume picks up from the SAME
+    stage and finishes — no earlier stage is ever re-run."""
+    calls = []
+
+    def advancer(name):
+        def h(state, entry, opts):
+            calls.append(name)
+            return ("advance", "ok")
+
+        return h
+
+    # vacancy_scoring gates on the first pass, then advances on resume.
+    def gating(state, entry, opts):
+        calls.append("vacancy_scoring")
+        if not entry.get("emitted"):
+            return ("gate", {"action": "score", "instructions": "score them", "payload_path": None})
+        return ("advance", "done")
+
+    rd.HANDLERS = {name: advancer(name) for name in rd.STAGE_ORDER}
+    rd.HANDLERS["vacancy_scoring"] = gating
+
+    state = rd._new_state(rd.Opts())
+
+    # First pass: stop at the gate.
+    code = rd.drive(state, rd.Opts())
+    assert code == rd.EXIT_GATE
+    gate_idx = rd.STAGE_ORDER.index("vacancy_scoring")
+    assert state["cursor"] == gate_idx
+    assert rd._stage(state, "vacancy_scoring")["status"] == "blocked_gate"
+    assert calls == rd.STAGE_ORDER[: gate_idx + 1]
+
+    # State survives a reload from disk (checkpoint is durable).
+    reloaded = rd._load_state()
+    assert reloaded is not None
+    assert reloaded["cursor"] == gate_idx
+
+    # Resume: continue from the gate to the end; earlier stages are NOT re-run.
+    calls.clear()
+    code = rd.drive(reloaded, rd.Opts())
+    assert code == rd.EXIT_DONE
+    assert calls == rd.STAGE_ORDER[gate_idx:]  # gate re-checked, then the tail
+    assert reloaded["finished"] is True
+
+
+def test_stage_error_stops_with_error_code_and_is_resumable(rd):
+    def advancer(name):
+        def h(state, entry, opts):
+            return ("advance", "ok")
+
+        return h
+
+    calls = {"fetch": 0}
+
+    def flaky_fetch(state, entry, opts):
+        calls["fetch"] += 1
+        if calls["fetch"] == 1:
+            return ("error", "boom")
+        return ("advance", "recovered")
+
+    rd.HANDLERS = {name: advancer(name) for name in rd.STAGE_ORDER}
+    rd.HANDLERS["fetch"] = flaky_fetch
+
+    state = rd._new_state(rd.Opts())
+    assert rd.drive(state, rd.Opts()) == rd.EXIT_ERROR
+    fetch_idx = rd.STAGE_ORDER.index("fetch")
+    assert state["cursor"] == fetch_idx  # did not advance past the failed stage
+    assert rd._stage(state, "fetch")["status"] == "error"
+
+    # Resume re-runs the failed stage (idempotent) and completes.
+    assert rd.drive(state, rd.Opts()) == rd.EXIT_DONE
+
+
+# ---------------------------------------------------------------------------
+# 3. Publish gate
+# ---------------------------------------------------------------------------
+
+
+def _clean_state(rd):
+    state = rd._new_state(rd.Opts())
+    for s in state["stages"]:
+        s["status"] = "done"
+    return state
+
+
+def test_publish_gate_allows_a_clean_run(rd):
+    allowed, reasons = rd.check_publish_gate(_clean_state(rd), fetch_stats={"orgs": {}})
+    assert allowed is True
+    assert reasons == []
+
+
+def test_publish_gate_blocks_on_a_stage_error(rd):
+    state = _clean_state(rd)
+    rd._stage(state, "enrich")["status"] = "error"
+    allowed, reasons = rd.check_publish_gate(state, fetch_stats={"orgs": {}})
+    assert allowed is False
+    assert any("enrich" in r for r in reasons)
+
+
+def test_publish_gate_blocks_on_mass_gone_archive(rd):
+    """A truncated fetch that archived most of an org's live roles blocks publish."""
+    stats = {"orgs": {"Globex": {"gone": 40, "live": 5}}}
+    allowed, reasons = rd.check_publish_gate(_clean_state(rd), fetch_stats=stats)
+    assert allowed is False
+    assert any("Globex" in r for r in reasons)
+
+
+def test_publish_gate_ignores_tiny_and_normal_orgs(rd):
+    # gone=2 is below the min-count floor; gone=5/25 is a normal ~20% share.
+    stats = {"orgs": {"Tiny": {"gone": 2, "live": 0}, "Normal": {"gone": 5, "live": 20}}}
+    allowed, reasons = rd.check_publish_gate(_clean_state(rd), fetch_stats=stats)
+    assert allowed is True, reasons
+
+
+# ---------------------------------------------------------------------------
+# 4. Scoring cap / full re-score opt-in
+# ---------------------------------------------------------------------------
+
+
+def test_default_run_lets_the_script_apply_the_cap(rd):
+    limit, warn = rd.resolve_scoring_limit(full_rescore=False)
+    assert limit is None  # no --limit -> score_vacancies.py applies max_per_run()
+    assert warn is None
+
+
+def test_full_rescore_lifts_the_cap_loudly(rd):
+    limit, warn = rd.resolve_scoring_limit(full_rescore=True)
+    assert isinstance(limit, int) and limit >= 1000
+    assert warn and "FULL RE-SCORE" in warn
+
+
+# ---------------------------------------------------------------------------
+# 5. Integration slice — real early stages on an isolated temp SQLite DB
+# ---------------------------------------------------------------------------
+
+
+def _force_sqlite(monkeypatch, db_file):
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
+    monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
+    for mod in ("database_supabase", "config", "company_registry", "db_conn", "db_backend"):
+        sys.modules.pop(mod, None)
+    import db_backend
+
+    importlib.reload(db_backend)
+    assert db_backend.IS_SQLITE
+
+
+def test_validate_profile_aborts_on_the_example(rd, monkeypatch):
+    from prompts import EXAMPLE_PROFILE_PATH
+
+    monkeypatch.setenv("USER_PROFILE_PATH", str(EXAMPLE_PROFILE_PATH))
+    state = rd._new_state(rd.Opts())
+    kind, msg = rd._h_validate_profile(state, rd._stage(state, "validate_profile"), rd.Opts())
+    assert kind == "abort"
+    assert "EXAMPLE" in msg
+
+
+def test_validate_profile_accepts_a_personalised_profile(rd, monkeypatch, tmp_path):
+    prof = tmp_path / "user_profile.md"
+    prof.write_text(
+        "## SUMMARY\nOperations lead, 8y, remote-first.\n\n## HARD_FILTERS\nban_regions:\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("USER_PROFILE_PATH", str(prof))
+    state = rd._new_state(rd.Opts())
+    kind, _ = rd._h_validate_profile(state, rd._stage(state, "validate_profile"), rd.Opts())
+    assert kind == "advance"
+
+
+def test_preflight_then_onboarding_gate_on_empty_db(rd, monkeypatch, tmp_path):
+    _force_sqlite(monkeypatch, tmp_path / "jobsearch.db")
+    state = rd._new_state(rd.Opts())
+
+    kind, note = rd._h_preflight(state, rd._stage(state, "preflight"), rd.Opts())
+    assert kind == "advance"
+    assert state["first_run"] is True
+
+    kind, payload = rd._h_onboarding(state, rd._stage(state, "onboarding"), rd.Opts())
+    assert kind == "gate"
+    assert payload["action"] == "onboard"
+
+
+def test_onboarding_skipped_when_companies_exist(rd, monkeypatch, tmp_path):
+    _force_sqlite(monkeypatch, tmp_path / "jobsearch.db")
+    import database_supabase as db
+
+    db.ensure_company("Acme Foundation", status="active")
+    db.get_conn().commit()
+
+    state = rd._new_state(rd.Opts())
+    kind, _ = rd._h_preflight(state, rd._stage(state, "preflight"), rd.Opts())
+    assert kind == "advance"
+    assert state["first_run"] is False
+
+    kind, note = rd._h_onboarding(state, rd._stage(state, "onboarding"), rd.Opts())
+    assert kind == "skip"
+    db.close_conn()
