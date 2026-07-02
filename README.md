@@ -59,6 +59,11 @@ and asks you only for the things it can't do itself.
   one vacancy per subagent for consistent judgement, with reasoning, tags,
   hard-requirements extraction and a summary. Same approach scores whole
   companies for mission/profile alignment.
+- **Scoring-quality check:** `/jobs-eval` builds a *golden set* — a few dozen of
+  your own vacancies labelled fits / doesn't-fit — and reports one number: how
+  often the scorer agrees with you, plus the disagreements to fix. It seeds
+  itself from your existing like/pass verdicts, so there's no upfront labelling
+  wall. The set is personal and stays on your machine (gitignored `evals/`).
 - **Company-first review:** new companies arrive as candidates; strong
   vacancies at not-yet-reviewed companies get rescued and flagged hot, so you
   approve companies with evidence in front of you.
@@ -222,6 +227,7 @@ Stripe") — it uses `/jobs-add` itself.
 | --- | --- |
 | `/jobs-add` | Add a company: ATS auto-detection, test fetch |
 | `/jobs-review` | Deep review of liked vacancies, archive low scores, terminal triage |
+| `/jobs-eval` | Scoring-quality check: label a golden set of your own vacancies, measure how well the scorer agrees with you |
 | `/jobs-profile` | Update scoring rules and candidate profile |
 | `/jobs-digest` | Send/poll the Telegram digest (full mode) |
 | `/jobs-update` | Pull latest code, refresh deps, apply DB migrations |

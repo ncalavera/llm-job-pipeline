@@ -193,7 +193,18 @@ Once set up, the loop is:
 /jobs-new                            # morning, ~5 min, mostly automated
 /jobs-review list → like/pass        # over coffee, or via Telegram buttons
 /jobs-review                         # weekly: decide what to actually apply to
+/jobs-eval                           # occasionally: is the scorer agreeing with you?
 ```
+
+## Check the scoring quality (`/jobs-eval`)
+
+The scoring prompt is the pipeline's main judging surface — so measure it.
+`/jobs-eval` seeds a small **golden set** from the like/pass verdicts you have
+already made (no upfront labelling), re-scores those vacancies with the current
+prompt, and prints one agreement number plus precision/recall at the score
+threshold and a list of disagreements to fix. The set is personal and lives in a
+gitignored `evals/` folder — it is never committed. Full runbook:
+`.claude/commands/jobs-eval.md`.
 
 ## Troubleshooting
 
