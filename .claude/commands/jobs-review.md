@@ -15,6 +15,10 @@ One entry point for reviewing vacancies after scoring. The first argument picks 
 
 **Never auto-drop into `apply`.** With no argument, show the menu and wait.
 
+**Reply in the user's product language.** Read `## OUTPUT_LANGUAGE` from
+`config/user_profile.md` (resolve with `python3 -c "import sys;sys.path.insert(0,'scripts');import product_language as p;print(p.resolve())"` → `en`/`ru`) and write ALL of your
+chat — menus, prompts, interview questions, summaries — in that language.
+
 After any mode that mutates state (`apply`, `archive`) — run the **Publish** step at the end (see bottom). `vac` mutations the user makes by hand can also publish on request, but the menu/CLI itself does not auto-publish.
 
 ---
