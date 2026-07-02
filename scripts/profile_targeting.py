@@ -127,9 +127,17 @@ def recommend_boards(sections: dict[str, str] | None = None, boards: dict | None
         boards = settings.boards()
     text = _profile_text(sections)
 
+    # Only recommend boards this repo can actually fetch. Catalogue entries
+    # whose strategy has no registered fetcher (e.g. the consider_board VC
+    # aggregators) would be enabled, return zero every run, and never say why —
+    # the silent-degradation class the guards exist for (review finding on #44).
+    from fetchers import BOARD_FETCHERS
+
     general: list[dict] = []
     matched: list[tuple[int, str, dict]] = []
     for bid, cfg in boards.items():
+        if str(cfg.get("strategy", "")) not in BOARD_FETCHERS:
+            continue
         name = str(cfg.get("name", bid))
         if cfg.get("general"):
             general.append(
@@ -210,12 +218,16 @@ def _derive_locations(sections: dict[str, str]) -> list[str]:
     field and country. Capped so queries never fan out too wide.
     """
     raw_line = ""
-    pat = re.compile(r"target locations?\s*:\s*(.+)", re.IGNORECASE)
+    pat = re.compile(r"^(?P<prefix>.*?)target locations?\s*:\s*(?P<rest>.+)", re.IGNORECASE)
+    # A negation right before the phrase means an EXCLUSION line
+    # ("Not target locations: US") — deriving those as search locations would
+    # search exactly where the user said not to (review nit on #44).
+    negated = re.compile(r"\b(?:not|no|never|excluded?)\W*$", re.IGNORECASE)
     for body in sections.values():
         for line in (body or "").splitlines():
             m = pat.search(line)
-            if m:
-                raw_line = m.group(1)
+            if m and not negated.search(m.group("prefix")):
+                raw_line = m.group("rest")
                 break
         if raw_line:
             break
