@@ -12,15 +12,20 @@ network):
    stages its writes and leaves the commit to the caller (a rollback drops an
    uncommitted approve/reject) — the DAL contract, no silent internal commit.
 
-3. Archive atomicity. ``archive_vacancies(force=True)`` OWNS its transaction:
-   it commits the DELETE itself and only THEN writes the on-disk JSON, so the
-   two can't diverge and nothing relies on an "accidental" caller/snapshot
-   commit. The score→archive→dashboard path loses nothing.
+3. Archive atomicity — in BOTH failure directions. ``archive_vacancies(force=
+   True)`` OWNS its transaction: the JSON payload is fully written to a temp
+   file BEFORE the DELETE is staged (a disk failure aborts with zero rows
+   lost), the DELETE is committed by the function itself (no reliance on an
+   "accidental" caller/snapshot commit), and only then is the temp file
+   atomically renamed onto the final archive name — so the DB and the disk
+   artifact can never disagree. The score→archive→dashboard path loses nothing.
 """
 
 import importlib
 import json
 import sys
+
+import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -204,9 +209,12 @@ def test_archive_self_commits_then_writes_json(tmp_path, monkeypatch):
         assert low not in live, "archived row must be gone for good"
         assert keep in live, "above-threshold row must survive"
 
-        # The on-disk JSON was written AFTER the commit and matches the delete.
-        archive_files = list((tmp_path / "archive").glob("archived_*.json"))
+        # The on-disk JSON was atomically published AFTER the commit (temp file
+        # + os.replace) and matches the delete; no temp leftovers remain.
+        archive_dir = tmp_path / "archive"
+        archive_files = list(archive_dir.glob("archived_*.json"))
         assert len(archive_files) == 1
+        assert not list(archive_dir.glob("*.tmp")), "temp file must be renamed away"
         payload = json.loads(archive_files[0].read_text(encoding="utf-8"))
         assert low in payload["vacancies"]
         assert keep not in payload["vacancies"]
@@ -224,5 +232,47 @@ def test_archive_self_commits_then_writes_json(tmp_path, monkeypatch):
         data_js = (out_dir / "data.js").read_text(encoding="utf-8")
         assert "Strong Fit Role" in data_js
         assert "Low Fit Role" not in data_js
+    finally:
+        db.close_conn()
+
+
+def test_archive_write_failure_loses_no_rows(tmp_path, monkeypatch):
+    """If the archive JSON cannot be written (disk full, permissions, encoding),
+    archive_vacancies must abort BEFORE the DELETE is staged: every row stays in
+    the database, no file appears under the final archive name, and no partial
+    temp file is left behind."""
+    db = _reset_backend(monkeypatch, tmp_path / "jobsearch.db")
+    try:
+        monkeypatch.setattr(db, "VACANCIES_DIR", tmp_path, raising=False)
+
+        db.ensure_company("Acme Robotics", status="active")
+        db.save_vacancies("Acme Robotics", "A", [_job("Low Fit Role")])
+        db.get_conn().commit()
+        low = _id_by_title(db, "Low Fit Role")
+        _set(db, low, llm_score=10)  # archivable
+        before = _dump_vacancies(db)
+
+        def _disk_full(*_args, **_kwargs):
+            raise OSError("No space left on device")
+
+        monkeypatch.setattr(db.json, "dump", _disk_full)
+        with pytest.raises(OSError, match="No space left"):
+            db.archive_vacancies(force=True)
+
+        # Nothing was staged on the connection: even a later unrelated commit
+        # (the classic accidental-commit trap) cannot persist a half-archive.
+        db.get_conn().commit()
+        assert _dump_vacancies(db) == before, "rows were lost despite a failed archive write"
+        assert low in db.load_vacancies(include_inactive_companies=True)
+
+        # No artifact under the final name, and the partial temp file is gone.
+        archive_dir = tmp_path / "archive"
+        assert not list(archive_dir.glob("archived_*.json")), "no final archive on failure"
+        assert not list(archive_dir.glob("*.tmp")), "partial temp file must be cleaned up"
+
+        # No dedup tombstone was persisted either — the failed attempt consumed
+        # nothing, so the role stays archivable once the disk recovers.
+        h = db.load_vacancies(include_inactive_companies=True)[low]["dedup_hash"]
+        assert h not in db.get_archived_hashes()
     finally:
         db.close_conn()
