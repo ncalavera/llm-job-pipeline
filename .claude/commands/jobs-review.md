@@ -78,7 +78,7 @@ Deep review of `liked` vacancies — walks through them one by one and helps mak
    - If "No" — suggest Skip (hard requirements are critical).
 
    **Q2.5: Growth and complexity**
-   - The next role should offer tasks complex enough to produce real growth — mission fit alone is not sufficient.
+   - The next role should offer tasks complex enough to produce real growth — a good fit on paper is not sufficient on its own.
    - Options: Yes, it's new/building and I'll grow / Mixed, partly growth partly maintenance / No, mostly maintenance
    - If "No" — suggest Skip.
 
