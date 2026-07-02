@@ -645,7 +645,7 @@ def test_private_artifact_zone_is_gitignored():
 EXAMPLE_PROFILE = CONFIG / "user_profile.example.md"
 
 PERSONA_TOKENS = re.compile(
-    r"Example Foundation|Example Startup|Example NGO"
+    r"Example Foundation|Example Startup|Example NGO|Jane Doe"
     r"|grantmaking|counter-terror|peacekeeping|cap at 35",
     re.IGNORECASE,
 )

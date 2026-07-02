@@ -19,7 +19,14 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 
 # The user-facing entry docs whose links must never rot.
-SCANNED_DOCS = ["README.md", "INSTALL.md", "INSTALL-EASY.md", "AGENTS.md"]
+SCANNED_DOCS = [
+    "README.md",
+    "INSTALL.md",
+    "INSTALL-EASY.md",
+    "AGENTS.md",
+    "docs/ARCHITECTURE.md",
+    "docs/job-boards-catalogue.md",
+]
 
 # Inline Markdown link target: the `(...)` half of `[text](target)`.
 _LINK = re.compile(r"\]\(([^)]+)\)")

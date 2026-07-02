@@ -43,7 +43,7 @@ translating your own words, not the DB.)
 
    Not sure which boards fit? `python3 scripts/sources.py recommend` proposes the
    ones that match **your** profile (target field, roles, geography) — an
-   engineer is proposed engineering boards, not six impact boards. It only
+   engineer is proposed engineering boards, not someone else's fixed set. It only
    suggests; enable what you want with `enable-board`. Boards never auto-enable.
 
 2. **When it stops, read WHY.** The driver exits with a code and a printed block:

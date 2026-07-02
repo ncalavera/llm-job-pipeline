@@ -43,7 +43,7 @@ scheduler — one command a day.
 | `scripts/product_language.py` | Resolves `## OUTPUT_LANGUAGE` — the one language of the whole product (agent replies, reports, digest, dashboard default). |
 | `scripts/database_supabase.py` | The data-access layer (DAL) — same API over both backends. Writes stage changes but leaves the commit to the caller (see the DAL rule in [`AGENTS.md`](../AGENTS.md)). |
 | `scripts/db_conn.py` / `db_backend.py` | Backend selection + connection (loads `.env`); picks SQLite or Postgres. |
-| `scripts/migrate.py` | Applies pending numbered migrations after backing up (SQLite file copy / Postgres `pg_dump`); safe to re-run. |
+| `scripts/migrate.py` | Applies pending numbered migrations after backing up (SQLite online-backup API — WAL-safe; Postgres `pg_dump` best-effort on top of transactional rollback); safe to re-run. |
 | `scripts/telegram_digest.py` | The optional daily digest (send + poll) — full mode only. |
 
 ## The daily pipeline
