@@ -134,3 +134,19 @@ test("isNotModified: missing If-None-Match (first poll) -> false", () => {
 test("isNotModified: no etag available -> false (never claim unchanged with nothing to compare)", () => {
   assert.equal(isNotModified('"abc"', null), false);
 });
+
+test("isNotModified: weak validator prefix on either side still matches (edge compression must not kill 304s)", () => {
+  assert.equal(isNotModified('W/"abc"', '"abc"'), true);
+  assert.equal(isNotModified('"abc"', 'W/"abc"'), true);
+  assert.equal(isNotModified('W/"old"', '"new"'), false);
+});
+
+test("isNotModified: comma-separated If-None-Match list matches any member", () => {
+  assert.equal(isNotModified('"a", "b", "c"', '"b"'), true);
+  assert.equal(isNotModified('"a", W/"b"', '"b"'), true);
+  assert.equal(isNotModified('"a", "b"', '"c"'), false);
+});
+
+test("isNotModified: '*' matches any current etag", () => {
+  assert.equal(isNotModified("*", '"abc"'), true);
+});

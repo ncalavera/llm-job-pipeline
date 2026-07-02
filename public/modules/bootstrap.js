@@ -81,8 +81,12 @@ export function startPolling(initialETag) {
       return;
     }
     if (nextETag) etag = nextETag;
-    const { applySnapshot, scheduleRender } = await import("./state.js");
-    if (applySnapshot(payload)) scheduleRender();
+    try {
+      const { applySnapshot, scheduleRender } = await import("./state.js");
+      if (applySnapshot(payload)) scheduleRender();
+    } catch {
+      return; // a background poll must never disrupt the visible dashboard
+    }
   }
 
   function startInterval() {

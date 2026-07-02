@@ -272,6 +272,10 @@ function replaceObjectContents(obj, next) {
  * hot-reload — those still need a manual refresh. In practice they only
  * change if the user edits dashboard settings and reruns the pipeline while
  * the tab is open, which is rare enough to leave as a documented limitation.
+ * Same class of gap: `state.liveCompanies` (loaded on demand from
+ * /api/companies by the Companies tab) is not refreshed here, and
+ * getCompanies() prefers it once set — new companies from a polled snapshot
+ * appear in that tab only after its next interaction reloads the live list.
  */
 export function applySnapshot(payload) {
   if (!payload || typeof payload !== "object") return false;

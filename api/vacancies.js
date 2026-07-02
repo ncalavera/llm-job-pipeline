@@ -29,9 +29,22 @@ export function computeETag(updatedAt) {
   return updatedAt ? `"${updatedAt}"` : null;
 }
 
-/** True when the client's cached copy (If-None-Match) is still current. */
+/** Strip an RFC 9110 weak-validator prefix: proxies (e.g. Vercel's edge
+ * compression) may turn a strong ETag into `W/"…"` on the way to the client.
+ * Comparing weakly keeps the 304 path alive — losing it silently re-ships the
+ * full multi-MB payload on every poll. */
+function opaqueTag(tag) {
+  const t = tag.trim();
+  return t.startsWith("W/") ? t.slice(2) : t;
+}
+
+/** True when the client's cached copy (If-None-Match) is still current.
+ * Weak comparison over a possibly comma-separated If-None-Match list. */
 export function isNotModified(ifNoneMatch, etag) {
-  return Boolean(ifNoneMatch) && Boolean(etag) && ifNoneMatch === etag;
+  if (!ifNoneMatch || !etag) return false;
+  if (ifNoneMatch.trim() === "*") return true;
+  const target = opaqueTag(etag);
+  return ifNoneMatch.split(",").some((tag) => opaqueTag(tag) === target);
 }
 
 export default async function handler(req, res) {
