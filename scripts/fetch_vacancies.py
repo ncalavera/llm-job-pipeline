@@ -89,6 +89,16 @@ def build_parser() -> argparse.ArgumentParser:
             "driver, which owns the gated publish step (see scripts/run_daily.py)."
         ),
     )
+    parser.add_argument(
+        "--no-auto-enrich",
+        action="store_true",
+        help=(
+            "Skip the inline candidate-company enrichment/scoring after a fetch. "
+            "The run_daily driver passes this because its company_scoring stage "
+            "owns the canonical chain (find site → collect evidence → WANT-score); "
+            "running it here too would be a degraded parallel path."
+        ),
+    )
     return parser
 
 
@@ -662,7 +672,12 @@ def main():
         get_conn().commit()
 
         # --- Auto-enrich new candidate companies from boards ---
-        _auto_enrich_candidates()
+        # Under the run_daily driver this is skipped (--no-auto-enrich): the
+        # driver's company_scoring stage owns the canonical chain (find site →
+        # collect evidence → WANT-score). Standalone fetches keep the inline
+        # enrichment for convenience.
+        if not args.no_auto_enrich:
+            _auto_enrich_candidates()
 
         # Firecrawl change tracking summary
         change_statuses = get_firecrawl_change_statuses()

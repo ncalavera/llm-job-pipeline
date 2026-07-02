@@ -195,9 +195,12 @@ def _load_company_evidence_map(company_ids: list) -> dict[str, list[dict]]:
         return {}
     conn = get_conn()
     cur = conn.cursor()
+    # No ``::text`` cast on the SELECT: it has no SQLite translation and would
+    # raise there. company_id is a UUID (Postgres) or TEXT (SQLite); str() below
+    # normalises both to the same key the caller uses (str(company["id"])).
     cur.execute(
         """
-        SELECT company_id::text, source, url, content
+        SELECT company_id, source, url, content
         FROM company_evidence
         WHERE company_id = ANY(%s::uuid[])
         """,
@@ -208,9 +211,10 @@ def _load_company_evidence_map(company_ids: list) -> dict[str, list[dict]]:
 
     order = {s: i for i, s in enumerate(_EVIDENCE_SOURCE_ORDER)}
     evidence: dict[str, list[dict]] = {}
-    for company_id_str, source, url, content in rows:
+    for company_id_val, source, url, content in rows:
         if source not in order:  # filter: only allowed primary sources reach the scorer
             continue
+        company_id_str = str(company_id_val)
         evidence.setdefault(company_id_str, []).append(
             {"source": source, "url": url or "", "content": content or ""}
         )
@@ -537,11 +541,15 @@ def cmd_local(args):
     strategy_context = _load_strategy_context()
     output = []
     skipped = 0
+    no_evidence: list[str] = []  # scored, but only via the legacy scrape-cache fallback
     for c in companies:
         user_msg = _build_user_msg(c, scrape_cache, strategy_context, evidence_map)
         if user_msg is None:
             skipped += 1
             continue
+
+        if str(c["id"]) not in evidence_map:
+            no_evidence.append(c["canonical_name"])
 
         output.append(
             {
@@ -556,6 +564,22 @@ def cmd_local(args):
 
     if skipped:
         print(f"  Skipped {skipped} companies (not in scrape cache or evidence)", file=sys.stderr)
+    # LOUD, not silent: WANT-scoring on the scrape-cache fallback (no primary
+    # company_evidence) is a degraded score, not a normal one. The chain is
+    # supposed to collect evidence before this step (run_daily company_scoring →
+    # collect_company_evidence); an empty evidence set means that collection was
+    # skipped or failed, so shout instead of quietly scoring on stale scrape text.
+    if no_evidence:
+        preview = ", ".join(sorted(no_evidence)[:8])
+        more = f" (+{len(no_evidence) - 8} more)" if len(no_evidence) > 8 else ""
+        print(
+            f"⚠  WARNING: {len(no_evidence)} of {len(output)} companies have NO "
+            f"company_evidence — scoring them on the legacy scrape cache (degraded, "
+            f"may be stale/empty). Collect evidence first "
+            f"(scripts/collect_company_evidence.py) for accurate WANT scores. "
+            f"Affected: {preview}{more}",
+            file=sys.stderr,
+        )
     print(f"Prepared {len(output)} companies for scoring", file=sys.stderr)
 
     if args.dry_run:
