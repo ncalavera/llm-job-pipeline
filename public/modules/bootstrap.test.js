@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { resolveSource } from "./bootstrap.js";
+import { resolveSource, shouldApplyPollResponse } from "./bootstrap.js";
 
 test("200 OK → live payload from the endpoint", () => {
   assert.equal(resolveSource({ ok: true, status: 200 }), "live");
@@ -25,4 +25,22 @@ test("503 (snapshot not generated / auth not configured) → error", () => {
 
 test("500 → error", () => {
   assert.equal(resolveSource({ ok: false, status: 500 }), "error");
+});
+
+// U-poll — startPolling()'s response-decision logic. The fetch/DOM/timer
+// parts of startPolling() need a browser; this pure function is what decides
+// whether a poll response is applied, unit-tested without one.
+
+test("poll: 200 → apply (snapshot changed)", () => {
+  assert.equal(shouldApplyPollResponse(200), true);
+});
+
+test("poll: 304 → skip (snapshot unchanged, no body to parse)", () => {
+  assert.equal(shouldApplyPollResponse(304), false);
+});
+
+test("poll: 401/500/503 → skip (a background poll failure never disrupts the open dashboard)", () => {
+  assert.equal(shouldApplyPollResponse(401), false);
+  assert.equal(shouldApplyPollResponse(500), false);
+  assert.equal(shouldApplyPollResponse(503), false);
 });

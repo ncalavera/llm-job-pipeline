@@ -235,6 +235,77 @@ export function isGroupCompanyApproved(g) {
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// Live snapshot refresh (polling — see bootstrap.js)
+// ---------------------------------------------------------------------------
+
+/** Replace an array's contents in place, keeping the same reference. */
+function replaceArrayContents(arr, next) {
+  arr.length = 0;
+  if (Array.isArray(next)) arr.push(...next);
+}
+
+/** Replace a plain object's own keys in place, keeping the same reference. */
+function replaceObjectContents(obj, next) {
+  for (const k of Object.keys(obj)) delete obj[k];
+  if (next && typeof next === "object") Object.assign(obj, next);
+}
+
+/**
+ * Hot-swap a freshly-polled /api/vacancies payload into the running app.
+ *
+ * `config`, `stats`, `vacancy_ids`, `groups`, `companies`, `archivedGroups`
+ * and `triageReviews` above are `const` bindings destructured once from
+ * window.VACANCY_DATA at module load — every render function across the app
+ * (catalog.js, companies.js, pipeline.js, today.js, stats.js, archive.js)
+ * imports and reads those SAME array/object references at render time. A
+ * refresh can't reassign them (const, and every importer would still hold
+ * the stale reference), so this mutates their CONTENTS in place instead —
+ * the next render() call sees fresh data through the same bindings.
+ *
+ * UI state (active tab, filters, sort, scroll, search text) lives in the
+ * separate `state` object and in DOM elements untouched by this function, so
+ * it survives automatically; callers just call scheduleRender() after.
+ *
+ * Known gap: presentation config baked once at module load (SHOW_MPA in
+ * companies.js, the i18n string table / pack images in i18n.js) does not
+ * hot-reload — those still need a manual refresh. In practice they only
+ * change if the user edits dashboard settings and reruns the pipeline while
+ * the tab is open, which is rare enough to leave as a documented limitation.
+ * Same class of gap: `state.liveCompanies` (loaded on demand from
+ * /api/companies by the Companies tab) is not refreshed here, and
+ * getCompanies() prefers it once set — new companies from a polled snapshot
+ * appear in that tab only after its next interaction reloads the live list.
+ */
+export function applySnapshot(payload) {
+  if (!payload || typeof payload !== "object") return false;
+
+  replaceObjectContents(config, payload.config || {});
+  replaceObjectContents(stats, payload.stats || {});
+  replaceArrayContents(vacancy_ids, payload.vacancy_ids || []);
+  replaceArrayContents(groups, payload.groups || []);
+  replaceArrayContents(companies, payload.companies || []);
+  replaceArrayContents(archivedGroups, payload.archived_groups || []);
+  replaceArrayContents(triageReviews, payload.triage_reviews || []);
+
+  // No dedicated const export — today.js reads these straight off the
+  // global at render time, so keep window.VACANCY_DATA itself current too.
+  window.VACANCY_DATA.enrichment_stats = payload.enrichment_stats;
+  window.VACANCY_DATA.latency_metrics = payload.latency_metrics;
+
+  groupsById.clear();
+  for (const g of groups) {
+    g.member_ids = Array.isArray(g.member_ids) ? g.member_ids : [];
+    if (!state.dbData[g.id]) state.dbData[g.id] = { status: "unseen" };
+    groupsById.set(g.id, g);
+  }
+
+  companiesBySlug.clear();
+  for (const c of companies) companiesBySlug.set(c.slug, c);
+
+  return true;
+}
+
 export function getCompanyStatusCounts(ids) {
   const counts = { liked: 0, passed: 0, unseen: 0 };
   const todayStr = new Date().toISOString().slice(0, 10);

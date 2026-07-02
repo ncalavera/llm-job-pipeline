@@ -6,6 +6,14 @@ import { getSupabase, validateConfig } from "./_supabase.js";
 // public/data.js VACANCY_DATA. The pipeline upserts that row on every data
 // change, so a browser refresh shows current data with no redeploy.
 //
+// Conditional GET: the dashboard polls this endpoint (see bootstrap.js). The
+// row's `updated_at` is bumped on every write (see
+// sql/migrations/0001_dashboard_snapshot.postgres.sql), so it is already a
+// stable, unique version token — no need to hash the ~3.6 MB payload. A poll
+// that sends a still-current `If-None-Match` gets a 304 with no body, and the
+// full payload is never even pulled out of Postgres (see the two-query split
+// below: the cheap metadata query runs first).
+//
 // Security (this payload carries PII — personal scoring text):
 //   * Same-origin only — NO `Access-Control-Allow-Origin: *`. The matching
 //     middleware.js Basic Auth gate is the access control.
@@ -13,6 +21,32 @@ import { getSupabase, validateConfig } from "./_supabase.js";
 //     every request through (opt-in auth), so this endpoint refuses to serve
 //     rather than leak PII on an unprotected deployment.
 //   * `Cache-Control: no-store` — a refresh must never get a stale payload.
+//     (This is an app-level conditional GET, not HTTP cache reuse: no-store
+//     just means "always ask the server", which the ETag round-trip still does.)
+
+/** Build the ETag for a snapshot version from its `updated_at` timestamp. */
+export function computeETag(updatedAt) {
+  return updatedAt ? `"${updatedAt}"` : null;
+}
+
+/** Strip an RFC 9110 weak-validator prefix: proxies (e.g. Vercel's edge
+ * compression) may turn a strong ETag into `W/"…"` on the way to the client.
+ * Comparing weakly keeps the 304 path alive — losing it silently re-ships the
+ * full multi-MB payload on every poll. */
+function opaqueTag(tag) {
+  const t = tag.trim();
+  return t.startsWith("W/") ? t.slice(2) : t;
+}
+
+/** True when the client's cached copy (If-None-Match) is still current.
+ * Weak comparison over a possibly comma-separated If-None-Match list. */
+export function isNotModified(ifNoneMatch, etag) {
+  if (!ifNoneMatch || !etag) return false;
+  if (ifNoneMatch.trim() === "*") return true;
+  const target = opaqueTag(etag);
+  return ifNoneMatch.split(",").some((tag) => opaqueTag(tag) === target);
+}
+
 export default async function handler(req, res) {
   // No CORS allow-origin header on purpose: same-origin only.
   res.setHeader("Cache-Control", "no-store");
@@ -41,6 +75,29 @@ export default async function handler(req, res) {
     console.warn("vacancies: config warning —", warnings.join("; "));
 
   try {
+    // Cheap first: fetch only the version column. A poller sends
+    // If-None-Match on every request, so an unchanged poll stops right here
+    // — no JSONB payload leaves Postgres, let alone the response.
+    const { data: meta, error: metaError } = await getSupabase()
+      .from("dashboard_snapshot")
+      .select("updated_at")
+      .eq("id", "current")
+      .maybeSingle();
+
+    if (metaError) throw metaError;
+    if (!meta) {
+      // Endpoint is live but the snapshot has not been generated yet. NOT a 404
+      // — 404 is the front-end's "endpoint absent → load static data.js" signal,
+      // which would be wrong here (full mode ships no data.js).
+      return res.status(503).json({ error: "Snapshot not generated yet" });
+    }
+
+    const etag = computeETag(meta.updated_at);
+    if (etag) res.setHeader("ETag", etag);
+    if (isNotModified(req.headers["if-none-match"], etag)) {
+      return res.status(304).end();
+    }
+
     const { data, error } = await getSupabase()
       .from("dashboard_snapshot")
       .select("payload")
@@ -49,9 +106,6 @@ export default async function handler(req, res) {
 
     if (error) throw error;
     if (!data) {
-      // Endpoint is live but the snapshot has not been generated yet. NOT a 404
-      // — 404 is the front-end's "endpoint absent → load static data.js" signal,
-      // which would be wrong here (full mode ships no data.js).
       return res.status(503).json({ error: "Snapshot not generated yet" });
     }
     return res.status(200).json(data.payload);

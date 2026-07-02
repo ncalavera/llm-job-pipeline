@@ -11,6 +11,18 @@
 //   401/500/503  -> a real error (auth gate, misconfig, snapshot missing) ->
 //                   show an explicit message, NEVER a silent stale fallback
 //   file://      -> offline view, no API host -> baked data.js
+//
+// Auto-refresh (full mode only): once live, poll /api/vacancies every
+// POLL_INTERVAL_MS with the last response's ETag as If-None-Match. Most polls
+// come back 304 (snapshot unchanged) — a few dozen bytes, no body to parse.
+// On an actual change, state.applySnapshot() hot-swaps the new data into the
+// SAME array/object references every render function already reads, so
+// scheduleRender() repaints without a reload and without touching state.js's
+// UI state (active tab, filters, sort, scroll) — see state.js for why that's
+// safe. Polling pauses while the tab is hidden (Page Visibility API) and
+// catches up immediately on refocus instead of waiting out the interval.
+
+const POLL_INTERVAL_MS = 60_000; // 60s — live-feeling, and an unchanged poll is nearly free
 
 /**
  * Decide where the dashboard payload comes from, given an HTTP response to
@@ -26,6 +38,76 @@ export function resolveSource({ ok, status }) {
 
 function isHttp() {
   return location.protocol === "http:" || location.protocol === "https:";
+}
+
+/**
+ * Decide whether a poll response carries data to apply. Pure — unit-tested
+ * without a browser. 304 (unchanged) and any non-2xx (a background poll
+ * failing should never disrupt the open dashboard the way boot()'s hard
+ * error path does — just try again next tick) both mean "nothing to apply".
+ * @returns {boolean}
+ */
+export function shouldApplyPollResponse(status) {
+  return status >= 200 && status < 300;
+}
+
+/**
+ * Poll /api/vacancies for a changed snapshot and hot-swap it in when found.
+ * No-ops outside full mode (no endpoint) — callers only invoke this after a
+ * "live" initial load. Exported for tests; real use is the `boot()` call below.
+ * @param {string|null} initialETag - ETag from the initial live fetch in boot().
+ */
+export function startPolling(initialETag) {
+  let etag = initialETag || null;
+  let timer = null;
+
+  async function tick() {
+    let res;
+    try {
+      res = await fetch("/api/vacancies", {
+        headers: etag
+          ? { Accept: "application/json", "If-None-Match": etag }
+          : { Accept: "application/json" },
+      });
+    } catch {
+      return; // offline blip — next tick retries
+    }
+    if (!shouldApplyPollResponse(res.status)) return; // 304 or a poll-time error
+    const nextETag = res.headers.get("ETag");
+    let payload;
+    try {
+      payload = await res.json();
+    } catch {
+      return;
+    }
+    if (nextETag) etag = nextETag;
+    try {
+      const { applySnapshot, scheduleRender } = await import("./state.js");
+      if (applySnapshot(payload)) scheduleRender();
+    } catch {
+      return; // a background poll must never disrupt the visible dashboard
+    }
+  }
+
+  function startInterval() {
+    if (timer) return;
+    timer = setInterval(tick, POLL_INTERVAL_MS);
+  }
+  function stopInterval() {
+    if (!timer) return;
+    clearInterval(timer);
+    timer = null;
+  }
+
+  if (document.visibilityState === "visible") startInterval();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      tick(); // catch up on whatever changed while the tab was hidden
+      startInterval();
+    } else {
+      stopInterval();
+    }
+  });
 }
 
 function loadStaticDataJs() {
@@ -57,6 +139,7 @@ function showError(detail) {
 export async function boot() {
   let source = "fallback";
   let payload = null;
+  let etag = null;
 
   if (isHttp()) {
     // One retry: a single transient network hiccup on a healthy deploy should
@@ -74,6 +157,7 @@ export async function boot() {
     if (res) {
       source = resolveSource({ ok: res.ok, status: res.status });
       if (source === "live") {
+        etag = res.headers.get("ETag");
         payload = await res.json();
         // A 200 with a null/non-object body would crash app.js with a confusing
         // error — treat it as a failure, not live data.
@@ -108,6 +192,10 @@ export async function boot() {
   }
 
   await import("../app.js"); // app.js lives at public/app.js, one level up
+
+  // Only full mode has a live endpoint to poll — fallback (simple/local mode,
+  // baked data.js) has no /api/vacancies to ask.
+  if (source === "live") startPolling(etag);
 }
 
 // Only run in the browser; importing this module under a test runner (no
