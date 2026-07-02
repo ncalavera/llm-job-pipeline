@@ -60,8 +60,9 @@ autonomously while the user gets coffee; questions cluster at the gates.
 ## The gates — your only jobs
 
 ### Onboarding (only on an empty database)
-Discover ~10–15 real, mission-aligned employers from `config/user_profile.md`
-(field + geography), validate each by probing the public ATS APIs with `curl`
+Discover ~10–15 real employers that fit `config/user_profile.md`
+(the candidate's target field + geography — whatever those are), validate each by
+probing the public ATS APIs with `curl`
 (Greenhouse / Lever / Ashby / Workable), show the shortlist and **wait for a
 yes**, then `migrate.py` and insert the approved companies as `active`. Then
 `--resume`. (The driver only reaches this gate when the company table is empty

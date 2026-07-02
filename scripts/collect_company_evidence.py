@@ -2,16 +2,16 @@
 """Collect raw company evidence from multiple sources into company_evidence table.
 
 Primary-source-first: facts must come from primary text the company published, not
-generated prose. After the GiveWell incident (Perplexity fabricated a "within 3 hours
+generated prose. After a real incident (Perplexity fabricated a "within 3 hours
 of Pacific" remote constraint that the real Greenhouse posting contradicts), Perplexity
 is DEMOTED to URL discovery only and is NOT a default source. Facts come from the
 company website, its real ATS / job board (Greenhouse / Lever / Ashby / Workable), and
 Exa page contents (real page text).
 
 Usage:
-    python3 scripts/collect_company_evidence.py --company "GiveWell,Coefficient Giving"
+    python3 scripts/collect_company_evidence.py --company "Acme Foundation,Example Org"
     python3 scripts/collect_company_evidence.py --company "Name" --sources website,exa
-    python3 scripts/collect_company_evidence.py --company "GiveWell" \\
+    python3 scripts/collect_company_evidence.py --company "Acme Foundation" \\
         --manual-urls "https://example.com/page1,https://example.com/page2"
 
 Sources:
@@ -480,7 +480,7 @@ def collect_careers(
 # Source: perplexity (general profile) — DEMOTED, NOT a default source
 #
 # Perplexity returns GENERATED PROSE, never primary text, and invents specifics
-# (the GiveWell incident: it fabricated a "within 3 hours of Pacific" remote
+# (a real incident: it fabricated a "within 3 hours of Pacific" remote
 # constraint that the real Greenhouse posting flatly contradicts). It must NEVER
 # be a fact source. Kept here only for optional URL discovery (run explicitly via
 # --sources perplexity); excluded from _DEFAULT_SOURCES.

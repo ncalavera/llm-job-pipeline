@@ -297,7 +297,7 @@ var WANT_DIMS = [
     "domain_desirability",
     "Domain",
     "Dom",
-    "How desirable the field is — dev / policy / growth over abstract causes.",
+    "How desirable the field is for this candidate, per their profile.",
   ],
   [
     "breadth_rotation",
@@ -327,7 +327,7 @@ var WANT_DIMS = [
     "culture_fit",
     "Culture",
     "Cul",
-    "Analytical, entrepreneurial, modern vs bureaucratic traditional-NGO.",
+    "Analytical, entrepreneurial, modern vs bureaucratic and traditional.",
   ],
 ];
 
@@ -1700,15 +1700,11 @@ function buildFitSection(c) {
       '%;border-radius:4px"></div></div></div></div>';
 
     if (c.fit_dimensions && Object.keys(c.fit_dimensions).length) {
-      var DIMS = [
-        ["mission_authenticity", "Mission"],
-        ["domain_desirability", "Domain"],
-        ["breadth_rotation", "Breadth"],
-        ["builder_stage", "Stage 0→1"],
-        ["career_entry_value", "Career"],
-        ["money_stability", "Money"],
-        ["culture_fit", "Culture"],
-      ];
+      // Derive the breakdown rows from the canonical factor set (WANT_DIMS) so
+      // the modal never drifts from the table/columns. [field, full label].
+      var DIMS = WANT_DIMS.map(function (d) {
+        return [d[0], d[1]];
+      });
       inner +=
         '<div style="margin-bottom:16px"><div style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">WANT breakdown</div>';
       for (var di = 0; di < DIMS.length; di++) {
