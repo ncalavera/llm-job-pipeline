@@ -68,6 +68,14 @@ from fetchers.parsing import (
     _blacklist_filter,
     _is_generic_pipeline_title,
 )
+from fetchers.firecrawl import (
+    fetch_firecrawl_scrape,
+    get_firecrawl_change_statuses,
+    get_scrape_statuses,
+    FIRECRAWL_JOBS_SCHEMA,
+    _fetch_local_scrape,
+    _enrich_blind_jobs,
+)
 from fetchers.legacy import (
     # ATS / company fetchers
     fetch_greenhouse,
@@ -83,13 +91,6 @@ from fetchers.legacy import (
     fetch_amazon_jobs,
     fetch_apple_jobs,
     fetch_unops_widget,
-    # Firecrawl scraper + statuses
-    fetch_firecrawl_scrape,
-    get_firecrawl_change_statuses,
-    get_scrape_statuses,
-    FIRECRAWL_JOBS_SCHEMA,
-    _fetch_local_scrape,
-    _enrich_blind_jobs,
     # Job boards
     fetch_algolia_board,
     fetch_firecrawl_board,
