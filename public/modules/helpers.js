@@ -697,6 +697,21 @@ export function llmScoreBadge(score) {
   return '<span class="llm-score-badge ' + cls + '">' + score + "</span>";
 }
 
+// A screen-only score (cheap two-pass model, never confirmed by the strong
+// model) that is high enough to land in the visible match band looks
+// byte-identical to a genuine strong-model score — this small badge is what
+// keeps the two distinguishable. The backend already decided WHEN it applies
+// (group.screen_only_score, see scripts/report/data_prep.py); this just
+// renders it. Old rows with no scored_by produce screen_only_score=false, so
+// nothing changes for them.
+export function screenScoreBadge(g) {
+  if (!g || !g.screen_only_score) return "";
+  return (
+    '<span class="screen-score-badge" title="screen score — not yet confirmed by the main model">' +
+    "screen</span>"
+  );
+}
+
 export function formatDeadlineHtml(deadline, cssPrefix) {
   if (!deadline) return "";
   const dl = new Date(deadline);

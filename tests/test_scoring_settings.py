@@ -96,6 +96,85 @@ def test_scoring_model_unknown_value_is_default(use_profile):
 
 
 # ---------------------------------------------------------------------------
+# screen_model (two-pass cheap screen)
+# ---------------------------------------------------------------------------
+
+
+def test_screen_model_default_is_haiku(use_profile):
+    use_profile("scoring_model: opus")
+    assert ss.screen_model() == ss.DEFAULT_SCREEN_MODEL == "haiku"
+
+
+def test_screen_model_read_from_profile(use_profile):
+    use_profile("scoring_model: opus\nscreen_model: sonnet")
+    assert ss.screen_model() == "sonnet"
+
+
+def test_screen_model_unknown_value_is_default(use_profile):
+    use_profile("scoring_model: opus\nscreen_model: gpt-9")
+    assert ss.screen_model() == "haiku"
+
+
+def test_screen_model_clamped_never_pricier_than_strong(use_profile):
+    # A sonnet strong model with an opus screen is nonsensical (screen would cost
+    # more than the final pass) — clamp the screen down to the strong tier.
+    use_profile("scoring_model: sonnet\nscreen_model: opus")
+    assert ss.screen_model() == "sonnet"
+
+
+def test_screen_model_equal_tier_is_allowed(use_profile):
+    use_profile("scoring_model: haiku\nscreen_model: haiku")
+    assert ss.screen_model() == "haiku"
+
+
+# ---------------------------------------------------------------------------
+# escalation_threshold (two-pass finalist floor)
+# ---------------------------------------------------------------------------
+
+
+def test_escalation_threshold_default(use_profile):
+    use_profile("scoring_model: sonnet")
+    assert ss.escalation_threshold() == ss.DEFAULT_ESCALATION_THRESHOLD == 50
+
+
+def test_escalation_threshold_read_from_profile(use_profile):
+    use_profile("escalate_threshold: 55")
+    assert ss.escalation_threshold() == 55
+
+
+def test_escalation_threshold_garbage_is_default(use_profile):
+    use_profile("escalate_threshold: lots")
+    assert ss.escalation_threshold() == 50
+
+
+def test_escalation_threshold_clamped_to_0_100(use_profile):
+    use_profile("escalate_threshold: 250")
+    assert ss.escalation_threshold() == 100
+    use_profile("escalate_threshold: -5")
+    assert ss.escalation_threshold() == 0
+
+
+# ---------------------------------------------------------------------------
+# escalation_threshold_warning — the clamp accepts 100, but that silently
+# disables the strong pass; this is the loud one-liner that says so.
+# ---------------------------------------------------------------------------
+
+
+def test_escalation_threshold_warning_none_for_a_normal_floor():
+    assert ss.escalation_threshold_warning(50) is None
+    assert ss.escalation_threshold_warning(70) is None
+    # Just under the near-ceiling cutoff — still no warning.
+    assert ss.escalation_threshold_warning(ss.NEAR_CEILING_THRESHOLD - 1) is None
+
+
+def test_escalation_threshold_warning_fires_at_and_above_near_ceiling():
+    warn_at = ss.escalation_threshold_warning(ss.NEAR_CEILING_THRESHOLD)
+    warn_100 = ss.escalation_threshold_warning(100)
+    assert warn_at is not None and "escalate nothing" in warn_at
+    assert warn_100 is not None and "escalate nothing" in warn_100
+
+
+# ---------------------------------------------------------------------------
 # max_per_run
 # ---------------------------------------------------------------------------
 

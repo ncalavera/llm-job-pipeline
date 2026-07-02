@@ -590,6 +590,45 @@ _VACANCY_LIGHT_COLUMNS = (
     "triage",
 )
 
+# ``scored_by`` (migration 0009) is deliberately NOT in the tuple above: unlike
+# the baseline-folded columns it's migration-only (see sql/migrations/README.md
+# — new migrations must be self-sufficient, not rely on the frozen baseline
+# already carrying the column). An install that hasn't run migrate.py yet must
+# not crash on every score write/read, so its presence is detected once per
+# process and the column is included only when it actually exists — mirrors
+# learning.table_ready() for the learning_log table.
+_scored_by_supported_cache: bool | None = None
+
+
+def _scored_by_supported() -> bool:
+    """True once ``vacancy.scored_by`` exists (migration 0009 has run).
+
+    False before that — callers degrade to skipping provenance rather than
+    raising "no such column" / "column does not exist".
+    """
+    global _scored_by_supported_cache
+    if _scored_by_supported_cache is not None:
+        return _scored_by_supported_cache
+    from db_backend import IS_SQLITE
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        if IS_SQLITE:
+            cur.execute("PRAGMA table_info(vacancy)")
+            cols = {row[1] for row in cur.fetchall()}
+        else:
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'vacancy'"
+            )
+            cols = {row[0] for row in cur.fetchall()}
+        _scored_by_supported_cache = "scored_by" in cols
+    except Exception:
+        _scored_by_supported_cache = False
+    finally:
+        cur.close()
+    return _scored_by_supported_cache
+
 
 def load_vacancies(
     *,
@@ -644,7 +683,8 @@ def load_vacancies(
     where = " AND ".join(conditions) if conditions else "TRUE"
 
     if light:
-        vacancy_cols = ", ".join(f"v.{c}" for c in _VACANCY_LIGHT_COLUMNS)
+        light_cols = _VACANCY_LIGHT_COLUMNS + (("scored_by",) if _scored_by_supported() else ())
+        vacancy_cols = ", ".join(f"v.{c}" for c in light_cols)
     else:
         vacancy_cols = "v.*"
 
@@ -1443,7 +1483,14 @@ def _geo_hard_banned(country: str, work_mode: str) -> bool:
 
 
 def update_llm_score(vacancy_uuid: str, score_data: dict):
-    """Update LLM score fields for a vacancy."""
+    """Update LLM score fields for a vacancy.
+
+    ``score_data["scored_by"]`` (optional) records which model tier produced
+    this score — the two-pass driver's screen pass writes the cheap model's
+    name here, and an escalation overwrites it with the strong model's name
+    on re-score. Omitted/absent writes NULL (unchanged behaviour for callers
+    that predate two-pass scoring).
+    """
     conn = get_conn()
     cur = conn.cursor()
     hard_reqs = score_data.get("llm_hard_requirements", [])
@@ -1468,10 +1515,24 @@ def update_llm_score(vacancy_uuid: str, score_data: dict):
         elig_clause = ", us_eligibility = %s"
         elig_params = [elig]
 
+    # Provenance (two-pass scoring): the model tier that produced THIS score.
+    # Only written once migration 0009 has actually run — an install that
+    # hasn't migrated yet must keep scoring, just without provenance, rather
+    # than crash on "no such column" (see _scored_by_supported()). NULL when
+    # the caller doesn't report a model (a caller that pre-dates two-pass
+    # scoring) — the dashboard treats a NULL scored_by as "no badge", never a
+    # crash either way.
+    sb_clause = ""
+    sb_params: list = []
+    if _scored_by_supported():
+        sb_clause = ", scored_by = %s"
+        sb_params = [score_data.get("scored_by")]
+
     cur.execute(
         f"""UPDATE vacancy SET
                llm_score = %s, llm_reasoning = %s, llm_summary = %s,
-               llm_hard_requirements = %s, llm_scored_at = now(){dl_clause}{elig_clause}
+               llm_hard_requirements = %s, llm_scored_at = now()
+               {dl_clause}{elig_clause}{sb_clause}
            WHERE id = %s""",
         (
             score_data.get("llm_score"),
@@ -1480,6 +1541,7 @@ def update_llm_score(vacancy_uuid: str, score_data: dict):
             json.dumps(hard_reqs),
             *dl_params,
             *elig_params,
+            *sb_params,
             vacancy_uuid,
         ),
     )
@@ -1499,6 +1561,32 @@ def update_llm_score(vacancy_uuid: str, score_data: dict):
             (vacancy_uuid,),
         )
 
+    cur.close()
+    return rowcount
+
+
+def reset_llm_scores(member_ids: list[str]) -> int:
+    """Null the ``llm_score`` for a set of vacancies so they read as unscored.
+
+    Used by the two-pass driver at the screen->escalate handshake: a
+    finalist's cheap SCREEN score is cleared so the strong pass re-scores it and
+    the driver can reuse the same ``llm_score IS NULL`` idempotency for BOTH
+    passes. The strong pass overwrites each with its own score; an interrupted
+    escalate simply leaves the finalists unscored, and a later run re-screens and
+    re-escalates them — never a silent stale cheap score.
+
+    Like the other DAL writers this does NOT commit — the caller owns the
+    transaction (see AGENTS.md). Returns the number of rows nulled.
+    """
+    if not member_ids:
+        return 0
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE vacancy SET llm_score = NULL WHERE id = ANY(%s::uuid[])",
+        ([str(m) for m in member_ids],),
+    )
+    rowcount = cur.rowcount
     cur.close()
     return rowcount
 

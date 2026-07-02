@@ -8,6 +8,7 @@ import {
   parseLocationChips,
   renderLocationChips,
   llmScoreBadge,
+  screenScoreBadge,
   relativeTime,
 } from "./helpers.js";
 import { T } from "./i18n.js";
@@ -133,6 +134,7 @@ function buildArchiveCard(g) {
     "</div>" +
     '<div class="catalog-header-right">' +
     llmScoreBadge(g.llm_score) +
+    screenScoreBadge(g) +
     "</div>" +
     "</div>" +
     '<h3 class="catalog-title">' +

@@ -57,6 +57,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="With --save: auto-archive unseen vacancies scoring below "
         "LLM_SCORE_THRESHOLD after saving (default: archival stays paused)",
     )
+    parser.add_argument(
+        "--scored-by",
+        help="With --save: model tier that scored this batch (e.g. 'haiku' for a "
+        "SCREEN pass, 'opus' for an ESCALATE pass) — recorded on vacancy.scored_by "
+        "so a kept-cheap score is never indistinguishable from a confirmed strong "
+        "score. Omit to leave scored_by unset.",
+    )
     return parser
 
 
@@ -385,7 +392,7 @@ def cmd_local(args):
 # ---------------------------------------------------------------------------
 
 
-def cmd_save(_args):
+def cmd_save(args):
     """Read scored results from stdin JSON, save to DB."""
     from database_supabase import update_llm_score, get_conn
 
@@ -393,6 +400,10 @@ def cmd_save(_args):
     if not data:
         print("No results to save.")
         return
+
+    # Score provenance for this whole batch (one --save call = one pass, one
+    # model — see _vacancy_gate_text in run_daily.py). Omitted -> unset.
+    scored_by = getattr(args, "scored_by", None)
 
     conn = get_conn()
     total_records = 0
@@ -441,6 +452,9 @@ def cmd_save(_args):
                 continue
 
         # Geography is enforced in the pre-score filter — no score cap here.
+
+        if scored_by:
+            score_data.setdefault("scored_by", scored_by)
 
         # Warn on short summaries
         summary = score_data.get("llm_summary", "")
@@ -519,7 +533,7 @@ def cmd_save(_args):
     # documented step is visibly run, not silently missing.
     from database_supabase import archive_vacancies
 
-    if getattr(_args, "archive", False):
+    if getattr(args, "archive", False):
         # archive_vacancies OWNS its transaction: it commits the DELETE itself
         # and only then writes the on-disk JSON, so the two can't diverge (the
         # one deliberate exception to the caller-commits DAL rule). No commit

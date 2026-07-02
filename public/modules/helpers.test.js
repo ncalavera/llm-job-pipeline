@@ -14,6 +14,7 @@ import {
   isVacancyGone,
   triageColumnFor,
   dedupeTriageEntries,
+  screenScoreBadge,
 } from "./helpers.js";
 
 const DAY = 86400000;
@@ -167,4 +168,21 @@ test("dedupe: a stale copy never routes a still-live role to 'expired'", () => {
     assert.equal(survivors.length, 1);
     assert.equal(triageColumnFor(survivors[0], COLS), "to_apply");
   }
+});
+
+// --- screenScoreBadge -------------------------------------------------------
+// The backend (scripts/report/data_prep.py) decides WHEN a score is a
+// screen-only score high enough to be mistaken for a confirmed one and bakes
+// that into group.screen_only_score; this helper only renders the marker.
+
+test("screenScoreBadge: renders nothing when screen_only_score is falsy", () => {
+  assert.equal(screenScoreBadge({ screen_only_score: false }), "");
+  assert.equal(screenScoreBadge({}), "");
+  assert.equal(screenScoreBadge(null), "");
+});
+
+test("screenScoreBadge: renders a marker when screen_only_score is true", () => {
+  const html = screenScoreBadge({ screen_only_score: true });
+  assert.match(html, /screen-score-badge/);
+  assert.match(html, /not yet confirmed by the main model/);
 });

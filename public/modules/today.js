@@ -24,6 +24,7 @@ import {
   isVacancyExpired,
   STALE_SOURCE_DAYS,
   sourceAgeDays,
+  screenScoreBadge,
 } from "./helpers.js";
 import { T } from "./i18n.js";
 
@@ -132,7 +133,8 @@ function _row(g, extra, actions) {
       head +
       "</a>"
     : head;
-  const score = g.llm_score != null ? " · 🎯 " + g.llm_score : "";
+  const score =
+    g.llm_score != null ? " · 🎯 " + g.llm_score + screenScoreBadge(g) : "";
   const tail = extra
     ? ' · <span class="today-why">' + escHtml(extra) + "</span>"
     : "";

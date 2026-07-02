@@ -262,8 +262,16 @@ def _build_org_colors(org_names: list[str]) -> dict:
     return org_colors
 
 
-def _build_group(v: dict, org_colors: dict, company_hq: dict) -> dict:
-    """Build one frontend group dict from a vacancy row."""
+def _build_group(
+    v: dict, org_colors: dict, company_hq: dict, strong_model: str | None = None
+) -> dict:
+    """Build one frontend group dict from a vacancy row.
+
+    ``strong_model`` is the currently-configured STRONG scoring tier (see
+    ``scoring_settings.scoring_model``), used only to derive
+    ``screen_only_score`` below — pass ``None`` to skip that derivation (e.g.
+    a caller that doesn't care about score provenance).
+    """
     # Locations v2: {work_mode, region, country, city, compensation, url}
     locs = v.get("locations", [])
     if not locs:
@@ -302,6 +310,21 @@ def _build_group(v: dict, org_colors: dict, company_hq: dict) -> dict:
         v.get("llm_score")
         if v.get("llm_score") is not None and v.get("llm_score", -1) >= 0
         else None
+    )
+
+    # Score provenance (two-pass scoring): which model tier last wrote
+    # llm_score. NULL/absent (pre-two-pass rows, or a caller that skips
+    # provenance) -> no badge, never a crash. "screen_only_score" flags a role
+    # whose CURRENT score was never confirmed by the strong model AND is high
+    # enough to show up in the dashboard's visible match band (APPLYABLE_SCORE)
+    # — exactly the case a kept-cheap score could be mistaken for a genuine one.
+    scored_by = v.get("scored_by")
+    screen_only_score = bool(
+        scored_by
+        and strong_model
+        and scored_by != strong_model
+        and llm_score is not None
+        and llm_score >= APPLYABLE_SCORE
     )
 
     # Build locations list for frontend (v2 structure)
@@ -364,6 +387,8 @@ def _build_group(v: dict, org_colors: dict, company_hq: dict) -> dict:
         "org_url": org_url,
         "region": best_region,
         "llm_score": llm_score,
+        "scored_by": scored_by,
+        "screen_only_score": screen_only_score,
         "llm_summary": v.get("llm_summary", ""),
         "llm_reasoning": v.get("llm_reasoning", ""),
         "llm_hard_requirements": v.get("llm_hard_requirements", []),
@@ -396,11 +421,14 @@ def _company_hq_map():
 
 def prepare_archived_data() -> list:
     """Lean list of archived vacancies for the Archive tab (no full_description)."""
+    from scoring_settings import scoring_model
+
     archived = load_vacancies(status="archived", include_inactive_companies=True, light=True)
     company_hq = _company_hq_map()
     all_orgs = sorted(set(v["org"] for v in archived.values()))
     org_colors = _build_org_colors(all_orgs)
-    groups = [_build_group(v, org_colors, company_hq) for v in archived.values()]
+    strong_model = scoring_model()
+    groups = [_build_group(v, org_colors, company_hq, strong_model) for v in archived.values()]
     groups.sort(key=lambda g: (-(g["llm_score"] if g["llm_score"] is not None else -1), g["org"]))
     return groups
 
@@ -411,6 +439,8 @@ def prepare_report_data(db: dict = None) -> dict:
     Loads from Supabase. The db param is accepted but ignored (backward compat).
     Returns dict with keys: groups, stats.
     """
+    from scoring_settings import scoring_model
+
     today = date.today().isoformat()
     all_vacs = load_vacancies(include_candidate_companies=True, status_exclude=["archived"])
     # Exclude unscored vacancies from dashboard — they appear after /score
@@ -432,7 +462,8 @@ def prepare_report_data(db: dict = None) -> dict:
     company_hq = _company_hq_map()
 
     # --- Build grouped list (each vacancy is already unique by org+title) ---
-    groups = [_build_group(v, org_colors, company_hq) for v in vacancies]
+    strong_model = scoring_model()
+    groups = [_build_group(v, org_colors, company_hq, strong_model) for v in vacancies]
 
     # --- Stats ---
     total_postings = len(vacancies)

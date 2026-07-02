@@ -23,6 +23,7 @@ import {
   jsAttr,
   relativeTime,
   llmScoreBadge,
+  screenScoreBadge,
   ratingDotsHtml,
   parseLocationChips,
   renderLocationChips,
@@ -1502,7 +1503,7 @@ function buildVacancyListHtml(c, opts) {
         "</a>"
       : escHtml(g.title);
 
-    var scoreBadge = llmScoreBadge(g.llm_score);
+    var scoreBadge = llmScoreBadge(g.llm_score) + screenScoreBadge(g);
     var actionBtn = "";
 
     if (!opts.readOnly) {
@@ -1917,6 +1918,7 @@ function buildVacanciesSection(c) {
           titleHtml +
           "</div>" +
           llmScoreBadge(g.llm_score) +
+          screenScoreBadge(g) +
           "</div>",
       );
     }
