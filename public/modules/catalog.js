@@ -17,6 +17,7 @@ import {
   parseLocationChips,
   renderLocationChips,
   llmScoreBadge,
+  screenScoreBadge,
   formatDeadlineHtml,
   relativeTime,
   isVacancyExpired,
@@ -382,7 +383,7 @@ function buildCatalogCard(g) {
       "</span>"
     : "";
 
-  const llmBadge = llmScoreBadge(g.llm_score);
+  const llmBadge = llmScoreBadge(g.llm_score) + screenScoreBadge(g);
 
   const catTierVal = g.calculated_tier || null;
   const catTierBadge = catTierVal

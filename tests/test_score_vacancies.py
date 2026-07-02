@@ -112,6 +112,43 @@ def _seed_one_vacancy(db):
     return next(iter(db.load_vacancies()))
 
 
+@pytest.fixture()
+def sqlite_dal_migrated(tmp_path, monkeypatch):
+    """Like ``sqlite_dal``, but also replays the real ``sql/migrations/*``
+    chain — needed for anything that touches a migration-only column
+    (``scored_by``, migration 0009, is not folded into the frozen baseline;
+    see sql/migrations/README.md)."""
+    db_file = tmp_path / "jobsearch.db"
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
+    monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
+
+    for mod in (
+        "database_supabase",
+        "config",
+        "company_registry",
+        "db_conn",
+        "db_backend",
+        "migrate",
+    ):
+        sys.modules.pop(mod, None)
+
+    import db_backend
+
+    importlib.reload(db_backend)
+    assert db_backend.IS_SQLITE
+
+    import migrate
+
+    importlib.reload(migrate)
+    assert migrate.cmd_migrate(allow_destructive=False, do_backup=False) == 0
+
+    import database_supabase as db
+
+    yield db
+    db.close_conn()
+
+
 def test_cmd_save_accepts_flat_documented_shape(sqlite_dal, monkeypatch):
     """The flat shape from AGENTS.md / jobs-score.md must persist correctly.
 
@@ -189,3 +226,122 @@ def test_cmd_save_still_accepts_strict_nested_shape(sqlite_dal, monkeypatch):
     score_vacancies.cmd_save(args)
 
     assert db.load_vacancies()[vid]["llm_score"] == 64
+
+
+# ---------------------------------------------------------------------------
+# cmd_save — score provenance (--scored-by, review fix)
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_save_records_scored_by_when_flag_given(sqlite_dal_migrated, monkeypatch):
+    """--scored-by on the CLI stamps every saved score with that model name —
+    this is how the driver tells --save which two-pass model just scored the
+    batch (see _vacancy_gate_text in scripts/run_daily.py)."""
+    db = sqlite_dal_migrated
+    vid = _seed_one_vacancy(db)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "report",
+        types.SimpleNamespace(generate_dashboard=lambda *a, **k: None),
+    )
+    payload = [
+        {
+            "member_ids": [vid],
+            "org": "Acme Robotics",
+            "title": "Head of Community",
+            "score": 55,
+            "reasoning": "Cheap first look.",
+            "short_summary": "A " * 120,
+        }
+    ]
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+
+    import score_vacancies
+
+    importlib.reload(score_vacancies)
+    args = types.SimpleNamespace(archive=False, scored_by="haiku")
+    score_vacancies.cmd_save(args)
+
+    assert db.load_vacancies()[vid]["scored_by"] == "haiku"
+
+
+def test_cmd_save_omitted_scored_by_leaves_column_null(sqlite_dal_migrated, monkeypatch):
+    """No --scored-by (e.g. a manual/ad-hoc --save) leaves scored_by unset,
+    matching the pre-two-pass behaviour — never a crash, never a fabricated
+    provenance."""
+    db = sqlite_dal_migrated
+    vid = _seed_one_vacancy(db)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "report",
+        types.SimpleNamespace(generate_dashboard=lambda *a, **k: None),
+    )
+    payload = [
+        {
+            "member_ids": [vid],
+            "org": "Acme Robotics",
+            "title": "Head of Community",
+            "score": 55,
+            "reasoning": "No provenance supplied.",
+            "short_summary": "A " * 120,
+        }
+    ]
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+
+    import score_vacancies
+
+    importlib.reload(score_vacancies)
+    args = types.SimpleNamespace(archive=False)  # no scored_by attribute at all
+    score_vacancies.cmd_save(args)
+
+    assert db.load_vacancies()[vid]["scored_by"] is None
+
+
+def test_cmd_save_escalation_overwrites_screen_scored_by(sqlite_dal_migrated, monkeypatch):
+    """The strong pass re-saving the same vacancy overwrites scored_by, exactly
+    like it overwrites llm_score — a kept-cheap score never lingers labelled as
+    confirmed, and a confirmed score never lingers labelled as cheap."""
+    db = sqlite_dal_migrated
+    vid = _seed_one_vacancy(db)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "report",
+        types.SimpleNamespace(generate_dashboard=lambda *a, **k: None),
+    )
+    import score_vacancies
+
+    importlib.reload(score_vacancies)
+
+    screen_payload = [
+        {
+            "member_ids": [vid],
+            "org": "Acme Robotics",
+            "title": "Head of Community",
+            "score": 55,
+            "reasoning": "Screen pass.",
+            "short_summary": "A " * 120,
+        }
+    ]
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(screen_payload)))
+    score_vacancies.cmd_save(types.SimpleNamespace(archive=False, scored_by="haiku"))
+    assert db.load_vacancies()[vid]["scored_by"] == "haiku"
+
+    escalate_payload = [
+        {
+            "member_ids": [vid],
+            "org": "Acme Robotics",
+            "title": "Head of Community",
+            "score": 78,
+            "reasoning": "Escalation pass.",
+            "short_summary": "B " * 120,
+        }
+    ]
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(escalate_payload)))
+    score_vacancies.cmd_save(types.SimpleNamespace(archive=False, scored_by="opus"))
+
+    saved = db.load_vacancies()[vid]
+    assert saved["scored_by"] == "opus"
+    assert saved["llm_score"] == 78

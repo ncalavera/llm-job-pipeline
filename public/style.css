@@ -1315,6 +1315,26 @@ body[data-dashboard-style="minimal"] .loading-illus {
   color: var(--muted);
 }
 
+/* Screen-only score marker — a cheap two-pass score not yet confirmed by the
+   strong model, shown only when it's high enough to be mistaken for one. */
+.screen-score-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  margin-left: 4px;
+  padding: 0 6px;
+  border: 1px dashed var(--muted);
+  border-radius: 7px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  background: var(--surface);
+  cursor: help;
+}
+
 .thumb-btn {
   width: 28px;
   height: 28px;

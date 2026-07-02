@@ -665,8 +665,9 @@ def _vacancy_gate_text(
         "and the real DB member_ids. CRITICAL: 1 vacancy = 1 subagent (batching\n"
         "over-scores by +20-50). Run at most 5 subagents at a time (rolling waves).\n\n"
         "Save results incrementally (each --save commits, so an interrupt keeps\n"
-        "finished work):\n"
-        "  python3 scripts/score_vacancies.py --save < chunk.json\n\n"
+        f'finished work) — pass --scored-by "{model}" so the score\'s provenance is\n'
+        "recorded (a kept-cheap score must never look identical to a confirmed one):\n"
+        f'  python3 scripts/score_vacancies.py --save --scored-by "{model}" < chunk.json\n\n'
         "Flat per-vacancy fields to save: member_ids, org, title, score, reasoning,\n"
         "tags, hard_requirements, short_summary. Then --resume — the driver\n"
         "re-checks and re-prompts only for any vacancy still unscored."
