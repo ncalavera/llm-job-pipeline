@@ -717,6 +717,9 @@ def cmd_save(_args):
     review = {"approved": [], "rejected": [], "pending": []}
     if saved > 0 and not getattr(_args, "no_auto_review", False):
         review = auto_review_candidates()
+        # auto_review_candidates stages its UPDATEs; the caller commits (DAL
+        # contract). Without this the approve/reject changes roll back at exit.
+        conn.commit()
 
     approved = len(review.get("approved", []))
     rejected = len(review.get("rejected", []))
@@ -806,6 +809,8 @@ def cmd_api(args):
 
     if scored > 0 and not args.no_auto_review:
         review = auto_review_candidates()
+        # DAL writes are caller-committed; persist the approve/reject changes.
+        conn.commit()
         print(
             f"Auto-review: {len(review.get('approved', []))} approved, "
             f"{len(review.get('rejected', []))} rejected"

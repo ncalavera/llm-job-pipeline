@@ -54,12 +54,25 @@ benchmarked with Claude models; other models work but calibration may differ.
 - Without `SUPABASE_DB_URL` set, the pipeline runs on a local SQLite file
   that auto-creates on first use (simple mode). With it set, Postgres
   (Supabase). Same scripts either way.
-- DAL writes are not auto-committed. `save_vacancies()` and the other write
-  functions in `database_supabase.py` stage their changes on the shared
-  connection but leave the commit to the caller, so a direct caller that forgets
-  `get_conn().commit()` silently loses its data. The fetch/score/filter scripts
-  already commit at their logical checkpoints; if you call the DAL yourself
-  (e.g. in a one-off script), commit before exit.
+- DAL writes are not auto-committed. `save_vacancies()`,
+  `auto_review_candidates()`, and the other write functions in
+  `database_supabase.py` stage their changes on the shared connection but leave
+  the commit to the caller, so a direct caller that forgets `get_conn().commit()`
+  silently loses its data. The fetch/score/filter scripts already commit at their
+  logical checkpoints; if you call the DAL yourself (e.g. in a one-off script),
+  commit before exit. The rule has exactly three documented exceptions:
+    1. `archive_vacancies()` commits internally, then writes its on-disk JSON
+       archive AFTER the commit — the delete and its disk artifact must stay
+       atomic, so this function owns its transaction.
+    2. `report.generate_dashboard()` (full mode) commits the `dashboard_snapshot`
+       upsert — the report sink. Callers must commit their own pending data
+       writes BEFORE calling it, or the snapshot commit sweeps them up by chance.
+    3. `telegram_digest.py` opens its own separate `autocommit=True` connection
+       (the digest poller), not the shared DAL singleton.
+  Consequence for `--report-only`: `fetch_vacancies.py --report-only` must NOT
+  stage any source-data mutation (e.g. `pass_expired_vacancies()` stays inside
+  the fetch guard) — a report run only re-renders the dashboard from the data,
+  it never changes it. Otherwise the dashboard snapshot commit would persist it.
 - Run `python3 -m pytest tests/ -q` after changing pipeline code — the suite
   runs offline. (`pytest` and `pydantic` are not in the easy-mode install; add
   them with `pip install pytest pydantic` to run the full suite.)

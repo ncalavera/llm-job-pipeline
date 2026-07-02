@@ -971,6 +971,11 @@ def auto_review_candidates(approve_threshold=None, reject_threshold=None, enable
     Grey zone (between thresholds) → stays candidate for manual review.
 
     Returns summary: {"approved": [...], "rejected": [...], "pending": [...]}.
+
+    COMMIT CONTRACT: like every other write in this module, this stages its
+    UPDATEs on the shared connection and leaves the commit to the caller (see
+    the module docstring). Call ``get_conn().commit()`` after it or the
+    approve/reject changes are silently rolled back at connection close.
     """
     import os
 
@@ -1028,7 +1033,7 @@ def auto_review_candidates(approve_threshold=None, reject_threshold=None, enable
             pending.append(name)
 
     cur.close()
-    conn.commit()
+    # No commit here — the caller owns the transaction (see docstring).
     return {"approved": approved, "rejected": rejected, "pending": pending}
 
 
@@ -1488,7 +1493,29 @@ def archive_vacancies(threshold: int = LLM_SCORE_THRESHOLD, force: bool = False)
     if not to_remove:
         return []
 
-    # Write local archive first
+    # Atomicity contract: the DB DELETE and the on-disk JSON archive must never
+    # disagree about what was removed — and neither side may lose data when the
+    # other fails. Order:
+    #   (1) build the archive payload in memory;
+    #   (2) serialize it to a TEMP file in the archive dir — a full-disk /
+    #       permissions / encoding failure raises HERE, before anything is
+    #       staged on the connection, so nothing is deleted and there is no
+    #       staged DELETE for a later unrelated commit to sweep up;
+    #   (3) DELETE + record tombstones, then COMMIT — the durable source of
+    #       truth for what was archived;
+    #   (4) atomically os.replace() the temp file onto the final name (same
+    #       directory → same filesystem). The final artifact appears only after
+    #       the commit, so it can never describe a removal a rollback undid,
+    #       and a kill mid-write can never leave a truncated file under the
+    #       final name. If the rename itself fails, the committed payload is
+    #       preserved in the temp file; its path + the UUIDs go to stderr.
+    # archive_vacancies OWNS its transaction (it does NOT leave the commit to
+    # the caller like the other DAL writes) precisely because that disk artifact
+    # must be tied to a durable delete. This is the one intentional exception to
+    # the "callers commit" rule; see AGENTS.md.
+    import os
+    import sys
+
     archive_dir = VACANCIES_DIR / "archive"
     archive_dir.mkdir(parents=True, exist_ok=True)
     archive_path = archive_dir / f"archived_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
@@ -1507,21 +1534,31 @@ def archive_vacancies(threshold: int = LLM_SCORE_THRESHOLD, force: bool = False)
         vac["company_id"] = str(vac["company_id"])
         archived_data[uid] = vac
 
-    with open(archive_path, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "archived_at": datetime.now().isoformat(),
-                "threshold": threshold,
-                "count": len(archived_data),
-                "vacancies": archived_data,
-            },
-            f,
-            indent=2,
-            ensure_ascii=False,
-            default=str,
-        )
+    # (2) Serialize to a temp file BEFORE touching the DB (see contract above):
+    # if this raises, the vacancies are still in the database, untouched.
+    tmp_path = archive_path.with_name(archive_path.name + ".tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "archived_at": datetime.now().isoformat(),
+                    "threshold": threshold,
+                    "count": len(archived_data),
+                    "vacancies": archived_data,
+                },
+                f,
+                indent=2,
+                ensure_ascii=False,
+                default=str,
+            )
+    except BaseException:
+        # Nothing is staged on the connection yet — drop the partial temp file
+        # and bail; the DB keeps every row.
+        tmp_path.unlink(missing_ok=True)
+        raise
 
-    # Delete from Supabase
+    # (3) Delete from the DB and record dedup tombstones, then COMMIT — the
+    # durable source of truth for what was archived.
     uuids = [r["id"] for r in to_remove]
     cur = conn.cursor()
     cur.execute("DELETE FROM vacancy WHERE id = ANY(%s::uuid[])", (uuids,))
@@ -1536,6 +1573,20 @@ def archive_vacancies(threshold: int = LLM_SCORE_THRESHOLD, force: bool = False)
             archive_hashes,
         )
     cur.close()
+    conn.commit()
+
+    # (4) Atomically publish the already-written archive under its final name.
+    # Same directory → same filesystem → os.replace is an atomic rename.
+    try:
+        os.replace(tmp_path, archive_path)
+    except OSError:
+        print(
+            f"  ERROR: archive rename failed AFTER the delete was committed.\n"
+            f"  The archived payload is preserved at: {tmp_path}\n"
+            f"  Archived UUIDs: {', '.join(str(u) for u in uuids)}",
+            file=sys.stderr,
+        )
+        raise
 
     print(
         f"  Archived {len(to_remove)} vacancies below LLM score {threshold}"

@@ -650,11 +650,18 @@ def main():
         elif args.auto_score and total_new == 0:
             print("\n  Auto-score skipped: no new vacancies found")
 
-    # Auto-pass expired unseen vacancies
-    pass_expired_vacancies()
-    get_conn().commit()
+        # Auto-pass expired unseen vacancies. This MUTATES source data (flips
+        # expired 'unseen' rows to 'passed'/'expiring'), so it lives INSIDE the
+        # fetch guard: a --report-only run must never change the data, only
+        # re-render the dashboard from it. Keeping it here also means nothing is
+        # left staged for generate_dashboard's snapshot commit to pick up by
+        # accident in report-only mode.
+        pass_expired_vacancies()
+        get_conn().commit()
 
-    # Generate dashboard
+    # Generate dashboard. This is report OUTPUT (public/data.js in simple mode,
+    # the dashboard_snapshot row in full mode) derived from the data — never a
+    # source-data write — so --report-only regenerates it too; that IS the flag.
     print("\nGenerating dashboard...")
     generate_dashboard()
     print(f"  Dashboard: {PUBLIC_DIR}")
