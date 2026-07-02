@@ -488,6 +488,19 @@ def test_new_boards_registered_and_opt_in(monkeypatch):
     assert len(cfg._ALL_JOB_BOARDS["linkedin"]["queries"]) >= 1
 
 
+def test_cfi_board_registered_and_disabled_by_default(monkeypatch):
+    import config as cfg
+
+    assert "consultants_for_impact" in cfg._ALL_JOB_BOARDS
+    assert cfg._ALL_JOB_BOARDS["consultants_for_impact"]["strategy"] == "cfi_board_json"
+
+    monkeypatch.delenv("JOB_BOARDS", raising=False)
+    assert "consultants_for_impact" not in cfg._select_enabled_boards()
+
+    monkeypatch.setenv("JOB_BOARDS", "consultants_for_impact")
+    assert set(cfg._select_enabled_boards()) == {"consultants_for_impact"}
+
+
 # ---------------------------------------------------------------------------
 # Idealist (Algolia POST) / Fast Forward (Getro POST) / LinkedIn (guest GET)
 # ---------------------------------------------------------------------------
@@ -639,6 +652,94 @@ def test_fetch_linkedin_board(monkeypatch):
     assert job["external_id"] == "4403552549"
     assert job["url"] == "https://uk.linkedin.com/jobs/view/chief-of-staff-at-governr-4403552549"
     assert job["location"] == "London, United Kingdom"
+
+
+CFI_BOARD_DATA = {
+    "stats": {"total_fetched": 3, "total_scored": 3},
+    "jobs": [
+        {
+            "score": 35,
+            "title": "Regional Digital Health Officer",
+            "org": "Living Goods",
+            "cause_areas": ["Global Health & Development"],
+            "location": "Vihiga, Kakamega",
+            "location_type_tags": [],
+            "source": "PG",
+            "url": "https://livinggoods.applytojob.com/apply/j1WkynNYk6/Regional-Digital-Health-Officer",
+            "breakdown": {"role_ops_program": 20, "cfi_org": 15},
+            "seniority": "Mid-Level Roles",
+            "deadline": "Jul 7, 2026",
+        },
+        {
+            # Expired — must be dropped.
+            "score": 35,
+            "title": "Operations Associate",
+            "org": "CLTR",
+            "cause_areas": ["Pandemic Preparedness"],
+            "location": "Remote, London",
+            "source": "PG",
+            "url": "https://www.longtermresilience.org/expired-job/",
+            "breakdown": {},
+            "seniority": "Mid-Level Roles",
+            "deadline": "Jul 1, 2026",
+            "expired": True,
+        },
+        {
+            # Generic talent-pool title — must be dropped by the shared filter.
+            "score": 10,
+            "title": "General Application — Future Openings",
+            "org": "Some Org",
+            "cause_areas": [],
+            "location": "—",
+            "source": "80K",
+            "url": "https://example.test/general-application",
+            "breakdown": {},
+            "seniority": "",
+            "deadline": "",
+        },
+    ],
+}
+
+
+def test_fetch_cfi_board(monkeypatch):
+    def router(verb, url, json=None, params=None):
+        assert verb == "GET" and "cfi-job-board.netlify.app" in url
+        return _Resp(json_data=CFI_BOARD_DATA)
+
+    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
+    out = fetchers.fetch_cfi_board(
+        {
+            "name": "Consultants for Impact",
+            "url": "https://www.consultantsforimpact.org/job-board",
+            "data_url": "https://cfi-job-board.netlify.app/board-data.json",
+        }
+    )
+    assert len(out) == 1
+    job = out[0]
+    assert job["title"] == "Regional Digital Health Officer"
+    assert job["org_override"] == "Living Goods"
+    assert job["url"] == (
+        "https://livinggoods.applytojob.com/apply/j1WkynNYk6/Regional-Digital-Health-Officer"
+    )
+    assert job["location"] == "Vihiga, Kakamega"
+    assert job["deadline"] == "Jul 7, 2026"
+    assert "Global Health & Development" in job["department"]
+    assert job["org_url"] == "https://www.consultantsforimpact.org/job-board"
+
+
+def test_fetch_cfi_board_max_jobs_caps_output(monkeypatch):
+    def router(verb, url, json=None, params=None):
+        return _Resp(json_data=CFI_BOARD_DATA)
+
+    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
+    out = fetchers.fetch_cfi_board(
+        {
+            "name": "Consultants for Impact",
+            "url": "https://www.consultantsforimpact.org/job-board",
+            "max_jobs": 0,
+        }
+    )
+    assert out == []
 
 
 # ---------------------------------------------------------------------------
