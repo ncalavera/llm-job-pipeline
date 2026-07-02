@@ -126,6 +126,14 @@ def thresholds() -> dict:
 # ---------------------------------------------------------------------------
 
 
+_DEFAULT_EVIDENCE_CAP = 25000
+# Below this, the assembler emits evidence blocks with only "### SOURCE:"
+# labels and near-zero content — a company would be silently scored on
+# nothing. Treated as misconfiguration: reset to the default instead of
+# honoring it.
+_MIN_EVIDENCE_CAP = 1000
+
+
 def scoring() -> dict:
     """Scoring cost/quality knobs. Neutral fallbacks (today's numbers).
 
@@ -136,11 +144,17 @@ def scoring() -> dict:
       more of each source's tail, lower cuts tokens per scoring call. The
       assembler trims each source proportionally by its share, keeping every
       source's HEAD (where the material anchors — funding, HQ, remote policy,
-      leadership — sit), so a lower cap loses tails first. Default 25000.
+      leadership — sit), so a lower cap loses tails first. Default 25000. A
+      non-numeric value falls back to the default; a numeric value below
+      ``_MIN_EVIDENCE_CAP`` (1000) is also treated as misconfiguration and
+      falls back to the default.
     """
     sec = _section("scoring")
+    cap = int(_num(sec, "company_evidence_char_cap", _DEFAULT_EVIDENCE_CAP))
+    if cap < _MIN_EVIDENCE_CAP:
+        cap = _DEFAULT_EVIDENCE_CAP
     return {
-        "company_evidence_char_cap": int(_num(sec, "company_evidence_char_cap", 25000)),
+        "company_evidence_char_cap": cap,
     }
 
 

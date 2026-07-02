@@ -62,6 +62,9 @@ show_mpa_column = false
 # of every source (≈2.5× the legacy 10k per-source cut) while keeping each
 # scoring call well under the plan's cost envelope. Raise it if you see scores
 # missing facts that live deep in a long source; lower it to cut cost further.
+# Values below ~1000 are treated as misconfiguration and reset to default:
+# below that floor the assembler has room for little more than the
+# "### SOURCE:" labels, so the company would be silently scored on no content.
 company_evidence_char_cap = 25000
 
 # ===========================================================================

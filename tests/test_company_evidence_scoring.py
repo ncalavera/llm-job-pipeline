@@ -121,3 +121,64 @@ def test_missing_evidence_triggers_loud_warning(sc, monkeypatch):
     assert "companies have NO" in stderr
     assert "Drift Labs" in stderr
     assert "collect_company_evidence" in stderr  # the fix instruction is named
+
+
+# ---------------------------------------------------------------------------
+# _assemble_evidence_content — respects the configured char cap
+# (settings.scoring()["company_evidence_char_cap"], read once into the module
+# constant _EVIDENCE_TOTAL_CAP). Pure-function tests, no DB rows needed.
+# ---------------------------------------------------------------------------
+
+
+def test_assemble_evidence_content_under_cap_is_untouched(sc, monkeypatch):
+    monkeypatch.setattr(sc.mod, "_EVIDENCE_TOTAL_CAP", 1000)
+    rows = [{"source": "website", "url": "https://example.org", "content": "Short content."}]
+
+    result = sc.mod._assemble_evidence_content(rows)
+
+    assert result == "### SOURCE: website (https://example.org)\nShort content."
+    assert "[trimmed]" not in result
+
+
+def test_assemble_evidence_content_over_cap_is_trimmed(sc, monkeypatch):
+    monkeypatch.setattr(sc.mod, "_EVIDENCE_TOTAL_CAP", 200)
+    rows = [
+        {"source": "website", "url": "https://example.org", "content": "A" * 300},
+        {"source": "careers", "url": "https://example.org/careers", "content": "B" * 300},
+    ]
+    combined_uncapped = "".join(r["content"] for r in rows)
+
+    result = sc.mod._assemble_evidence_content(rows)
+
+    # Trimming actually shrank the payload well below the raw combined size.
+    assert len(result) < len(combined_uncapped)
+    # Both source labels survive -- trimming cuts content, not structure.
+    assert "### SOURCE: website (https://example.org)" in result
+    assert "### SOURCE: careers (https://example.org/careers)" in result
+    # Each source keeps its HEAD (where the material anchors sit), not a
+    # random slice or the tail.
+    assert "AAA" in result and "A" * 300 not in result
+    assert "BBB" in result and "B" * 300 not in result
+    assert result.count("[trimmed]") == 2
+
+
+def test_assemble_evidence_content_trims_proportionally_by_share(sc, monkeypatch):
+    """A source with 3x the content of another keeps roughly 3x as much after
+    trimming -- the budget split is proportional, not equal."""
+    monkeypatch.setattr(sc.mod, "_EVIDENCE_TOTAL_CAP", 400)
+    rows = [
+        {"source": "website", "url": "https://example.org", "content": "A" * 900},
+        {"source": "careers", "url": "https://example.org/careers", "content": "B" * 300},
+    ]
+
+    result = sc.mod._assemble_evidence_content(rows)
+
+    kept_a = result.count("A")
+    kept_b = result.count("B")
+    assert kept_a > kept_b
+    # Roughly a 3:1 split (allow slack for the shared label/separator budget).
+    assert 2.0 < kept_a / kept_b < 4.0
+
+
+def test_assemble_evidence_content_empty_rows_is_empty_string(sc):
+    assert sc.mod._assemble_evidence_content([]) == ""

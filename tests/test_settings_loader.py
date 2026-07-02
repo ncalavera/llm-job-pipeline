@@ -51,6 +51,71 @@ def test_thresholds_types_and_values():
     assert t["auto_discovery_status"] == "candidate"
 
 
+# ---------------------------------------------------------------------------
+# scoring() — company_evidence_char_cap
+# ---------------------------------------------------------------------------
+
+
+def test_scoring_char_cap_shipped_default():
+    assert settings.scoring()["company_evidence_char_cap"] == 25000
+
+
+def test_scoring_char_cap_reads_from_toml(tmp_path, monkeypatch):
+    p = tmp_path / "defaults.toml"
+    p.write_text(
+        textwrap.dedent(
+            """
+            [scoring]
+            company_evidence_char_cap = 12000
+            """
+        ),
+        encoding="utf-8",
+    )
+    _point_at(monkeypatch, p)
+    assert settings.scoring()["company_evidence_char_cap"] == 12000
+
+
+def test_scoring_char_cap_missing_section_falls_back(tmp_path, monkeypatch):
+    p = tmp_path / "defaults.toml"
+    p.write_text("[thresholds]\nllm_score_threshold = 5\n", encoding="utf-8")
+    _point_at(monkeypatch, p)
+    assert settings.scoring()["company_evidence_char_cap"] == 25000
+
+
+def test_scoring_char_cap_missing_file_falls_back(tmp_path, monkeypatch):
+    _point_at(monkeypatch, tmp_path / "does_not_exist.toml")
+    assert settings.scoring()["company_evidence_char_cap"] == 25000
+
+
+@pytest.mark.parametrize("bad_cap", [0, -500, 999])
+def test_scoring_char_cap_below_floor_falls_back(tmp_path, monkeypatch, bad_cap):
+    """A cap below the ~1000-char floor is misconfiguration — a value this low
+    leaves room for little beyond the "### SOURCE:" labels, so it resets to the
+    default instead of silently scoring a company on no content."""
+    p = tmp_path / "defaults.toml"
+    p.write_text(
+        f"[scoring]\ncompany_evidence_char_cap = {bad_cap}\n",
+        encoding="utf-8",
+    )
+    _point_at(monkeypatch, p)
+    assert settings.scoring()["company_evidence_char_cap"] == 25000
+
+
+def test_scoring_char_cap_non_numeric_falls_back(tmp_path, monkeypatch):
+    p = tmp_path / "defaults.toml"
+    p.write_text('[scoring]\ncompany_evidence_char_cap = "lots"\n', encoding="utf-8")
+    _point_at(monkeypatch, p)
+    assert settings.scoring()["company_evidence_char_cap"] == 25000
+
+
+def test_scoring_char_cap_at_floor_is_kept(tmp_path, monkeypatch):
+    """The floor itself (1000) is a valid, non-misconfigured value."""
+    p = tmp_path / "defaults.toml"
+    p.write_text("[scoring]\ncompany_evidence_char_cap = 1000\n", encoding="utf-8")
+    _point_at(monkeypatch, p)
+    assert settings.scoring()["company_evidence_char_cap"] == 1000
+
+
 def test_auto_discovery_status_reads_from_toml(tmp_path, monkeypatch):
     toml_path = tmp_path / "defaults.toml"
     toml_path.write_text(
