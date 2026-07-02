@@ -179,7 +179,9 @@ function _companyBlock(c) {
       bg +
       '" data-company-slug="' +
       escHtml(c.company_slug) +
-      '" title="Open company card">' +
+      '" title="' +
+      escHtml(T("apps_open_company", "Open company card")) +
+      '">' +
       escHtml(c.org) +
       "</button>"
     : '<span class="apps-company-name" style="color:' +

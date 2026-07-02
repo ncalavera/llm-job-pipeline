@@ -300,9 +300,15 @@ export function applySnapshot(payload) {
   // current too (Boards catalogue, resolved Settings, Today's learning hint).
   window.VACANCY_DATA.enrichment_stats = payload.enrichment_stats;
   window.VACANCY_DATA.latency_metrics = payload.latency_metrics;
-  window.VACANCY_DATA.boards_catalog = payload.boards_catalog;
-  window.VACANCY_DATA.settings = payload.settings;
-  window.VACANCY_DATA.learning = payload.learning;
+  // Keep the last-good baked values when a polled payload predates these keys
+  // (old server, new client) — blanking a rendered section is worse than
+  // showing slightly stale read-only catalogue/settings data.
+  if (payload.boards_catalog !== undefined)
+    window.VACANCY_DATA.boards_catalog = payload.boards_catalog;
+  if (payload.settings !== undefined)
+    window.VACANCY_DATA.settings = payload.settings;
+  if (payload.learning !== undefined)
+    window.VACANCY_DATA.learning = payload.learning;
 
   groupsById.clear();
   for (const g of groups) {

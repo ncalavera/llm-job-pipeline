@@ -57,7 +57,7 @@ import { renderPipeline } from "./modules/pipeline.js";
 import { renderToday, todayAction } from "./modules/today.js";
 import { initStats, renderStats } from "./modules/stats.js";
 import { initArchive, renderArchive } from "./modules/archive.js";
-import { initBoards } from "./modules/boards.js";
+import { initBoards, renderBoards } from "./modules/boards.js";
 import {
   initApplications,
   renderApplications,
@@ -132,6 +132,7 @@ on("render", () => {
   if (state.currentMode === "stats") renderStats();
   if (state.currentMode === "applications") renderApplications();
   if (state.currentMode === "settings") renderSettings();
+  if (state.currentMode === "boards") renderBoards();
   if (state.currentProfileSlug) renderProfileForSlug(state.currentProfileSlug);
 });
 
