@@ -1958,6 +1958,97 @@ function buildVacanciesSection(c) {
   );
 }
 
+// Applications + research. A small block inside the EXISTING company
+// profile: applications you have made (with status + which artifacts were sent)
+// and the research collected in company_evidence. Nothing gets lost in folders.
+// The full standalone Applications section is a later ticket.
+function buildApplicationsSection(c) {
+  var apps = c.applications || [];
+  var research = c.research || [];
+  if (apps.length === 0 && research.length === 0) return "";
+
+  var inner = "";
+
+  if (apps.length > 0) {
+    var rows = apps
+      .map(function (a) {
+        var meta = [];
+        if (a.channel) meta.push(escHtml(a.channel));
+        if (a.applied_at) meta.push(escHtml(a.applied_at));
+        var artifactKeys = a.artifacts ? Object.keys(a.artifacts) : [];
+        var artifactsHtml =
+          artifactKeys.length > 0
+            ? '<div class="cp-app-artifacts">' +
+              artifactKeys
+                .map(function (k) {
+                  return (
+                    '<span class="cp-app-artifact">' + escHtml(k) + "</span>"
+                  );
+                })
+                .join("") +
+              "</div>"
+            : "";
+        return (
+          '<div class="cp-app-item">' +
+          '<span class="cp-app-status cp-app-status-' +
+          escHtml(a.status) +
+          '">' +
+          escHtml(a.status) +
+          "</span>" +
+          (meta.length
+            ? '<span class="cp-app-meta">' + meta.join(" · ") + "</span>"
+            : "") +
+          artifactsHtml +
+          "</div>"
+        );
+      })
+      .join("");
+    inner += '<div class="cp-app-list">' + rows + "</div>";
+  }
+
+  if (research.length > 0) {
+    var researchRows = research
+      .map(function (r) {
+        var label = escHtml(r.source || "research");
+        var body = r.url
+          ? '<a href="' +
+            escHtml(r.url) +
+            '" target="_blank" rel="noopener">' +
+            escHtml(r.url) +
+            "</a>"
+          : label;
+        var when = r.fetched_at
+          ? '<span class="cp-app-meta">' +
+            escHtml(String(r.fetched_at).slice(0, 10)) +
+            "</span>"
+          : "";
+        return (
+          '<div class="cp-app-item"><span class="cp-app-source">' +
+          label +
+          "</span>" +
+          body +
+          when +
+          "</div>"
+        );
+      })
+      .join("");
+    inner +=
+      '<div class="cp-app-research-label">Research (' +
+      research.length +
+      ")</div>" +
+      '<div class="cp-app-list">' +
+      researchRows +
+      "</div>";
+  }
+
+  return (
+    '<div class="cp-section">' +
+    '<div class="cp-section-title"><span class="cp-section-icon">✉️</span> Applications & Research</div>' +
+    inner +
+    "</div>"
+  );
+}
+
 function buildCompanyProfilePage(c) {
   var tierCls = c.calculated_tier
     ? "ctier-" + c.calculated_tier.toLowerCase()
@@ -2085,6 +2176,7 @@ function buildCompanyProfilePage(c) {
     buildAboutSection(c) +
     buildFitSection(c) +
     buildVacanciesSection(c) +
+    buildApplicationsSection(c) +
     mdHtml +
     atsHtml +
     catalogBtn +

@@ -263,7 +263,11 @@ def _build_org_colors(org_names: list[str]) -> dict:
 
 
 def _build_group(
-    v: dict, org_colors: dict, company_hq: dict, strong_model: str | None = None
+    v: dict,
+    org_colors: dict,
+    company_hq: dict,
+    strong_model: str | None = None,
+    applications_by_vac: dict | None = None,
 ) -> dict:
     """Build one frontend group dict from a vacancy row.
 
@@ -271,6 +275,11 @@ def _build_group(
     ``scoring_settings.scoring_model``), used only to derive
     ``screen_only_score`` below — pass ``None`` to skip that derivation (e.g.
     a caller that doesn't care about score provenance).
+
+    ``applications_by_vac`` is an optional {vacancy_id: application} map (see
+    ``applications.applications_by_vacancy``); when provided, the vacancy's own
+    application (if any) is attached so a card can show it. ``None`` -> no
+    application field is derived (a caller that doesn't care).
     """
     # Locations v2: {work_mode, region, country, city, compensation, url}
     locs = v.get("locations", [])
@@ -403,6 +412,9 @@ def _build_group(
         "locations": entry_locations,
         "member_ids": [],
         "company_id": v.get("company_id", ""),
+        # The application attached to this vacancy (1:1), or None. Card shows a
+        # small "applied · <status>" block; the full section is a later ticket.
+        "application": (applications_by_vac or {}).get(v.get("id")),
     }
 
 
@@ -422,13 +434,18 @@ def _company_hq_map():
 def prepare_archived_data() -> list:
     """Lean list of archived vacancies for the Archive tab (no full_description)."""
     from scoring_settings import scoring_model
+    import applications
 
     archived = load_vacancies(status="archived", include_inactive_companies=True, light=True)
     company_hq = _company_hq_map()
+    apps_by_vac = applications.applications_by_vacancy()
     all_orgs = sorted(set(v["org"] for v in archived.values()))
     org_colors = _build_org_colors(all_orgs)
     strong_model = scoring_model()
-    groups = [_build_group(v, org_colors, company_hq, strong_model) for v in archived.values()]
+    groups = [
+        _build_group(v, org_colors, company_hq, strong_model, apps_by_vac)
+        for v in archived.values()
+    ]
     groups.sort(key=lambda g: (-(g["llm_score"] if g["llm_score"] is not None else -1), g["org"]))
     return groups
 
@@ -440,6 +457,7 @@ def prepare_report_data(db: dict = None) -> dict:
     Returns dict with keys: groups, stats.
     """
     from scoring_settings import scoring_model
+    import applications
 
     today = date.today().isoformat()
     all_vacs = load_vacancies(include_candidate_companies=True, status_exclude=["archived"])
@@ -463,7 +481,10 @@ def prepare_report_data(db: dict = None) -> dict:
 
     # --- Build grouped list (each vacancy is already unique by org+title) ---
     strong_model = scoring_model()
-    groups = [_build_group(v, org_colors, company_hq, strong_model) for v in vacancies]
+    apps_by_vac = applications.applications_by_vacancy()
+    groups = [
+        _build_group(v, org_colors, company_hq, strong_model, apps_by_vac) for v in vacancies
+    ]
 
     # --- Stats ---
     total_postings = len(vacancies)
@@ -639,10 +660,18 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
     """
     if org_colors is None:
         org_colors = {}
+    import applications
+    from database_supabase import load_company_evidence_summary
+
     company_lookup = _load_company_lookup()
     summaries = _load_executive_summaries()
     enrichment = _load_enrichment()
     vacancies = load_vacancies(include_inactive_companies=True, light=True)
+    # Applications + research, keyed by company_id, so the profile shows
+    # everything related in one place (nothing lost in folders). Both degrade to
+    # {} on a fresh/pre-migration DB.
+    apps_by_company = applications.applications_by_company()
+    research_by_company = load_company_evidence_summary()
 
     # Load source tracking from company table
     conn = get_conn()
@@ -784,10 +813,14 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
                 "deadline_label": _deadline_soon_label(stats.get("_hot_deadline", "")),
             }
 
+        company_id = csv_row.get("company_id", "")
+        company_applications = apps_by_company.get(company_id, []) if company_id else []
+        company_research = research_by_company.get(company_id, []) if company_id else []
+
         companies.append(
             {
                 "name": display_name,
-                "company_id": csv_row.get("company_id", ""),
+                "company_id": company_id,
                 "slug": slug,
                 "category": csv_row.get("category", ""),
                 "product": csv_row.get("description", ""),
@@ -849,6 +882,15 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
                 "glassdoor_rating": social.get("glassdoor_rating"),
                 "linkedin_employees": social.get("linkedin_employees", ""),
                 "recent_news": social.get("recent_news", []),
+                # --- Applications + research ---
+                # Everything the user has done toward this company: applications
+                # (with status + artifact refs) and the research rows collected
+                # in company_evidence. Shown as a small block in the profile;
+                # the full standalone Applications section is a later ticket.
+                "applications": company_applications,
+                "application_count": len(company_applications),
+                "research": company_research,
+                "research_count": len(company_research),
             }
         )
 

@@ -3849,3 +3849,64 @@ a.pipe-grp-role-title:hover {
   background: #fee2e2;
   color: #991b1b;
 }
+
+/* Applications & research — small blocks inside the existing catalog
+   card and company profile. Full standalone Applications section is later. */
+.app-badge {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+.cp-app-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cp-app-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13px;
+}
+.cp-app-status {
+  text-transform: capitalize;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #ecfdf5;
+  color: #047857;
+}
+.cp-app-status-rejected,
+.cp-app-status-withdrawn {
+  background: #fef2f2;
+  color: #991b1b;
+}
+.cp-app-status-offer {
+  background: #fffbeb;
+  color: #b45309;
+}
+.cp-app-source {
+  font-weight: 600;
+  color: #6b7280;
+}
+.cp-app-meta {
+  color: #9ca3af;
+}
+.cp-app-artifacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.cp-app-artifact {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: #f3f4f6;
+  color: #4b5563;
+}
+.cp-app-research-label {
+  margin: 12px 0 6px;
+  font-weight: 600;
+  color: #6b7280;
+}
