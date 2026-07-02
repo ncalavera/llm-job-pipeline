@@ -32,6 +32,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO / "scripts"
+PROMPTS = SCRIPTS / "prompts"
 TESTS = REPO / "tests"
 CONFIG = REPO / "config"
 DOCS_INDEX = REPO / "docs" / "index.html"
@@ -54,9 +55,20 @@ def _py_files(*roots: Path) -> list[Path]:
     return out
 
 
+def _prompt_files() -> list[Path]:
+    """The LLM prompt templates under scripts/prompts/ (owner-agnostic by
+    contract: the desirability rubric, salary benchmark and reference orgs come
+    from the user profile, NOT from these shipped templates)."""
+    if not PROMPTS.exists():
+        return []
+    return sorted(PROMPTS.glob("*.md"))
+
+
 def _text_files() -> list[Path]:
-    """Python + the public dashboard HTML + .claude command markdown."""
+    """Python + the LLM prompt templates + the public dashboard HTML + .claude
+    command markdown."""
     files = _py_files(SCRIPTS, TESTS)
+    files.extend(_prompt_files())
     if DOCS_INDEX.exists():
         files.append(DOCS_INDEX)
     if CLAUDE.exists():
@@ -390,6 +402,35 @@ def test_no_geo_proper_noun_in_branch_literals():
     assert not hits, (
         "An if/elif branches on a country/region proper-noun literal — "
         "geography must be a data-table lookup, not a per-place branch:\n" + "\n".join(hits)
+    )
+
+
+# ---------------------------------------------------------------------------
+# 8b. No literal money amount in the LLM prompt templates.
+#
+# The scoring rubric must take the candidate's salary benchmark and every other
+# money anchor FROM THE USER PROFILE, never from a figure baked into the shipped
+# template (the leak was a "€7k/month benchmark" welded into company-scoring.md).
+# A currency-symbol-plus-digit or a "<n>k/month"-style pay figure in a prompt is
+# therefore always a regression. Score bands ("85–100"), runway durations
+# ("18–24 months") and a bare "$X" placeholder carry no currency+digit, so they
+# do not trip this guard.
+# ---------------------------------------------------------------------------
+
+MONEY_LITERAL = re.compile(
+    r"[€$£¥]\s?\d"  # €7, $5,000, £4000
+    r"|\b\d[\d,.]*\s?k?\s?/\s?(?:month|mo|year|yr|hour|hr)\b"  # 7k/month, 5000/yr
+    r"|\b\d[\d,.]*\s?(?:USD|EUR|GBP|CAD|AUD)\b",  # 5000 USD
+    re.IGNORECASE,
+)
+
+
+def test_no_money_amount_in_prompt_templates():
+    hits = _scan(_prompt_files(), MONEY_LITERAL)
+    assert not hits, (
+        "A literal money amount leaked into an LLM prompt template — the salary "
+        "benchmark and every money anchor must come from the user profile, not a "
+        "figure baked into the shipped prompt:\n" + "\n".join(hits)
     )
 
 
