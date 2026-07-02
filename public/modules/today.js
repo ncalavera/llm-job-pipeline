@@ -13,7 +13,9 @@
 // English fallbacks here keep the public shell Cyrillic-free.
 
 import {
+  state,
   groups,
+  companiesList,
   getGroupStatus,
   STATUS_BASKET,
   isGroupCompanyApproved,
@@ -244,6 +246,63 @@ function _metricsPanel() {
   );
 }
 
+// Companies still awaiting the user's approve/reject decision. Honors any live
+// approval the user just made this session (state.companyStatuses, keyed by
+// company_id) over the baked snapshot's review_status. A one-line nudge with a
+// button that jumps straight to the Companies → Pending Review sub-tab.
+function _pendingCompaniesBlock() {
+  const pending = (companiesList || []).filter(function (c) {
+    const live = state.companyStatuses && state.companyStatuses[c.company_id];
+    const status = live || c.review_status;
+    return status === "pending";
+  });
+  if (!pending.length) return "";
+  const label = T("today_pending_companies", "Companies awaiting approval");
+  const cta = T("today_pending_companies_cta", "Review");
+  return (
+    '<section class="today-block today-pending"><h3>' +
+    escHtml(label) +
+    ' <span class="today-count">' +
+    pending.length +
+    "</span></h3>" +
+    '<p class="today-pending-cta"><button type="button" class="today-act act-apply" ' +
+    "onclick=\"switchMode('companies');switchCompanySubTab('pending')\">" +
+    escHtml(cta) +
+    "</button></p></section>"
+  );
+}
+
+// The learning cycle's "there are verdicts to fold in next run" hint, from the
+// server-computed VACANCY_DATA.learning (deterministic, no LLM). Only shown when
+// something is actually pending; the counts are the only thing baked (never the
+// proposal text).
+function _learningBlock() {
+  const l = (window.VACANCY_DATA && window.VACANCY_DATA.learning) || null;
+  if (!l || !l.pending) return "";
+  const parts = [];
+  if (l.verdicts) {
+    parts.push(
+      l.verdicts +
+        " " +
+        T("today_learning_pending", "verdicts to review on the next run"),
+    );
+  }
+  if (l.proposals) {
+    parts.push(
+      l.proposals + " " + T("today_learning_proposals", "proposals ready"),
+    );
+  }
+  if (!parts.length) return "";
+  return (
+    '<section class="today-block today-learning"><h3>' +
+    escHtml(T("today_learning", "Learning cycle")) +
+    "</h3>" +
+    '<p class="today-learning-line">' +
+    escHtml(parts.join(" · ")) +
+    "</p></section>"
+  );
+}
+
 export function renderToday() {
   const root = document.getElementById("todaySection");
   if (!root) return;
@@ -334,6 +393,8 @@ export function renderToday() {
   );
 
   root.innerHTML =
+    _pendingCompaniesBlock() +
+    _learningBlock() +
     _list(
       T("today_expiring", "Expiring, needs a decision"),
       expiring,
