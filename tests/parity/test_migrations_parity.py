@@ -31,8 +31,8 @@ def test_migrate_py_converges_a_never_migrated_postgres_db(monkeypatch):
     """Postgres's migration files guard every ADD COLUMN with
     ``IF NOT EXISTS``, so replaying the full chain against a database whose
     baseline already carries some of those columns is a clean no-op. This is
-    the Postgres side of the exact scenario that crashes on SQLite -- see
-    test_migrate_py_converges_a_never_migrated_sqlite_db (xfail) below."""
+    the Postgres side of the exact scenario exercised on SQLite below --
+    see test_migrate_py_converges_a_never_migrated_sqlite_db."""
     dal = bootstrap_postgres(monkeypatch)  # skips if PARITY_PG_URL is unset
     import migrate
 
@@ -41,31 +41,20 @@ def test_migrate_py_converges_a_never_migrated_postgres_db(monkeypatch):
     dal.close_conn()
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "Real, currently-live divergence: sql/schema.sqlite.sql (the frozen "
-        "SQLite baseline) already declares us_eligibility and "
-        "expiring_alerted_at -- columns that migrations 0003 and 0005 also "
-        "try to ADD. Postgres's migration files guard with "
-        "'ADD COLUMN IF NOT EXISTS' so replaying them against an "
-        "already-current baseline is a no-op; the SQLite migration files use "
-        "a bare ALTER TABLE ADD COLUMN (SQLite has no IF NOT EXISTS for ADD "
-        "COLUMN), so `python3 scripts/migrate.py` against a truly fresh "
-        "SQLite install crashes with 'duplicate column name'. This is the "
-        "exact step /jobs-new (2a) and INSTALL-EASY.md (2b) run on first "
-        "use -- a fresh SQLite user following the documented flow hits this "
-        "today. Needs a real fix (re-sync the frozen baseline with the "
-        "migration ledger, or make the SQLite runner tolerant of an "
-        "already-present column); out of scope for this parity-harness "
-        "ticket, tracked separately and reported."
-    ),
-)
 def test_migrate_py_converges_a_never_migrated_sqlite_db(tmp_path, monkeypatch):
     """`scripts/migrate.py` must bring a brand-new, never-migrated database up
     to the current schema in one clean run -- this is literally the step a
-    fresh SQLite install's onboarding runs. See the xfail reason for what
-    breaks today."""
+    fresh SQLite install's onboarding runs (/jobs-new step 2a, INSTALL-EASY.md
+    step 2b).
+
+    sql/schema.sqlite.sql (the frozen baseline) already declares
+    us_eligibility and expiring_alerted_at -- columns that migrations 0003
+    and 0005 also try to ADD. Postgres's migration files guard with
+    'ADD COLUMN IF NOT EXISTS' so replaying them against an already-current
+    baseline is a no-op; SQLite has no such guard for ADD COLUMN, so
+    _Sqlite.run() in scripts/migrate.py catches the resulting "duplicate
+    column name" error for those specific migrations and treats them as
+    applied instead of aborting the run."""
     rc = raw_migrate_fresh_sqlite(monkeypatch, tmp_path)
     assert rc == 0
 
