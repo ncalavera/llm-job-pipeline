@@ -65,6 +65,14 @@ EXIT_ERROR = 30
 GONE_ARCHIVE_BLOCK_SHARE = 0.30
 GONE_ARCHIVE_MIN_COUNT = 3
 
+# Overload proxy: when this many already-scored, still-unseen roles await a
+# verdict, new roles are arriving faster than they are reviewed.
+# The run-start banner then SUGGESTS dialing volume down — it never applies it
+# (STRATEGY guardrail 8). Scored-unseen is the honest measurable backlog: it is
+# exactly the user's review queue, and unlike raw fetch counts it only grows when
+# the user falls behind. 50 ≈ several days' worth of a normal daily surface.
+OVERLOAD_BACKLOG = 50
+
 # The canonical stage order. This list — not the runbook, not the maintainer's
 # memory — is the single source of truth for what happens when.
 #
@@ -1285,6 +1293,73 @@ def _print_summary(state: dict) -> None:
     print(bar, flush=True)
 
 
+def _boards_summary(opts: Opts) -> str:
+    """Human phrasing of the boards feeding THIS run (from the resolved set)."""
+    boards = opts.job_boards
+    if not boards:
+        return "none (tracked companies only)"
+    if boards == "all":
+        return "all defined boards"
+    return boards
+
+
+def _overload_advice() -> str | None:
+    """A propose-only suggestion to reduce volume when the review backlog is large.
+
+    Returns ``None`` when the backlog is under the threshold or the DB can't be
+    read. Never applies anything — it only names the three real levers to turn
+    down (STRATEGY guardrail 8: propose, never self-apply)."""
+    try:
+        backlog = _scored_unseen()
+    except Exception:
+        return None
+    if backlog < OVERLOAD_BACKLOG:
+        return None
+    return (
+        f"  ⚠  Review backlog: {backlog} scored roles still await a verdict "
+        f"(≥ {OVERLOAD_BACKLOG}). New roles are arriving faster than you review them.\n"
+        "     Consider dialing volume DOWN (suggestion only — nothing changes unless you do it):\n"
+        "       • fewer boards          →  python3 scripts/sources.py disable-board <id>\n"
+        "       • lower the daily limit  →  [volume] daily_scoring_limit in config/defaults.toml\n"
+        "       • stricter hard filters  →  ## HARD_FILTERS in config/user_profile.md"
+    )
+
+
+def _print_run_banner(opts: Opts) -> None:
+    """At run start, show WHERE today's volume comes from and the limits in effect.
+
+    Wrapped so a banner failure (e.g. DB not migrated yet) can never abort the
+    run — the real DB checks belong to the preflight stage, not here. DB-derived
+    counts degrade to "?" instead of raising (STRATEGY goal 1)."""
+    try:
+        import settings
+        from scoring_settings import max_per_run
+
+        vol = settings.volume()
+        try:
+            active = _scalar("SELECT count(*) FROM company WHERE status='active'")
+        except Exception:
+            active = "?"
+
+        bar = "=" * 70
+        print(f"\n{bar}")
+        print("  /jobs-new — today's volume")
+        print(bar)
+        print(f"  Active companies tracked: {active}  (per-run fetch cap: {vol['max_active_companies']})")
+        print(f"  Job boards this run:      {_boards_summary(opts)}")
+        print(
+            f"  Scoring limit:            {max_per_run()} roles/run   "
+            f"Digest size: {vol['digest_size']}"
+        )
+        advice = _overload_advice()
+        if advice:
+            print(advice)
+        print(bar, flush=True)
+    except Exception:
+        # A banner is informational; never let it break the run.
+        pass
+
+
 def _print_status() -> None:
     state = _load_state()
     if not state:
@@ -1344,6 +1419,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_DONE
 
     existing = _load_state()
+    fresh_run = False
     if args.new:
         opts = Opts(
             job_boards=_resolve_boards(args.boards),
@@ -1351,6 +1427,7 @@ def main(argv: list[str] | None = None) -> int:
             no_publish=args.no_publish,
         )
         state = _new_state(opts)
+        fresh_run = True
     elif args.resume:
         if not existing:
             print("No run to resume. Start one: python3 scripts/run_daily.py")
@@ -1374,6 +1451,10 @@ def main(argv: list[str] | None = None) -> int:
             no_publish=args.no_publish,
         )
         state = _new_state(opts)
+        fresh_run = True
+
+    if fresh_run:
+        _print_run_banner(opts)
 
     rc = drive(state, opts)
 

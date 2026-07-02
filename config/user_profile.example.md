@@ -210,8 +210,16 @@ keeps its cheap score, sorted out of view.
   when you don't pass --limit. A quiet day scores 20-30; this cap keeps a burst
   day (hundreds of new roles) from silently draining your plan — the overflow is
   offered on the next run, and the run prints "scored X of Y". In the two-pass
-  flow the cap bounds the SCREEN set (the strong pass is a subset). Empty/omitted
-  or a non-positive value → 150.
+  flow the cap bounds the SCREEN set (the strong pass is a subset). This PERSONAL,
+  plan-tier value OVERRIDES the neutral `[volume] daily_scoring_limit` in
+  config/defaults.toml; leave it empty/omitted to inherit that shared default
+  (150). A non-positive value also falls back to the shared default.
+
+The neutral "how many do I see" dials (how many active companies fetch per run,
+the shared scoring limit, the digest size) live in one place —
+config/defaults.toml `[volume]` — and `/jobs-new` prints the current values at
+run start. This section holds only the parts tied to YOUR plan (model tier + the
+per-run cap).
 -->
 
 scoring_model: sonnet

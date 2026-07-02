@@ -45,16 +45,32 @@ from __future__ import annotations
 
 import re
 
+import settings
+
 # Reuse the single profile reader so these settings and the LLM prompts always
 # read the same file. prompts.py lives next to this module on sys.path.
 from prompts import _load_user_profile
 
 # Neutral defaults. Sonnet is the cheap, budget-plan model (no personal anchor in
-# a shipped default). The cap is a spike-day guard: ~5-7x a normal daily batch
-# (20-30), well under a several-hundred-vacancy burst, and mid-range of a
-# sensible 100-300 safety-net band.
+# a shipped default). The per-run cap default is the NEUTRAL volume dial
+# ([volume] daily_scoring_limit); DEFAULT_MAX_PER_RUN is only the ultimate
+# fallback used when even that is unreadable. It mirrors the shipped
+# daily_scoring_limit (150): a spike-day guard ~5-7x a normal daily batch
+# (20-30), well under a several-hundred-vacancy burst.
 DEFAULT_SCORING_MODEL = "sonnet"
 DEFAULT_MAX_PER_RUN = 150
+
+
+def _default_max_per_run() -> int:
+    """The neutral scoring-limit default: [volume] daily_scoring_limit.
+
+    This is what wires the profile-less path to the single volume window. The
+    profile's ## VOLUME max_per_run still overrides it (see ``max_per_run``).
+    """
+    try:
+        return int(settings.volume()["daily_scoring_limit"])
+    except Exception:
+        return DEFAULT_MAX_PER_RUN
 
 # The cheap two-pass screen model and the escalation floor. haiku is
 # the cheapest tier — it maximises the two-pass saving (Haiku 4.5 costs ~1/5 of
@@ -183,16 +199,19 @@ def escalation_threshold_warning(threshold: int) -> str | None:
 
 
 def max_per_run() -> int:
-    """Return the per-run scoring cap, or the neutral default (150).
+    """Return the per-run scoring cap.
 
-    A non-positive or garbage value falls back to the default — the cap is a
-    safety net and must never resolve to "score nothing" or crash.
+    Resolution: the profile's ``## VOLUME max_per_run`` (personal plan-tier knob)
+    wins; otherwise the neutral ``[volume] daily_scoring_limit`` from
+    defaults.toml. A non-positive or garbage profile value falls back to that
+    neutral default — the cap is a safety net and must never resolve to "score
+    nothing" or crash.
     """
     val = _volume_fields().get("max_per_run", "").strip()
     if val.lower() in _EMPTY_TOKENS:
-        return DEFAULT_MAX_PER_RUN
+        return _default_max_per_run()
     try:
         n = int(val)
     except ValueError:
-        return DEFAULT_MAX_PER_RUN
-    return n if n > 0 else DEFAULT_MAX_PER_RUN
+        return _default_max_per_run()
+    return n if n > 0 else _default_max_per_run()

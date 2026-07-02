@@ -68,6 +68,42 @@ show_mpa_column = false
 company_evidence_char_cap = 25000
 
 # ===========================================================================
+# Volume — ONE window for "how many vacancies do I want to see?".
+#
+# Daily flow was spread across four unrelated levers (company re-fetch cooldown,
+# the scoring --limit, which boards are on, the hard filters). These three dials
+# gather the neutral, tool-mechanics part of that into one place; each is wired
+# to the REAL lever it names (no parallel mechanism). Lower any one and the daily
+# flow measurably shrinks; run_daily.py prints the current values at run start.
+#
+# These are OWNER-AGNOSTIC caps (a nurse, a game designer and a policy analyst
+# all want "show me roughly N a day"), so they ship here — unlike the plan-tier
+# cost knobs (scoring model, spike cap) which are personal and live in the
+# profile's ## VOLUME section. Where both exist (scoring limit), the profile's
+# ## VOLUME max_per_run OVERRIDES daily_scoring_limit below.
+# ===========================================================================
+[volume]
+# The most ACTIVE companies fetched for new vacancies in a single run. When more
+# are due (their re-fetch cooldown elapsed), the rest defer to the next run — a
+# per-run flow cap, never a status change (STRATEGY guardrail 8). Real lever:
+# the company selection in fetch_vacancies.py. Default 200 is a spike-day guard,
+# not a throttle: a hand-curated active set is far smaller, so a normal run is
+# untouched; lower it to deliberately slow company-sourced volume.
+max_active_companies = 200
+
+# The most vacancies scored in one run when no explicit --limit is passed. Real
+# lever: score_vacancies.py --limit (via scoring_settings.max_per_run). This is
+# the neutral default; a profile ## VOLUME max_per_run (plan-tier personal knob)
+# overrides it. A quiet day scores 20-30; the cap keeps a burst day from draining
+# the plan, and the overflow is offered next run ("scored X of Y").
+daily_scoring_limit = 150
+
+# How many vacancies the Telegram digest sends by default (no --limit). Real
+# lever: telegram_digest.py --limit (via settings.digest default_limit). Lower it
+# for a shorter daily message.
+digest_size = 5
+
+# ===========================================================================
 # Numeric thresholds — scoring, tiers, auto-archive, auto-review.
 # ===========================================================================
 [thresholds]
@@ -578,7 +614,8 @@ location_hint_cities = [
 [digest]
 hot_vacancy_score = 55
 deadline_soon_days = 7
-default_limit = 5
+# NB: the digest's default size lives in [volume] digest_size (the single volume
+# window) — settings.digest() reads it from there, not from a key here.
 default_min_score = 40
 summary_fallback_chars = 600
 summary_max_chars = 1500
