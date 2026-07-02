@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Filter Report — Vacancy Pipeline</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+    --bg: #FFF8F0;
+    --bg-warm: #FFF0E0;
+    --bg-card: #FFFFFF;
+    --text: #3D2E1F;
+    --text-secondary: #7A6554;
+    --text-light: #A89680;
+    --accent-warm: #E8915A;
+    --accent-deep: #C76B35;
+    --accent-sage: #8BA37A;
+    --accent-lavender: #9B8AB8;
+    --accent-sky: #7EB5D6;
+    --accent-rose: #D4787A;
+    --surface: #EDE5D8;
+    --shadow-sm: 0 2px 8px rgba(0,0,0,0.06);
+    --shadow-md: 0 2px 16px rgba(42,31,20,0.06);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+}
+body::after {
+    content:''; position:fixed; inset:0; opacity:0.12; pointer-events:none; z-index:0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+    background-size:200px 200px;
+}
+.container { max-width:1000px; margin:0 auto; padding:40px 24px 80px; position:relative; z-index:1; }
+.hero { text-align:center; padding:48px 20px 32px; }
+.hero-label { font-size:11px; letter-spacing:3px; text-transform:uppercase; color:var(--text-light); font-weight:500; margin-bottom:12px; }
+.hero h1 { font-size:42px; font-weight:300; line-height:1.2; margin-bottom:8px; }
+.hero p { font-size:15px; color:var(--text-secondary); }
+.stat-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin:32px 0; }
+.stat-card { background:var(--bg-card); border-radius:14px; padding:20px; box-shadow:var(--shadow-sm);
+    border-top:3px solid var(--surface); text-align:center; }
+.stat-card .num { font-size:32px; font-weight:600; letter-spacing:-0.03em; }
+.stat-card .label { font-size:12px; color:var(--text-secondary); margin-top:4px; text-transform:uppercase; letter-spacing:0.05em; }
+.section { margin:48px 0; }
+.section-label { font-size:11px; letter-spacing:3px; text-transform:uppercase; color:var(--text-light); font-weight:500; margin-bottom:8px; }
+.section h2 { font-size:26px; font-weight:400; margin-bottom:16px; }
+.funnel { background:white; border-radius:14px; padding:24px; box-shadow:var(--shadow-sm); margin:24px 0; }
+.funnel-bar { display:flex; height:40px; border-radius:8px; overflow:hidden; margin:12px 0; }
+.funnel-seg { display:flex; align-items:center; justify-content:center; color:white; font-size:13px; font-weight:500; }
+.data-table { width:100%; border-collapse:collapse; font-size:14px; }
+.data-table thead { border-bottom:2px solid var(--surface); }
+.data-table th { text-align:left; padding:10px 12px; font-size:11px; letter-spacing:0.06em;
+    text-transform:uppercase; color:var(--text-light); font-weight:500; }
+.data-table td { padding:8px 12px; border-bottom:1px solid #f0ebe3; }
+.data-table tbody tr:hover { background:#FBF8F3; }
+.card { background:var(--bg-card); border-radius:14px; padding:24px; box-shadow:var(--shadow-sm); margin:16px 0; }
+.badge { display:inline-block; border-radius:9999px; padding:2px 10px; font-size:12px; font-weight:500; }
+.mini-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin:16px 0; }
+.mini-card { background:white; border-radius:12px; padding:16px; box-shadow:var(--shadow-sm); }
+.mini-card h4 { font-size:13px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px; }
+.reco { background:linear-gradient(135deg, var(--bg-warm) 0%, #FFF5EB 100%); border-left:4px solid var(--accent-warm);
+    border-radius:0 14px 14px 0; padding:20px 24px; margin:16px 0; }
+.reco h3 { font-size:16px; font-weight:500; margin-bottom:8px; }
+.reco ul { padding-left:20px; font-size:14px; color:var(--text-secondary); }
+.reco li { margin-bottom:4px; }
+@media (max-width:768px) {
+    .stat-grid { grid-template-columns:repeat(2,1fr); }
+    .mini-grid { grid-template-columns:1fr; }
+    .hero h1 { font-size:28px; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+    <div class="hero">
+        <div class="hero-label">Vacancy Pipeline</div>
+        <h1>Filter Report</h1>
+        <p>02 January 2026, 09:30 &mdash; 12 unscored vacancies analyzed</p>
+    </div>
+
+    <!-- Stat cards -->
+    <div class="stat-grid" style="grid-template-columns:repeat(5,1fr)">
+        <div class="stat-card" style="border-top-color:var(--text)">
+            <div class="num">12</div>
+            <div class="label">Unscored Total</div>
+        </div>
+        <div class="stat-card" style="border-top-color:#059669">
+            <div class="num" style="color:#059669">3</div>
+            <div class="label">Ready to Score</div>
+        </div>
+        <div class="stat-card" style="border-top-color:var(--accent-rose)">
+            <div class="num" style="color:var(--accent-rose)">6</div>
+            <div class="label">Delete</div>
+        </div>
+        <div class="stat-card" style="border-top-color:var(--accent-warm)">
+            <div class="num" style="color:var(--accent-warm)">3</div>
+            <div class="label">Re-enrich</div>
+        </div>
+    </div>
+
+    <!-- Funnel -->
+    <div class="funnel">
+        <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px">
+            FUNNEL: 12 unscored &rarr; 6 delete + 3 re-enrich &rarr; <strong>3 ready</strong>
+        </div>
+        <div class="funnel-bar">
+            <div class="funnel-seg" style="width:50.0%;background:var(--accent-rose)">
+                50%
+            </div>
+            <div class="funnel-seg" style="width:25.0%;background:var(--accent-warm)">
+                25%
+            </div>
+            <div class="funnel-seg" style="width:25.0%;background:#059669">
+                25%
+            </div>
+        </div>
+        <div style="display:flex;gap:24px;font-size:12px;color:var(--text-secondary)">
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--accent-rose);margin-right:4px"></span>Delete (6)</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--accent-warm);margin-right:4px"></span>Re-enrich (3)</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#059669;margin-right:4px"></span>Ready (3)</span>
+        </div>
+    </div>
+
+    <!-- Ready breakdown -->
+    <div class="section">
+        <div class="section-label">Ready to Score</div>
+        <h2>Breakdown: 3 vacancies</h2>
+        <div class="mini-grid">
+            <div class="mini-card">
+                <h4>By Tier</h4>
+                <table class="data-table"><tr><td>A — Strong Fit</td><td style='font-weight:600'>1</td></tr>
+<tr><td>B — Monitor</td><td style='font-weight:600'>1</td></tr>
+<tr><td>S — Strategic</td><td style='font-weight:600'>1</td></tr>
+</table>
+            </div>
+            <div class="mini-card">
+                <h4>By Region</h4>
+                <table class="data-table"><tr><td>Europe</td><td style='font-weight:600'>1</td></tr>
+<tr><td>Remote</td><td style='font-weight:600'>1</td></tr>
+<tr><td>US</td><td style='font-weight:600'>1</td></tr>
+</table>
+            </div>
+            <div class="mini-card">
+                <h4>Top Organizations</h4>
+                <table class="data-table"><tr><td>Kappa Org</td><td style='font-weight:600'>2</td></tr>
+<tr><td>Lambda Org</td><td style='font-weight:600'>1</td></tr>
+</table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete section -->
+    <div class="section">
+        <div class="section-label">Delete Candidates</div>
+        <h2>6 vacancies to remove</h2>
+        
+        <details class="delete-group" style="margin-bottom:16px">
+            <summary style="cursor:pointer;padding:12px 16px;background:white;border-radius:12px;
+                border-left:4px solid #D4787A;box-shadow:0 2px 8px rgba(0,0,0,0.05)">
+                <span style="font-weight:600">Blacklist Match</span>
+                <span class="badge" style="background:#D4787A20;color:#D4787A;margin-left:8px">
+                    2
+                </span>
+                <span style="color:var(--text-secondary);font-size:13px;margin-left:8px">Title matched GLOBAL_BLACKLIST</span>
+            </summary>
+            <div style="padding:8px 0 0">
+                <table class="data-table">
+                    <thead><tr>
+                        <th style="width:25%">Organization</th>
+                        <th style="width:45%">Position</th>
+                        <th style="width:30%">Location</th>
+                    </tr></thead>
+                    <tbody><tr>
+                <td style="font-weight:500">Acme Foundation</td>
+                <td>Expression of Interest Specialist</td>
+                <td style="color:var(--text-secondary);font-size:13px">Berlin, Germany</td>
+            </tr>
+<tr>
+                <td style="font-weight:500">Beta Institute</td>
+                <td>Volunteer Coordinator</td>
+                <td style="color:var(--text-secondary);font-size:13px">Berlin, Germany</td>
+            </tr>
+</tbody>
+                </table>
+            </div>
+        </details>
+        <details class="delete-group" style="margin-bottom:16px">
+            <summary style="cursor:pointer;padding:12px 16px;background:white;border-radius:12px;
+                border-left:4px solid #9B59B6;box-shadow:0 2px 8px rgba(0,0,0,0.05)">
+                <span style="font-weight:600">Content Junk</span>
+                <span class="badge" style="background:#9B59B620;color:#9B59B6;margin-left:8px">
+                    1
+                </span>
+                <span style="color:var(--text-secondary);font-size:13px;margin-left:8px">reCAPTCHA, donation widgets, error pages, navigation snippets</span>
+            </summary>
+            <div style="padding:8px 0 0">
+                <table class="data-table">
+                    <thead><tr>
+                        <th style="width:25%">Organization</th>
+                        <th style="width:45%">Position</th>
+                        <th style="width:30%">Location</th>
+                    </tr></thead>
+                    <tbody><tr>
+                <td style="font-weight:500">Gamma Trust</td>
+                <td>Broken Page Role</td>
+                <td style="color:var(--text-secondary);font-size:13px">Berlin, Germany</td>
+            </tr>
+</tbody>
+                </table>
+            </div>
+        </details>
+        <details class="delete-group" style="margin-bottom:16px">
+            <summary style="cursor:pointer;padding:12px 16px;background:white;border-radius:12px;
+                border-left:4px solid #E67E22;box-shadow:0 2px 8px rgba(0,0,0,0.05)">
+                <span style="font-weight:600">Re-archived</span>
+                <span class="badge" style="background:#E67E2220;color:#E67E22;margin-left:8px">
+                    1
+                </span>
+                <span style="color:var(--text-secondary);font-size:13px;margin-left:8px">Previously archived (90-day cooldown)</span>
+            </summary>
+            <div style="padding:8px 0 0">
+                <table class="data-table">
+                    <thead><tr>
+                        <th style="width:25%">Organization</th>
+                        <th style="width:45%">Position</th>
+                        <th style="width:30%">Location</th>
+                    </tr></thead>
+                    <tbody><tr>
+                <td style="font-weight:500">Delta Fund</td>
+                <td>Old Role Again</td>
+                <td style="color:var(--text-secondary);font-size:13px">Berlin, Germany</td>
+            </tr>
+</tbody>
+                </table>
+            </div>
+        </details>
+        <details class="delete-group" style="margin-bottom:16px">
+            <summary style="cursor:pointer;padding:12px 16px;background:white;border-radius:12px;
+                border-left:4px solid #A0846B;box-shadow:0 2px 8px rgba(0,0,0,0.05)">
+                <span style="font-weight:600">Excluded country</span>
+                <span class="badge" style="background:#A0846B20;color:#A0846B;margin-left:8px">
+                    1
+                </span>
+                <span style="color:var(--text-secondary);font-size:13px;margin-left:8px">All locations in a country the profile excludes, no remote</span>
+            </summary>
+            <div style="padding:8px 0 0">
+                <table class="data-table">
+                    <thead><tr>
+                        <th style="width:25%">Organization</th>
+                        <th style="width:45%">Position</th>
+                        <th style="width:30%">Location</th>
+                    </tr></thead>
+                    <tbody><tr>
+                <td style="font-weight:500">Epsilon Org</td>
+                <td>On-site Only Role</td>
+                <td style="color:var(--text-secondary);font-size:13px">Lagos, Nigeria</td>
+            </tr>
+</tbody>
+                </table>
+            </div>
+        </details>
+        <details class="delete-group" style="margin-bottom:16px">
+            <summary style="cursor:pointer;padding:12px 16px;background:white;border-radius:12px;
+                border-left:4px solid #A89680;box-shadow:0 2px 8px rgba(0,0,0,0.05)">
+                <span style="font-weight:600">Stale Blind</span>
+                <span class="badge" style="background:#A8968020;color:#A89680;margin-left:8px">
+                    1
+                </span>
+                <span style="color:var(--text-secondary);font-size:13px;margin-left:8px">Has URL, no description, >7 days</span>
+            </summary>
+            <div style="padding:8px 0 0">
+                <table class="data-table">
+                    <thead><tr>
+                        <th style="width:25%">Organization</th>
+                        <th style="width:45%">Position</th>
+                        <th style="width:30%">Location</th>
+                    </tr></thead>
+                    <tbody><tr>
+                <td style="font-weight:500">Zeta Group</td>
+                <td>Stale Blind Role</td>
+                <td style="color:var(--text-secondary);font-size:13px">Berlin, Germany</td>
+            </tr>
+</tbody>
+                </table>
+            </div>
+        </details>
+    </div>
+
+    <!-- Re-enrich section -->
+    <div class="section">
+        <div class="section-label">Re-enrich Candidates</div>
+        <h2>3 vacancies need content</h2>
+        <p style="color:var(--text-secondary);margin-bottom:16px">
+            Estimated Firecrawl credits: ~15
+            (2 blind + 1 thin)
+        </p>
+        <div class="card" style="overflow-x:auto">
+            <table class="data-table">
+                <thead><tr>
+                    <th>Organization</th>
+                    <th>Position</th>
+                    <th>URL</th>
+                    <th>Type</th>
+                </tr></thead>
+                <tbody><tr>
+            <td style="font-weight:500">Theta Co</td>
+            <td>Blind Role Two</td>
+            <td><a href="https://theta.test/2" style="color:var(--accent-deep);text-decoration:none;font-size:13px"
+                   target="_blank">https://theta.test/2</a></td>
+            <td><span class="badge" style="background:#E8915A20;color:#E8915A">blind</span></td>
+        </tr>
+<tr>
+            <td style="font-weight:500">Eta Labs</td>
+            <td>Blind Role One</td>
+            <td><a href="https://eta.test/1" style="color:var(--accent-deep);text-decoration:none;font-size:13px"
+                   target="_blank">https://eta.test/1</a></td>
+            <td><span class="badge" style="background:#E8915A20;color:#E8915A">blind</span></td>
+        </tr>
+<tr>
+            <td style="font-weight:500">Iota Inc</td>
+            <td>Thin Role</td>
+            <td><a href="https://iota.test/3" style="color:var(--accent-deep);text-decoration:none;font-size:13px"
+                   target="_blank">https://iota.test/3</a></td>
+            <td><span class="badge" style="background:#D9770620;color:#D97706">thin</span></td>
+        </tr>
+</tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Per-org table -->
+    <div class="section">
+        <div class="section-label">Per Organization</div>
+        <h2>Summary by company</h2>
+        <div class="card" style="overflow-x:auto">
+            <table class="data-table">
+                <thead><tr>
+                    <th>Organization</th>
+                    <th>Tier</th>
+                    <th>Total</th>
+                    <th>Ready</th>
+                    <th>Delete</th>
+                    <th>Re-enrich</th>
+                    <th>Del %</th>
+                </tr></thead>
+                <tbody><tr style="background:#FFF0E0">
+            <td style="font-weight:500">Acme Foundation</td>
+            <td>C</td>
+            <td>1</td>
+            <td style="color:#059669">0</td>
+            <td style="color:#D4787A">1</td>
+            <td style="color:#E8915A">0</td>
+            <td>100%</td>
+        </tr>
+<tr style="background:#FFF0E0">
+            <td style="font-weight:500">Beta Institute</td>
+            <td>C</td>
+            <td>1</td>
+            <td style="color:#059669">0</td>
+            <td style="color:#D4787A">1</td>
+            <td style="color:#E8915A">0</td>
+            <td>100%</td>
+        </tr>
+<tr style="background:#FFF0E0">
+            <td style="font-weight:500">Delta Fund</td>
+            <td>C</td>
+            <td>1</td>
+            <td style="color:#059669">0</td>
+            <td style="color:#D4787A">1</td>
+            <td style="color:#E8915A">0</td>
+            <td>100%</td>
+        </tr>
+<tr style="background:#FFF0E0">
+            <td style="font-weight:500">Epsilon Org</td>
+            <td>C</td>
+            <td>1</td>
+            <td style="color:#059669">0</td>
+            <td style="color:#D4787A">1</td>
+            <td style="color:#E8915A">0</td>
+            <td>100%</td>
+        </tr>
+<tr style="background:#FFF0E0">
+            <td style="font-weight:500">Gamma Trust</td>
+            <td>C</td>
+            <td>1</td>
+            <td style="color:#059669">0</td>
+            <td style="color:#D4787A">1</td>
+            <td style="color:#E8915A">0</td>
+            <td>100%</td>
+        </tr>
+<tr style="background:#FFF0E0">
+            <td style="font-weight:500">Zeta Group</td>
+            <td>C</td>
+            <td>1</td>
+            <td style="color:#059669">0</td>
+            <td style="color:#D4787A">1</td>
+            <td style="color:#E8915A">0</td>
+            <td>100%</td>
+        </tr>
+<tr>
+            <td style="font-weight:500">Eta Labs</td>
+            <td>A</td>
+            <td>1</td>
+            <td style="color:#059669">0</td>
+            <td style="color:#D4787A">0</td>
+            <td style="color:#E8915A">1</td>
+            <td>0%</td>
+        </tr>
+<tr>
+            <td style="font-weight:500">Iota Inc</td>
+            <td>B</td>
+            <td>1</td>
+            <td style="color:#059669">0</td>
+            <td style="color:#D4787A">0</td>
+            <td style="color:#E8915A">1</td>
+            <td>0%</td>
+        </tr>
+<tr>
+            <td style="font-weight:500">Kappa Org</td>
+            <td>B</td>
+            <td>2</td>
+            <td style="color:#059669">2</td>
+            <td style="color:#D4787A">0</td>
+            <td style="color:#E8915A">0</td>
+            <td>0%</td>
+        </tr>
+<tr>
+            <td style="font-weight:500">Lambda Org</td>
+            <td>A</td>
+            <td>1</td>
+            <td style="color:#059669">1</td>
+            <td style="color:#D4787A">0</td>
+            <td style="color:#E8915A">0</td>
+            <td>0%</td>
+        </tr>
+<tr>
+            <td style="font-weight:500">Theta Co</td>
+            <td>S</td>
+            <td>1</td>
+            <td style="color:#059669">0</td>
+            <td style="color:#D4787A">0</td>
+            <td style="color:#E8915A">1</td>
+            <td>0%</td>
+        </tr>
+</tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Recommendations -->
+    <div class="section">
+        <div class="section-label">Next Steps</div>
+        <h2>Recommendations</h2>
+        <div class="reco">
+            <h3>Suggested pipeline</h3>
+            <ul>
+                <li><strong>Delete</strong> 6 irrelevant vacancies to clean the DB</li>
+                <li><strong>Re-enrich</strong> 3 vacancies via Firecrawl (~15 credits)</li>
+                <li><strong>Score</strong> 3 ready vacancies with <code>/score</code></li>
+                <li>Run <strong><code>--suggest-blacklist</code></strong> after deletion to improve future filtering</li>
+            </ul>
+        </div>
+    </div>
+</div>
+</body>
+</html>

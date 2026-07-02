@@ -8,11 +8,14 @@ Usage:
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# Import-cheap (stdlib only, no DB/profile side effects), so it stays above the
+# --help guard with the other early imports.
+from llm_json import FLAT_SCORE_OBJECT, parse_llm_json  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -94,24 +97,12 @@ sys.stdout = _real_stdout
 
 
 def _parse_json(text: str) -> dict:
-    """Parse JSON from LLM response, handling fences, preamble."""
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    fence = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
-    if fence:
-        try:
-            return json.loads(fence.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-    brace = re.search(r'\{[^{}]*"score"\s*:\s*\d+[^{}]*\}', text, re.DOTALL)
-    if brace:
-        try:
-            return json.loads(brace.group(0))
-        except json.JSONDecodeError:
-            pass
-    return {"error": "JSON parse failed", "raw": text[:500]}
+    """Parse JSON from an LLM response, handling fences and preamble.
+
+    Thin adapter over the shared ``llm_json.parse_llm_json`` with the vacancy
+    brace fallback (a flat ``{"score": N}`` object).
+    """
+    return parse_llm_json(text, FLAT_SCORE_OBJECT)
 
 
 def _sanitize_text(text: str) -> str:

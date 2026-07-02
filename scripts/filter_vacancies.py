@@ -645,7 +645,11 @@ def _truncate(text: str, maxlen: int = 60) -> str:
 
 
 def generate_html_report(categories: dict, stats: dict, output_path: Path) -> Path:
-    """Generate REPORT-filter.html with analysis results."""
+    """Render the filter report HTML and write it to output_path.
+
+    Orchestration only: turn each section's data into an HTML fragment via the
+    _render_* builders, then hand the fragments to the page-shell template.
+    """
     total = stats["total"]
     delete_count = stats["delete_count"]
     reenrich_count = stats["reenrich_count"]
@@ -656,7 +660,32 @@ def generate_html_report(categories: dict, stats: dict, output_path: Path) -> Pa
     reen_pct = (reenrich_count / total * 100) if total else 0
     ready_pct = (ready_count / total * 100) if total else 0
 
-    # Build delete sections
+    html = _render_report_page(
+        categories=categories,
+        total=total,
+        ready_count=ready_count,
+        delete_count=delete_count,
+        reenrich_count=reenrich_count,
+        del_pct=del_pct,
+        reen_pct=reen_pct,
+        ready_pct=ready_pct,
+        firecrawl_credits=len(categories["reenrich_blind"]) * 5
+        + len(categories["reenrich_thin"]) * 5,
+        delete_sections_html=_render_delete_sections(categories),
+        reenrich_rows=_render_reenrich_rows(categories),
+        tier_rows=_render_tier_rows(stats),
+        region_rows=_render_region_rows(stats),
+        ready_org_rows=_render_ready_org_rows(stats),
+        org_summary_rows=_render_org_summary_rows(stats),
+    )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(html, encoding="utf-8")
+    return output_path
+
+
+def _render_delete_sections(categories: dict) -> str:
+    """One collapsible <details> block per non-empty delete category."""
     delete_sections_html = ""
 
     delete_cats = [
@@ -712,8 +741,11 @@ def generate_html_report(categories: dict, stats: dict, output_path: Path) -> Pa
                 </table>
             </div>
         </details>"""
+    return delete_sections_html
 
-    # Build reenrich section
+
+def _render_reenrich_rows(categories: dict) -> str:
+    """Table rows for the re-enrich (blind + thin) candidates, tier-sorted."""
     reenrich_rows = ""
     all_reenrich = categories["reenrich_blind"] + categories["reenrich_thin"]
     for vid, vac in sorted(
@@ -732,8 +764,11 @@ def generate_html_report(categories: dict, stats: dict, output_path: Path) -> Pa
                    target="_blank">{url_short}</a></td>
             <td><span class="badge" style="background:{badge_color}20;color:{badge_color}">{kind}</span></td>
         </tr>\n"""
+    return reenrich_rows
 
-    # Ready breakdown by tier
+
+def _render_tier_rows(stats: dict) -> str:
+    """Ready-to-score breakdown by company tier."""
     tier_rows = ""
     for tier, count in sorted(stats["ready_by_tier"].items()):
         tier_label = {
@@ -743,19 +778,28 @@ def generate_html_report(categories: dict, stats: dict, output_path: Path) -> Pa
             "C": "C — Low Priority",
         }.get(str(tier), f"Tier {tier}")
         tier_rows += f"<tr><td>{tier_label}</td><td style='font-weight:600'>{count}</td></tr>\n"
+    return tier_rows
 
-    # Ready breakdown by region
+
+def _render_region_rows(stats: dict) -> str:
+    """Ready-to-score breakdown by region."""
     region_rows = ""
     region_labels = {"europe": "Europe", "remote": "Remote", "us": "US", "other": "Other"}
     for region, count in stats["ready_by_region"].items():
         region_rows += f"<tr><td>{region_labels.get(region, region)}</td><td style='font-weight:600'>{count}</td></tr>\n"
+    return region_rows
 
-    # Top ready orgs
+
+def _render_ready_org_rows(stats: dict) -> str:
+    """Top ready-to-score organizations."""
     ready_org_rows = ""
     for org, count in stats["ready_by_org"].items():
         ready_org_rows += f"<tr><td>{_esc(org)}</td><td style='font-weight:600'>{count}</td></tr>\n"
+    return ready_org_rows
 
-    # Per-org summary table
+
+def _render_org_summary_rows(stats: dict) -> str:
+    """Per-organization summary rows (heavy-delete orgs get a warm background)."""
     org_summary_rows = ""
     for org, data in stats["org_stats"].items():
         del_pct_org = (data["delete"] / data["total"] * 100) if data["total"] else 0
@@ -769,10 +813,29 @@ def generate_html_report(categories: dict, stats: dict, output_path: Path) -> Pa
             <td style="color:#E8915A">{data["reenrich"]}</td>
             <td>{del_pct_org:.0f}%</td>
         </tr>\n"""
+    return org_summary_rows
 
-    firecrawl_credits = len(categories["reenrich_blind"]) * 5 + len(categories["reenrich_thin"]) * 5
 
-    html = f"""<!DOCTYPE html>
+def _render_report_page(
+    *,
+    categories: dict,
+    total: int,
+    ready_count: int,
+    delete_count: int,
+    reenrich_count: int,
+    del_pct: float,
+    reen_pct: float,
+    ready_pct: float,
+    firecrawl_credits: int,
+    delete_sections_html: str,
+    reenrich_rows: str,
+    tier_rows: str,
+    region_rows: str,
+    ready_org_rows: str,
+    org_summary_rows: str,
+) -> str:
+    """The page shell: CSS + layout that stitches the section fragments together."""
+    return f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
@@ -1018,10 +1081,6 @@ body::after {{
 </div>
 </body>
 </html>"""
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(html, encoding="utf-8")
-    return output_path
 
 
 # ---------------------------------------------------------------------------
@@ -1313,7 +1372,7 @@ def main():
     print(f"  Ready to score: {stats['ready_count']}", file=sys.stderr, flush=True)
     print("--- End Filter Summary ---\n", file=sys.stderr, flush=True)
 
-    report_path = Path("REPORT-filter.html")
+    report_path = PROJECT_ROOT / "reports" / "REPORT-filter.html"
     generate_html_report(categories, stats, report_path)
 
     # Collect all delete IDs by category

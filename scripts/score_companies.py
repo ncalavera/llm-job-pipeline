@@ -17,6 +17,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# Import-cheap (stdlib only, no DB/profile side effects), so it stays above the
+# --help guard with the other early imports.
+from llm_json import parse_llm_json  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -98,25 +102,12 @@ _STRATEGY_SECTIONS = [
 
 
 def _parse_json(text: str) -> dict:
-    """Parse JSON from LLM response, handling fences, nested objects."""
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    fence = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
-    if fence:
-        try:
-            return json.loads(fence.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-    # Greedy match for outermost braces (company responses have nested objects)
-    brace = re.search(r"\{.*\}", text, re.DOTALL)
-    if brace:
-        try:
-            return json.loads(brace.group(0))
-        except json.JSONDecodeError:
-            pass
-    return {"error": "JSON parse failed", "raw": text[:500]}
+    """Parse JSON from an LLM response, handling fences and nested objects.
+
+    Thin adapter over the shared ``llm_json.parse_llm_json`` with the default
+    outermost-braces fallback (company responses have nested objects).
+    """
+    return parse_llm_json(text)
 
 
 def _clean_placeholders(about: dict) -> dict:
