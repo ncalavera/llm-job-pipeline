@@ -30,18 +30,20 @@ import pytest
 # Fixtures — isolated temp SQLite DB + clean module chain
 # ---------------------------------------------------------------------------
 
+
 def _force_sqlite(monkeypatch, db_file):
     """Point the whole chain at a fresh temp SQLite file and reload it."""
     monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
     monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
-    for mod in ("database_supabase", "config", "company_registry",
-                "db_conn", "db_backend"):
+    for mod in ("database_supabase", "config", "company_registry", "db_conn", "db_backend"):
         sys.modules.pop(mod, None)
     import db_backend
+
     importlib.reload(db_backend)
     assert db_backend.IS_SQLITE, "e2e must run on the SQLite backend"
     import database_supabase as db
+
     return db
 
 
@@ -56,7 +58,8 @@ def dal(tmp_path, monkeypatch):
 def _stub_report(monkeypatch):
     """Replace the dashboard module so --save doesn't write files."""
     monkeypatch.setitem(
-        sys.modules, "report",
+        sys.modules,
+        "report",
         types.SimpleNamespace(generate_dashboard=lambda *a, **k: None),
     )
 
@@ -65,17 +68,16 @@ def _stub_report(monkeypatch):
 # Fake board / ATS responses (made-up data, no real orgs)
 # ---------------------------------------------------------------------------
 
+
 def _job(title, *, city="Berlin, Germany", desc=None, url=None):
     """Build one fetcher-shaped job dict (what fetchers.py hands the DAL)."""
     return {
         "title": title,
         "snippet": f"{title} — short blurb.",
-        "full_description": desc or (
-            f"We are hiring a {title}. " * 12 + "Own the work end to end."
-        ),
+        "full_description": desc
+        or (f"We are hiring a {title}. " * 12 + "Own the work end to end."),
         "location": city,
-        "url": url or ("https://example.test/job/"
-                       + title.lower().replace(" ", "-")),
+        "url": url or ("https://example.test/job/" + title.lower().replace(" ", "-")),
     }
 
 
@@ -94,6 +96,7 @@ ACME_DAY1 = [
 # Scoring contract helpers — drive cmd_local / cmd_save in-process
 # ---------------------------------------------------------------------------
 
+
 def _run_local(monkeypatch, *, limit=None):
     """Invoke score_vacancies.cmd_local and capture the JSON it emits.
 
@@ -101,12 +104,16 @@ def _run_local(monkeypatch, *, limit=None):
     carries pure JSON of the unscored vacancies for the (here faked) scorer.
     """
     import score_vacancies
+
     importlib.reload(score_vacancies)
     buf = io.StringIO()
     monkeypatch.setattr(sys, "stdout", buf)
     args = types.SimpleNamespace(
-        force=False, include_passed=False, no_candidates=False,
-        limit=limit, offset=0,
+        force=False,
+        include_passed=False,
+        no_candidates=False,
+        limit=limit,
+        offset=0,
     )
     try:
         score_vacancies.cmd_local(args)
@@ -124,22 +131,25 @@ def _fake_scores(payload, scorer):
     out = []
     for item in payload:
         score, summary = scorer(item["org"], item["title"])
-        out.append({
-            "payload_kind": "vacancy",
-            "member_ids": item["member_ids"],
-            "org": item["org"],
-            "title": item["title"],
-            "score": score,
-            "reasoning": f"Deterministic test score for {item['title']}.",
-            "short_summary": summary,
-            "hard_requirements": ["test requirement"],
-            "tags": ["test"],
-        })
+        out.append(
+            {
+                "payload_kind": "vacancy",
+                "member_ids": item["member_ids"],
+                "org": item["org"],
+                "title": item["title"],
+                "score": score,
+                "reasoning": f"Deterministic test score for {item['title']}.",
+                "short_summary": summary,
+                "hard_requirements": ["test requirement"],
+                "tags": ["test"],
+            }
+        )
     return out
 
 
 def _run_save(monkeypatch, save_payload, *, archive=False):
     import score_vacancies
+
     importlib.reload(score_vacancies)
     _stub_report(monkeypatch)
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(save_payload)))
@@ -149,16 +159,18 @@ def _run_save(monkeypatch, save_payload, *, archive=False):
 
 # A summary long enough to clear cmd_save's 200-char short-summary warning.
 def _summary(title):
-    return (f"This role, {title}, is a deterministic test fixture. " * 6)
+    return f"This role, {title}, is a deterministic test fixture. " * 6
 
 
 # ===========================================================================
 # DAY 1
 # ===========================================================================
 
+
 def test_day1_backend_select_and_schema(dal):
     """1. SQLite backend selected, DB auto-created, schema present."""
     import db_backend
+
     assert db_backend.IS_SQLITE
     cur = dal.get_conn().cursor()
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
@@ -190,6 +202,7 @@ def test_day1_filter_drops_junk_keeps_real_with_empty_profile(dal):
     classifies all 3 as 'ready' (nothing personal drops out of the box).
     """
     import filter_vacancies
+
     importlib.reload(filter_vacancies)
 
     dal.ensure_company("Acme Foundation", status="active")
@@ -198,13 +211,11 @@ def test_day1_filter_drops_junk_keeps_real_with_empty_profile(dal):
 
     # Junk is gone before classification.
     titles = {v["title"] for v in dal.load_vacancies().values()}
-    assert titles == {"Volunteer Coordinator", "Software Engineer",
-                      "Research Fellowship"}
+    assert titles == {"Volunteer Coordinator", "Software Engineer", "Research Fellowship"}
 
     cats = filter_vacancies.classify_vacancies()
     ready_titles = {v["title"] for _, v in cats["ready"]}
-    assert ready_titles == {"Volunteer Coordinator", "Software Engineer",
-                            "Research Fellowship"}
+    assert ready_titles == {"Volunteer Coordinator", "Software Engineer", "Research Fellowship"}
     assert cats["delete_blacklist"] == []
     assert cats["delete_geo"] == []
 
@@ -234,8 +245,7 @@ def test_day1_score_contract_and_save(dal, monkeypatch):
         assert set(item["member_ids"]) <= db_ids
 
     def scorer(org, title):
-        return (70 if title == "Volunteer Coordinator" else 45,
-                _summary(title))
+        return (70 if title == "Volunteer Coordinator" else 45, _summary(title))
 
     save_payload = _fake_scores(payload, scorer)
     _run_save(monkeypatch, save_payload)
@@ -251,25 +261,32 @@ def test_day1_score_contract_and_save(dal, monkeypatch):
 def test_day1_save_auto_archive_below_threshold(dal, monkeypatch):
     """4b. With --archive, unseen vacancies below threshold are archived."""
     dal.ensure_company("Acme Foundation", status="active")
-    dal.save_vacancies("Acme Foundation", "A", [
-        _job("Keeper Role"), _job("Throwaway Role", city="London, United Kingdom"),
-    ])
+    dal.save_vacancies(
+        "Acme Foundation",
+        "A",
+        [
+            _job("Keeper Role"),
+            _job("Throwaway Role", city="London, United Kingdom"),
+        ],
+    )
     dal.get_conn().commit()
 
     payload = _run_local(monkeypatch)
 
     threshold = dal.LLM_SCORE_THRESHOLD if hasattr(dal, "LLM_SCORE_THRESHOLD") else 20
     import config
+
     threshold = config.LLM_SCORE_THRESHOLD
 
     def scorer(org, title):
-        return (80 if title == "Keeper Role" else max(threshold - 5, 0),
-                _summary(title))
+        return (80 if title == "Keeper Role" else max(threshold - 5, 0), _summary(title))
 
     _run_save(monkeypatch, _fake_scores(payload, scorer), archive=True)
 
-    statuses = {v["title"]: v.get("status")
-                for v in dal.load_vacancies(include_inactive_companies=True).values()}
+    statuses = {
+        v["title"]: v.get("status")
+        for v in dal.load_vacancies(include_inactive_companies=True).values()
+    }
     # Low-scoring unseen role archived (force=True path); keeper stays.
     assert statuses.get("Keeper Role") == "unseen"
     assert "Throwaway Role" not in {t for t, s in statuses.items() if s != "archived"}
@@ -278,6 +295,7 @@ def test_day1_save_auto_archive_below_threshold(dal, monkeypatch):
 def test_day1_report_builds_with_and_without_data(dal, monkeypatch):
     """5. data_prep builds the dashboard data from the DB, and on an EMPTY DB."""
     import report.data_prep as data_prep
+
     importlib.reload(data_prep)
 
     # Empty DB: must not crash and must yield zero groups.
@@ -295,8 +313,7 @@ def test_day1_report_builds_with_and_without_data(dal, monkeypatch):
     data = data_prep.prepare_report_data()
     assert data["stats"]["total_roles"] == 3
     report_titles = {g["title"] for g in data["groups"]}
-    assert report_titles == {"Volunteer Coordinator", "Software Engineer",
-                             "Research Fellowship"}
+    assert report_titles == {"Volunteer Coordinator", "Software Engineer", "Research Fellowship"}
 
 
 def test_day1_like_dislike_persist(dal):
@@ -316,6 +333,7 @@ def test_day1_like_dislike_persist(dal):
 def test_day1_triage_load_liked_and_persist_decision(dal):
     """7. triage.get_liked_vacancies + group_by_company, then a to_apply sticks."""
     import triage
+
     importlib.reload(triage)
 
     dal.ensure_company("Acme Foundation", status="active")
@@ -344,6 +362,7 @@ def test_day1_triage_load_liked_and_persist_decision(dal):
 # DAY 2 — repeat behaviour on a NEW connection (proves persistence)
 # ===========================================================================
 
+
 @pytest.fixture()
 def day2(tmp_path, monkeypatch):
     """Seed a DB on day 1, close it, then hand back a builder that reopens the
@@ -366,17 +385,19 @@ def day2(tmp_path, monkeypatch):
     # DAL here rather than the cmd_local/cmd_save seam — that seam is exercised
     # in the day-1 tests; here we only need the rows marked scored.)
     for vid in ids:
-        db.update_llm_score(vid, {
-            "llm_score": 55,
-            "llm_reasoning": "seed",
-            "llm_summary": "seed summary " * 20,
-            "llm_hard_requirements": [],
-        })
+        db.update_llm_score(
+            vid,
+            {
+                "llm_score": 55,
+                "llm_reasoning": "seed",
+                "llm_summary": "seed summary " * 20,
+                "llm_hard_requirements": [],
+            },
+        )
     db.get_conn().commit()
     db.close_conn()
 
-    state = {"db_file": db_file, "liked_id": liked_id,
-             "title_to_id": dict(title_to_id)}
+    state = {"db_file": db_file, "liked_id": liked_id, "title_to_id": dict(title_to_id)}
 
     def reopen():
         return _force_sqlite(monkeypatch, db_file)
@@ -396,9 +417,9 @@ def test_day2_refetch_dedup_new_and_gone(day2, monkeypatch):
     # Day-2 listing OMITS "Research Fellowship", REPEATS the others, adds a NEW
     # "Programme Lead".
     day2_listing = [
-        _job("Volunteer Coordinator"),                      # repeat → dedup
+        _job("Volunteer Coordinator"),  # repeat → dedup
         _job("Software Engineer", city="London, United Kingdom"),  # repeat
-        _job("Programme Lead"),                             # new → insert
+        _job("Programme Lead"),  # new → insert
     ]
     new = db.save_vacancies("Acme Foundation", "A", day2_listing)
     db.get_conn().commit()
@@ -409,12 +430,12 @@ def test_day2_refetch_dedup_new_and_gone(day2, monkeypatch):
     db.get_conn().commit()
     assert archived == 1
 
-    live = {v["title"]: v["status"]
-            for v in db.load_vacancies(include_inactive_companies=True).values()}
+    live = {
+        v["title"]: v["status"] for v in db.load_vacancies(include_inactive_companies=True).values()
+    }
     assert live.get("Research Fellowship") == "archived"
     live_titles = {t for t, s in live.items() if s != "archived"}
-    assert live_titles == {"Volunteer Coordinator", "Software Engineer",
-                           "Programme Lead"}
+    assert live_titles == {"Volunteer Coordinator", "Software Engineer", "Programme Lead"}
 
     # Re-score only the unscored/new role.
     payload = _run_local(monkeypatch)
@@ -442,12 +463,20 @@ def test_day2_status_decision_persist_across_reconnect(day2):
 # DAY 2 — profile change re-runs the filter under a temp HARD_FILTERS profile
 # ===========================================================================
 
-_RELOAD_CHAIN = ("settings", "geo", "prompts", "hard_filters", "config",
-                 "database_supabase", "filter_vacancies")
+_RELOAD_CHAIN = (
+    "settings",
+    "geo",
+    "prompts",
+    "hard_filters",
+    "config",
+    "database_supabase",
+    "filter_vacancies",
+)
 
 
 def _reload_filter_chain():
     import settings
+
     settings.clear_cache()
     for mod in _RELOAD_CHAIN:
         if mod in sys.modules:
@@ -455,14 +484,13 @@ def _reload_filter_chain():
         else:
             importlib.import_module(mod)
     import filter_vacancies
+
     return filter_vacancies
 
 
 def _write_profile(path, *, countries="(none)", keywords="(none)"):
     path.write_text(
-        "## HARD_FILTERS\n\n"
-        f"exclude_countries: {countries}\n"
-        f"exclude_title_keywords: {keywords}\n",
+        f"## HARD_FILTERS\n\nexclude_countries: {countries}\nexclude_title_keywords: {keywords}\n",
         encoding="utf-8",
     )
 
@@ -478,11 +506,11 @@ def restore_chain():
     so geo.py / config.py rebind to the real defaults.toml.
     """
     import os
+
     saved_profile = os.environ.get("USER_PROFILE_PATH")
     saved_toml = os.environ.get("DEFAULTS_TOML_PATH")
     yield
-    for var, saved in (("USER_PROFILE_PATH", saved_profile),
-                       ("DEFAULTS_TOML_PATH", saved_toml)):
+    for var, saved in (("USER_PROFILE_PATH", saved_profile), ("DEFAULTS_TOML_PATH", saved_toml)):
         if saved is None:
             os.environ.pop(var, None)
         else:
@@ -494,15 +522,13 @@ def restore_chain():
     importlib.reload(sys.modules["filter_vacancies"])
 
 
-def test_day2_profile_change_drops_then_restores(dal, tmp_path, monkeypatch,
-                                                 restore_chain):
+def test_day2_profile_change_drops_then_restores(dal, tmp_path, monkeypatch, restore_chain):
     """9. exclude_countries + exclude_title_keywords drop matching rows; an
     empty profile drops nothing.
 
     Uses a fictional geo map so the test is place-agnostic: 'Country A' is the
     excluded country, the keyword 'engineer' is the excluded title word.
     """
-    import os
 
     # Fictional geo map: pin our fake country/city to a neutral bucket. Carry
     # the universal-junk words too — pointing DEFAULTS_TOML_PATH at a temp file
@@ -511,13 +537,13 @@ def test_day2_profile_change_drops_then_restores(dal, tmp_path, monkeypatch,
     geo_toml = tmp_path / "defaults.toml"
     geo_toml.write_text(
         "[junk]\n"
-        "words = [\"talent pool\", \"expression of interest\", "
-        "\"general application\"]\n"
+        'words = ["talent pool", "expression of interest", '
+        '"general application"]\n'
         "substr = []\n"
         "desc_substr = []\n\n"
-        "[geo.countries]\nother = [\"country a\"]\n\n"
-        "[geo.cities]\nother = [\"city a\"]\n\n"
-        "[geo.work_mode]\nremote = [\"remote\"]\nhybrid = [\"hybrid\"]\n",
+        '[geo.countries]\nother = ["country a"]\n\n'
+        '[geo.cities]\nother = ["city a"]\n\n'
+        '[geo.work_mode]\nremote = ["remote"]\nhybrid = ["hybrid"]\n',
         encoding="utf-8",
     )
     profile = tmp_path / "user_profile.md"
@@ -525,8 +551,9 @@ def test_day2_profile_change_drops_then_restores(dal, tmp_path, monkeypatch,
     monkeypatch.setenv("USER_PROFILE_PATH", str(profile))
 
     country_a_vac = {"locations": [{"country": "Country A", "city": "City A"}]}
-    germany_vac = {"locations": [{"country": "Country A", "city": "City A"},
-                                 {"work_mode": "remote"}]}  # has a kept location
+    germany_vac = {
+        "locations": [{"country": "Country A", "city": "City A"}, {"work_mode": "remote"}]
+    }  # has a kept location
     eng_title = "Senior Software Engineer"
     other_title = "Head of Operations"
 
@@ -534,12 +561,14 @@ def test_day2_profile_change_drops_then_restores(dal, tmp_path, monkeypatch,
     _write_profile(profile, countries="country a", keywords="engineer")
     fv = _reload_filter_chain()
     import config
+
     assert config.EXCLUDE_COUNTRIES == ["country a"]
     assert "engineer" in config.EXCLUDE_TITLE_KEYWORDS
 
     # filters was reloaded in place by the chain reload above; this reference
     # reflects the current (WITH-filters) profile.
     import filters
+
     # A vacancy located ONLY in Country A drops on geography.
     assert fv._all_locations_excluded(country_a_vac) is True
     assert fv._geo_delete_category(country_a_vac) == "delete_geo"
@@ -555,13 +584,16 @@ def test_day2_profile_change_drops_then_restores(dal, tmp_path, monkeypatch,
     _write_profile(profile, countries="(none)", keywords="(none)")
     fv = _reload_filter_chain()
     import config as config2
+
     importlib.reload(config2)
     assert config2.EXCLUDE_COUNTRIES == []
     assert config2.EXCLUDE_TITLE_KEYWORDS == []
 
     import database_supabase as db_mod2
+
     importlib.reload(db_mod2)  # reloads filters in place under the empty profile
     import filters as filters2
+
     assert fv._all_locations_excluded(country_a_vac) is False
     assert fv._geo_delete_category(country_a_vac) is None
     assert filters2.title_words_blacklisted(eng_title) is False

@@ -184,6 +184,7 @@ def _rotate_backups(prefix: str):
 # psycopg2->sqlite translation layer used elsewhere.
 # --------------------------------------------------------------------------
 
+
 class _Sqlite:
     def __init__(self):
         self.path = sqlite_db_path()
@@ -203,9 +204,12 @@ class _Sqlite:
         self.adopted_existing = db_existed and not ledger_existed
 
     def _has_table(self, name: str) -> bool:
-        return self.conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)
-        ).fetchone() is not None
+        return (
+            self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)
+            ).fetchone()
+            is not None
+        )
 
     def _ensure_baseline(self, db_existed: bool):
         if not db_existed:
@@ -303,13 +307,18 @@ class _Postgres:
             with open(dest, "w", encoding="utf-8") as fh:
                 subprocess.run(
                     ["pg_dump", "--no-owner", "--no-privileges", self.url],
-                    stdout=fh, check=True, timeout=300,
+                    stdout=fh,
+                    check=True,
+                    timeout=300,
                 )
             _rotate_backups("supabase")
             return dest
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-            print(f"  ! pg_dump failed ({e}); continuing — per-migration "
-                  f"transactions still protect you.", file=sys.stderr)
+            print(
+                f"  ! pg_dump failed ({e}); continuing — per-migration "
+                f"transactions still protect you.",
+                file=sys.stderr,
+            )
             dest.unlink(missing_ok=True)
             return None
 
@@ -347,6 +356,7 @@ def _open():
 # --------------------------------------------------------------------------
 # Commands
 # --------------------------------------------------------------------------
+
 
 def cmd_status() -> int:
     db = _open()
@@ -424,13 +434,17 @@ def cmd_migrate(allow_destructive: bool, do_backup: bool) -> int:
 
         # Read each pending migration once; reuse for the destructive scan AND
         # the apply loop (no double I/O).
-        loaded = [(v, lbl, p, (p.read_text(encoding="utf-8") if p else None))
-                  for (v, lbl, p) in pending]
+        loaded = [
+            (v, lbl, p, (p.read_text(encoding="utf-8") if p else None)) for (v, lbl, p) in pending
+        ]
 
         # Safety gate: refuse destructive migrations unless explicitly allowed.
         destructive = _scan_destructive(loaded)
         if destructive and not allow_destructive:
-            print("ABORTED — these pending migrations contain destructive statements:", file=sys.stderr)
+            print(
+                "ABORTED — these pending migrations contain destructive statements:",
+                file=sys.stderr,
+            )
             for d in destructive:
                 print(f"    {d}", file=sys.stderr)
             print(
@@ -465,13 +479,21 @@ def cmd_migrate(allow_destructive: bool, do_backup: bool) -> int:
             print(f"  restoring database from {backup_path.name} ...", file=sys.stderr)
             db.restore(backup_path)
             if db.integrity_ok():
-                print("  restore OK — database is back to its pre-migration state.", file=sys.stderr)
+                print(
+                    "  restore OK — database is back to its pre-migration state.", file=sys.stderr
+                )
             else:
-                print(f"  ! integrity check failed after restore. Your backup is "
-                      f"safe at {backup_path}", file=sys.stderr)
+                print(
+                    f"  ! integrity check failed after restore. Your backup is "
+                    f"safe at {backup_path}",
+                    file=sys.stderr,
+                )
         elif not IS_SQLITE:
-            print("  the failed migration was rolled back (transactional). Earlier "
-                  "migrations, if any, stayed applied.", file=sys.stderr)
+            print(
+                "  the failed migration was rolled back (transactional). Earlier "
+                "migrations, if any, stayed applied.",
+                file=sys.stderr,
+            )
             if backup_path:
                 print(f"  full snapshot for disaster recovery: {backup_path}", file=sys.stderr)
         return 1
@@ -482,13 +504,20 @@ def cmd_migrate(allow_destructive: bool, do_backup: bool) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Apply pending schema migrations safely.")
     ap.add_argument("--status", action="store_true", help="show state, run nothing")
-    ap.add_argument("--baseline", action="store_true",
-                    help="mark all pending migrations as applied WITHOUT running "
-                         "them (adopt an already-current database)")
-    ap.add_argument("--allow-destructive", action="store_true",
-                    help="permit migrations containing DROP/DELETE/TRUNCATE/etc.")
-    ap.add_argument("--no-backup", action="store_true",
-                    help="skip the pre-migration safety backup (CI only)")
+    ap.add_argument(
+        "--baseline",
+        action="store_true",
+        help="mark all pending migrations as applied WITHOUT running "
+        "them (adopt an already-current database)",
+    )
+    ap.add_argument(
+        "--allow-destructive",
+        action="store_true",
+        help="permit migrations containing DROP/DELETE/TRUNCATE/etc.",
+    )
+    ap.add_argument(
+        "--no-backup", action="store_true", help="skip the pre-migration safety backup (CI only)"
+    )
     args = ap.parse_args()
     if args.status:
         return cmd_status()

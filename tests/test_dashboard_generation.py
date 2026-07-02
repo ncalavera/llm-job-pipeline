@@ -38,10 +38,17 @@ def _force_sqlite(monkeypatch, db_file: Path):
     monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
     monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
-    for mod in ("database_supabase", "config", "company_registry",
-                "db_conn", "db_backend", "report"):
+    for mod in (
+        "database_supabase",
+        "config",
+        "company_registry",
+        "db_conn",
+        "db_backend",
+        "report",
+    ):
         sys.modules.pop(mod, None)
     import db_backend
+
     importlib.reload(db_backend)
     assert db_backend.IS_SQLITE, "generator test must run on the SQLite backend"
 
@@ -49,6 +56,7 @@ def _force_sqlite(monkeypatch, db_file: Path):
 # ---------------------------------------------------------------------------
 # 1. generate_dashboard() does not touch the tracked index.html
 # ---------------------------------------------------------------------------
+
 
 def test_generate_dashboard_leaves_index_html_untouched(tmp_path, monkeypatch):
     assert INDEX_HTML.exists(), "tracked public/index.html must exist"
@@ -77,6 +85,7 @@ def test_generate_dashboard_leaves_index_html_untouched(tmp_path, monkeypatch):
 # 2. dashboard style resolver
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def resolver(monkeypatch):
     """Import report with a clean SQLite chain and a cleared settings cache."""
@@ -85,8 +94,10 @@ def resolver(monkeypatch):
     for mod in ("report", "settings"):
         sys.modules.pop(mod, None)
     import settings
+
     settings.clear_cache()
     import report
+
     yield report
     settings.clear_cache()
 
@@ -112,6 +123,7 @@ def test_supported_styles_are_exactly_illustrated_and_minimal(resolver):
 
 def test_defaults_toml_dashboard_style_is_illustrated():
     import settings
+
     settings.clear_cache()
     cfg = settings.load_defaults().get("dashboard", {})
     assert cfg.get("style") == "illustrated"
@@ -122,12 +134,13 @@ def test_defaults_toml_dashboard_style_is_illustrated():
 #    simple mode writes data.js. (U2)
 # ---------------------------------------------------------------------------
 
+
 class _FakeCursor:
     def __init__(self, sink):
         self._sink = sink
 
     def execute(self, sql, params=None):
-        self._sink["sql"] = sql          # last statement
+        self._sink["sql"] = sql  # last statement
         self._sink["params"] = params
         self._sink.setdefault("calls", []).append((sql, params))
 
@@ -153,8 +166,10 @@ def _fresh_report(monkeypatch):
     for mod in ("database_supabase", "config", "db_conn", "db_backend", "report"):
         sys.modules.pop(mod, None)
     import db_backend
+
     importlib.reload(db_backend)
     import report
+
     return report, db_backend
 
 
@@ -204,7 +219,9 @@ def test_full_mode_keeps_previous_snapshot_before_overwrite(monkeypatch):
     assert "'current'" in statements
     # previous is captured before current is overwritten.
     prev_idx = next(i for i, (s, _) in enumerate(fake.sink["calls"]) if "'previous'" in s.lower())
-    curr_idx = next(i for i, (s, _) in enumerate(fake.sink["calls"]) if "values ('current'" in s.lower())
+    curr_idx = next(
+        i for i, (s, _) in enumerate(fake.sink["calls"]) if "values ('current'" in s.lower()
+    )
     assert prev_idx < curr_idx
 
 

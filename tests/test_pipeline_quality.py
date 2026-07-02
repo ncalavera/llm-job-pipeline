@@ -21,7 +21,6 @@ from quality import (
     clean_description,
     strip_cookie_boilerplate,
     is_cookie_boilerplate,
-    is_error_page,
     is_navigation_junk,
     COOKIE_MIN_REMAINDER,
 )
@@ -63,6 +62,7 @@ COOKIE_BANNER = (
 # 1. quality.clean_description()
 # ===========================================================================
 
+
 class TestCleanDescriptionEmpty:
     """Empty inputs."""
 
@@ -94,7 +94,7 @@ class TestCleanDescriptionCookieWall:
     def test_QD04_cookie_wall_short_content_after(self):
         # Banner + content < COOKIE_MIN_REMAINDER chars → still cookie_wall
         short_jd = COOKIE_BANNER + "Apply at careers page."
-        remainder = len(short_jd[len(COOKIE_BANNER):].strip())
+        remainder = len(short_jd[len(COOKIE_BANNER) :].strip())
         assert remainder < COOKIE_MIN_REMAINDER, "fixture too long — fix test"
         _, verdict = clean_description(short_jd)
         assert verdict == "cookie_wall"
@@ -228,6 +228,7 @@ class TestCleanDescriptionNoFalsePositives:
 # 2. Title blacklist — non-vacancy junk patterns
 # ===========================================================================
 
+
 class TestBlacklistJunkMatched:
     """Universal-junk listings must match — only "there is no concrete single
     role here at all" markers (talent pools, generic applications, volunteer
@@ -237,9 +238,10 @@ class TestBlacklistJunkMatched:
     @pytest.fixture(autouse=True)
     def import_blacklist(self):
         import filters
+
         self._is_blacklisted = lambda title, desc="": (
-            filters.title_words_blacklisted(title)
-            or filters.description_words_blacklisted(desc))
+            filters.title_words_blacklisted(title) or filters.description_words_blacklisted(desc)
+        )
 
     def test_talent_pool(self):
         assert self._is_blacklisted("Talent Pool — Future Roles") is True
@@ -269,9 +271,10 @@ class TestBlacklistFormatWordsNotJunk:
     @pytest.fixture(autouse=True)
     def import_blacklist(self):
         import filters
+
         self._is_blacklisted = lambda title, desc="": (
-            filters.title_words_blacklisted(title)
-            or filters.description_words_blacklisted(desc))
+            filters.title_words_blacklisted(title) or filters.description_words_blacklisted(desc)
+        )
 
     def test_bootcamp_not_junk(self):
         # "Data Science Bootcamp" instructor is a real job
@@ -301,9 +304,10 @@ class TestBlacklistLegitNotMatched:
     @pytest.fixture(autouse=True)
     def import_blacklist(self):
         import filters
+
         self._is_blacklisted = lambda title, desc="": (
-            filters.title_words_blacklisted(title)
-            or filters.description_words_blacklisted(desc))
+            filters.title_words_blacklisted(title) or filters.description_words_blacklisted(desc)
+        )
 
     def test_program_director_not_blacklisted(self):
         assert self._is_blacklisted("Program Director") is False
@@ -330,12 +334,14 @@ class TestBlacklistLegitNotMatched:
 # 3. _gate_description() in database_supabase.py — no DB write
 # ===========================================================================
 
+
 class TestGateDescription:
     """_gate_description mutates the job dict, no DB calls."""
 
     @pytest.fixture(autouse=True)
     def import_gate(self):
         from database_supabase import _gate_description
+
         self._gate_description = _gate_description
 
     def test_GD01_cookie_wall_blanked(self):
@@ -389,12 +395,14 @@ class TestGateDescription:
 # 4. Deadline / hot_vacancy helpers
 # ===========================================================================
 
+
 class TestDeadlineSoonLabelTelegram:
     """deadline_soon_label from telegram_digest.py."""
 
     @pytest.fixture(autouse=True)
     def import_helper(self):
         from telegram_digest import deadline_soon_label, DEADLINE_SOON_DAYS, HOT_VACANCY_SCORE
+
         self.deadline_soon_label = deadline_soon_label
         self.DEADLINE_SOON_DAYS = DEADLINE_SOON_DAYS
         self.HOT_VACANCY_SCORE = HOT_VACANCY_SCORE
@@ -431,12 +439,14 @@ class TestDeadlineSoonLabelTelegram:
 
 SKIP_DB = not os.environ.get("SUPABASE_DB_URL")
 
+
 @pytest.mark.skipif(SKIP_DB, reason="SUPABASE_DB_URL not set — skipping integration tests")
 class TestIntegrationReadOnly:
     """Read-only checks against a live DB."""
 
     def test_INT01_load_candidate_vacancies_returns_dict(self):
         from database_supabase import load_candidate_vacancies_for_scoring
+
         result = load_candidate_vacancies_for_scoring(limit=5)
         assert isinstance(result, dict)
         # Every key is a UUID string
@@ -446,6 +456,7 @@ class TestIntegrationReadOnly:
     def test_INT02_no_unseen_at_inactive_companies(self):
         """No unseen vacancies should remain at inactive companies."""
         from db_conn import get_conn
+
         # Import RealDictCursor from db_backend, not psycopg2 directly: on the
         # SQLite backend the cursor only yields dict rows when handed the
         # db_backend marker class. The genuine psycopg2 RealDictCursor is a
@@ -473,6 +484,7 @@ class TestIntegrationReadOnly:
 # 6. enrich_blind_vacancies — import + _DIRECT_HOST_FETCHERS contents
 # ===========================================================================
 
+
 class TestEnrichBlindVacancies:
     """Verify the blind-vacancy enrichment module."""
 
@@ -481,25 +493,31 @@ class TestEnrichBlindVacancies:
 
     def test_EBV02_direct_host_fetchers_present(self):
         import enrich_blind_vacancies
+
         assert hasattr(enrich_blind_vacancies, "_DIRECT_HOST_FETCHERS")
 
     def test_EBV03_careers_unops_in_fetchers(self):
         import enrich_blind_vacancies
+
         assert "careers.unops.org" in enrich_blind_vacancies._DIRECT_HOST_FETCHERS
 
     def test_EBV04_jobs_unops_in_fetchers(self):
         import enrich_blind_vacancies
+
         assert "jobs.unops.org" in enrich_blind_vacancies._DIRECT_HOST_FETCHERS
 
     def test_EBV05_jobs_unicef_in_fetchers(self):
         import enrich_blind_vacancies
+
         assert "jobs.unicef.org" in enrich_blind_vacancies._DIRECT_HOST_FETCHERS
 
     def test_EBV06_quality_functions_accessible(self):
         # enrich_blind_vacancies must use clean_description from quality
         from quality import clean_description
+
         assert callable(clean_description)
         # Confirm the module imports quality (indirectly via database_supabase)
         import enrich_blind_vacancies
+
         # If the module loaded without errors, the merge is wired up
         assert enrich_blind_vacancies is not None

@@ -25,13 +25,22 @@ def dal(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
     monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
-    for mod in ("database_supabase", "config", "company_registry",
-                "db_conn", "db_backend", "report", "report.data_prep"):
+    for mod in (
+        "database_supabase",
+        "config",
+        "company_registry",
+        "db_conn",
+        "db_backend",
+        "report",
+        "report.data_prep",
+    ):
         sys.modules.pop(mod, None)
     import db_backend
+
     importlib.reload(db_backend)
     assert db_backend.IS_SQLITE
     import database_supabase as db
+
     yield db
     db.close_conn()
 
@@ -60,6 +69,7 @@ def _id_by_title(db, title):
 def _applyable_for(name):
     """Run prepare_company_data and return the applyable_count for one company."""
     import report.data_prep as dp
+
     companies = dp.prepare_company_data()
     for c in companies:
         if c["name"] == name:
@@ -70,6 +80,7 @@ def _applyable_for(name):
 # ---------------------------------------------------------------------------
 # 21 vacancies, 2 clear the bar → applyable_count == 2
 # ---------------------------------------------------------------------------
+
 
 def test_two_of_twentyone_are_applyable(dal):
     dal.ensure_company("Acme Robotics", status="active")
@@ -95,11 +106,18 @@ def test_two_of_twentyone_are_applyable(dal):
 # disqualifies these roles here.
 # ---------------------------------------------------------------------------
 
+
 def test_expiring_high_scores_are_not_applyable(dal):
     dal.ensure_company("Expire Inc", status="active")
-    dal.save_vacancies("Expire Inc", "A", [
-        _job("Hot Lead"), _job("Hot Manager"), _job("Cold Role"),
-    ])
+    dal.save_vacancies(
+        "Expire Inc",
+        "A",
+        [
+            _job("Hot Lead"),
+            _job("Hot Manager"),
+            _job("Cold Role"),
+        ],
+    )
     _commit(dal)
 
     yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
@@ -117,15 +135,20 @@ def test_expiring_high_scores_are_not_applyable(dal):
 # Decided statuses (passed / archived) are excluded even at a top score.
 # ---------------------------------------------------------------------------
 
+
 def test_decided_statuses_are_not_applyable(dal):
     dal.ensure_company("Decided Co", status="active")
-    dal.save_vacancies("Decided Co", "A", [
-        _job("Passed Role"), _job("Open Role"),
-    ])
+    dal.save_vacancies(
+        "Decided Co",
+        "A",
+        [
+            _job("Passed Role"),
+            _job("Open Role"),
+        ],
+    )
     _commit(dal)
 
-    dal.update_vacancy_fields(_id_by_title(dal, "Passed Role"),
-                              llm_score=95, status="passed")
+    dal.update_vacancy_fields(_id_by_title(dal, "Passed Role"), llm_score=95, status="passed")
     dal.update_vacancy_fields(_id_by_title(dal, "Open Role"), llm_score=95)
     _commit(dal)
 
@@ -138,19 +161,23 @@ def test_decided_statuses_are_not_applyable(dal):
 # Deadline in the past disqualifies; future deadline / no deadline count
 # ---------------------------------------------------------------------------
 
+
 def test_past_deadline_excluded_future_included(dal):
     dal.ensure_company("Deadline Co", status="active")
-    dal.save_vacancies("Deadline Co", "A", [
-        _job("Past Role"), _job("Future Role"),
-    ])
+    dal.save_vacancies(
+        "Deadline Co",
+        "A",
+        [
+            _job("Past Role"),
+            _job("Future Role"),
+        ],
+    )
     _commit(dal)
 
     yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
     tomorrow = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
-    dal.update_vacancy_fields(_id_by_title(dal, "Past Role"),
-                              llm_score=90, deadline=yesterday)
-    dal.update_vacancy_fields(_id_by_title(dal, "Future Role"),
-                              llm_score=90, deadline=tomorrow)
+    dal.update_vacancy_fields(_id_by_title(dal, "Past Role"), llm_score=90, deadline=yesterday)
+    dal.update_vacancy_fields(_id_by_title(dal, "Future Role"), llm_score=90, deadline=tomorrow)
     _commit(dal)
 
     assert _applyable_for("Deadline Co") == 1

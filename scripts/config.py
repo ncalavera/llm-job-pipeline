@@ -54,6 +54,7 @@ def get_firecrawl_client():
     if _firecrawl_client is None:
         try:
             from firecrawl import Firecrawl
+
             _firecrawl_client = Firecrawl()
         except ImportError:
             _firecrawl_import_failed = True
@@ -87,8 +88,7 @@ from company_registry import (  # noqa: E402
 
 #: {bucket_name: [keywords]} — bucket names are data keys from TOML, not code.
 REGION_KEYWORDS: dict[str, list[str]] = {
-    bucket: list(keywords)
-    for bucket, keywords in settings.region_keywords().items()
+    bucket: list(keywords) for bucket, keywords in settings.region_keywords().items()
 }
 
 # ---------------------------------------------------------------------------
@@ -146,15 +146,9 @@ from geo import canonical_country as _canon  # noqa: E402
 GEO_BANNED_COUNTRIES = frozenset(
     _canon(c) for c in (list(EXCLUDE_COUNTRIES) + list(GEO_BAN_COUNTRIES)) if _canon(c)
 )
-GEO_BANNED_REGIONS = frozenset(
-    r.lower().strip() for r in GEO_BAN_REGIONS if r and r.strip()
-)
-GEO_KEEP_COUNTRIES_SET = frozenset(
-    _canon(c) for c in GEO_KEEP_COUNTRIES if _canon(c)
-)
-GEO_ONSITE_OK_SET = frozenset(
-    r.lower().strip() for r in GEO_ONSITE_OK_REGIONS if r and r.strip()
-)
+GEO_BANNED_REGIONS = frozenset(r.lower().strip() for r in GEO_BAN_REGIONS if r and r.strip())
+GEO_KEEP_COUNTRIES_SET = frozenset(_canon(c) for c in GEO_KEEP_COUNTRIES if _canon(c))
+GEO_ONSITE_OK_SET = frozenset(r.lower().strip() for r in GEO_ONSITE_OK_REGIONS if r and r.strip())
 #: True when ANY geography ban is configured (explicit country or whole region).
 GEO_ACTIVE = bool(GEO_BANNED_COUNTRIES or GEO_BANNED_REGIONS)
 

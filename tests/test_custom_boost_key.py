@@ -11,10 +11,10 @@ These tests prove:
   3. _read_custom_boost reads it (and the legacy key for back-compat);
   4. the boost actually reaches calculate_company_tier (moves the composite).
 """
+
 import sys
 from pathlib import Path
 
-import pytest
 
 SCRIPTS = str(Path(__file__).resolve().parent.parent / "scripts")
 if SCRIPTS not in sys.path:

@@ -32,16 +32,24 @@ def sc(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
 
-    for mod in ("score_companies", "database_supabase", "config",
-                "company_registry", "db_conn", "db_backend"):
+    for mod in (
+        "score_companies",
+        "database_supabase",
+        "config",
+        "company_registry",
+        "db_conn",
+        "db_backend",
+    ):
         sys.modules.pop(mod, None)
 
     import db_backend
+
     importlib.reload(db_backend)
     assert db_backend.IS_SQLITE
 
     import database_supabase as dal
     import score_companies
+
     importlib.reload(score_companies)
 
     ns = type("ScEnv", (), {})()
@@ -54,6 +62,7 @@ def sc(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # _parse_json — LLM response extraction (the external-boundary parse step)
 # ---------------------------------------------------------------------------
+
 
 def test_parse_json_plain(sc):
     out = sc.mod._parse_json('{"alignment_score": 70}')
@@ -80,12 +89,15 @@ def test_parse_json_invalid_returns_error(sc):
 # _extract_enrichment — normalize a parsed LLM result into an enrichment dict
 # ---------------------------------------------------------------------------
 
+
 def test_extract_enrichment_from_mission_fit(sc):
     result = {
         "about": {"description": "A robotics nonprofit", "sector": "Robotics"},
         "mission_fit": {
-            "alignment_score": 72, "alignment_label": "strong",
-            "strengths": ["mission overlap"], "risks": ["early stage"],
+            "alignment_score": 72,
+            "alignment_label": "strong",
+            "strengths": ["mission overlap"],
+            "risks": ["early stage"],
         },
     }
     enr = sc.mod._extract_enrichment(result)
@@ -118,6 +130,7 @@ def test_extract_enrichment_out_of_range_is_none(sc):
 # Scoring → persistence: parse a (fake) LLM result and persist via the DAL,
 # exactly as the --api backend does. Asserts mission_fit / alignment land.
 # ---------------------------------------------------------------------------
+
 
 def test_score_result_persists_to_company_row(sc):
     db = sc.dal
@@ -162,6 +175,7 @@ def test_calculate_company_tier_assigns_letter(sc):
 # cmd_save is a Postgres-only path on this backend — document, don't fail.
 # ---------------------------------------------------------------------------
 
+
 def test_cmd_save_is_postgres_only_on_sqlite(sc):
     """score_companies.cmd_save binds parameters with the real psycopg2 Json
     wrapper, which the SQLite shim does not adapt, so it cannot persist on the
@@ -176,16 +190,18 @@ def test_cmd_save_is_postgres_only_on_sqlite(sc):
     cid = db.ensure_company("Acme Robotics", status="candidate")
     db.get_conn().commit()
 
-    payload = [{
-        "payload_kind": "company",
-        "id": str(cid),
-        "canonical_name": "Acme Robotics",
-        "enrichment": {
-            "about": {"description": "x", "sector": "Robotics"},
-            "mission_fit": {"alignment_score": 70, "alignment_label": "ok"},
-            "alignment_score": 70,
-        },
-    }]
+    payload = [
+        {
+            "payload_kind": "company",
+            "id": str(cid),
+            "canonical_name": "Acme Robotics",
+            "enrichment": {
+                "about": {"description": "x", "sector": "Robotics"},
+                "mission_fit": {"alignment_score": 70, "alignment_label": "ok"},
+                "alignment_score": 70,
+            },
+        }
+    ]
     monkeypatch_stdin = io.StringIO(json.dumps(payload))
     old_stdin = sys.stdin
     sys.stdin = monkeypatch_stdin

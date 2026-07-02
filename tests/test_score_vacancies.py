@@ -1,4 +1,5 @@
 """Tests for _sanitize_text, _parse_json."""
+
 import importlib
 import io
 import json
@@ -12,6 +13,7 @@ from score_vacancies import _sanitize_text, _parse_json
 # ---------------------------------------------------------------------------
 # _sanitize_text
 # ---------------------------------------------------------------------------
+
 
 def test_ST01_crlf_normalized():
     result = _sanitize_text("line1\r\nline2")
@@ -36,6 +38,7 @@ def test_ST04_normal_text_unchanged():
 # ---------------------------------------------------------------------------
 # _parse_json
 # ---------------------------------------------------------------------------
+
 
 def test_PJ01_plain_valid_json():
     result = _parse_json('{"score": 75, "reasoning": "Good match"}')
@@ -67,6 +70,7 @@ def test_PJ04_invalid_returns_error_dict():
 # cmd_save — accepts the documented FLAT shape (finding #2)
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def sqlite_dal(tmp_path, monkeypatch):
     """Fresh SQLite-backed DAL on an isolated temp DB (no Supabase)."""
@@ -75,28 +79,35 @@ def sqlite_dal(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
 
-    for mod in ("database_supabase", "config", "company_registry",
-                "db_conn", "db_backend"):
+    for mod in ("database_supabase", "config", "company_registry", "db_conn", "db_backend"):
         sys.modules.pop(mod, None)
 
     import db_backend
+
     importlib.reload(db_backend)
     assert db_backend.IS_SQLITE
 
     import database_supabase as db
+
     yield db
     db.close_conn()
 
 
 def _seed_one_vacancy(db):
     db.ensure_company("Acme Robotics", status="active")
-    db.save_vacancies("Acme Robotics", "A", [{
-        "title": "Head of Community",
-        "snippet": "Lead community efforts.",
-        "full_description": "Lead our global community programme. " * 8,
-        "location": "Berlin, Germany",
-        "url": "https://acme.example/job/hoc",
-    }])
+    db.save_vacancies(
+        "Acme Robotics",
+        "A",
+        [
+            {
+                "title": "Head of Community",
+                "snippet": "Lead community efforts.",
+                "full_description": "Lead our global community programme. " * 8,
+                "location": "Berlin, Germany",
+                "url": "https://acme.example/job/hoc",
+            }
+        ],
+    )
     db.get_conn().commit()
     return next(iter(db.load_vacancies()))
 
@@ -113,24 +124,28 @@ def test_cmd_save_accepts_flat_documented_shape(sqlite_dal, monkeypatch):
 
     # Stub out the dashboard regeneration (writes files / needs report assets).
     monkeypatch.setitem(
-        sys.modules, "report",
+        sys.modules,
+        "report",
         types.SimpleNamespace(generate_dashboard=lambda *a, **k: None),
     )
 
     # The documented FLAT payload — no payload_kind, no nested score_data.
-    payload = [{
-        "member_ids": [vid],
-        "org": "Acme Robotics",
-        "title": "Head of Community",
-        "score": 78,
-        "reasoning": "Strong fit on community + ops leadership.",
-        "tags": ["community", "operations"],
-        "hard_requirements": ["5y community leadership"],
-        "short_summary": "A " * 120,  # long enough to clear the 200-char warning
-    }]
+    payload = [
+        {
+            "member_ids": [vid],
+            "org": "Acme Robotics",
+            "title": "Head of Community",
+            "score": 78,
+            "reasoning": "Strong fit on community + ops leadership.",
+            "tags": ["community", "operations"],
+            "hard_requirements": ["5y community leadership"],
+            "short_summary": "A " * 120,  # long enough to clear the 200-char warning
+        }
+    ]
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
 
     import score_vacancies
+
     importlib.reload(score_vacancies)
     args = types.SimpleNamespace(archive=False)
     score_vacancies.cmd_save(args)
@@ -147,24 +162,28 @@ def test_cmd_save_still_accepts_strict_nested_shape(sqlite_dal, monkeypatch):
     vid = _seed_one_vacancy(db)
 
     monkeypatch.setitem(
-        sys.modules, "report",
+        sys.modules,
+        "report",
         types.SimpleNamespace(generate_dashboard=lambda *a, **k: None),
     )
-    payload = [{
-        "payload_kind": "vacancy",
-        "member_ids": [vid],
-        "org": "Acme Robotics",
-        "title": "Head of Community",
-        "score_data": {
-            "llm_score": 64,
-            "llm_reasoning": "Solid.",
-            "llm_summary": "B " * 120,
-            "llm_hard_requirements": [],
-        },
-    }]
+    payload = [
+        {
+            "payload_kind": "vacancy",
+            "member_ids": [vid],
+            "org": "Acme Robotics",
+            "title": "Head of Community",
+            "score_data": {
+                "llm_score": 64,
+                "llm_reasoning": "Solid.",
+                "llm_summary": "B " * 120,
+                "llm_hard_requirements": [],
+            },
+        }
+    ]
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
 
     import score_vacancies
+
     importlib.reload(score_vacancies)
     args = types.SimpleNamespace(archive=False)
     score_vacancies.cmd_save(args)

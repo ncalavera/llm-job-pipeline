@@ -32,13 +32,14 @@ def dal(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
     monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
-    for mod in ("database_supabase", "config", "company_registry",
-                "db_conn", "db_backend"):
+    for mod in ("database_supabase", "config", "company_registry", "db_conn", "db_backend"):
         sys.modules.pop(mod, None)
     import db_backend
+
     importlib.reload(db_backend)
     assert db_backend.IS_SQLITE
     import database_supabase as db
+
     yield db
     db.close_conn()
 
@@ -68,6 +69,7 @@ def _commit(db):
 # Restore: archived → unseen re-enters the live catalog
 # ---------------------------------------------------------------------------
 
+
 def test_restore_archived_vacancy_to_unseen(dal):
     dal.ensure_company("Acme Robotics", status="active")
     dal.save_vacancies("Acme Robotics", "A", [_job("Programme Lead")])
@@ -95,11 +97,17 @@ def test_restore_archived_vacancy_to_unseen(dal):
 # archive_gone never touches a DECIDED status
 # ---------------------------------------------------------------------------
 
+
 def test_archive_gone_skips_decided_status(dal):
     dal.ensure_company("Acme Robotics", status="active")
-    dal.save_vacancies("Acme Robotics", "A", [
-        _job("Liked Role"), _job("Unseen Role"),
-    ])
+    dal.save_vacancies(
+        "Acme Robotics",
+        "A",
+        [
+            _job("Liked Role"),
+            _job("Unseen Role"),
+        ],
+    )
     _commit(dal)
     liked = _id_by_title(dal, "Liked Role")
     dal.update_vacancy_status(liked, "liked")
@@ -111,15 +119,18 @@ def test_archive_gone_skips_decided_status(dal):
     _commit(dal)
     assert archived == 1
 
-    final = {v["title"]: v["status"]
-             for v in dal.load_vacancies(include_inactive_companies=True).values()}
-    assert final["Liked Role"] == "liked"      # protected
+    final = {
+        v["title"]: v["status"]
+        for v in dal.load_vacancies(include_inactive_companies=True).values()
+    }
+    assert final["Liked Role"] == "liked"  # protected
     assert final["Unseen Role"] == "archived"  # archived
 
 
 # ---------------------------------------------------------------------------
 # Direct-ATS resurrection: the company's own re-listing revives a gone role
 # ---------------------------------------------------------------------------
+
 
 def test_direct_refetch_resurrects_gone_role(dal):
     dal.ensure_company("Acme Robotics", status="active")
@@ -144,6 +155,7 @@ def test_direct_refetch_resurrects_gone_role(dal):
 # ---------------------------------------------------------------------------
 # Score-below-threshold archive hash is recorded and skips re-merge
 # ---------------------------------------------------------------------------
+
 
 def test_score_below_threshold_hash_blocks_remerge(dal):
     """A dedup_hash archived for a non-gone reason (e.g. score_below_threshold)

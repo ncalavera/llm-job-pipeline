@@ -24,7 +24,7 @@ REPO = Path(__file__).resolve().parent.parent
 SENSITIVE = [
     re.compile(r"^\.env$"),
     re.compile(r"^\.env\.local$"),
-    re.compile(r"^\.env\.(?!example$).+"),   # any .env.* except .env.example
+    re.compile(r"^\.env\.(?!example$).+"),  # any .env.* except .env.example
     re.compile(r"^config/user_profile\.md$"),
     re.compile(r"^public/data\.js$"),
     re.compile(r"^vacancies/"),
@@ -38,7 +38,9 @@ SENSITIVE = [
 def _tracked_files() -> list[str]:
     out = subprocess.run(
         ["git", "-C", str(REPO), "ls-files"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return [line for line in out.stdout.splitlines() if line]
 
@@ -52,13 +54,13 @@ def test_no_private_data_is_tracked():
                 break
     assert not leaks, (
         "Private data is tracked in the PUBLIC repo — remove it "
-        "(git rm --cached <file>) and confirm it is gitignored:\n"
-        + "\n".join(leaks)
+        "(git rm --cached <file>) and confirm it is gitignored:\n" + "\n".join(leaks)
     )
 
 
 def test_patterns_allow_safe_files_and_block_unsafe():
     """Guards the matcher so it cannot silently start passing everything."""
+
     def hit(p: str) -> bool:
         return any(pat.search(p) for pat in SENSITIVE)
 
@@ -74,6 +76,6 @@ def test_patterns_allow_safe_files_and_block_unsafe():
     assert hit("local.sqlite")
     # allowed (must NOT match)
     assert not hit(".env.example")
-    assert not hit("sql/schema.sqlite.sql")   # DDL, ends in .sql
+    assert not hit("sql/schema.sqlite.sql")  # DDL, ends in .sql
     assert not hit("public/app.js")
     assert not hit("config/user_profile.example.md")

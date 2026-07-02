@@ -27,6 +27,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Classification patterns
 # ---------------------------------------------------------------------------
 
+
 def _check_aggregator(name: str) -> str | None:
     """Pattern 1: Aggregators — '[via ...]', 'Various ...'"""
     if name.startswith("[via ") or name.startswith("Various "):
@@ -35,9 +36,15 @@ def _check_aggregator(name: str) -> str | None:
 
 
 _BOARD_SLUGS = {
-    "80k_hours", "80000hours", "80000_hours", "80k",
-    "fast_forward", "ffwd",
-    "idealist", "reliefweb", "devex",
+    "80k_hours",
+    "80000hours",
+    "80000_hours",
+    "80k",
+    "fast_forward",
+    "ffwd",
+    "idealist",
+    "reliefweb",
+    "devex",
 }
 
 
@@ -50,8 +57,12 @@ def _check_board_duplicate(name: str) -> str | None:
 
 
 _GOVT_PREFIXES = [
-    "US Government,", "UK Government,", "California Dept", "California Department",
-    "New York State,", "Anser (US government",
+    "US Government,",
+    "UK Government,",
+    "California Dept",
+    "California Department",
+    "New York State,",
+    "Anser (US government",
 ]
 _GOVT_EXCEPTIONS = ["AI Security Institute"]
 
@@ -67,11 +78,24 @@ def _check_government(name: str) -> str | None:
 
 
 _UNIVERSITY_PATTERNS = [
-    "University of", "MIT,", "MIT ", "Massachusetts Institute of Technology",
-    "Yale", "Cornell", "Oxford",
-    "Rutgers", "Northeastern", "Stanford", "Harvard", "Princeton",
-    "Columbia University", "Georgetown", "NYU", "UC Berkeley",
-    "Carnegie Mellon", "Johns Hopkins",
+    "University of",
+    "MIT,",
+    "MIT ",
+    "Massachusetts Institute of Technology",
+    "Yale",
+    "Cornell",
+    "Oxford",
+    "Rutgers",
+    "Northeastern",
+    "Stanford",
+    "Harvard",
+    "Princeton",
+    "Columbia University",
+    "Georgetown",
+    "NYU",
+    "UC Berkeley",
+    "Carnegie Mellon",
+    "Johns Hopkins",
 ]
 
 
@@ -134,6 +158,7 @@ def classify_companies() -> list[tuple[dict, str, str]]:
 # Report generation (markdown)
 # ---------------------------------------------------------------------------
 
+
 def generate_report(classified: list[tuple[dict, str, str]]) -> str:
     """Generate markdown report."""
     deletes = [(r, reason) for r, action, reason in classified if action == "DELETE"]
@@ -183,6 +208,7 @@ def generate_report(classified: list[tuple[dict, str, str]]) -> str:
 # Apply mode
 # ---------------------------------------------------------------------------
 
+
 def apply_deletions(classified: list[tuple[dict, str, str]]):
     """Set DELETE companies to inactive with status_reason. Saves snapshot first.
 
@@ -216,9 +242,7 @@ def apply_deletions(classified: list[tuple[dict, str, str]]):
             for row, reason in deletes
         ],
     }
-    snapshot_path.write_text(
-        json.dumps(snapshot, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    snapshot_path.write_text(json.dumps(snapshot, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"Snapshot saved: {snapshot_path.name}")
 
     # Update DB
@@ -238,6 +262,7 @@ def apply_deletions(classified: list[tuple[dict, str, str]]):
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(description="Pre-filter candidate companies")
     parser.add_argument("--apply", action="store_true", help="Execute deletions")
@@ -250,7 +275,9 @@ def main():
 
     if args.apply:
         if args.limit:
-            print(f"WARNING: --limit {args.limit} active — only first {args.limit} companies processed")
+            print(
+                f"WARNING: --limit {args.limit} active — only first {args.limit} companies processed"
+            )
         apply_deletions(classified)
     else:
         report = generate_report(classified)

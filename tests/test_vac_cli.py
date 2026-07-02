@@ -24,16 +24,25 @@ def vac(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
 
-    for mod in ("vac", "database_supabase", "config",
-                "company_registry", "db_conn", "db_backend", "geo"):
+    for mod in (
+        "vac",
+        "database_supabase",
+        "config",
+        "company_registry",
+        "db_conn",
+        "db_backend",
+        "geo",
+    ):
         sys.modules.pop(mod, None)
 
     import db_backend
+
     importlib.reload(db_backend)
     assert db_backend.IS_SQLITE
 
     import database_supabase as dal
     import vac as vac_mod
+
     importlib.reload(vac_mod)
 
     ns = type("VacEnv", (), {})()
@@ -45,13 +54,19 @@ def vac(tmp_path, monkeypatch):
 
 def _seed(dal, title="Head of Community"):
     dal.ensure_company("Acme Robotics", status="active")
-    dal.save_vacancies("Acme Robotics", "A", [{
-        "title": title,
-        "snippet": "Lead community efforts.",
-        "full_description": "Lead our global community programme. " * 8,
-        "location": "Berlin, Germany",
-        "url": f"https://acme.example/job/{title.lower().replace(' ', '-')}",
-    }])
+    dal.save_vacancies(
+        "Acme Robotics",
+        "A",
+        [
+            {
+                "title": title,
+                "snippet": "Lead community efforts.",
+                "full_description": "Lead our global community programme. " * 8,
+                "location": "Berlin, Germany",
+                "url": f"https://acme.example/job/{title.lower().replace(' ', '-')}",
+            }
+        ],
+    )
     dal.get_conn().commit()
     for vid, v in dal.load_vacancies().items():
         if v["title"] == title:
@@ -62,6 +77,7 @@ def _seed(dal, title="Head of Community"):
 # ---------------------------------------------------------------------------
 # mark — status transitions persist and round-trip
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("status", ["liked", "passed", "unseen", "to_apply", "applied"])
 def test_mark_persists_each_status(vac, status):
@@ -113,6 +129,7 @@ def test_mark_unknown_id_exits_nonzero(vac):
 # ---------------------------------------------------------------------------
 # Parser contract — the subcommands the runbooks call must exist.
 # ---------------------------------------------------------------------------
+
 
 def test_parser_exposes_mark_subcommand(vac):
     parser = vac.mod.build_parser()

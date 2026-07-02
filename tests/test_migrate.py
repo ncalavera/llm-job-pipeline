@@ -28,6 +28,7 @@ _REAL_ROOT = Path(__file__).resolve().parent.parent
 # the migrations and backups directories redirected to temp paths.
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def mig(tmp_path, monkeypatch):
     """Reload migrate.py against a temp SQLite DB + temp migrations/backups dirs.
@@ -41,15 +42,23 @@ def mig(tmp_path, monkeypatch):
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
 
     # Rebuild the backend chain so IS_SQLITE / sqlite_db_path pick up the env.
-    for mod in ("database_supabase", "config", "company_registry",
-                "db_conn", "db_backend", "migrate"):
+    for mod in (
+        "database_supabase",
+        "config",
+        "company_registry",
+        "db_conn",
+        "db_backend",
+        "migrate",
+    ):
         sys.modules.pop(mod, None)
 
     import db_backend
+
     importlib.reload(db_backend)
     assert db_backend.IS_SQLITE, "migrate tests must run on SQLite"
 
     import migrate
+
     importlib.reload(migrate)
 
     # Build a hermetic temp project layout so MIGRATIONS_DIR, BACKUPS_DIR and the
@@ -59,9 +68,7 @@ def mig(tmp_path, monkeypatch):
     # baseline schema is copied in so _ensure_baseline can bootstrap a fresh DB.
     proj = tmp_path
     (proj / "sql").mkdir()
-    shutil.copy2(
-        _REAL_ROOT / "sql" / "schema.sqlite.sql", proj / "sql" / "schema.sqlite.sql"
-    )
+    shutil.copy2(_REAL_ROOT / "sql" / "schema.sqlite.sql", proj / "sql" / "schema.sqlite.sql")
     migrations_dir = proj / "sql" / "migrations"
     migrations_dir.mkdir()
     backups_dir = proj / "data" / "backups"
@@ -127,6 +134,7 @@ def _logical_snapshot(db_path):
 # Baseline schema bootstrap on a fresh DB
 # ---------------------------------------------------------------------------
 
+
 def test_fresh_db_gets_baseline_schema(mig):
     """A brand-new empty SQLite DB → opening the runner applies the baseline,
     so the ``company`` table exists afterward (zero pending migrations)."""
@@ -143,6 +151,7 @@ def test_fresh_db_gets_baseline_schema(mig):
 # Pending migration applied + recorded; second run is idempotent
 # ---------------------------------------------------------------------------
 
+
 def test_pending_migration_applied_and_recorded(mig):
     (mig.migrations_dir / "0001_add_foo.sql").write_text(
         "ALTER TABLE company ADD COLUMN foo_flag INTEGER;\n", encoding="utf-8"
@@ -158,16 +167,12 @@ def test_second_run_is_idempotent(mig):
         "ALTER TABLE company ADD COLUMN foo_flag INTEGER;\n", encoding="utf-8"
     )
     assert mig.m.cmd_migrate(allow_destructive=False, do_backup=True) == 0
-    backups_after_first = (
-        sorted(mig.backups_dir.glob("*")) if mig.backups_dir.exists() else []
-    )
+    backups_after_first = sorted(mig.backups_dir.glob("*")) if mig.backups_dir.exists() else []
 
     # Second run: nothing pending → no-op, no new backup, ledger unchanged.
     assert mig.m.cmd_migrate(allow_destructive=False, do_backup=True) == 0
     assert _applied_versions(mig.db_path) == {"0001"}
-    backups_after_second = (
-        sorted(mig.backups_dir.glob("*")) if mig.backups_dir.exists() else []
-    )
+    backups_after_second = sorted(mig.backups_dir.glob("*")) if mig.backups_dir.exists() else []
     assert backups_after_second == backups_after_first, (
         "an up-to-date run must not create another backup"
     )
@@ -176,6 +181,7 @@ def test_second_run_is_idempotent(mig):
 # ---------------------------------------------------------------------------
 # --status lists pending vs applied without changing the DB
 # ---------------------------------------------------------------------------
+
 
 def test_status_lists_without_mutating(mig, capsys):
     # Bootstrap the baseline first so the DB file exists and is stable.
@@ -213,11 +219,15 @@ def test_status_marks_applied(mig, capsys):
 # Destructive guard
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("destructive_sql", [
-    "DROP TABLE company;",
-    "DELETE FROM company;",
-    "TRUNCATE company;",
-])
+
+@pytest.mark.parametrize(
+    "destructive_sql",
+    [
+        "DROP TABLE company;",
+        "DELETE FROM company;",
+        "TRUNCATE company;",
+    ],
+)
 def test_destructive_migration_aborts_and_no_op(mig, destructive_sql):
     """A migration with a destructive statement aborts with a nonzero exit and
     does NOT modify the DB (no ledger row, schema untouched)."""
@@ -225,9 +235,7 @@ def test_destructive_migration_aborts_and_no_op(mig, destructive_sql):
     assert mig.m.cmd_migrate(allow_destructive=False, do_backup=False) == 0
     before_bytes = mig.db_path.read_bytes()
 
-    (mig.migrations_dir / "0001_danger.sql").write_text(
-        destructive_sql + "\n", encoding="utf-8"
-    )
+    (mig.migrations_dir / "0001_danger.sql").write_text(destructive_sql + "\n", encoding="utf-8")
 
     rc = mig.m.cmd_migrate(allow_destructive=False, do_backup=True)
     assert rc == 2, "destructive run must exit nonzero (2)"
@@ -254,6 +262,7 @@ def test_destructive_migration_runs_with_allow_flag(mig):
 # ---------------------------------------------------------------------------
 # Automatic backup
 # ---------------------------------------------------------------------------
+
 
 def test_backup_created_for_pending_run(mig):
     """A run with pending work and an existing DB creates a backup file under
@@ -283,6 +292,7 @@ def test_backup_created_for_pending_run(mig):
 # SQLite auto-restore on failure — the failed run must be a clean no-op
 # ---------------------------------------------------------------------------
 
+
 def test_failed_migration_restores_db_clean_no_op(mig):
     """A migration that adds a column and THEN runs invalid SQL must leave the
     DB exactly as before the run: the added column is ABSENT, the ledger is
@@ -297,8 +307,7 @@ def test_failed_migration_restores_db_clean_no_op(mig):
     # First statement is valid (adds a column), second is invalid SQL → throws
     # mid-script, after the DDL already half-applied.
     (mig.migrations_dir / "0001_broken.sql").write_text(
-        "ALTER TABLE company ADD COLUMN halfway INTEGER;\n"
-        "THIS IS NOT VALID SQL;\n",
+        "ALTER TABLE company ADD COLUMN halfway INTEGER;\nTHIS IS NOT VALID SQL;\n",
         encoding="utf-8",
     )
 
@@ -330,6 +339,7 @@ def test_failed_run_without_backup_still_returns_failure(mig):
 # Multiple pending migrations apply in order
 # ---------------------------------------------------------------------------
 
+
 def test_multiple_migrations_apply_in_order(mig):
     (mig.migrations_dir / "0001_a.sql").write_text(
         "ALTER TABLE company ADD COLUMN col_a INTEGER;\n", encoding="utf-8"
@@ -347,12 +357,12 @@ def test_multiple_migrations_apply_in_order(mig):
 # Destructive-statement gate: precise over/under-match (code-review fixes)
 # ---------------------------------------------------------------------------
 
+
 def test_update_set_backfill_is_not_destructive(mig):
     """The canonical additive pattern — ADD COLUMN then backfill with UPDATE
     SET — must run WITHOUT --allow-destructive (UPDATE is not data loss)."""
     (mig.migrations_dir / "0001_backfill.sql").write_text(
-        "ALTER TABLE company ADD COLUMN region TEXT;\n"
-        "UPDATE company SET region = 'unknown';\n",
+        "ALTER TABLE company ADD COLUMN region TEXT;\nUPDATE company SET region = 'unknown';\n",
         encoding="utf-8",
     )
     rc = mig.m.cmd_migrate(allow_destructive=False, do_backup=True)
@@ -389,6 +399,7 @@ def test_drop_schema_is_blocked(mig):
 # ---------------------------------------------------------------------------
 # --baseline: adopt an already-current DB without running migrations
 # ---------------------------------------------------------------------------
+
 
 def test_baseline_records_without_running(mig):
     """--baseline marks pending migrations applied WITHOUT executing their SQL,

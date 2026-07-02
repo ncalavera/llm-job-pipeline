@@ -10,9 +10,6 @@ import argparse
 import json
 import re
 import sys
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -50,20 +47,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-candidates",
         action="store_true",
         help="Do NOT pull strong vacancies from candidate (unreviewed) companies "
-             "(default: include them, capped per run)",
+        "(default: include them, capped per run)",
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-workers", type=int, default=MAX_CONCURRENT)
     parser.add_argument(
-        "--archive", action="store_true",
+        "--archive",
+        action="store_true",
         help="With --save: auto-archive unseen vacancies scoring below "
-             "LLM_SCORE_THRESHOLD after saving (default: archival stays paused)",
+        "LLM_SCORE_THRESHOLD after saving (default: archival stays paused)",
     )
     return parser
 
 
 # Print help and exit BEFORE importing anything that touches the DB or profile.
 from cli_help import wants_help
+
 if __name__ == "__main__" and wants_help():
     build_parser().parse_args()
 
@@ -86,13 +85,14 @@ sys.stdout = _real_stdout
 # Inline utilities
 # ---------------------------------------------------------------------------
 
+
 def _parse_json(text: str) -> dict:
     """Parse JSON from LLM response, handling fences, preamble."""
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    fence = re.search(r'```(?:json)?\s*\n?(.*?)```', text, re.DOTALL)
+    fence = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
     if fence:
         try:
             return json.loads(fence.group(1).strip())
@@ -111,10 +111,7 @@ def _sanitize_text(text: str) -> str:
     """Normalize text for safe API submission."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = text.replace("\xa0", " ")
-    text = "".join(
-        c for c in text
-        if c == "\n" or c == "\t" or (ord(c) >= 32 and ord(c) != 127)
-    )
+    text = "".join(c for c in text if c == "\n" or c == "\t" or (ord(c) >= 32 and ord(c) != 127))
     return text
 
 
@@ -124,7 +121,9 @@ def _build_user_msg(vacancy: dict) -> str:
     Vacancy scoring is independent of company scoring (KTD4): the company
     alignment_score is intentionally not part of the prompt input.
     """
-    description = vacancy.get("full_description") or vacancy.get("snippet") or "No description available"
+    description = (
+        vacancy.get("full_description") or vacancy.get("snippet") or "No description available"
+    )
     description = _sanitize_text(description)
     if len(description) > 8000:
         description = description[:8000] + "\n\n[Description truncated]"
@@ -133,7 +132,11 @@ def _build_user_msg(vacancy: dict) -> str:
     loc_parts = []
     for loc in locs:
         # Try structured v2 fields first, fall back to v1 'location' text
-        parts = [p for p in [loc.get("city"), loc.get("country"), loc.get("region"), loc.get("work_mode")] if p]
+        parts = [
+            p
+            for p in [loc.get("city"), loc.get("country"), loc.get("region"), loc.get("work_mode")]
+            if p
+        ]
         if not parts:
             # v1 fallback: 'location' key contains free-text like "Washington, DC metro area"
             v1_loc = loc.get("location")
@@ -158,8 +161,10 @@ def _build_user_msg(vacancy: dict) -> str:
 # Data loading + dedup
 # ---------------------------------------------------------------------------
 
-def _load_and_dedup(*, force=False, include_passed=False,
-                    include_candidates=True, limit=None, offset=0):
+
+def _load_and_dedup(
+    *, force=False, include_passed=False, include_candidates=True, limit=None, offset=0
+):
     """Load vacancies, dedup by (org, title), filter.
 
     Returns: (roles, fitness_map, stats)
@@ -174,7 +179,8 @@ def _load_and_dedup(*, force=False, include_passed=False,
     filter (filter_vacancies.py), not here.
     """
     from database_supabase import (
-        load_vacancies, get_company_fitness_map,
+        load_vacancies,
+        get_company_fitness_map,
         load_candidate_vacancies_for_scoring,
     )
 
@@ -182,7 +188,8 @@ def _load_and_dedup(*, force=False, include_passed=False,
     # subagent budget on auto-passed expired or user-skipped rows.
     status_exclude = None if include_passed else ["passed", "skipped"]
     vacancies = (
-        load_vacancies(status_exclude=status_exclude) if force
+        load_vacancies(status_exclude=status_exclude)
+        if force
         else load_vacancies(unscored_only=True, status_exclude=status_exclude)
     )
     fitness_map = get_company_fitness_map()
@@ -203,7 +210,8 @@ def _load_and_dedup(*, force=False, include_passed=False,
             print(
                 f"  [CANDIDATE RESCUE] +{candidate_count} vacancies from "
                 f"candidate (unreviewed) companies",
-                file=sys.stderr, flush=True,
+                file=sys.stderr,
+                flush=True,
             )
 
     role_groups: dict[tuple[str, str], list[dict]] = {}
@@ -212,8 +220,7 @@ def _load_and_dedup(*, force=False, include_passed=False,
         role_groups.setdefault(key, []).append(v)
 
     roles = []
-    stats = {"blacklisted": 0, "blind": 0, "total": len(vacancies),
-             "candidates": candidate_count}
+    stats = {"blacklisted": 0, "blind": 0, "total": len(vacancies), "candidates": candidate_count}
     for key, members in role_groups.items():
         rep = max(
             members,
@@ -221,15 +228,19 @@ def _load_and_dedup(*, force=False, include_passed=False,
         )
         # Compute desc up-front so blacklist can check description-level kills.
         desc = rep.get("full_description") or rep.get("snippet") or ""
-        if (filters.title_words_blacklisted(rep["title"])
-                or filters.description_words_blacklisted(desc)):
+        if filters.title_words_blacklisted(rep["title"]) or filters.description_words_blacklisted(
+            desc
+        ):
             stats["blacklisted"] += 1
             continue
         # Blind vacancy gate — skip if no description AND no snippet
         if not desc.strip():
             stats["blind"] += 1
-            print(f"  [BLIND SKIP] {rep['org']:25s} {rep['title'][:50]} (no description)",
-                  file=sys.stderr, flush=True)
+            print(
+                f"  [BLIND SKIP] {rep['org']:25s} {rep['title'][:50]} (no description)",
+                file=sys.stderr,
+                flush=True,
+            )
             continue
         if not force and rep.get("llm_score") is not None and rep.get("llm_score") != -1:
             continue
@@ -245,6 +256,7 @@ def _load_and_dedup(*, force=False, include_passed=False,
 # ---------------------------------------------------------------------------
 # Shared: build score_data
 # ---------------------------------------------------------------------------
+
 
 def _apply_onsite_penalty(score: int, country: str, work_mode: str) -> int:
     """Subtract the profile's on-site penalty for a non-remote role outside the
@@ -301,6 +313,7 @@ def _make_score_data(result: dict, rep: dict) -> dict:
 # Mode: --local
 # ---------------------------------------------------------------------------
 
+
 def cmd_local(args):
     """Output JSON to stdout for subagent scoring."""
     _real_stdout = sys.stdout
@@ -310,7 +323,8 @@ def cmd_local(args):
         force=args.force,
         include_passed=args.include_passed,
         include_candidates=not args.no_candidates,
-        limit=args.limit, offset=args.offset,
+        limit=args.limit,
+        offset=args.offset,
     )
 
     if not roles:
@@ -324,15 +338,17 @@ def cmd_local(args):
     for _key, rep, members in roles:
         user_msg = _build_user_msg(rep)
 
-        output.append({
-            "payload_kind": "vacancy",
-            "id": rep["id"],
-            "member_ids": [m["id"] for m in members],
-            "org": rep["org"],
-            "title": rep["title"],
-            "system_prompt": SYSTEM_PROMPT,
-            "user_msg": user_msg,
-        })
+        output.append(
+            {
+                "payload_kind": "vacancy",
+                "id": rep["id"],
+                "member_ids": [m["id"] for m in members],
+                "org": rep["org"],
+                "title": rep["title"],
+                "system_prompt": SYSTEM_PROMPT,
+                "user_msg": user_msg,
+            }
+        )
 
     sys.stdout = _real_stdout
     json.dump(output, _real_stdout, ensure_ascii=False)
@@ -341,6 +357,7 @@ def cmd_local(args):
 # ---------------------------------------------------------------------------
 # Mode: --save
 # ---------------------------------------------------------------------------
+
 
 def cmd_save(_args):
     """Read scored results from stdin JSON, save to DB."""
@@ -429,8 +446,10 @@ def cmd_save(_args):
     # noisy "No module named 'cleanup_locations'" line on every --save).
     try:
         import importlib.util
+
         if importlib.util.find_spec("cleanup_locations") is not None:
             from cleanup_locations import normalize_location
+
             scored_ids = [m for entry in data for m in entry.get("member_ids", [])]
             if scored_ids:
                 heal_cur = conn.cursor()
@@ -451,6 +470,7 @@ def cmd_save(_args):
                         new_locs.append(cleaned)
                     if changed:
                         from db_backend import Json
+
                         heal_cur.execute(
                             "UPDATE vacancy SET locations = %s WHERE id = %s",
                             (Json(new_locs), vid),
@@ -472,6 +492,7 @@ def cmd_save(_args):
     # the caller passes --archive. Without the flag we print one line so the
     # documented step is visibly run, not silently missing.
     from database_supabase import archive_vacancies
+
     if getattr(_args, "archive", False):
         archived = archive_vacancies(force=True)
         # DAL writes are not auto-committed (AGENTS.md) — persist the archival
@@ -485,6 +506,7 @@ def cmd_save(_args):
 
     # Regenerate dashboard so ticker and stats reflect new scores
     from report import generate_dashboard
+
     generate_dashboard()
     print("Dashboard regenerated.")
 
@@ -493,12 +515,14 @@ def cmd_save(_args):
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     args = build_parser().parse_args()
 
     # Always announce the backend on stderr (safe even in --local mode where
     # stdout carries pure JSON for the subagents).
     from db_backend import print_backend_banner
+
     print_backend_banner(sys.stderr)
 
     if args.save:

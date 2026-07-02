@@ -34,8 +34,16 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 # clean 500 rather than a server that won't boot.
 
 VALID_STATUSES = {
-    "unseen", "liked", "passed", "to_apply", "to_research",
-    "to_network", "skipped", "applied", "expiring", "archived",
+    "unseen",
+    "liked",
+    "passed",
+    "to_apply",
+    "to_research",
+    "to_network",
+    "skipped",
+    "applied",
+    "expiring",
+    "archived",
 }
 VALID_ACTIONS = {"approve", "reject"}
 
@@ -52,6 +60,7 @@ _db_lock = threading.Lock()
 
 def _commit():
     from db_conn import get_conn
+
     get_conn().commit()
 
 
@@ -127,6 +136,7 @@ class Handler(BaseHTTPRequestHandler):
     def _api_statuses(self):
         try:
             from database_supabase import load_vacancies
+
             with _db_lock:
                 vacs = load_vacancies(include_inactive_companies=True, light=True)
             statuses, timestamps = {}, {}
@@ -146,6 +156,7 @@ class Handler(BaseHTTPRequestHandler):
     def _api_company_statuses(self):
         try:
             from db_conn import get_conn
+
             with _db_lock:
                 conn = get_conn()
                 cur = conn.cursor()
@@ -169,6 +180,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             from db_conn import get_conn
             from database_supabase import update_vacancy_status
+
             with _db_lock:
                 conn = get_conn()
                 cur = conn.cursor()
@@ -196,13 +208,16 @@ class Handler(BaseHTTPRequestHandler):
         reason = f"{action}d via local dashboard"
         try:
             from db_conn import get_conn
+
             with _db_lock:
                 conn = get_conn()
                 cur = conn.cursor()
                 cur.execute("SELECT id FROM company WHERE id = %s", (company_id,))
                 if cur.fetchone() is None:
                     cur.close()
-                    return self._send_json(404, {"error": "Company not found", "company_id": company_id})
+                    return self._send_json(
+                        404, {"error": "Company not found", "company_id": company_id}
+                    )
                 cur.execute(
                     "UPDATE company SET status = %s, status_reason = %s WHERE id = %s",
                     (new_status, reason, company_id),
@@ -246,9 +261,11 @@ def main():
             "`python3 scripts/fetch_vacancies.py --report-only` first.\n"
         )
 
-    backend = "SQLite (local)" if not (
-        os.environ.get("SUPABASE_DB_URL") or os.environ.get("SUPABASE_DIRECT_URL")
-    ) else "Supabase"
+    backend = (
+        "SQLite (local)"
+        if not (os.environ.get("SUPABASE_DB_URL") or os.environ.get("SUPABASE_DIRECT_URL"))
+        else "Supabase"
+    )
 
     server = HTTPServer((args.host, args.port), Handler)
     url = f"http://{args.host}:{args.port}/"

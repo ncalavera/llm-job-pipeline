@@ -1,6 +1,7 @@
 """The dashboard's 'N fetched, none scored yet' hint must count only vacancies
 genuinely awaiting scoring — not already-triaged rows that happen to lack a
 score. Regression for the inflated-count bug."""
+
 import sys
 from pathlib import Path
 

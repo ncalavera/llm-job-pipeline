@@ -25,19 +25,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Filter unscored vacancies")
     parser.add_argument("--delete-ids", type=str, help="Comma-separated IDs to archive and remove")
     parser.add_argument("--suggest-blacklist", action="store_true", help="Analyze deleted patterns")
-    parser.add_argument("--dedup", action="store_true", help="Run dedup pre-step: clean exact hash dupes + find fuzzy dupes")
+    parser.add_argument(
+        "--dedup",
+        action="store_true",
+        help="Run dedup pre-step: clean exact hash dupes + find fuzzy dupes",
+    )
     return parser
 
 
 # Print help and exit BEFORE importing anything that touches the DB or profile.
 from cli_help import wants_help
+
 if __name__ == "__main__" and wants_help():
     build_parser().parse_args()
 
 from config import (
-    COMPANIES, VACANCIES_DIR, GLOBAL_BLACKLIST,
-    GEO_BANNED_COUNTRIES, GEO_BANNED_REGIONS, GEO_KEEP_COUNTRIES_SET, GEO_ACTIVE,
-    resolve_canonical_name,
+    VACANCIES_DIR,
+    GLOBAL_BLACKLIST,
+    GEO_BANNED_COUNTRIES,
+    GEO_BANNED_REGIONS,
+    GEO_KEEP_COUNTRIES_SET,
+    GEO_ACTIVE,
 )
 from geo import canonical_country, country_for_location, country_banned
 from db_backend import RealDictCursor
@@ -45,8 +53,10 @@ import filters
 from database_supabase import (
     load_vacancies,
     delete_vacancies as db_delete_vacancies,
-    get_conn, update_vacancy_fields, make_vacancy_id,
-    get_archived_hashes, record_archived_hashes,
+    get_conn,
+    update_vacancy_fields,
+    get_archived_hashes,
+    record_archived_hashes,
 )
 
 
@@ -54,20 +64,20 @@ from database_supabase import (
 # HTML stripping for description blacklist checking
 # ---------------------------------------------------------------------------
 
-_BLOCK_TAGS = re.compile(r'<(script|style)[^>]*>.*?</(script|style)>', re.DOTALL | re.IGNORECASE)
-_HTML_TAGS = re.compile(r'<[^>]+>')
-_MULTI_WS = re.compile(r'\s{2,}')
+_BLOCK_TAGS = re.compile(r"<(script|style)[^>]*>.*?</(script|style)>", re.DOTALL | re.IGNORECASE)
+_HTML_TAGS = re.compile(r"<[^>]+>")
+_MULTI_WS = re.compile(r"\s{2,}")
 _DESCRIPTION_SCAN_CHARS: int = 600
 
 
 def _strip_html(raw: str) -> str:
     """Strip HTML tags, script/style blocks, and decode entities."""
-    if not raw or '<' not in raw:
+    if not raw or "<" not in raw:
         return raw
-    text = _BLOCK_TAGS.sub(' ', raw)
-    text = _HTML_TAGS.sub(' ', text)
+    text = _BLOCK_TAGS.sub(" ", raw)
+    text = _HTML_TAGS.sub(" ", text)
     text = _html.unescape(text)
-    return _MULTI_WS.sub(' ', text).strip()
+    return _MULTI_WS.sub(" ", text).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -76,9 +86,16 @@ def _strip_html(raw: str) -> str:
 # ---------------------------------------------------------------------------
 
 _FUZZY_THRESHOLD: float = 0.85
-_PROTECTED_STATUSES: frozenset[str] = frozenset({
-    "liked", "to_apply", "to_research", "to_network", "applied", "archived",
-})
+_PROTECTED_STATUSES: frozenset[str] = frozenset(
+    {
+        "liked",
+        "to_apply",
+        "to_research",
+        "to_network",
+        "applied",
+        "archived",
+    }
+)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -236,12 +253,18 @@ def _clean_exact_dupes() -> dict:
     archive_dir = PROJECT_ROOT / "vacancies" / "archive"
     archive_dir.mkdir(parents=True, exist_ok=True)
     archive_path = archive_dir / f"dupe_cleanup_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
-    archive_path.write_text(json.dumps({
-        "archived_at": datetime.now().isoformat(),
-        "source": "filter_dedup",
-        "count": len(losers_to_delete),
-        "vacancies": losers_data,
-    }, indent=2, default=str))
+    archive_path.write_text(
+        json.dumps(
+            {
+                "archived_at": datetime.now().isoformat(),
+                "source": "filter_dedup",
+                "count": len(losers_to_delete),
+                "vacancies": losers_data,
+            },
+            indent=2,
+            default=str,
+        )
+    )
 
     # Delete losers
     db_delete_vacancies(losers_to_delete)
@@ -278,6 +301,7 @@ def _serialize_vacancy(vac: dict) -> dict:
 # Classification
 # ---------------------------------------------------------------------------
 
+
 def _get_vacancy_url(vac: dict) -> str:
     """Get best URL for a vacancy: first location URL, then top-level."""
     locs = vac.get("locations", [])
@@ -298,6 +322,7 @@ def _get_vacancy_url(vac: dict) -> str:
 # and are NEVER used for exclusion — excluding "canada" must not drop the United
 # States just because both share the "us" bucket. No country is privileged.
 # ---------------------------------------------------------------------------
+
 
 def _normalize_country(name: str) -> str:
     """Canonicalize a country name for exact comparison (alias-proof)."""
@@ -337,14 +362,15 @@ def _entry_is_excluded_geo(loc: dict) -> bool:
 
     # Multi-city free text (";"-joined): excluded only when EVERY part resolves
     # to a banned country. A single kept part keeps the whole entry.
-    raw_text = _normalize_country(loc.get("location") or "") or _normalize_country(loc.get("city") or "")
+    raw_text = _normalize_country(loc.get("location") or "") or _normalize_country(
+        loc.get("city") or ""
+    )
     if ";" in raw_text and not _normalize_country(loc.get("country") or ""):
         parts = [p.strip() for p in raw_text.split(";") if p.strip()]
         if not parts:
             return False
         return all(
-            _country_is_banned(country_for_location({"location": part}) or "")
-            for part in parts
+            _country_is_banned(country_for_location({"location": part}) or "") for part in parts
         )
 
     country = country_for_location(loc)
@@ -365,9 +391,7 @@ def _entry_is_remote(loc: dict) -> bool:
     a non-US worker with timezone overlap)."""
     if "remote" in (loc.get("work_mode") or "").lower():
         return True
-    text = " ".join(
-        str(loc.get(k) or "") for k in ("location", "city", "region")
-    ).lower()
+    text = " ".join(str(loc.get(k) or "") for k in ("location", "city", "region")).lower()
     return any(m in text for m in _REMOTE_MARKERS)
 
 
@@ -529,6 +553,7 @@ def classify_vacancies(db: dict = None) -> dict:
 # Stats aggregation
 # ---------------------------------------------------------------------------
 
+
 def compute_stats(categories: dict) -> dict:
     """Compute summary statistics from classified vacancies."""
     total = sum(len(v) for v in categories.values())
@@ -555,8 +580,16 @@ def compute_stats(categories: dict) -> dict:
         ready_by_org[vac.get("org", "Unknown")] += 1
 
     # Per-org table (across all categories)
-    org_stats = defaultdict(lambda: {"tier": "C", "total": 0, "ready": 0, "delete": 0, "reenrich": 0})
-    delete_cats = ["delete_blacklist", "delete_junk", "delete_rearchived", "delete_geo", "delete_stale_blind"]
+    org_stats = defaultdict(
+        lambda: {"tier": "C", "total": 0, "ready": 0, "delete": 0, "reenrich": 0}
+    )
+    delete_cats = [
+        "delete_blacklist",
+        "delete_junk",
+        "delete_rearchived",
+        "delete_geo",
+        "delete_stale_blind",
+    ]
     reenrich_cats = ["reenrich_blind", "reenrich_thin"]
     for cat_name, items in categories.items():
         for _, vac in items:
@@ -576,7 +609,11 @@ def compute_stats(categories: dict) -> dict:
         "company_gated": company_gated,
         "reenrich_count": reenrich_count,
         "ready_count": ready_count,
-        "ready_by_tier": dict(sorted(ready_by_tier.items(), key=lambda x: {"S": 0, "A": 1, "B": 2, "C": 3}.get(x[0], 99))),
+        "ready_by_tier": dict(
+            sorted(
+                ready_by_tier.items(), key=lambda x: {"S": 0, "A": 1, "B": 2, "C": 3}.get(x[0], 99)
+            )
+        ),
         "ready_by_region": dict(ready_by_region.most_common()),
         "ready_by_relevance": dict(sorted(ready_by_relevance.items(), reverse=True)),
         "ready_by_org": dict(ready_by_org.most_common(15)),
@@ -588,15 +625,22 @@ def compute_stats(categories: dict) -> dict:
 # HTML report
 # ---------------------------------------------------------------------------
 
+
 def _esc(text: str) -> str:
     """Escape HTML."""
-    return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+    return (
+        (text or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
 
 
 def _truncate(text: str, maxlen: int = 60) -> str:
     if len(text) <= maxlen:
         return text
-    return text[:maxlen - 1] + "\u2026"
+    return text[: maxlen - 1] + "\u2026"
 
 
 def generate_html_report(categories: dict, stats: dict, output_path: Path) -> Path:
@@ -616,9 +660,19 @@ def generate_html_report(categories: dict, stats: dict, output_path: Path) -> Pa
 
     delete_cats = [
         ("delete_blacklist", "Blacklist Match", "#D4787A", "Title matched GLOBAL_BLACKLIST"),
-        ("delete_junk", "Content Junk", "#9B59B6", "reCAPTCHA, donation widgets, error pages, navigation snippets"),
+        (
+            "delete_junk",
+            "Content Junk",
+            "#9B59B6",
+            "reCAPTCHA, donation widgets, error pages, navigation snippets",
+        ),
         ("delete_rearchived", "Re-archived", "#E67E22", "Previously archived (90-day cooldown)"),
-        ("delete_geo", "Excluded country", "#A0846B", "All locations in a country the profile excludes, no remote"),
+        (
+            "delete_geo",
+            "Excluded country",
+            "#A0846B",
+            "All locations in a country the profile excludes, no remote",
+        ),
         ("delete_stale_blind", "Stale Blind", "#A89680", "Has URL, no description, >7 days"),
     ]
     for cat_key, cat_label, cat_color, cat_desc in delete_cats:
@@ -661,7 +715,9 @@ def generate_html_report(categories: dict, stats: dict, output_path: Path) -> Pa
     # Build reenrich section
     reenrich_rows = ""
     all_reenrich = categories["reenrich_blind"] + categories["reenrich_thin"]
-    for vid, vac in sorted(all_reenrich, key=lambda x: {"S": 0, "A": 1, "B": 2, "C": 3}.get(x[1].get("tier"), 99)):
+    for vid, vac in sorted(
+        all_reenrich, key=lambda x: {"S": 0, "A": 1, "B": 2, "C": 3}.get(x[1].get("tier"), 99)
+    ):
         org = _esc(vac.get("org", "?"))
         title = _esc(_truncate(vac.get("title", "?"), 50))
         url = _get_vacancy_url(vac)
@@ -679,7 +735,12 @@ def generate_html_report(categories: dict, stats: dict, output_path: Path) -> Pa
     # Ready breakdown by tier
     tier_rows = ""
     for tier, count in sorted(stats["ready_by_tier"].items()):
-        tier_label = {"S": "S — Strategic", "A": "A — Strong Fit", "B": "B — Monitor", "C": "C — Low Priority"}.get(str(tier), f"Tier {tier}")
+        tier_label = {
+            "S": "S — Strategic",
+            "A": "A — Strong Fit",
+            "B": "B — Monitor",
+            "C": "C — Low Priority",
+        }.get(str(tier), f"Tier {tier}")
         tier_rows += f"<tr><td>{tier_label}</td><td style='font-weight:600'>{count}</td></tr>\n"
 
     # Ready breakdown by region
@@ -700,11 +761,11 @@ def generate_html_report(categories: dict, stats: dict, output_path: Path) -> Pa
         style = ' style="background:#FFF0E0"' if del_pct_org > 80 else ""
         org_summary_rows += f"""<tr{style}>
             <td style="font-weight:500">{_esc(org)}</td>
-            <td>{data['tier']}</td>
-            <td>{data['total']}</td>
-            <td style="color:#059669">{data['ready']}</td>
-            <td style="color:#D4787A">{data['delete']}</td>
-            <td style="color:#E8915A">{data['reenrich']}</td>
+            <td>{data["tier"]}</td>
+            <td>{data["total"]}</td>
+            <td style="color:#059669">{data["ready"]}</td>
+            <td style="color:#D4787A">{data["delete"]}</td>
+            <td style="color:#E8915A">{data["reenrich"]}</td>
             <td>{del_pct_org:.0f}%</td>
         </tr>\n"""
 
@@ -791,7 +852,9 @@ body::after {{
     <div class="hero">
         <div class="hero-label">Vacancy Pipeline</div>
         <h1>Filter Report</h1>
-        <p>{datetime.now().strftime('%d %B %Y, %H:%M')} &mdash; {total} unscored vacancies analyzed</p>
+        <p>{datetime.now().strftime("%d %B %Y, %H:%M")} &mdash; {
+        total
+    } unscored vacancies analyzed</p>
     </div>
 
     <!-- Stat cards -->
@@ -817,23 +880,31 @@ body::after {{
     <!-- Funnel -->
     <div class="funnel">
         <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px">
-            FUNNEL: {total} unscored &rarr; {delete_count} delete + {reenrich_count} re-enrich &rarr; <strong>{ready_count} ready</strong>
+            FUNNEL: {total} unscored &rarr; {delete_count} delete + {
+        reenrich_count
+    } re-enrich &rarr; <strong>{ready_count} ready</strong>
         </div>
         <div class="funnel-bar">
             <div class="funnel-seg" style="width:{del_pct:.1f}%;background:var(--accent-rose)">
-                {f'{del_pct:.0f}%' if del_pct > 5 else ''}
+                {f"{del_pct:.0f}%" if del_pct > 5 else ""}
             </div>
             <div class="funnel-seg" style="width:{reen_pct:.1f}%;background:var(--accent-warm)">
-                {f'{reen_pct:.0f}%' if reen_pct > 5 else ''}
+                {f"{reen_pct:.0f}%" if reen_pct > 5 else ""}
             </div>
             <div class="funnel-seg" style="width:{ready_pct:.1f}%;background:#059669">
-                {f'{ready_pct:.0f}%' if ready_pct > 5 else ''}
+                {f"{ready_pct:.0f}%" if ready_pct > 5 else ""}
             </div>
         </div>
         <div style="display:flex;gap:24px;font-size:12px;color:var(--text-secondary)">
-            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--accent-rose);margin-right:4px"></span>Delete ({delete_count})</span>
-            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--accent-warm);margin-right:4px"></span>Re-enrich ({reenrich_count})</span>
-            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#059669;margin-right:4px"></span>Ready ({ready_count})</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--accent-rose);margin-right:4px"></span>Delete ({
+        delete_count
+    })</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--accent-warm);margin-right:4px"></span>Re-enrich ({
+        reenrich_count
+    })</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#059669;margin-right:4px"></span>Ready ({
+        ready_count
+    })</span>
         </div>
     </div>
 
@@ -861,7 +932,11 @@ body::after {{
     <div class="section">
         <div class="section-label">Delete Candidates</div>
         <h2>{delete_count} vacancies to remove</h2>
-        {delete_sections_html if delete_sections_html else '<p style="color:var(--text-secondary)">No delete candidates found.</p>'}
+        {
+        delete_sections_html
+        if delete_sections_html
+        else '<p style="color:var(--text-secondary)">No delete candidates found.</p>'
+    }
     </div>
 
     <!-- Re-enrich section -->
@@ -870,9 +945,10 @@ body::after {{
         <h2>{reenrich_count} vacancies need content</h2>
         <p style="color:var(--text-secondary);margin-bottom:16px">
             Estimated Firecrawl credits: ~{firecrawl_credits}
-            ({len(categories['reenrich_blind'])} blind + {len(categories['reenrich_thin'])} thin)
+            ({len(categories["reenrich_blind"])} blind + {len(categories["reenrich_thin"])} thin)
         </p>
-        {f'''<div class="card" style="overflow-x:auto">
+        {
+        f'''<div class="card" style="overflow-x:auto">
             <table class="data-table">
                 <thead><tr>
                     <th>Organization</th>
@@ -882,7 +958,10 @@ body::after {{
                 </tr></thead>
                 <tbody>{reenrich_rows}</tbody>
             </table>
-        </div>''' if reenrich_rows else '<p style="color:var(--text-secondary)">No re-enrich candidates.</p>'}
+        </div>'''
+        if reenrich_rows
+        else '<p style="color:var(--text-secondary)">No re-enrich candidates.</p>'
+    }
     </div>
 
     <!-- Per-org table -->
@@ -912,9 +991,25 @@ body::after {{
         <div class="reco">
             <h3>Suggested pipeline</h3>
             <ul>
-                {'<li><strong>Delete</strong> ' + str(delete_count) + ' irrelevant vacancies to clean the DB</li>' if delete_count else ''}
-                {'<li><strong>Re-enrich</strong> ' + str(reenrich_count) + ' vacancies via Firecrawl (~' + str(firecrawl_credits) + ' credits)</li>' if reenrich_count else ''}
-                <li><strong>Score</strong> {ready_count} ready vacancies with <code>/score</code></li>
+                {
+        "<li><strong>Delete</strong> "
+        + str(delete_count)
+        + " irrelevant vacancies to clean the DB</li>"
+        if delete_count
+        else ""
+    }
+                {
+        "<li><strong>Re-enrich</strong> "
+        + str(reenrich_count)
+        + " vacancies via Firecrawl (~"
+        + str(firecrawl_credits)
+        + " credits)</li>"
+        if reenrich_count
+        else ""
+    }
+                <li><strong>Score</strong> {
+        ready_count
+    } ready vacancies with <code>/score</code></li>
                 <li>Run <strong><code>--suggest-blacklist</code></strong> after deletion to improve future filtering</li>
             </ul>
         </div>
@@ -932,18 +1027,23 @@ body::after {{
 # Delete mode
 # ---------------------------------------------------------------------------
 
+
 def delete_vacancies_filtered(ids_to_delete: list[str]) -> Path:
     """Archive and remove specified vacancies from Supabase.
 
     Writes local JSON archive before deleting.
     Returns path to the archive file.
     """
-    from db_backend import RealDictCursor, Json
+    from db_backend import RealDictCursor
+
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     # Fetch vacancy data for archive
-    cur.execute("SELECT v.*, c.canonical_name AS org FROM vacancy v JOIN company c ON v.company_id = c.id WHERE v.id = ANY(%s::uuid[])", (ids_to_delete,))
+    cur.execute(
+        "SELECT v.*, c.canonical_name AS org FROM vacancy v JOIN company c ON v.company_id = c.id WHERE v.id = ANY(%s::uuid[])",
+        (ids_to_delete,),
+    )
     rows = cur.fetchall()
     if not rows:
         print("No matching vacancy IDs found in DB.")
@@ -970,17 +1070,22 @@ def delete_vacancies_filtered(ids_to_delete: list[str]) -> Path:
     archive_path = archive_dir / f"filter_{ts}.json"
 
     with open(archive_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "archived_at": datetime.now().isoformat(),
-            "source": "filter",
-            "count": len(found),
-            "vacancies": found,
-        }, f, indent=2, ensure_ascii=False, default=str)
+        json.dump(
+            {
+                "archived_at": datetime.now().isoformat(),
+                "source": "filter",
+                "count": len(found),
+                "vacancies": found,
+            },
+            f,
+            indent=2,
+            ensure_ascii=False,
+            default=str,
+        )
 
     # Record archived hashes for dedup (prevents re-fetch → re-score → re-archive)
     archive_entries = [
-        (v.get("dedup_hash"), "filter_deleted")
-        for v in found.values() if v.get("dedup_hash")
+        (v.get("dedup_hash"), "filter_deleted") for v in found.values() if v.get("dedup_hash")
     ]
     record_archived_hashes(archive_entries)
 
@@ -997,6 +1102,7 @@ def delete_vacancies_filtered(ids_to_delete: list[str]) -> Path:
 # ---------------------------------------------------------------------------
 # Blacklist suggestions
 # ---------------------------------------------------------------------------
+
 
 def suggest_blacklist() -> dict:
     """Analyze recent filter archives and suggest blacklist patterns.
@@ -1027,12 +1133,12 @@ def suggest_blacklist() -> dict:
     for vid, vac in vacancies.items():
         title = vac.get("title", "").lower()
         org = vac.get("org", "Unknown")
-        words = re.findall(r'[a-z]+', title)
+        words = re.findall(r"[a-z]+", title)
 
         # Generate bigrams and trigrams
         for n in (2, 3):
             for i in range(len(words) - n + 1):
-                ngram = " ".join(words[i:i + n])
+                ngram = " ".join(words[i : i + n])
                 # Skip if already covered by existing blacklist
                 if any(bl in ngram or ngram in bl for bl in bl_lower):
                     continue
@@ -1044,14 +1150,17 @@ def suggest_blacklist() -> dict:
         total_count = sum(orgs.values())
         unique_orgs = len(orgs)
         if total_count >= 3 and unique_orgs >= 2:
-            org_breakdown = ", ".join(f"{org}\u00d7{cnt}" for org, cnt in
-                                       sorted(orgs.items(), key=lambda x: -x[1]))
-            title_patterns.append({
-                "pattern": pattern,
-                "count": total_count,
-                "orgs": unique_orgs,
-                "breakdown": org_breakdown,
-            })
+            org_breakdown = ", ".join(
+                f"{org}\u00d7{cnt}" for org, cnt in sorted(orgs.items(), key=lambda x: -x[1])
+            )
+            title_patterns.append(
+                {
+                    "pattern": pattern,
+                    "count": total_count,
+                    "orgs": unique_orgs,
+                    "breakdown": org_breakdown,
+                }
+            )
 
     # Company observations: orgs with >80% deletion rate
     org_counts = Counter()
@@ -1069,12 +1178,14 @@ def suggest_blacklist() -> dict:
     for org, deleted in org_deleted.most_common():
         total = org_counts.get(org, deleted)
         if total >= 5 and deleted / total > 0.8:
-            company_observations.append({
-                "org": org,
-                "deleted": deleted,
-                "total": total,
-                "pct": deleted / total * 100,
-            })
+            company_observations.append(
+                {
+                    "org": org,
+                    "deleted": deleted,
+                    "total": total,
+                    "pct": deleted / total * 100,
+                }
+            )
 
     # Print suggestions
     print(f"\nBLACKLIST SUGGESTIONS (from {len(vacancies)} deleted vacancies in {latest.name}):\n")
@@ -1087,9 +1198,11 @@ def suggest_blacklist() -> dict:
         print("  No new title patterns found.")
 
     if company_observations:
-        print(f"\n  Company-level observations:")
+        print("\n  Company-level observations:")
         for c in company_observations:
-            print(f'    {c["org"]}: {c["deleted"]}/{c["total"]} deleted ({c["pct"]:.0f}%) \u2014 consider postponing')
+            print(
+                f"    {c['org']}: {c['deleted']}/{c['total']} deleted ({c['pct']:.0f}%) \u2014 consider postponing"
+            )
     else:
         print("\n  No company-level observations.")
 
@@ -1103,10 +1216,12 @@ def suggest_blacklist() -> dict:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     args = build_parser().parse_args()
 
     from db_backend import print_backend_banner
+
     print_backend_banner()
 
     if args.suggest_blacklist:
@@ -1126,17 +1241,29 @@ def main():
         print("Running dedup pre-step...", file=sys.stderr, flush=True)
         dedup_result = _clean_exact_dupes()
         if dedup_result.get("merged", 0) > 0:
-            print(f"  Exact dupes cleaned: {dedup_result['merged']} "
-                  f"(examined {dedup_result['examined']} groups, "
-                  f"{dedup_result.get('protected', 0)} protected)", file=sys.stderr, flush=True)
+            print(
+                f"  Exact dupes cleaned: {dedup_result['merged']} "
+                f"(examined {dedup_result['examined']} groups, "
+                f"{dedup_result.get('protected', 0)} protected)",
+                file=sys.stderr,
+                flush=True,
+            )
         else:
-            print(f"  No exact dupes found ({dedup_result['examined']} groups examined)", file=sys.stderr, flush=True)
+            print(
+                f"  No exact dupes found ({dedup_result['examined']} groups examined)",
+                file=sys.stderr,
+                flush=True,
+            )
 
         # Fuzzy dedup on remaining unscored vacancies
         all_vacs = load_vacancies(unscored_only=True)
         fuzzy_dupes = _find_fuzzy_dupes(all_vacs)
         if fuzzy_dupes:
-            print(f"  Fuzzy dupes found: {len(fuzzy_dupes)} pairs (quarantined for review)", file=sys.stderr, flush=True)
+            print(
+                f"  Fuzzy dupes found: {len(fuzzy_dupes)} pairs (quarantined for review)",
+                file=sys.stderr,
+                flush=True,
+            )
         else:
             print("  No fuzzy dupes found", file=sys.stderr, flush=True)
 
@@ -1145,8 +1272,14 @@ def main():
     stats = compute_stats(categories)
 
     # --- Structured filter summary (for feedback loop) ---
-    print(f"\n--- Filter Summary ---", file=sys.stderr, flush=True)
-    for cat in ["delete_blacklist", "delete_junk", "delete_rearchived", "delete_geo", "delete_stale_blind"]:
+    print("\n--- Filter Summary ---", file=sys.stderr, flush=True)
+    for cat in [
+        "delete_blacklist",
+        "delete_junk",
+        "delete_rearchived",
+        "delete_geo",
+        "delete_stale_blind",
+    ]:
         count = len(categories.get(cat, []))
         if count:
             print(f"  {cat}: {count}", file=sys.stderr, flush=True)
@@ -1154,21 +1287,35 @@ def main():
     if junk_items:
         junk_by_company = Counter(v.get("org", "?") for _, v in junk_items)
         junk_by_reason = Counter(v.get("_junk_reason", "?") for _, v in junk_items)
-        print(f"  Junk by company: {dict(junk_by_company.most_common(5))}", file=sys.stderr, flush=True)
+        print(
+            f"  Junk by company: {dict(junk_by_company.most_common(5))}",
+            file=sys.stderr,
+            flush=True,
+        )
         print(f"  Junk by reason: {dict(junk_by_reason)}", file=sys.stderr, flush=True)
     rearchived = categories.get("delete_rearchived", [])
     if rearchived:
         rearch_by_company = Counter(v.get("org", "?") for _, v in rearchived)
-        print(f"  Re-archived by company: {dict(rearch_by_company.most_common(5))}", file=sys.stderr, flush=True)
+        print(
+            f"  Re-archived by company: {dict(rearch_by_company.most_common(5))}",
+            file=sys.stderr,
+            flush=True,
+        )
     print(f"  Ready to score: {stats['ready_count']}", file=sys.stderr, flush=True)
-    print(f"--- End Filter Summary ---\n", file=sys.stderr, flush=True)
+    print("--- End Filter Summary ---\n", file=sys.stderr, flush=True)
 
     report_path = Path("REPORT-filter.html")
     generate_html_report(categories, stats, report_path)
 
     # Collect all delete IDs by category
     delete_ids = {}
-    for cat in ["delete_blacklist", "delete_junk", "delete_rearchived", "delete_geo", "delete_stale_blind"]:
+    for cat in [
+        "delete_blacklist",
+        "delete_junk",
+        "delete_rearchived",
+        "delete_geo",
+        "delete_stale_blind",
+    ]:
         delete_ids[cat] = [vid for vid, _ in categories.get(cat, [])]
 
     reenrich_ids = {
@@ -1192,6 +1339,7 @@ def main():
     print(json.dumps(output, indent=2, ensure_ascii=False))
 
     from database_supabase import validate_db
+
     validate_db()
 
 

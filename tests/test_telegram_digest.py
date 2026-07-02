@@ -17,20 +17,25 @@ ROW = {
     "full_description": None,
     "snippet": None,
     "compensation": None,
-    "locations": [{
-        "url": "https://example.com/jobs/1?a=1&b=2",
-        "city": "London", "country": "UK", "region": "europe",
-        "work_mode": "hybrid", "compensation": "£90k",
-    }],
+    "locations": [
+        {
+            "url": "https://example.com/jobs/1?a=1&b=2",
+            "city": "London",
+            "country": "UK",
+            "region": "europe",
+            "work_mode": "hybrid",
+            "compensation": "£90k",
+        }
+    ],
 }
 
 
 def test_build_message_escapes_html_and_has_all_parts():
     msg = td.build_message(dict(ROW), 1)
-    assert "&lt;&amp; Co&gt;" in msg          # HTML in the title is escaped
+    assert "&lt;&amp; Co&gt;" in msg  # HTML in the title is escaped
     assert "<b>1. Example Org —" in msg
     assert "🎯 89/100" in msg
-    assert "💰 £90k" in msg                    # compensation pulled from locations
+    assert "💰 £90k" in msg  # compensation pulled from locations
     assert "London, hybrid" in msg
     assert 'href="https://example.com/jobs/1?a=1&amp;b=2"' in msg
     assert "A short vacancy summary." in msg
@@ -40,7 +45,7 @@ def test_build_message_fits_telegram_limit():
     row = dict(ROW, llm_summary="x" * 10000)
     msg = td.build_message(row, 1)
     assert len(msg) <= td.MESSAGE_MAX_CHARS
-    assert "href=" in msg                      # the link survives truncation
+    assert "href=" in msg  # the link survives truncation
 
 
 def test_summary_fallback_to_description():
@@ -73,8 +78,8 @@ def test_parse_callback_rejects_garbage():
     assert td.parse_callback(None) is None
     assert td.parse_callback("") is None
     assert td.parse_callback("x:y:z") is None
-    assert td.parse_callback("v:abc:q") is None      # unknown action
-    assert td.parse_callback("v::l") is None         # empty id
+    assert td.parse_callback("v:abc:q") is None  # unknown action
+    assert td.parse_callback("v::l") is None  # empty id
     assert td.parse_callback("v:abc:l:extra") is None
 
 
@@ -89,10 +94,10 @@ EXPIRING_ROW = dict(
 
 def test_expiring_message_is_loud_and_complete():
     msg = td.build_expiring_message(dict(EXPIRING_ROW))
-    assert "Вот-вот пропадёт" in msg              # loud, distinct header
+    assert "Вот-вот пропадёт" in msg  # loud, distinct header
     assert "Example Org — Senior Advisor" in msg
     assert "🎯 89/100" in msg
-    assert "виден 2026-06-20" in msg              # why it is expiring
+    assert "виден 2026-06-20" in msg  # why it is expiring
     assert "href=" in msg
 
 
@@ -104,7 +109,7 @@ def test_expiring_keyboard_has_three_actions_that_map():
     assert mapped == [
         (ROW["id"], "liked"),
         (ROW["id"], "passed"),
-        (ROW["id"], "applied"),   # «уже подал» → applied
+        (ROW["id"], "applied"),  # «уже подал» → applied
     ]
     for b in btns:
         assert len(b["callback_data"].encode()) <= 64

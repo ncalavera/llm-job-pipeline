@@ -2,15 +2,17 @@
 
 import json
 from datetime import date, datetime
-from pathlib import Path
 
 from config import (
-    COMPANIES, PROJECT_ROOT,
+    COMPANIES,
+    PROJECT_ROOT,
     resolve_canonical_name,
 )
 from database_supabase import (
-    get_conn, load_vacancies, update_vacancy_status,
-    batch_update_statuses, update_vacancy_fields,
+    get_conn,
+    load_vacancies,
+    update_vacancy_status,
+    batch_update_statuses,
     load_company_enrichment,
 )
 
@@ -25,6 +27,7 @@ TRIAGED_STATUSES = {"to_apply", "to_research", "to_network", "skipped", "applied
 # ---------------------------------------------------------------------------
 # Redis helpers
 # ---------------------------------------------------------------------------
+
 
 def get_liked_vacancies() -> list[dict]:
     """Fetch liked vacancies from Supabase.
@@ -69,6 +72,7 @@ def batch_update_statuses_and_commit(updates: dict[str, str]) -> dict[str, bool]
 # URL auto-discovery
 # ---------------------------------------------------------------------------
 
+
 def find_vacancy_url(v: dict, client=None) -> str | None:
     """Return first existing location URL, or search via Firecrawl if missing."""
     for loc in v.get("locations", []):
@@ -82,8 +86,10 @@ def find_vacancy_url(v: dict, client=None) -> str | None:
         return None
     try:
         results = client.search(query=f"{org} {title} job", limit=5)
-        for item in (results if isinstance(results, list) else getattr(results, "data", results)):
-            url = getattr(item, "url", None) or (item.get("url") if isinstance(item, dict) else None)
+        for item in results if isinstance(results, list) else getattr(results, "data", results):
+            url = getattr(item, "url", None) or (
+                item.get("url") if isinstance(item, dict) else None
+            )
             if url and "://" in url:
                 return url
     except Exception:
@@ -98,6 +104,7 @@ def update_vacancies_in_db(updates: dict[str, dict]) -> int:
     Returns number of changed vacancies.
     """
     from psycopg2.extras import Json, RealDictCursor
+
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     changed = 0
@@ -110,8 +117,7 @@ def update_vacancies_in_db(updates: dict[str, dict]) -> int:
             locs = row["locations"] or []
             if locs and not locs[0].get("url"):
                 locs[0]["url"] = fields["url"]
-                cur.execute("UPDATE vacancy SET locations = %s WHERE id = %s",
-                           (Json(locs), vid))
+                cur.execute("UPDATE vacancy SET locations = %s WHERE id = %s", (Json(locs), vid))
                 changed += 1
     if changed:
         conn.commit()
@@ -122,6 +128,7 @@ def update_vacancies_in_db(updates: dict[str, dict]) -> int:
 # ---------------------------------------------------------------------------
 # Deadline filtering
 # ---------------------------------------------------------------------------
+
 
 def is_deadline_passed(v: dict) -> bool:
     """True if vacancy deadline is in the past."""
@@ -138,6 +145,7 @@ def is_deadline_passed(v: dict) -> bool:
 # ---------------------------------------------------------------------------
 # Grouping & context
 # ---------------------------------------------------------------------------
+
 
 def group_by_company(vacancies: list[dict]) -> list[dict]:
     """Group vacancies by canonical org name, sorted by max llm_score DESC.
@@ -180,6 +188,7 @@ def get_company_context(org: str) -> dict:
 # ---------------------------------------------------------------------------
 # triage.json persistence
 # ---------------------------------------------------------------------------
+
 
 def load_triage_db() -> dict:
     """Load triage database. Creates empty structure if missing."""
@@ -236,6 +245,7 @@ def add_review(session: dict, review: dict):
 # ---------------------------------------------------------------------------
 # Vacancy formatting for CLI briefing
 # ---------------------------------------------------------------------------
+
 
 def format_vacancy_briefing(v: dict, enrichment: dict) -> str:
     """Format a vacancy for CLI display during triage interview."""
@@ -303,7 +313,9 @@ def format_company_briefing(org: str, tier, enrichment: dict) -> str:
         lines.append(f"  Employees: {about['employee_count']}")
 
     if mission.get("alignment_score") is not None:
-        lines.append(f"  Alignment: {mission['alignment_score']}/100 ({mission.get('alignment_label', '')})")
+        lines.append(
+            f"  Alignment: {mission['alignment_score']}/100 ({mission.get('alignment_label', '')})"
+        )
 
     if mission.get("mission_verdict"):
         lines.append(f"  Verdict: {mission['mission_verdict']}")

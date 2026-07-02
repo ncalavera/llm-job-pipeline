@@ -51,18 +51,22 @@ _DEFAULT_SOURCES = "website,careers,exa,exa_offices"
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Collect raw evidence for companies")
-    p.add_argument("--company", required=True,
-                   help="Canonical company name(s), comma-separated")
-    p.add_argument("--sources", default=_DEFAULT_SOURCES,
-                   help=f"Comma-separated source list (default: {_DEFAULT_SOURCES})")
-    p.add_argument("--manual-urls",
-                   help="Extra URLs to scrape as source='manual_url', comma-separated")
+    p.add_argument("--company", required=True, help="Canonical company name(s), comma-separated")
+    p.add_argument(
+        "--sources",
+        default=_DEFAULT_SOURCES,
+        help=f"Comma-separated source list (default: {_DEFAULT_SOURCES})",
+    )
+    p.add_argument(
+        "--manual-urls", help="Extra URLs to scrape as source='manual_url', comma-separated"
+    )
     return p
 
 
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
+
 
 def _resolve_company(conn, name: str) -> "dict | None":
     """Return company dict (id, website, careers_url, ats_slug, ats_config,
@@ -87,8 +91,9 @@ def _resolve_company(conn, name: str) -> "dict | None":
     }
 
 
-def _store_evidence(conn, company_id: str, source: str, url: str,
-                    content: str, meta: "dict | None") -> None:
+def _store_evidence(
+    conn, company_id: str, source: str, url: str, content: str, meta: "dict | None"
+) -> None:
     """Idempotent by (company_id, source): delete previous row, insert fresh."""
     with conn.cursor() as cur:
         cur.execute(
@@ -98,26 +103,24 @@ def _store_evidence(conn, company_id: str, source: str, url: str,
         cur.execute(
             """INSERT INTO company_evidence (company_id, source, url, content, meta)
                VALUES (%s, %s, %s, %s, %s)""",
-            (company_id, source, url, content,
-             json.dumps(meta) if meta is not None else None),
+            (company_id, source, url, content, json.dumps(meta) if meta is not None else None),
         )
     conn.commit()
 
 
-def _store_evidence_by_url(conn, company_id: str, source: str, url: str,
-                           content: str, meta: "dict | None") -> None:
+def _store_evidence_by_url(
+    conn, company_id: str, source: str, url: str, content: str, meta: "dict | None"
+) -> None:
     """Idempotent by (company_id, source, url): used for manual_url rows."""
     with conn.cursor() as cur:
         cur.execute(
-            "DELETE FROM company_evidence "
-            "WHERE company_id = %s AND source = %s AND url = %s",
+            "DELETE FROM company_evidence WHERE company_id = %s AND source = %s AND url = %s",
             (company_id, source, url),
         )
         cur.execute(
             """INSERT INTO company_evidence (company_id, source, url, content, meta)
                VALUES (%s, %s, %s, %s, %s)""",
-            (company_id, source, url, content,
-             json.dumps(meta) if meta is not None else None),
+            (company_id, source, url, content, json.dumps(meta) if meta is not None else None),
         )
     conn.commit()
 
@@ -126,9 +129,11 @@ def _store_evidence_by_url(conn, company_id: str, source: str, url: str,
 # Firecrawl helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_firecrawl_client():
     try:
         from firecrawl import FirecrawlApp
+
         key = os.environ.get("FIRECRAWL_API_KEY", "")
         if not key:
             print("  WARNING: FIRECRAWL_API_KEY not set", file=sys.stderr)
@@ -142,10 +147,11 @@ def _get_firecrawl_client():
 def _scrape_url(client, url: str) -> str:
     """Scrape a single URL and return full markdown. Empty string on failure."""
     try:
-        result = client.scrape(url, formats=["markdown"],
-                               only_main_content=True, timeout=60000)
-        md = result.markdown if hasattr(result, "markdown") else (
-            result.get("markdown") if isinstance(result, dict) else ""
+        result = client.scrape(url, formats=["markdown"], only_main_content=True, timeout=60000)
+        md = (
+            result.markdown
+            if hasattr(result, "markdown")
+            else (result.get("markdown") if isinstance(result, dict) else "")
         )
         return md or ""
     except Exception as e:
@@ -159,8 +165,9 @@ def _scrape_with_links(client, url: str) -> "tuple[str, list[str]]":
     The links list is used to walk from an ATS board index into individual job
     postings (where offices / remote / visa / comp live as primary text)."""
     try:
-        result = client.scrape(url, formats=["markdown", "links"],
-                               only_main_content=True, timeout=60000)
+        result = client.scrape(
+            url, formats=["markdown", "links"], only_main_content=True, timeout=60000
+        )
         if hasattr(result, "markdown"):
             md = result.markdown or ""
             links = list(getattr(result, "links", None) or [])
@@ -175,18 +182,29 @@ def _scrape_with_links(client, url: str) -> "tuple[str, list[str]]":
         return "", []
 
 
-_ABOUT_KEYWORDS = {"about", "mission", "team", "values", "impact",
-                   "who-we-are", "our-story", "what-we-do"}
+_ABOUT_KEYWORDS = {
+    "about",
+    "mission",
+    "team",
+    "values",
+    "impact",
+    "who-we-are",
+    "our-story",
+    "what-we-do",
+}
 
 
 def _discover_about_pages(client, url: str) -> list[str]:
     """Map site and pick up to 3 about/mission pages."""
     root = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
     try:
-        result = client.map(root, search="about mission team values",
-                            limit=20, include_subdomains=False)
-        links = result.links if hasattr(result, "links") else (
-            result if isinstance(result, list) else []
+        result = client.map(
+            root, search="about mission team values", limit=20, include_subdomains=False
+        )
+        links = (
+            result.links
+            if hasattr(result, "links")
+            else (result if isinstance(result, list) else [])
         )
     except Exception as e:
         print(f"    map() failed: {str(e)[:80]}")
@@ -207,8 +225,10 @@ def _discover_about_pages(client, url: str) -> list[str]:
             continue
         seen.add(link_url)
         path = urlparse(link_url).path.lower().rstrip("/")
-        if any(skip in path for skip in ("/login", "/signup", "/privacy", "/terms",
-                                          "/cookie", "/legal", "/404")):
+        if any(
+            skip in path
+            for skip in ("/login", "/signup", "/privacy", "/terms", "/cookie", "/legal", "/404")
+        ):
             continue
         score = 100 if path in ("", "/") else 0
         for kw in _ABOUT_KEYWORDS:
@@ -222,8 +242,10 @@ def _discover_about_pages(client, url: str) -> list[str]:
     if url not in urls:
         urls.insert(0, url)
     selected = urls[:3]
-    print(f"    Mapped {len(links)} pages → selected {len(selected)}: "
-          + ", ".join(urlparse(u).path or "/" for u in selected))
+    print(
+        f"    Mapped {len(links)} pages → selected {len(selected)}: "
+        + ", ".join(urlparse(u).path or "/" for u in selected)
+    )
     return selected
 
 
@@ -231,8 +253,8 @@ def _discover_about_pages(client, url: str) -> list[str]:
 # Source: website
 # ---------------------------------------------------------------------------
 
-def collect_website(conn, company_id: str, name: str, website: str,
-                    careers_url: str = "") -> bool:
+
+def collect_website(conn, company_id: str, name: str, website: str, careers_url: str = "") -> bool:
     """Scrape about/mission pages via Firecrawl, store full markdown."""
     if not website:
         print(f"  [{name}] website: no URL in DB — skipping")
@@ -241,8 +263,11 @@ def collect_website(conn, company_id: str, name: str, website: str,
     client = _get_firecrawl_client()
     if client is None:
         import requests
-        _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-               "AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36")
+
+        _UA = (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
+        )
         try:
             resp = requests.get(website, headers={"User-Agent": _UA}, timeout=15)
             resp.raise_for_status()
@@ -284,12 +309,13 @@ _CAREERS_MAX_POSTINGS = 3
 
 # Build the public board URL(s) for a known ATS provider from its slug.
 _ATS_BOARD_BUILDERS = {
-    "greenhouse": lambda s: [f"https://job-boards.greenhouse.io/{s}",
-                             f"https://boards.greenhouse.io/{s}"],
-    "lever":      lambda s: [f"https://jobs.lever.co/{s}"],
-    "ashby":      lambda s: [f"https://jobs.ashbyhq.com/{s}"],
-    "workable":   lambda s: [f"https://apply.workable.com/{s}/",
-                             f"https://{s}.workable.com"],
+    "greenhouse": lambda s: [
+        f"https://job-boards.greenhouse.io/{s}",
+        f"https://boards.greenhouse.io/{s}",
+    ],
+    "lever": lambda s: [f"https://jobs.lever.co/{s}"],
+    "ashby": lambda s: [f"https://jobs.ashbyhq.com/{s}"],
+    "workable": lambda s: [f"https://apply.workable.com/{s}/", f"https://{s}.workable.com"],
 }
 
 # Detect an ATS board URL in a page link → provider name.
@@ -304,14 +330,15 @@ _ATS_URL_PATTERNS = [
 # Detect an individual job-posting URL → provider name (deeper than the board index).
 _ATS_POSTING_PATTERNS = {
     "greenhouse": re.compile(r"greenhouse\.io/[^/]+/jobs/\d+", re.I),
-    "lever":      re.compile(r"jobs\.lever\.co/[^/]+/[0-9a-fA-F-]{8,}", re.I),
-    "ashby":      re.compile(r"jobs\.ashbyhq\.com/[^/]+/[0-9a-fA-F-]{8,}", re.I),
-    "workable":   re.compile(r"workable\.com/[^/]+/j/[A-Za-z0-9]+", re.I),
+    "lever": re.compile(r"jobs\.lever\.co/[^/]+/[0-9a-fA-F-]{8,}", re.I),
+    "ashby": re.compile(r"jobs\.ashbyhq\.com/[^/]+/[0-9a-fA-F-]{8,}", re.I),
+    "workable": re.compile(r"workable\.com/[^/]+/j/[A-Za-z0-9]+", re.I),
 }
 
 
-def _ats_board_candidates(fetch_strategy: str, ats_slug: str,
-                          ats_config: dict) -> "list[tuple[str, str]]":
+def _ats_board_candidates(
+    fetch_strategy: str, ats_slug: str, ats_config: dict
+) -> "list[tuple[str, str]]":
     """Board URL candidates from stored ATS columns → [(url, provider), ...].
 
     Reads ats_config['url'] (explicit board/careers URL) and ats_config['slug']
@@ -365,10 +392,16 @@ def _posting_links(links: "list[str]", provider: str) -> "list[str]":
     return out
 
 
-def collect_careers(conn, company_id: str, name: str, website: str,
-                    careers_url: str = "", ats_slug: str = "",
-                    ats_config: "dict | None" = None,
-                    fetch_strategy: str = "") -> bool:
+def collect_careers(
+    conn,
+    company_id: str,
+    name: str,
+    website: str,
+    careers_url: str = "",
+    ats_slug: str = "",
+    ats_config: "dict | None" = None,
+    fetch_strategy: str = "",
+) -> bool:
     """Scrape the company's real ATS / job board as PRIMARY text.
 
     Resolution order: stored ATS columns (ats_config / ats_slug + fetch_strategy)
@@ -383,7 +416,8 @@ def collect_careers(conn, company_id: str, name: str, website: str,
 
     # 1) Build prioritized (url, provider) candidates.
     candidates: list[tuple[str, str]] = _ats_board_candidates(
-        fetch_strategy, ats_slug, ats_config or {})
+        fetch_strategy, ats_slug, ats_config or {}
+    )
     if careers_url:
         prov = next((p for pat, p in _ATS_URL_PATTERNS if pat.search(careers_url)), "")
         candidates.append((careers_url, prov))
@@ -466,6 +500,7 @@ Keep the answer factual and concise."""
 def _call_perplexity(name: str, prompt: str) -> "tuple[str, list, str]":
     """Return (answer_text, citations, model). Raises on API error."""
     import requests as _req
+
     key = os.environ.get("PERPLEXITY_API_KEY", "")
     if not key:
         raise RuntimeError("PERPLEXITY_API_KEY not set")
@@ -491,8 +526,9 @@ def _call_perplexity(name: str, prompt: str) -> "tuple[str, list, str]":
     return answer, citations, model
 
 
-def collect_perplexity(conn, company_id: str, name: str,
-                       website: str = "", careers_url: str = "") -> bool:
+def collect_perplexity(
+    conn, company_id: str, name: str, website: str = "", careers_url: str = ""
+) -> bool:
     """General job-seeker profile via Perplexity Sonar."""
     try:
         answer, citations, model = _call_perplexity(
@@ -523,8 +559,9 @@ Include any mention of relocation support, time-zone requirements, or countries 
 Keep the answer factual and cite sources."""
 
 
-def collect_perplexity_offices(conn, company_id: str, name: str,
-                               website: str = "", careers_url: str = "") -> bool:
+def collect_perplexity_offices(
+    conn, company_id: str, name: str, website: str = "", careers_url: str = ""
+) -> bool:
     """Offices / remote / visa-focused Perplexity query."""
     try:
         answer, citations, model = _call_perplexity(
@@ -540,8 +577,9 @@ def collect_perplexity_offices(conn, company_id: str, name: str,
 
     meta = {"model": model, "citations": citations, "note": "offices_remote_visa"}
     _store_evidence(conn, company_id, "perplexity_offices", "", answer, meta)
-    print(f"  [{name}] perplexity_offices: stored {len(answer):,} chars, "
-          f"{len(citations)} citation(s)")
+    print(
+        f"  [{name}] perplexity_offices: stored {len(answer):,} chars, {len(citations)} citation(s)"
+    )
     return True
 
 
@@ -549,9 +587,11 @@ def collect_perplexity_offices(conn, company_id: str, name: str,
 # Source: exa (general profile)
 # ---------------------------------------------------------------------------
 
+
 def _call_exa(name: str, query: str) -> "tuple[str, list[str]]":
     """Return (combined_text, result_urls). Raises on API error."""
     import requests as _req
+
     key = os.environ.get("EXA_API_KEY", "")
     if not key:
         raise RuntimeError("EXA_API_KEY not set")
@@ -581,8 +621,7 @@ def _call_exa(name: str, query: str) -> "tuple[str, list[str]]":
     return "\n\n".join(parts), urls_list
 
 
-def collect_exa(conn, company_id: str, name: str,
-                website: str = "", careers_url: str = "") -> bool:
+def collect_exa(conn, company_id: str, name: str, website: str = "", careers_url: str = "") -> bool:
     """General profile search via Exa, top 3 results."""
     query = f"{name} organization mission funding offices leadership"
     try:
@@ -605,11 +644,15 @@ def collect_exa(conn, company_id: str, name: str,
 # Source: exa_offices
 # ---------------------------------------------------------------------------
 
-def collect_exa_offices(conn, company_id: str, name: str,
-                        website: str = "", careers_url: str = "") -> bool:
+
+def collect_exa_offices(
+    conn, company_id: str, name: str, website: str = "", careers_url: str = ""
+) -> bool:
     """Offices / remote / visa-focused Exa search, top 3 results."""
-    query = (f"{name} office locations countries remote work policy "
-             f"visa sponsorship international hiring")
+    query = (
+        f"{name} office locations countries remote work policy "
+        f"visa sponsorship international hiring"
+    )
     try:
         combined, urls_list = _call_exa(name, query)
     except Exception as e:
@@ -622,14 +665,14 @@ def collect_exa_offices(conn, company_id: str, name: str,
 
     meta = {"result_urls": urls_list, "query": query, "note": "offices_remote_visa"}
     _store_evidence(conn, company_id, "exa_offices", "", combined, meta)
-    print(f"  [{name}] exa_offices: stored {len(combined):,} chars from "
-          f"{len(urls_list)} result(s)")
+    print(f"  [{name}] exa_offices: stored {len(combined):,} chars from {len(urls_list)} result(s)")
     return True
 
 
 # ---------------------------------------------------------------------------
 # Source: manual_url
 # ---------------------------------------------------------------------------
+
 
 def collect_manual_urls(conn, company_id: str, name: str, urls: list[str]) -> bool:
     """Scrape explicit URLs via Firecrawl, one evidence row per URL."""
@@ -657,8 +700,10 @@ def collect_manual_urls(conn, company_id: str, name: str, urls: list[str]) -> bo
 # Source: deep_research (stub — expensive, not called by default)
 # ---------------------------------------------------------------------------
 
-def collect_deep_research(conn, company_id: str, name: str,
-                          website: str = "", careers_url: str = "") -> bool:
+
+def collect_deep_research(
+    conn, company_id: str, name: str, website: str = "", careers_url: str = ""
+) -> bool:
     """Stub: OpenAI deep-research call. NOT called unless --sources deep_research."""
     print(f"  [{name}] deep_research: stub — not implemented yet")
     return False
@@ -685,8 +730,7 @@ def main() -> int:
     companies = [c.strip() for c in args.company.split(",") if c.strip()]
     sources = [s.strip() for s in args.sources.split(",") if s.strip()]
     manual_urls = (
-        [u.strip() for u in args.manual_urls.split(",") if u.strip()]
-        if args.manual_urls else []
+        [u.strip() for u in args.manual_urls.split(",") if u.strip()] if args.manual_urls else []
     )
 
     unknown_sources = [s for s in sources if s not in _COLLECTORS]
@@ -715,10 +759,16 @@ def main() -> int:
             fn = _COLLECTORS[source]
             try:
                 if source == "careers":
-                    ok = fn(conn, company_id, name, website=website,
-                            careers_url=careers_url, ats_slug=row["ats_slug"],
-                            ats_config=row["ats_config"],
-                            fetch_strategy=row["fetch_strategy"])
+                    ok = fn(
+                        conn,
+                        company_id,
+                        name,
+                        website=website,
+                        careers_url=careers_url,
+                        ats_slug=row["ats_slug"],
+                        ats_config=row["ats_config"],
+                        fetch_strategy=row["fetch_strategy"],
+                    )
                 else:
                     ok = fn(conn, company_id, name, website=website, careers_url=careers_url)
             except Exception as e:

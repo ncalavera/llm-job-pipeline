@@ -6,8 +6,6 @@ Covers the three outcomes that used to collapse into the ambiguous ``no_data``:
   * ``js_required``      — a JS-rendered shell (UNCHANGED regression guard)
 """
 
-import pytest
-
 import fetchers
 from fetch_vacancies import _resolve_fetch_status
 from database_supabase import is_fetch_error
@@ -16,6 +14,7 @@ from database_supabase import is_fetch_error
 # ---------------------------------------------------------------------------
 # _resolve_fetch_status — render_ok_zero + js_required-unchanged
 # ---------------------------------------------------------------------------
+
 
 class TestResolveFetchStatus:
     def test_successful_empty_becomes_render_ok_zero(self):
@@ -42,6 +41,7 @@ class TestResolveFetchStatus:
 # is_fetch_error — render_ok_zero is healthy, the rest are broken
 # ---------------------------------------------------------------------------
 
+
 class TestIsFetchErrorClassification:
     def test_render_ok_zero_is_not_an_error(self):
         assert is_fetch_error("render_ok_zero") is False
@@ -60,6 +60,7 @@ class TestIsFetchErrorClassification:
 # fetch_firecrawl_scrape — records credit_exhausted when credits == 0
 # ---------------------------------------------------------------------------
 
+
 class TestCreditExhaustedOverride:
     def test_credit_gate_records_credit_exhausted(self, monkeypatch):
         org = "British International Investment"
@@ -67,16 +68,14 @@ class TestCreditExhaustedOverride:
         # stub the local fallback so no real HTTP happens.
         monkeypatch.setattr(fetchers, "_firecrawl_credits_remaining", 0)
         monkeypatch.setitem(fetchers._last_scrape_status, org, None)
-        monkeypatch.setattr(fetchers, "_fetch_local_scrape",
-                            lambda *a, **k: [])
+        monkeypatch.setattr(fetchers, "_fetch_local_scrape", lambda *a, **k: [])
 
         jobs = fetchers.fetch_firecrawl_scrape(org, "https://isw.example/careers")
         assert jobs == []
         assert fetchers.get_scrape_statuses().get(org) == "credit_exhausted"
 
         # End-to-end: the status assignment turns that into credit_exhausted.
-        resolved = _resolve_fetch_status(
-            "ok", bool(jobs), fetchers.get_scrape_statuses().get(org))
+        resolved = _resolve_fetch_status("ok", bool(jobs), fetchers.get_scrape_statuses().get(org))
         assert resolved == "credit_exhausted"
 
     def test_quota_error_marks_credit_exhausted(self, monkeypatch):

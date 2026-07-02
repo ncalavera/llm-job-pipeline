@@ -27,6 +27,7 @@ def test_PE01_pass_expired_updates_status_updated_at():
     """The UPDATE must set status_updated_at = NOW() so we can distinguish
     system auto-pass from manual status changes via dashboard."""
     import database_supabase as db
+
     conn, cur = _mock_conn()
     with patch.object(db, "get_conn", return_value=conn):
         db.pass_expired_vacancies()
@@ -43,6 +44,7 @@ def test_PE02_pass_expired_filters_by_deadline_and_status():
     """Sanity: keep the original WHERE clause intact — only mark unseen vacancies
     with a past deadline as passed."""
     import database_supabase as db
+
     conn, cur = _mock_conn()
     with patch.object(db, "get_conn", return_value=conn):
         db.pass_expired_vacancies()

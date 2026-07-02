@@ -27,7 +27,7 @@ import argparse
 import json
 import subprocess
 import sys
-from datetime import datetime, date, timezone
+from datetime import datetime
 
 import run_status  # lightweight progress heartbeat (vacancies/run_status.json)
 
@@ -37,60 +37,111 @@ def build_parser() -> argparse.ArgumentParser:
     ``--help`` / ``-h`` prints usage without connecting to the database or
     loading the user profile (those happen only when a real command runs)."""
     parser = argparse.ArgumentParser(description="Fetch job vacancies from configured sources")
-    parser.add_argument("--free-only", action="store_true",
-                        help="Only fetch from Greenhouse orgs (no Firecrawl credits)")
-    parser.add_argument("--report-only", action="store_true",
-                        help="Regenerate the dashboard data (public/data.js) from the database")
-    parser.add_argument("--list-manual", action="store_true",
-                        help="Print manual-check companies and exit (no fetching)")
-    parser.add_argument("--companies", type=str, default="",
-                        help="Comma-separated company names (case-insensitive, alias-aware)")
-    parser.add_argument("--strategy", type=str, default="",
-                        help="Fetch only companies using this ATS strategy")
-    parser.add_argument("--force-all", action="store_true",
-                        help="Fetch ALL companies (ignore TTL cooldown)")
-    parser.add_argument("--tier", type=str, default="",
-                        help="Fetch only companies of this calculated tier (S, A, B, C)")
-    parser.add_argument("--boards-only", action="store_true",
-                        help="Fetch only job boards, skip companies")
-    parser.add_argument("--no-boards", action="store_true",
-                        help="Skip job boards, fetch companies only")
-    parser.add_argument("--include-paused", action="store_true",
-                        help="Include paused companies in fetch")
-    parser.add_argument("--auto-score", action="store_true",
-                        help="Auto-run filter + score after fetch (if new vacancies found)")
-    parser.add_argument("--auto-score-limit", type=int, default=50,
-                        help="Max vacancies to auto-score (default: 50)")
+    parser.add_argument(
+        "--free-only",
+        action="store_true",
+        help="Only fetch from Greenhouse orgs (no Firecrawl credits)",
+    )
+    parser.add_argument(
+        "--report-only",
+        action="store_true",
+        help="Regenerate the dashboard data (public/data.js) from the database",
+    )
+    parser.add_argument(
+        "--list-manual",
+        action="store_true",
+        help="Print manual-check companies and exit (no fetching)",
+    )
+    parser.add_argument(
+        "--companies",
+        type=str,
+        default="",
+        help="Comma-separated company names (case-insensitive, alias-aware)",
+    )
+    parser.add_argument(
+        "--strategy", type=str, default="", help="Fetch only companies using this ATS strategy"
+    )
+    parser.add_argument(
+        "--force-all", action="store_true", help="Fetch ALL companies (ignore TTL cooldown)"
+    )
+    parser.add_argument(
+        "--tier",
+        type=str,
+        default="",
+        help="Fetch only companies of this calculated tier (S, A, B, C)",
+    )
+    parser.add_argument(
+        "--boards-only", action="store_true", help="Fetch only job boards, skip companies"
+    )
+    parser.add_argument(
+        "--no-boards", action="store_true", help="Skip job boards, fetch companies only"
+    )
+    parser.add_argument(
+        "--include-paused", action="store_true", help="Include paused companies in fetch"
+    )
+    parser.add_argument(
+        "--auto-score",
+        action="store_true",
+        help="Auto-run filter + score after fetch (if new vacancies found)",
+    )
+    parser.add_argument(
+        "--auto-score-limit", type=int, default=50, help="Max vacancies to auto-score (default: 50)"
+    )
     return parser
 
 
 # Print help and exit BEFORE importing anything that touches the DB or profile.
 from cli_help import wants_help
+
 if __name__ == "__main__" and wants_help():
     build_parser().parse_args()
 
 from config import (
-    COMPANIES, JOB_BOARDS, REPORT_PATH, VACANCIES_DIR,
-    PUBLIC_DIR, FETCH_LOG_DIR, resolve_canonical_name,
+    COMPANIES,
+    JOB_BOARDS,
+    PUBLIC_DIR,
+    FETCH_LOG_DIR,
+    resolve_canonical_name,
 )
 from fetchers import (
-    fetch_greenhouse, fetch_firecrawl_scrape,
-    fetch_workday_api, fetch_algolia_board, fetch_firecrawl_board,
-    fetch_lever, fetch_ashby, fetch_workable, fetch_reliefweb_board,
-    fetch_impactpool_board, fetch_datadotorg_board,
-    fetch_arbeitnow_board, fetch_remotive_board, fetch_wwr_board,
+    fetch_greenhouse,
+    fetch_firecrawl_scrape,
+    fetch_workday_api,
+    fetch_algolia_board,
+    fetch_firecrawl_board,
+    fetch_lever,
+    fetch_ashby,
+    fetch_workable,
+    fetch_reliefweb_board,
+    fetch_impactpool_board,
+    fetch_datadotorg_board,
+    fetch_arbeitnow_board,
+    fetch_remotive_board,
+    fetch_wwr_board,
     fetch_hn_whoishiring_board,
-    fetch_idealist_board, fetch_fastforward_board, fetch_linkedin_board,
+    fetch_idealist_board,
+    fetch_fastforward_board,
+    fetch_linkedin_board,
     fetch_unops_widget,
-    fetch_recruitee, fetch_teamtailor_rss, fetch_bamboohr,
-    fetch_amazon_jobs, fetch_successfactors, fetch_adp_json,
+    fetch_recruitee,
+    fetch_teamtailor_rss,
+    fetch_bamboohr,
+    fetch_amazon_jobs,
+    fetch_successfactors,
+    fetch_adp_json,
     get_firecrawl_change_statuses,
     get_scrape_statuses,
 )
 from database_supabase import (
-    get_conn, save_vacancies, archive_gone_vacancies,
-    should_fetch_board, mark_board_fetched, save_board_vacancies, sync_boards,
-    update_source_tracking, load_vacancies, print_reconciliation_report,
+    get_conn,
+    save_vacancies,
+    archive_gone_vacancies,
+    should_fetch_board,
+    mark_board_fetched,
+    save_board_vacancies,
+    sync_boards,
+    update_source_tracking,
+    print_reconciliation_report,
     pass_expired_vacancies,
 )
 
@@ -99,8 +150,15 @@ from database_supabase import (
 # firecrawl_scrape (change tracking returns [] when the page is unchanged)
 # and amazon_jobs (search-based, may return a subset).
 GONE_DETECTION_STRATEGIES = {
-    "greenhouse", "lever", "ashby", "workable", "recruitee",
-    "teamtailor_rss", "bamboohr", "workday_api", "unops_widget",
+    "greenhouse",
+    "lever",
+    "ashby",
+    "workable",
+    "recruitee",
+    "teamtailor_rss",
+    "bamboohr",
+    "workday_api",
+    "unops_widget",
 }
 from report import generate_dashboard
 
@@ -111,6 +169,7 @@ def _load_enrichment_tiers() -> dict[str, str]:
     Returns dict: canonical_name → tier_letter (or missing key if no data).
     """
     from database_supabase import load_all_enrichment
+
     enrichment = load_all_enrichment()
 
     tiers: dict[str, str] = {}
@@ -141,16 +200,20 @@ def _save_fetch_log(source_key: str, jobs: list, fetch_status: str = "ok") -> No
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{source_key}.json"
     with open(log_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "fetched_at": datetime.now().isoformat(timespec="seconds"),
-            "fetch_status": fetch_status,
-            "count": len(jobs),
-            "jobs": jobs,
-        }, f, indent=2, ensure_ascii=False)
+        json.dump(
+            {
+                "fetched_at": datetime.now().isoformat(timespec="seconds"),
+                "fetch_status": fetch_status,
+                "count": len(jobs),
+                "jobs": jobs,
+            },
+            f,
+            indent=2,
+            ensure_ascii=False,
+        )
 
 
-def _resolve_fetch_status(fetch_status: str, has_jobs: bool,
-                          scrape_status: str | None) -> str:
+def _resolve_fetch_status(fetch_status: str, has_jobs: bool, scrape_status: str | None) -> str:
     """Disambiguate an empty fetch into a specific reason code (U9 / WS6).
 
     A successful fetch that yielded no jobs is not automatically "broken":
@@ -225,8 +288,11 @@ def _auto_enrich_candidates():
     conn.commit()
 
     if approved or rejected or pending:
-        print(f"  Auto-review: {len(approved)} approved, {len(rejected)} rejected, "
-              f"{len(pending)} pending your review", flush=True)
+        print(
+            f"  Auto-review: {len(approved)} approved, {len(rejected)} rejected, "
+            f"{len(pending)} pending your review",
+            flush=True,
+        )
 
 
 def _filter_companies(args) -> dict:
@@ -260,15 +326,13 @@ def _filter_companies(args) -> dict:
 
     # --strategy greenhouse → only that ATS strategy
     if args.strategy:
-        filtered = {n: c for n, c in filtered.items()
-                    if c["strategy"] == args.strategy}
+        filtered = {n: c for n, c in filtered.items() if c["strategy"] == args.strategy}
 
     # --tier S/A/B/C → filter by calculated tier (from enrichment data)
     enriched_tiers = _load_enrichment_tiers()
     if args.tier:
         tier_filter = args.tier.upper()
-        filtered = {n: c for n, c in filtered.items()
-                    if enriched_tiers.get(n) == tier_filter}
+        filtered = {n: c for n, c in filtered.items() if enriched_tiers.get(n) == tier_filter}
 
     # TTL cooldown: skip companies fetched recently (default behavior)
     # --force-all or --companies disables this
@@ -312,12 +376,14 @@ def main():
     print("=" * 60)
 
     from db_backend import print_backend_banner
+
     print_backend_banner()
 
     # --list-manual: show manual-check companies and exit
     if args.list_manual:
-        manual = [(name, cfg) for name, cfg in COMPANIES.items()
-                  if cfg["strategy"] == "manual_check"]
+        manual = [
+            (name, cfg) for name, cfg in COMPANIES.items() if cfg["strategy"] == "manual_check"
+        ]
         if manual:
             print("\n⚠️  Manual check needed for:")
             for name, cfg in manual:
@@ -348,8 +414,10 @@ def main():
                 print("  Run /jobs-new to discover your first companies,")
                 print("  or /jobs-add to add a company by name.")
             else:
-                print("\nNo companies match these filters. "
-                      "Relax --companies / --strategy / --tier, or drop them to fetch all.")
+                print(
+                    "\nNo companies match these filters. "
+                    "Relax --companies / --strategy / --tier, or drop them to fetch all."
+                )
         else:
             print(f"\nFetching vacancies from {len(filtered)}/{len(COMPANIES)} organizations...\n")
 
@@ -366,10 +434,20 @@ def main():
                 continue
 
             if args.free_only and strategy not in (
-                    "greenhouse", "lever", "ashby", "workable", "unops_widget",
-                    "recruitee", "teamtailor_rss", "bamboohr",
-                    "amazon_jobs", "apple_jobs", "workday_api",
-                    "successfactors", "adp_json"):
+                "greenhouse",
+                "lever",
+                "ashby",
+                "workable",
+                "unops_widget",
+                "recruitee",
+                "teamtailor_rss",
+                "bamboohr",
+                "amazon_jobs",
+                "apple_jobs",
+                "workday_api",
+                "successfactors",
+                "adp_json",
+            ):
                 print(f"  [{org_name}] Skipped (--free-only mode)")
                 continue
 
@@ -379,15 +457,15 @@ def main():
             fetch_status = "ok"
             try:
                 if strategy == "greenhouse":
-                    jobs = fetch_greenhouse(org_name, config["slug"],
-                                            eu=config.get("eu", False))
+                    jobs = fetch_greenhouse(org_name, config["slug"], eu=config.get("eu", False))
                 elif strategy == "firecrawl_scrape":
                     jobs = fetch_firecrawl_scrape(
-                        org_name, config["url"],
-                        url_filter=config.get("url_filter", ""))
+                        org_name, config["url"], url_filter=config.get("url_filter", "")
+                    )
                 elif strategy == "workday_api":
                     jobs = fetch_workday_api(
-                        org_name, config["tenant"], config["board"], config["base_url"], config)
+                        org_name, config["tenant"], config["board"], config["base_url"], config
+                    )
                 elif strategy == "lever":
                     jobs = fetch_lever(org_name, config["slug"])
                 elif strategy == "ashby":
@@ -396,7 +474,8 @@ def main():
                     jobs = fetch_workable(org_name, config["slug"])
                 elif strategy == "unops_widget":
                     jobs = fetch_unops_widget(
-                        org_name, config["url"],
+                        org_name,
+                        config["url"],
                         title_blacklist=config.get("title_blacklist"),
                         seniority_filter=config.get("seniority_filter"),
                         location_keywords=config.get("location_keywords"),
@@ -439,10 +518,14 @@ def main():
                 new_depts = seen_depts - {d for d in dept_exclude}
                 if new_depts:
                     print(f"  [{org_name}] new departments (not excluded): {sorted(new_depts)}")
-                jobs = [j for j in jobs if j.get("department", "").lower() not in dept_exclude_lower]
+                jobs = [
+                    j for j in jobs if j.get("department", "").lower() not in dept_exclude_lower
+                ]
                 excluded = before - len(jobs)
                 if excluded:
-                    print(f"  [{org_name}] department filter: {excluded}/{before} excluded, {len(jobs)} remaining")
+                    print(
+                        f"  [{org_name}] department filter: {excluded}/{before} excluded, {len(jobs)} remaining"
+                    )
 
             new_count = save_vacancies(org_name, tier, jobs)
             update_source_tracking(org_name, tier, strategy, new_count, fetch_status)
@@ -528,8 +611,11 @@ def main():
 
                 new_count = save_board_vacancies(board_cfg, jobs)
                 update_source_tracking(
-                    board_name, board_cfg.get("tier", "C"), strategy,
-                    new_count, board_fetch_status,
+                    board_name,
+                    board_cfg.get("tier", "C"),
+                    strategy,
+                    new_count,
+                    board_fetch_status,
                 )
                 total_new += new_count
                 if new_count > 0:
@@ -549,7 +635,9 @@ def main():
         if change_statuses:
             unchanged = sum(1 for s in change_statuses.values() if s == "same")
             if unchanged:
-                print(f"\n  Firecrawl: {unchanged}/{len(change_statuses)} pages unchanged (saved credits)")
+                print(
+                    f"\n  Firecrawl: {unchanged}/{len(change_statuses)} pages unchanged (saved credits)"
+                )
 
         run_status.finish(new=total_new)
         print(f"\n{'=' * 60}")
@@ -585,6 +673,7 @@ def main():
     print(f"  Dashboard: {PUBLIC_DIR}")
 
     from database_supabase import validate_db
+
     validate_db()
 
     print("\nDone!")

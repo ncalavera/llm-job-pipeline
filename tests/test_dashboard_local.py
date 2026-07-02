@@ -30,7 +30,6 @@ def server(tmp_path, monkeypatch):
 
     Yields ``(base_url, dal)`` and tears the server down cleanly after.
     """
-    import sqlite3 as _sqlite3
 
     db_file = tmp_path / "jobsearch.db"
     monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
@@ -38,11 +37,18 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
 
     # Rebuild the backend chain so the DAL/db_conn singletons bind to the temp DB.
-    for mod in ("dashboard_local", "database_supabase", "config",
-                "company_registry", "db_conn", "db_backend"):
+    for mod in (
+        "dashboard_local",
+        "database_supabase",
+        "config",
+        "company_registry",
+        "db_conn",
+        "db_backend",
+    ):
         sys.modules.pop(mod, None)
 
     import db_backend
+
     importlib.reload(db_backend)
     assert db_backend.IS_SQLITE, "dashboard tests must run on SQLite"
 
@@ -63,9 +69,11 @@ def server(tmp_path, monkeypatch):
 
     import database_supabase as dal
     import dashboard_local
+
     importlib.reload(dashboard_local)
 
     from http.server import HTTPServer
+
     httpd = HTTPServer(("127.0.0.1", 0), dashboard_local.Handler)
     port = httpd.server_address[1]
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
@@ -85,6 +93,7 @@ def server(tmp_path, monkeypatch):
 # HTTP helpers
 # ---------------------------------------------------------------------------
 
+
 def _get(base, path):
     with urllib.request.urlopen(base + path, timeout=10) as resp:
         return resp.status, json.loads(resp.read().decode("utf-8"))
@@ -93,7 +102,9 @@ def _get(base, path):
 def _post(base, path, payload):
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        base + path, data=data, headers={"Content-Type": "application/json"},
+        base + path,
+        data=data,
+        headers={"Content-Type": "application/json"},
         method="POST",
     )
     try:
@@ -105,13 +116,19 @@ def _post(base, path, payload):
 
 def _seed_vacancy(dal, org="Acme Robotics", title="Head of Community"):
     dal.ensure_company(org, status="active")
-    dal.save_vacancies(org, "A", [{
-        "title": title,
-        "snippet": "Lead community efforts.",
-        "full_description": "Lead our global community programme. " * 8,
-        "location": "Berlin, Germany",
-        "url": f"https://acme.example/job/{title.lower().replace(' ', '-')}",
-    }])
+    dal.save_vacancies(
+        org,
+        "A",
+        [
+            {
+                "title": title,
+                "snippet": "Lead community efforts.",
+                "full_description": "Lead our global community programme. " * 8,
+                "location": "Berlin, Germany",
+                "url": f"https://acme.example/job/{title.lower().replace(' ', '-')}",
+            }
+        ],
+    )
     dal.get_conn().commit()
     # Return the id of the row we just seeded (matched by title), not merely the
     # first row — callers seed several vacancies and need each one's own id.
@@ -124,6 +141,7 @@ def _seed_vacancy(dal, org="Acme Robotics", title="Head of Community"):
 # ---------------------------------------------------------------------------
 # /api/health + /api/statuses
 # ---------------------------------------------------------------------------
+
 
 def test_health_ok(server):
     base, _ = server
@@ -157,6 +175,7 @@ def test_statuses_returns_decided_only(server):
 # ---------------------------------------------------------------------------
 # /api/save — like/pass persistence
 # ---------------------------------------------------------------------------
+
 
 def test_save_persists_status(server):
     base, dal = server
@@ -199,7 +218,8 @@ def test_save_unknown_vacancy_is_404(server):
     base, dal = server
     _seed_vacancy(dal)
     status, body = _post(
-        base, "/api/save",
+        base,
+        "/api/save",
         {"id": "00000000-0000-0000-0000-000000000000", "status": "liked"},
     )
     assert status == 404
@@ -209,6 +229,7 @@ def test_save_unknown_vacancy_is_404(server):
 # ---------------------------------------------------------------------------
 # /api/company-statuses + /api/company-review
 # ---------------------------------------------------------------------------
+
 
 def test_company_statuses_maps_review_labels(server):
     """active→approved, candidate→pending, inactive→rejected."""
@@ -232,17 +253,13 @@ def test_company_review_approve_and_reject(server):
     dal.get_conn().commit()
 
     # Approve → company becomes active.
-    status, body = _post(
-        base, "/api/company-review", {"company_id": cid, "action": "approve"}
-    )
+    status, body = _post(base, "/api/company-review", {"company_id": cid, "action": "approve"})
     assert status == 200
     assert body["ok"] is True
     assert dal.get_company_fitness_map()["Pending Co"]["status"] == "active"
 
     # Reject → company becomes inactive.
-    status, body = _post(
-        base, "/api/company-review", {"company_id": cid, "action": "reject"}
-    )
+    status, body = _post(base, "/api/company-review", {"company_id": cid, "action": "reject"})
     assert status == 200
     assert dal.get_company_fitness_map()["Pending Co"]["status"] == "inactive"
 
@@ -255,9 +272,7 @@ def test_company_review_rejects_invalid_action(server):
     base, dal = server
     cid = dal.ensure_company("Pending Co", status="candidate")
     dal.get_conn().commit()
-    status, body = _post(
-        base, "/api/company-review", {"company_id": cid, "action": "explode"}
-    )
+    status, body = _post(base, "/api/company-review", {"company_id": cid, "action": "explode"})
     assert status == 400
     assert "Invalid action" in body["error"]
 
@@ -265,7 +280,8 @@ def test_company_review_rejects_invalid_action(server):
 def test_company_review_unknown_company_is_404(server):
     base, dal = server
     status, body = _post(
-        base, "/api/company-review",
+        base,
+        "/api/company-review",
         {"company_id": "999999", "action": "approve"},
     )
     assert status == 404

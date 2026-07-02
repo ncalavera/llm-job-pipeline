@@ -14,6 +14,7 @@ try:
     import requests
 except ImportError:
     import sys
+
     subprocess.check_call([sys.executable, "-m", "pip", "install", "requests", "-q"])
     import requests
 
@@ -32,14 +33,16 @@ GENERIC_PIPELINE_TITLE_PATTERNS = [
 # so it is not an owner-geography filter; broaden it for your own regions.
 _LOCATION_HINT_CITIES = settings.parsing_location_hint_cities()
 _LOCATION_HINT_RE = (
-    r'\b((?:' + "|".join(re.escape(c) for c in _LOCATION_HINT_CITIES)
-    + r')[^|\n\[\]()]{0,30})'
-) if _LOCATION_HINT_CITIES else r'(?!x)x'  # never-matching regex when empty
+    (r"\b((?:" + "|".join(re.escape(c) for c in _LOCATION_HINT_CITIES) + r")[^|\n\[\]()]{0,30})")
+    if _LOCATION_HINT_CITIES
+    else r"(?!x)x"
+)  # never-matching regex when empty
 
 
 # ---------------------------------------------------------------------------
 # Greenhouse API
 # ---------------------------------------------------------------------------
+
 
 def fetch_greenhouse(org_name: str, slug: str, *, eu: bool = False) -> list[dict]:
     """Fetch jobs from Greenhouse public API (free, no credits).
@@ -58,25 +61,28 @@ def fetch_greenhouse(org_name: str, slug: str, *, eu: bool = False) -> list[dict
             raw_content = j.get("content", "") or ""
             snippet = _html_to_snippet(raw_content)
             full_desc = _html_to_text(raw_content)
-            jobs.append({
-                "title": j.get("title", ""),
-                "location": j.get("location", {}).get("name", ""),
-                "department": (j.get("departments", [{}])[0].get("name", "")
-                               if j.get("departments") else ""),
-                "url": j.get("absolute_url", ""),
-                "external_id": str(j.get("id", "")),
-                "snippet": snippet,
-                "full_description": full_desc,
-                "compensation": _extract_compensation(raw_content),
-                "deadline": _extract_deadline(raw_content),
-            })
+            jobs.append(
+                {
+                    "title": j.get("title", ""),
+                    "location": j.get("location", {}).get("name", ""),
+                    "department": (
+                        j.get("departments", [{}])[0].get("name", "")
+                        if j.get("departments")
+                        else ""
+                    ),
+                    "url": j.get("absolute_url", ""),
+                    "external_id": str(j.get("id", "")),
+                    "snippet": snippet,
+                    "full_description": full_desc,
+                    "compensation": _extract_compensation(raw_content),
+                    "deadline": _extract_deadline(raw_content),
+                }
+            )
         print(f"  [{org_name}] Found {len(jobs)} vacancies")
         return jobs
     except Exception as e:
         print(f"  [{org_name}] ERROR: {e}")
         return []
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +92,9 @@ def fetch_greenhouse(org_name: str, slug: str, *, eu: bool = False) -> list[dict
 _WORKDAY_DETAIL_RATE_LIMIT = 0.25  # seconds between per-job detail requests
 
 
-def fetch_workday_api(org_name: str, tenant: str, board: str, base_url: str, config: dict | None = None) -> list[dict]:
+def fetch_workday_api(
+    org_name: str, tenant: str, board: str, base_url: str, config: dict | None = None
+) -> list[dict]:
     """Fetch jobs from Workday's undocumented but public JSON API.
 
     Two-phase fetch:
@@ -116,12 +124,14 @@ def fetch_workday_api(org_name: str, tenant: str, board: str, base_url: str, con
     try:
         # ── Phase 1: Listing ─────────────────────────────────────────────────
         while True:
-            payload = json.dumps({
-                "appliedFacets": {},
-                "limit": limit,
-                "offset": offset,
-                "searchText": search_text,
-            }).encode()
+            payload = json.dumps(
+                {
+                    "appliedFacets": {},
+                    "limit": limit,
+                    "offset": offset,
+                    "searchText": search_text,
+                }
+            ).encode()
             req = urllib.request.Request(list_url, data=payload, headers=headers)
             with urllib.request.urlopen(req, timeout=20) as resp:
                 data = json.load(resp)
@@ -145,18 +155,21 @@ def fetch_workday_api(org_name: str, tenant: str, board: str, base_url: str, con
                     job_url = job_url.replace("//", "/").replace(":/", "://")
                 else:
                     job_url = ""
-                jobs.append({
-                    "title": j.get("title", ""),
-                    "location": j.get("locationsText", ""),
-                    "department": "",
-                    "url": job_url,
-                    "external_id": hashlib.md5(
-                        job_url.encode() if job_url else
-                        f"{org_name}:{j.get('title','')}".encode()
-                    ).hexdigest()[:12],
-                    "snippet": "",
-                    "_ext_path": ext_path,  # temp: used in phase 2, removed before return
-                })
+                jobs.append(
+                    {
+                        "title": j.get("title", ""),
+                        "location": j.get("locationsText", ""),
+                        "department": "",
+                        "url": job_url,
+                        "external_id": hashlib.md5(
+                            job_url.encode()
+                            if job_url
+                            else f"{org_name}:{j.get('title', '')}".encode()
+                        ).hexdigest()[:12],
+                        "snippet": "",
+                        "_ext_path": ext_path,  # temp: used in phase 2, removed before return
+                    }
+                )
 
             offset += len(postings)
             if not postings or offset >= (total_known or 0):
@@ -174,8 +187,7 @@ def fetch_workday_api(org_name: str, tenant: str, board: str, base_url: str, con
             try:
                 req = urllib.request.Request(
                     detail_url,
-                    headers={"Accept": "application/json",
-                             "User-Agent": headers["User-Agent"]},
+                    headers={"Accept": "application/json", "User-Agent": headers["User-Agent"]},
                 )
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     detail = json.load(resp)
@@ -203,6 +215,7 @@ def fetch_workday_api(org_name: str, tenant: str, board: str, base_url: str, con
 # Lever public API
 # ---------------------------------------------------------------------------
 
+
 def fetch_lever(org_name: str, slug: str) -> list[dict]:
     """Fetch jobs from Lever public API (free, no auth).
     Endpoint: GET https://api.lever.co/v0/postings/{slug}?mode=json
@@ -217,17 +230,21 @@ def fetch_lever(org_name: str, slug: str) -> list[dict]:
         for j in data:
             categories = j.get("categories", {})
             raw_desc = j.get("descriptionPlain", "") or ""
-            snippet = raw_desc[:400].rsplit(" ", 1)[0] + "\u2026" if len(raw_desc) > 400 else raw_desc
-            jobs.append({
-                "title": j.get("text", ""),
-                "location": categories.get("location", ""),
-                "department": categories.get("team", ""),
-                "url": j.get("hostedUrl", ""),
-                "external_id": j.get("id", "") or hashlib.md5(
-                    f"{org_name}:{j.get('text', '')}".encode()).hexdigest()[:12],
-                "snippet": snippet,
-                "full_description": raw_desc,
-            })
+            snippet = (
+                raw_desc[:400].rsplit(" ", 1)[0] + "\u2026" if len(raw_desc) > 400 else raw_desc
+            )
+            jobs.append(
+                {
+                    "title": j.get("text", ""),
+                    "location": categories.get("location", ""),
+                    "department": categories.get("team", ""),
+                    "url": j.get("hostedUrl", ""),
+                    "external_id": j.get("id", "")
+                    or hashlib.md5(f"{org_name}:{j.get('text', '')}".encode()).hexdigest()[:12],
+                    "snippet": snippet,
+                    "full_description": raw_desc,
+                }
+            )
         print(f"  [{org_name}] Found {len(jobs)} vacancies")
         return jobs
     except Exception as e:
@@ -238,6 +255,7 @@ def fetch_lever(org_name: str, slug: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Ashby public API
 # ---------------------------------------------------------------------------
+
 
 def fetch_ashby(org_name: str, slug: str) -> list[dict]:
     """Fetch jobs from Ashby public API (free, no auth).
@@ -254,21 +272,28 @@ def fetch_ashby(org_name: str, slug: str) -> list[dict]:
             raw_desc = j.get("descriptionPlain", "") or ""
             html_desc = j.get("descriptionHtml", "") or ""
             full_desc = raw_desc or _html_to_text(html_desc)
-            snippet = _html_to_snippet(html_desc) if html_desc else (
-                raw_desc[:400].rsplit(" ", 1)[0] + "\u2026" if len(raw_desc) > 400 else raw_desc
+            snippet = (
+                _html_to_snippet(html_desc)
+                if html_desc
+                else (
+                    raw_desc[:400].rsplit(" ", 1)[0] + "\u2026" if len(raw_desc) > 400 else raw_desc
+                )
             )
             job_url = j.get("jobUrl", "")
-            jobs.append({
-                "title": j.get("title", ""),
-                "location": j.get("location", ""),
-                "department": j.get("department", "") or j.get("team", ""),
-                "url": job_url,
-                "external_id": hashlib.md5(job_url.encode()).hexdigest()[:12] if job_url else
-                               hashlib.md5(f"{org_name}:{j.get('title', '')}".encode()).hexdigest()[:12],
-                "snippet": snippet,
-                "full_description": full_desc,
-                "compensation": j.get("compensationTierSummary", ""),
-            })
+            jobs.append(
+                {
+                    "title": j.get("title", ""),
+                    "location": j.get("location", ""),
+                    "department": j.get("department", "") or j.get("team", ""),
+                    "url": job_url,
+                    "external_id": hashlib.md5(job_url.encode()).hexdigest()[:12]
+                    if job_url
+                    else hashlib.md5(f"{org_name}:{j.get('title', '')}".encode()).hexdigest()[:12],
+                    "snippet": snippet,
+                    "full_description": full_desc,
+                    "compensation": j.get("compensationTierSummary", ""),
+                }
+            )
         print(f"  [{org_name}] Found {len(jobs)} vacancies")
         return jobs
     except Exception as e:
@@ -279,6 +304,7 @@ def fetch_ashby(org_name: str, slug: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Workable public widget API
 # ---------------------------------------------------------------------------
+
 
 def fetch_workable(org_name: str, slug: str) -> list[dict]:
     """Fetch jobs from Workable widget API (free, no auth).
@@ -299,14 +325,16 @@ def fetch_workable(org_name: str, slug: str) -> list[dict]:
                 location = f"Remote \u2014 {location}" if location else "Remote"
             shortcode = j.get("shortcode", "")
             job_url = j.get("url", "") or f"https://apply.workable.com/{slug}/j/{shortcode}/"
-            jobs.append({
-                "title": j.get("title", ""),
-                "location": location,
-                "department": j.get("department", ""),
-                "url": job_url,
-                "external_id": shortcode or hashlib.md5(job_url.encode()).hexdigest()[:12],
-                "snippet": j.get("shortDescription", ""),
-            })
+            jobs.append(
+                {
+                    "title": j.get("title", ""),
+                    "location": location,
+                    "department": j.get("department", ""),
+                    "url": job_url,
+                    "external_id": shortcode or hashlib.md5(job_url.encode()).hexdigest()[:12],
+                    "snippet": j.get("shortDescription", ""),
+                }
+            )
         print(f"  [{org_name}] Found {len(jobs)} vacancies")
         # Workable list API only returns shortDescription — enrich via Firecrawl
         jobs = _enrich_blind_jobs(jobs, org_name)
@@ -319,6 +347,7 @@ def fetch_workable(org_name: str, slug: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Recruitee public API
 # ---------------------------------------------------------------------------
+
 
 def fetch_recruitee(org_name: str, slug: str) -> list[dict]:
     """Fetch jobs from Recruitee public API (free, no auth).
@@ -361,17 +390,19 @@ def fetch_recruitee(org_name: str, slug: str) -> list[dict]:
                     compensation += f" {salary['currency']}"
 
             job_url = j.get("careers_url", "")
-            jobs.append({
-                "title": j.get("title", ""),
-                "location": location,
-                "department": j.get("department", ""),
-                "url": job_url,
-                "external_id": str(j.get("id", "")) or hashlib.md5(
-                    f"{org_name}:{j.get('title', '')}".encode()).hexdigest()[:12],
-                "snippet": snippet,
-                "full_description": full_desc,
-                "compensation": compensation,
-            })
+            jobs.append(
+                {
+                    "title": j.get("title", ""),
+                    "location": location,
+                    "department": j.get("department", ""),
+                    "url": job_url,
+                    "external_id": str(j.get("id", ""))
+                    or hashlib.md5(f"{org_name}:{j.get('title', '')}".encode()).hexdigest()[:12],
+                    "snippet": snippet,
+                    "full_description": full_desc,
+                    "compensation": compensation,
+                }
+            )
         print(f"  [{org_name}] Found {len(jobs)} vacancies")
         return jobs
     except Exception as e:
@@ -382,6 +413,7 @@ def fetch_recruitee(org_name: str, slug: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Teamtailor RSS feed
 # ---------------------------------------------------------------------------
+
 
 def fetch_teamtailor_rss(org_name: str, slug: str) -> list[dict]:
     """Fetch jobs from Teamtailor RSS feed (free, no auth).
@@ -444,18 +476,23 @@ def fetch_teamtailor_rss(org_name: str, slug: str) -> list[dict]:
                 department = tt_dept.strip()
 
             # Stable external_id from link URL
-            external_id = hashlib.md5(link.encode()).hexdigest()[:12] if link else \
-                hashlib.md5(f"{org_name}:{title}".encode()).hexdigest()[:12]
+            external_id = (
+                hashlib.md5(link.encode()).hexdigest()[:12]
+                if link
+                else hashlib.md5(f"{org_name}:{title}".encode()).hexdigest()[:12]
+            )
 
-            jobs.append({
-                "title": title,
-                "location": location,
-                "department": department,
-                "url": link,
-                "external_id": external_id,
-                "snippet": snippet,
-                "full_description": full_desc,
-            })
+            jobs.append(
+                {
+                    "title": title,
+                    "location": location,
+                    "department": department,
+                    "url": link,
+                    "external_id": external_id,
+                    "snippet": snippet,
+                    "full_description": full_desc,
+                }
+            )
 
         print(f"  [{org_name}] Found {len(jobs)} vacancies")
         return jobs
@@ -470,6 +507,7 @@ def fetch_teamtailor_rss(org_name: str, slug: str) -> list[dict]:
 
 _BAMBOOHR_DETAIL_RATE_LIMIT = 0.3  # seconds between detail requests
 
+
 def fetch_bamboohr(org_name: str, slug: str) -> list[dict]:
     """Fetch jobs from BambooHR public careers API (free, no auth).
     Two-phase: list at /careers/list, then detail at /careers/{id}/detail.
@@ -477,17 +515,22 @@ def fetch_bamboohr(org_name: str, slug: str) -> list[dict]:
     list_url = f"https://{slug}.bamboohr.com/careers/list"
     print(f"  [{org_name}] BambooHR API: {list_url}")
     try:
-        resp = requests.get(list_url, headers={"Accept": "application/json"},
-                            timeout=15, allow_redirects=False)
+        resp = requests.get(
+            list_url, headers={"Accept": "application/json"}, timeout=15, allow_redirects=False
+        )
         if resp.status_code in (301, 302, 303, 307, 308):
-            print(f"  [{org_name}] ERROR: BambooHR redirected to {resp.headers.get('Location','?')} — "
-                  f"account likely disabled, update fetch_strategy in Supabase")
+            print(
+                f"  [{org_name}] ERROR: BambooHR redirected to {resp.headers.get('Location', '?')} — "
+                f"account likely disabled, update fetch_strategy in Supabase"
+            )
             return []
         resp.raise_for_status()
         ctype = resp.headers.get("content-type", "")
         if "json" not in ctype.lower():
-            print(f"  [{org_name}] ERROR: BambooHR returned {ctype or 'unknown content-type'} "
-                  f"(expected JSON), status={resp.status_code}")
+            print(
+                f"  [{org_name}] ERROR: BambooHR returned {ctype or 'unknown content-type'} "
+                f"(expected JSON), status={resp.status_code}"
+            )
             return []
         data = resp.json()
         postings = data.get("result", [])
@@ -513,7 +556,9 @@ def fetch_bamboohr(org_name: str, slug: str) -> list[dict]:
             if job_id:
                 try:
                     detail_url = f"https://{slug}.bamboohr.com/careers/{job_id}/detail"
-                    dr = requests.get(detail_url, headers={"Accept": "application/json"}, timeout=15)
+                    dr = requests.get(
+                        detail_url, headers={"Accept": "application/json"}, timeout=15
+                    )
                     dr.raise_for_status()
                     detail = dr.json().get("result", {}).get("jobOpening", {})
                     raw_desc = detail.get("description", "") or ""
@@ -525,16 +570,18 @@ def fetch_bamboohr(org_name: str, slug: str) -> list[dict]:
                 if i < len(postings) - 1:
                     time.sleep(_BAMBOOHR_DETAIL_RATE_LIMIT)
 
-            jobs.append({
-                "title": title,
-                "location": location,
-                "department": department,
-                "url": job_url,
-                "external_id": str(job_id),
-                "snippet": snippet,
-                "full_description": full_desc,
-                "compensation": compensation,
-            })
+            jobs.append(
+                {
+                    "title": title,
+                    "location": location,
+                    "department": department,
+                    "url": job_url,
+                    "external_id": str(job_id),
+                    "snippet": snippet,
+                    "full_description": full_desc,
+                    "compensation": compensation,
+                }
+            )
 
         print(f"  [{org_name}] {len(jobs)} vacancies with descriptions")
         return jobs
@@ -546,6 +593,7 @@ def fetch_bamboohr(org_name: str, slug: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # SAP SuccessFactors — Career Site Builder tile-search feed
 # ---------------------------------------------------------------------------
+
 
 def _sf_base_url(config: dict) -> str:
     """Resolve the SuccessFactors site base (host + /<Site>) from config.
@@ -588,28 +636,31 @@ def _parse_successfactors_tiles(html: str, base_url: str, org_name: str) -> list
             continue
         path = html_module.unescape(m_url.group(1))
         job_url = urllib.parse.urljoin(host + "/", path.lstrip("/"))
-        m_id = re.search(r'job-id-(\d+)', li)
+        m_id = re.search(r"job-id-(\d+)", li)
         ext_id = m_id.group(1) if m_id else hashlib.md5(job_url.encode()).hexdigest()[:12]
-        m_title = re.search(r'jobTitle-link[^>]*>\s*(.*?)\s*</a>', li, re.DOTALL)
+        m_title = re.search(r"jobTitle-link[^>]*>\s*(.*?)\s*</a>", li, re.DOTALL)
         title = ""
         if m_title:
-            title = html_module.unescape(re.sub(r'\s+', ' ', m_title.group(1))).strip()
+            title = html_module.unescape(re.sub(r"\s+", " ", m_title.group(1))).strip()
         if not title:
             continue
         # Location, when present, sits in a jobLocation/jobGeoLocation span.
         location = ""
         m_loc = re.search(
-            r'class="[^"]*job(?:Geo)?Location[^"]*"[^>]*>\s*(.*?)\s*</', li, re.DOTALL)
+            r'class="[^"]*job(?:Geo)?Location[^"]*"[^>]*>\s*(.*?)\s*</', li, re.DOTALL
+        )
         if m_loc:
-            location = html_module.unescape(re.sub(r'\s+', ' ', m_loc.group(1))).strip()
-        jobs.append({
-            "title": title,
-            "location": location,
-            "department": "",
-            "url": job_url,
-            "external_id": ext_id,
-            "snippet": "",
-        })
+            location = html_module.unescape(re.sub(r"\s+", " ", m_loc.group(1))).strip()
+        jobs.append(
+            {
+                "title": title,
+                "location": location,
+                "department": "",
+                "url": job_url,
+                "external_id": ext_id,
+                "snippet": "",
+            }
+        )
     return jobs
 
 
@@ -681,11 +732,15 @@ def fetch_successfactors(org_name: str, config: dict) -> list[dict]:
 # ADP Workforce Now — public job-requisitions JSON feed
 # ---------------------------------------------------------------------------
 
+
 def _adp_cid(config: dict) -> str:
     """Resolve the ADP career-center ``cid`` from config (ats_slug or ats_config)."""
-    return (config.get("ats_slug")
-            or (config.get("ats_config") or {}).get("cid")
-            or config.get("cid") or "").strip()
+    return (
+        config.get("ats_slug")
+        or (config.get("ats_config") or {}).get("cid")
+        or config.get("cid")
+        or ""
+    ).strip()
 
 
 def _adp_location(locs) -> str:
@@ -699,8 +754,10 @@ def _adp_location(locs) -> str:
         name = ((loc.get("nameCode") or {}).get("shortName") or "").strip()
         if not name:
             addr = loc.get("address") or {}
-            parts = [addr.get("cityName", ""),
-                     (addr.get("countrySubdivisionLevel1") or {}).get("codeValue", "")]
+            parts = [
+                addr.get("cityName", ""),
+                (addr.get("countrySubdivisionLevel1") or {}).get("codeValue", ""),
+            ]
             name = ", ".join(p for p in parts if p)
         if name:
             names.append(name.strip())
@@ -712,8 +769,10 @@ def _adp_job_url(portal: str, cid: str, item_id: str) -> str:
     if portal and "recruitment.html" in portal:
         sep = "&" if "?" in portal else "?"
         return f"{portal}{sep}jobId={item_id}" if item_id else portal
-    base = ("https://workforcenow.adp.com/mascsr/default/mdf/recruitment/"
-            f"recruitment.html?cid={cid}&type=MP&lang=en_US")
+    base = (
+        "https://workforcenow.adp.com/mascsr/default/mdf/recruitment/"
+        f"recruitment.html?cid={cid}&type=MP&lang=en_US"
+    )
     return f"{base}&jobId={item_id}" if item_id else base
 
 
@@ -744,13 +803,15 @@ def fetch_adp_json(org_name: str, config: dict) -> list[dict]:
     if not cid:
         print(f"  [{org_name}] ADP: no cid configured (ats_slug/ats_config.cid)")
         return []
-    url = ("https://workforcenow.adp.com/mascsr/default/careercenter/public/"
-           f"events/staffing/v1/job-requisitions?cid={cid}")
+    url = (
+        "https://workforcenow.adp.com/mascsr/default/careercenter/public/"
+        f"events/staffing/v1/job-requisitions?cid={cid}"
+    )
     print(f"  [{org_name}] ADP Workforce Now: {url}")
     try:
         resp = requests.get(
-            url, headers={"Accept": "application/json", "User-Agent": _LOCAL_UA},
-            timeout=20)
+            url, headers={"Accept": "application/json", "User-Agent": _LOCAL_UA}, timeout=20
+        )
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
@@ -759,7 +820,7 @@ def fetch_adp_json(org_name: str, config: dict) -> list[dict]:
 
     portal = config.get("careers_url") or config.get("url") or ""
     jobs = []
-    for r in (data.get("jobRequisitions") or []):
+    for r in data.get("jobRequisitions") or []:
         if not isinstance(r, dict):
             continue
         title = (r.get("requisitionTitle") or "").strip()
@@ -767,15 +828,17 @@ def fetch_adp_json(org_name: str, config: dict) -> list[dict]:
             continue
         item_id = str(r.get("itemID") or "")
         location = _adp_location(r.get("requisitionLocations"))
-        jobs.append({
-            "title": title,
-            "location": location,
-            "department": "",
-            "url": _adp_job_url(portal, cid, item_id),
-            "external_id": item_id or hashlib.md5(
-                f"{org_name}:{title}".encode()).hexdigest()[:12],
-            "snippet": _adp_snippet(location, r.get("payGradeRange")),
-        })
+        jobs.append(
+            {
+                "title": title,
+                "location": location,
+                "department": "",
+                "url": _adp_job_url(portal, cid, item_id),
+                "external_id": item_id
+                or hashlib.md5(f"{org_name}:{title}".encode()).hexdigest()[:12],
+                "snippet": _adp_snippet(location, r.get("payGradeRange")),
+            }
+        )
     print(f"  [{org_name}] Found {len(jobs)} vacancies")
     return jobs
 
@@ -784,21 +847,22 @@ def fetch_adp_json(org_name: str, config: dict) -> list[dict]:
 # HTML helpers
 # ---------------------------------------------------------------------------
 
+
 def _html_to_text(html: str) -> str:
     """Decode HTML entities and strip tags, return clean text."""
     if not html:
         return ""
     html = html.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
     html = html.replace("&quot;", '"').replace("&#39;", "'").replace("&nbsp;", " ")
-    text = re.sub(r'<[^>]+>', ' ', html)
-    return re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r"<[^>]+>", " ", html)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _html_to_snippet(html: str, max_chars: int = 400) -> str:
     """Strip HTML tags and return a clean text snippet."""
     text = _html_to_text(html)
     if len(text) > max_chars:
-        text = text[:max_chars].rsplit(' ', 1)[0] + "\u2026"
+        text = text[:max_chars].rsplit(" ", 1)[0] + "\u2026"
     return text
 
 
@@ -812,32 +876,33 @@ def _extract_compensation(raw_html: str) -> str:
 
     # Pattern 1: "Compensation: \u20acX,XXX - \u20acY,YYY" (a common highlights layout)
     m = re.search(
-        r'[Cc]ompensation[:\s]+([\u20ac$\u00a3][\d,]+(?:\.\d+)?)\s*[-\u2013]\s*([\u20ac$\u00a3]?[\d,]+(?:\.\d+)?)',
-        text
+        r"[Cc]ompensation[:\s]+([\u20ac$\u00a3][\d,]+(?:\.\d+)?)\s*[-\u2013]\s*([\u20ac$\u00a3]?[\d,]+(?:\.\d+)?)",
+        text,
     )
     if m:
         return _format_monthly(m.group(1), m.group(2))
 
     # Pattern 2: "OTE (On-Target Earnings): $X - $Y"
     m = re.search(
-        r'OTE[^:]*:\s*([\u20ac$\u00a3][\d,]+(?:\.\d+)?)\s*[-\u2013]\s*([\u20ac$\u00a3]?[\d,]+(?:\.\d+)?)',
-        text
+        r"OTE[^:]*:\s*([\u20ac$\u00a3][\d,]+(?:\.\d+)?)\s*[-\u2013]\s*([\u20ac$\u00a3]?[\d,]+(?:\.\d+)?)",
+        text,
     )
     if m:
         return _format_monthly(m.group(1), m.group(2))
 
     # Pattern 3: "base pay range... $X-$Y" (CZI style)
     m = re.search(
-        r'(?:base pay|salary|pay)\s+range[^\u20ac$\u00a3]*([\u20ac$\u00a3][\d,]+(?:\.\d+)?)\s*[-\u2013]\s*([\u20ac$\u00a3]?[\d,]+(?:\.\d+)?)',
-        text, re.IGNORECASE
+        r"(?:base pay|salary|pay)\s+range[^\u20ac$\u00a3]*([\u20ac$\u00a3][\d,]+(?:\.\d+)?)\s*[-\u2013]\s*([\u20ac$\u00a3]?[\d,]+(?:\.\d+)?)",
+        text,
+        re.IGNORECASE,
     )
     if m:
         return _format_monthly(m.group(1), m.group(2))
 
     # Pattern 4: "Compensation: X,XXX Serbian dinars" or "GEL X,XXX"
     m = re.search(
-        r'[Cc]ompensation[:\s]+([\d,]+(?:\.\d+)?)\s*[-\u2013]\s*([\d,]+(?:\.\d+)?)\s*(Serbian dinars|GEL|dinars)',
-        text
+        r"[Cc]ompensation[:\s]+([\d,]+(?:\.\d+)?)\s*[-\u2013]\s*([\d,]+(?:\.\d+)?)\s*(Serbian dinars|GEL|dinars)",
+        text,
     )
     if m:
         lo = _parse_number(m.group(1))
@@ -846,17 +911,14 @@ def _extract_compensation(raw_html: str) -> str:
         return f"{currency} {lo:,.0f}-{hi:,.0f}/mo"
 
     # Pattern 5: "GEL11,000 - GEL14,050"
-    m = re.search(r'(GEL)([\d,]+)\s*[-\u2013]\s*(?:GEL)?([\d,]+)', text)
+    m = re.search(r"(GEL)([\d,]+)\s*[-\u2013]\s*(?:GEL)?([\d,]+)", text)
     if m:
         lo = _parse_number(m.group(2))
         hi = _parse_number(m.group(3))
         return f"GEL {lo:,.0f}-{hi:,.0f}/mo"
 
     # Pattern 6: single salary "Salary: \u20acX,XXX"
-    m = re.search(
-        r'(?:[Ss]alary|[Cc]ompensation)[:\s]+([\u20ac$\u00a3][\d,]+(?:\.\d+)?)',
-        text
-    )
+    m = re.search(r"(?:[Ss]alary|[Cc]ompensation)[:\s]+([\u20ac$\u00a3][\d,]+(?:\.\d+)?)", text)
     if m:
         return _format_monthly(m.group(1), None)
 
@@ -869,8 +931,8 @@ def _extract_deadline(raw_html: str) -> str:
     if not text:
         return ""
     m = re.search(
-        r'(?:[Dd]eadline|[Cc]losing\s+date|[Aa]pply\s+by|[Aa]pplications?\s+close)[:\s]+([A-Za-z0-9,\s]+\d{4})',
-        text
+        r"(?:[Dd]eadline|[Cc]losing\s+date|[Aa]pply\s+by|[Aa]pplications?\s+close)[:\s]+([A-Za-z0-9,\s]+\d{4})",
+        text,
     )
     if m:
         return m.group(1).strip()
@@ -962,6 +1024,7 @@ def _firecrawl_credits_available() -> bool:
         return _firecrawl_credits_remaining > 0
 
     import os
+
     key = os.environ.get("FIRECRAWL_API_KEY", "")
     if not key:
         # No key: can't check, but Firecrawl client likely unusable anyway.
@@ -987,8 +1050,14 @@ def _firecrawl_credits_available() -> bool:
 
 # Errors from the Firecrawl SDK that signal quota exhaustion / rate limits.
 _QUOTA_ERROR_MARKERS = (
-    "402", "429", "payment required", "insufficient credit",
-    "out of credit", "rate limit", "quota", "too many requests",
+    "402",
+    "429",
+    "payment required",
+    "insufficient credit",
+    "out of credit",
+    "rate limit",
+    "quota",
+    "too many requests",
 )
 
 
@@ -1015,7 +1084,7 @@ def _html_to_markdown(html: str) -> str:
         text = re.sub(r"<[^>]+>", " ", text)
         return html_module.unescape(re.sub(r"\s+", " ", text))
     h = html2text.HTML2Text()
-    h.body_width = 0          # no hard wrapping
+    h.body_width = 0  # no hard wrapping
     h.ignore_images = True
     h.ignore_emphasis = True
     h.single_line_break = True
@@ -1025,12 +1094,11 @@ def _html_to_markdown(html: str) -> str:
 def _absolutize_links(html: str, base_url: str) -> str:
     """Rewrite root-relative href="/..." links to absolute URLs."""
     from urllib.parse import urljoin
-    return re.sub(r'(href=")(/[^"]+)',
-                  lambda m: m.group(1) + urljoin(base_url, m.group(2)), html)
+
+    return re.sub(r'(href=")(/[^"]+)', lambda m: m.group(1) + urljoin(base_url, m.group(2)), html)
 
 
-def _fetch_pageup_xhr(org_name: str, url: str, *,
-                      url_filter: str = "") -> list[dict]:
+def _fetch_pageup_xhr(org_name: str, url: str, *, url_filter: str = "") -> list[dict]:
     """PageUp ATS (e.g. jobs.unicef.org): facet filters apply only via XHR.
 
     Plain GET ignores ?optionsFacetsDD_* facets and returns the unfiltered
@@ -1039,6 +1107,7 @@ def _fetch_pageup_xhr(org_name: str, url: str, *,
     retry with backoff; production cadence is one request per TTL cycle.
     """
     import time
+
     print(f"  [{org_name}] PageUp XHR scrape: {url}")
     headers = {
         "User-Agent": _LOCAL_UA,
@@ -1056,8 +1125,10 @@ def _fetch_pageup_xhr(org_name: str, url: str, *,
                 resp = requests.get(req_url, headers=h, timeout=20)
                 if resp.status_code == 200 and resp.text:
                     return resp.text
-                print(f"  [{org_name}] PageUp throttled "
-                      f"(HTTP {resp.status_code}), retry {attempt + 1}/{retries}...")
+                print(
+                    f"  [{org_name}] PageUp throttled "
+                    f"(HTTP {resp.status_code}), retry {attempt + 1}/{retries}..."
+                )
             except Exception as e:
                 print(f"  [{org_name}] PageUp fetch error: {e}")
         return ""
@@ -1077,28 +1148,35 @@ def _fetch_pageup_xhr(org_name: str, url: str, *,
         # most rows (titles routinely exceed the 100-char title limit).
         page_new = 0
         for m in re.finditer(
-                r'class="job-link"\s+href="([^"]+)"\s*>\s*([^<]+)</a>(.{0,2000}?)'
-                r'(?=class="job-link"|$)', html, re.DOTALL):
-            job_url, title, tail = (m.group(1),
-                                    html_module.unescape(m.group(2)).strip(),
-                                    m.group(3))
+            r'class="job-link"\s+href="([^"]+)"\s*>\s*([^<]+)</a>(.{0,2000}?)'
+            r'(?=class="job-link"|$)',
+            html,
+            re.DOTALL,
+        ):
+            job_url, title, tail = (
+                m.group(1),
+                html_module.unescape(m.group(2)).strip(),
+                m.group(3),
+            )
             if job_url in seen_urls:
                 continue
             seen_urls.add(job_url)
             if url_filter_re and not url_filter_re.search(job_url):
                 continue
             snippet_m = re.search(r"<p[^>]*>\s*([^<]{30,})</p>", tail)
-            loc_m = re.search(r"location[^>]*>\s*<[^>]*>\s*([^<]+)<", tail,
-                              re.IGNORECASE)
-            jobs.append({
-                "title": title,
-                "location": (loc_m.group(1).strip() if loc_m else ""),
-                "department": "",
-                "url": job_url,
-                "external_id": hashlib.md5(job_url.encode()).hexdigest()[:12],
-                "snippet": (html_module.unescape(snippet_m.group(1).strip())
-                            if snippet_m else ""),
-            })
+            loc_m = re.search(r"location[^>]*>\s*<[^>]*>\s*([^<]+)<", tail, re.IGNORECASE)
+            jobs.append(
+                {
+                    "title": title,
+                    "location": (loc_m.group(1).strip() if loc_m else ""),
+                    "department": "",
+                    "url": job_url,
+                    "external_id": hashlib.md5(job_url.encode()).hexdigest()[:12],
+                    "snippet": (
+                        html_module.unescape(snippet_m.group(1).strip()) if snippet_m else ""
+                    ),
+                }
+            )
             page_new += 1
         if page_new == 0:  # page param ignored or past the end
             break
@@ -1129,6 +1207,7 @@ def _fetch_wagtail_jobs_api(org_name: str, url: str) -> list[dict]:
     the per-job detail pages are server-rendered — zero-cost to fetch.
     """
     import time
+
     print(f"  [{org_name}] Wagtail jobs API: {url}")
     try:
         resp = requests.get(url, headers={"User-Agent": _LOCAL_UA}, timeout=20)
@@ -1145,29 +1224,39 @@ def _fetch_wagtail_jobs_api(org_name: str, url: str) -> list[dict]:
         job_url = (it.get("meta", {}).get("html_url") or "").strip()
         if not title or not job_url:
             continue
+
         def _s(key):
             v = it.get(key)
             return v.strip() if isinstance(v, str) else ""
-        extras = " | ".join(filter(None, [
-            _s("location"), _s("salary"), _s("contract_type"),
-            f"closes {it['closes'][:10]}" if isinstance(it.get("closes"), str) else "",
-        ]))
+
+        extras = " | ".join(
+            filter(
+                None,
+                [
+                    _s("location"),
+                    _s("salary"),
+                    _s("contract_type"),
+                    f"closes {it['closes'][:10]}" if isinstance(it.get("closes"), str) else "",
+                ],
+            )
+        )
         snippet = " ".join(filter(None, [_s("listing_summary"), extras]))
-        jobs.append({
-            "title": title,
-            "location": _s("location"),
-            "department": "",
-            "url": job_url,
-            "external_id": hashlib.md5(job_url.encode()).hexdigest()[:12],
-            "snippet": snippet,
-        })
+        jobs.append(
+            {
+                "title": title,
+                "location": _s("location"),
+                "department": "",
+                "url": job_url,
+                "external_id": hashlib.md5(job_url.encode()).hexdigest()[:12],
+                "snippet": snippet,
+            }
+        )
     print(f"  [{org_name}] Wagtail API: {len(jobs)} vacancies")
 
     for job in jobs:
         time.sleep(2)
         try:
-            resp = requests.get(job["url"],
-                                headers={"User-Agent": _LOCAL_UA}, timeout=20)
+            resp = requests.get(job["url"], headers={"User-Agent": _LOCAL_UA}, timeout=20)
             if resp.status_code == 200 and len(resp.text) > 2000:
                 job["full_description"] = _html_to_markdown(resp.text)
         except Exception as e:
@@ -1177,8 +1266,7 @@ def _fetch_wagtail_jobs_api(org_name: str, url: str) -> list[dict]:
     return jobs
 
 
-def _fetch_local_scrape(org_name: str, url: str, *,
-                        url_filter: str = "") -> list[dict]:
+def _fetch_local_scrape(org_name: str, url: str, *, url_filter: str = "") -> list[dict]:
     """Zero-cost fallback: fetch the page with requests → markdown → parse.
 
     Records a 'js_required' status override when the page looks like a
@@ -1212,8 +1300,10 @@ def _fetch_local_scrape(org_name: str, url: str, *,
     text_len = len(re.sub(r"\s+", " ", markdown).strip())
     has_links = "](" in markdown
     if text_len < 500 or not has_links:
-        print(f"  [{org_name}] Page looks JS-rendered "
-              f"(text={text_len} chars, links={has_links}) → js_required")
+        print(
+            f"  [{org_name}] Page looks JS-rendered "
+            f"(text={text_len} chars, links={has_links}) → js_required"
+        )
         _last_scrape_status[org_name] = "js_required"
         return []
 
@@ -1225,8 +1315,9 @@ def _fetch_local_scrape(org_name: str, url: str, *,
     return jobs
 
 
-def _parse_json_jobs(json_data: dict, org_name: str, base_url: str,
-                     *, url_filter: str = "") -> list[dict]:
+def _parse_json_jobs(
+    json_data: dict, org_name: str, base_url: str, *, url_filter: str = ""
+) -> list[dict]:
     """Convert Firecrawl JSON extraction output to standard vacancy dicts.
 
     Args:
@@ -1259,16 +1350,18 @@ def _parse_json_jobs(json_data: dict, org_name: str, base_url: str,
             continue
         if job_url and _is_non_job_url(job_url):
             continue
-        jobs.append({
-            "title": title,
-            "location": (j.get("location") or "").strip(),
-            "department": (j.get("department") or "").strip(),
-            "url": job_url,
-            "external_id": hashlib.md5(
-                (job_url or f"{org_name}:{title}").encode()
-            ).hexdigest()[:12],
-            "snippet": (j.get("snippet") or "").strip(),
-        })
+        jobs.append(
+            {
+                "title": title,
+                "location": (j.get("location") or "").strip(),
+                "department": (j.get("department") or "").strip(),
+                "url": job_url,
+                "external_id": hashlib.md5((job_url or f"{org_name}:{title}").encode()).hexdigest()[
+                    :12
+                ],
+                "snippet": (j.get("snippet") or "").strip(),
+            }
+        )
     return jobs
 
 
@@ -1276,13 +1369,16 @@ def _parse_json_jobs(json_data: dict, org_name: str, base_url: str,
 # Amazon Jobs public API
 # ---------------------------------------------------------------------------
 
+
 def fetch_amazon_jobs(org_name: str, config: dict) -> list[dict]:
     """Fetch jobs from Amazon Jobs search API (free, no auth).
     Endpoint: GET https://www.amazon.jobs/en/search.json?base_query=...
     Supports multiple queries (comma-separated) since the API does AND matching.
     """
     queries_raw = config.get("queries", config.get("base_query", "nonprofit,social impact"))
-    queries = [q.strip() for q in queries_raw.split(",")] if isinstance(queries_raw, str) else queries_raw
+    queries = (
+        [q.strip() for q in queries_raw.split(",")] if isinstance(queries_raw, str) else queries_raw
+    )
     api_url = "https://www.amazon.jobs/en/search.json"
     limit = 100
     seen_ids: set[str] = set()
@@ -1315,8 +1411,11 @@ def fetch_amazon_jobs(org_name: str, config: dict) -> list[dict]:
                 if not title:
                     continue
                 job_id = j.get("id_icims") or j.get("id") or ""
-                ext_id = str(job_id) if job_id else hashlib.md5(
-                    f"{org_name}:{title}".encode()).hexdigest()[:12]
+                ext_id = (
+                    str(job_id)
+                    if job_id
+                    else hashlib.md5(f"{org_name}:{title}".encode()).hexdigest()[:12]
+                )
                 if ext_id in seen_ids:
                     continue
                 seen_ids.add(ext_id)
@@ -1326,15 +1425,17 @@ def fetch_amazon_jobs(org_name: str, config: dict) -> list[dict]:
                 snippet = (j.get("description_short") or "").strip()
                 location = (j.get("location") or "").strip()
 
-                all_jobs.append({
-                    "title": title,
-                    "location": location,
-                    "department": (j.get("job_category") or "").strip(),
-                    "url": job_url,
-                    "external_id": ext_id,
-                    "snippet": snippet,
-                    "full_description": desc,
-                })
+                all_jobs.append(
+                    {
+                        "title": title,
+                        "location": location,
+                        "department": (j.get("job_category") or "").strip(),
+                        "url": job_url,
+                        "external_id": ext_id,
+                        "snippet": snippet,
+                        "full_description": desc,
+                    }
+                )
 
             hits = data.get("hits", 0)
             offset += limit
@@ -1348,6 +1449,7 @@ def fetch_amazon_jobs(org_name: str, config: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Apple Jobs API (CSRF token + POST)
 # ---------------------------------------------------------------------------
+
 
 def fetch_apple_jobs(org_name: str, config: dict) -> list[dict]:
     """Fetch jobs from Apple Jobs API (free, CSRF token required).
@@ -1381,9 +1483,7 @@ def fetch_apple_jobs(org_name: str, config: dict) -> list[dict]:
     while True:
         payload = {
             "query": query,
-            "filters": {
-                "range": {"standardWeeklyHours": {"start": None, "end": None}}
-            },
+            "filters": {"range": {"standardWeeklyHours": {"start": None, "end": None}}},
             "page": page,
             "locale": "en-us",
             "sort": "relevance",
@@ -1416,19 +1516,28 @@ def fetch_apple_jobs(org_name: str, config: dict) -> list[dict]:
             job_url = f"https://jobs.apple.com/en-us/details/{pos_id}" if pos_id else ""
             summary = (j.get("jobSummary") or "").strip()
             locs = j.get("locations", [])
-            location = ", ".join(
-                (loc.get("name") or loc.get("city") or "") for loc in locs[:3]
-            ) if isinstance(locs, list) else ""
+            location = (
+                ", ".join((loc.get("name") or loc.get("city") or "") for loc in locs[:3])
+                if isinstance(locs, list)
+                else ""
+            )
 
-            all_jobs.append({
-                "title": title,
-                "location": location,
-                "department": (j.get("team", {}).get("teamName", "") if isinstance(j.get("team"), dict) else ""),
-                "url": job_url,
-                "external_id": str(pos_id) if pos_id else hashlib.md5(
-                    f"{org_name}:{title}".encode()).hexdigest()[:12],
-                "snippet": summary,
-            })
+            all_jobs.append(
+                {
+                    "title": title,
+                    "location": location,
+                    "department": (
+                        j.get("team", {}).get("teamName", "")
+                        if isinstance(j.get("team"), dict)
+                        else ""
+                    ),
+                    "url": job_url,
+                    "external_id": str(pos_id)
+                    if pos_id
+                    else hashlib.md5(f"{org_name}:{title}".encode()).hexdigest()[:12],
+                    "snippet": summary,
+                }
+            )
 
         total = data.get("totalRecords", 0)
         if len(all_jobs) >= total or not search_results:
@@ -1439,9 +1548,9 @@ def fetch_apple_jobs(org_name: str, config: dict) -> list[dict]:
     return all_jobs
 
 
-def fetch_firecrawl_scrape(org_name: str, url: str, *,
-                           use_json: bool = True,
-                           url_filter: str = "") -> list[dict]:
+def fetch_firecrawl_scrape(
+    org_name: str, url: str, *, use_json: bool = True, url_filter: str = ""
+) -> list[dict]:
     """Scrape a careers page via Firecrawl SDK (preferred) or CLI fallback.
 
     With use_json=True (default for companies): requests both JSON extraction
@@ -1516,8 +1625,7 @@ def fetch_firecrawl_scrape(org_name: str, url: str, *,
     if use_json:
         json_data = getattr(result, "json", None)
         if json_data:
-            jobs = _parse_json_jobs(json_data, org_name, url,
-                                   url_filter=url_filter)
+            jobs = _parse_json_jobs(json_data, org_name, url, url_filter=url_filter)
             if jobs:
                 print(f"  [{org_name}] Parsed {len(jobs)} vacancies from JSON extraction")
                 # Cache markdown for debugging
@@ -1557,7 +1665,10 @@ def _enrich_blind_jobs(jobs: list[dict], org_name: str) -> list[dict]:
 
     # Pre-filter blacklisted titles
     import filters
-    to_enrich = [(i, j) for i, j in blind if not filters.title_words_blacklisted(j.get("title", ""))]
+
+    to_enrich = [
+        (i, j) for i, j in blind if not filters.title_words_blacklisted(j.get("title", ""))
+    ]
     skipped = len(blind) - len(to_enrich)
 
     if not to_enrich:
@@ -1565,8 +1676,10 @@ def _enrich_blind_jobs(jobs: list[dict], org_name: str) -> list[dict]:
             print(f"  [{org_name}] {skipped} blind jobs skipped (blacklisted)")
         return jobs
 
-    print(f"  [{org_name}] Enriching {len(to_enrich)} blind jobs via Firecrawl" +
-          (f" ({skipped} blacklisted skipped)" if skipped else ""))
+    print(
+        f"  [{org_name}] Enriching {len(to_enrich)} blind jobs via Firecrawl"
+        + (f" ({skipped} blacklisted skipped)" if skipped else "")
+    )
 
     enriched = 0
     for idx, (i, job) in enumerate(to_enrich):
@@ -1586,11 +1699,11 @@ def _enrich_blind_jobs(jobs: list[dict], org_name: str) -> list[dict]:
 
             if md:
                 # Clean markdown to plain text
-                text = re.sub(r'!\[([^\]]*)\]\([^)]+\)', '', md)
-                text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
-                text = re.sub(r'<[^>]{1,200}>', '', text)
-                text = re.sub(r'[*_`#\\]', '', text)
-                text = re.sub(r'\n{3,}', '\n\n', text).strip()
+                text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", "", md)
+                text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+                text = re.sub(r"<[^>]{1,200}>", "", text)
+                text = re.sub(r"[*_`#\\]", "", text)
+                text = re.sub(r"\n{3,}", "\n\n", text).strip()
 
                 if len(text) >= 100:
                     jobs[i]["full_description"] = text[:30000]
@@ -1624,8 +1737,7 @@ def _cache_markdown(org_name: str, markdown: str, *, source: str = "firecrawl") 
         pass
 
 
-def _fetch_firecrawl_scrape_cli(org_name: str, url: str, *,
-                                url_filter: str = "") -> list[dict]:
+def _fetch_firecrawl_scrape_cli(org_name: str, url: str, *, url_filter: str = "") -> list[dict]:
     """Legacy CLI fallback: scrape via firecrawl CLI subprocess."""
     FIRECRAWL_CACHE.mkdir(parents=True, exist_ok=True)
     slug = org_name.lower().replace(" ", "_").replace(".", "")
@@ -1633,9 +1745,19 @@ def _fetch_firecrawl_scrape_cli(org_name: str, url: str, *,
 
     try:
         result = subprocess.run(
-            ["firecrawl", "scrape", url, "--wait-for", "5000",
-             "--only-main-content", "-o", str(output_file)],
-            capture_output=True, text=True, timeout=60
+            [
+                "firecrawl",
+                "scrape",
+                url,
+                "--wait-for",
+                "5000",
+                "--only-main-content",
+                "-o",
+                str(output_file),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         if result.returncode != 0:
             print(f"  [{org_name}] CLI error: {result.stderr[:200]}")
@@ -1662,11 +1784,16 @@ def _fetch_firecrawl_scrape_cli(org_name: str, url: str, *,
 # UNOPS careers widget (official endpoint, no auth)
 # ---------------------------------------------------------------------------
 
-def fetch_unops_widget(org_name: str, url: str, *,
-                       title_blacklist: list[str] | None = None,
-                       seniority_filter: list[str] | None = None,
-                       location_keywords: list[str] | None = None,
-                       fetch_descriptions: bool = True) -> list[dict]:
+
+def fetch_unops_widget(
+    org_name: str,
+    url: str,
+    *,
+    title_blacklist: list[str] | None = None,
+    seniority_filter: list[str] | None = None,
+    location_keywords: list[str] | None = None,
+    fetch_descriptions: bool = True,
+) -> list[dict]:
     """Fetch UNOPS open positions from the official careers widget endpoint."""
     print(f"  [{org_name}] UNOPS widget: {url}")
     try:
@@ -1704,7 +1831,9 @@ def fetch_unops_widget(org_name: str, url: str, *,
         deadline = _extract_unops_widget_field(block, "Post End date")
 
         ext_match = re.search(r"/(\d+)(?:$|[?#])", job_url)
-        external_id = ext_match.group(1) if ext_match else hashlib.md5(job_url.encode()).hexdigest()[:12]
+        external_id = (
+            ext_match.group(1) if ext_match else hashlib.md5(job_url.encode()).hexdigest()[:12]
+        )
         if external_id in seen_ids:
             continue
         seen_ids.add(external_id)
@@ -1742,20 +1871,24 @@ def fetch_unops_widget(org_name: str, url: str, *,
             snippet_parts.append(f"Deadline: {deadline}")
         snippet = " | ".join(snippet_parts)
 
-        jobs.append({
-            "title": title,
-            "location": duty_station,
-            "department": seniority,
-            "url": job_url,
-            "external_id": external_id,
-            "snippet": snippet,
-            "deadline": deadline,
-        })
+        jobs.append(
+            {
+                "title": title,
+                "location": duty_station,
+                "department": seniority,
+                "url": job_url,
+                "external_id": external_id,
+                "snippet": snippet,
+                "deadline": deadline,
+            }
+        )
 
     total_skipped = sum(skipped.values())
-    print(f"  [{org_name}] Found {len(jobs)} vacancies (skipped: {total_skipped} — "
-          f"blacklist:{skipped['blacklist']}, expired:{skipped['expired']}, "
-          f"seniority:{skipped['seniority']}, location:{skipped['location']})")
+    print(
+        f"  [{org_name}] Found {len(jobs)} vacancies (skipped: {total_skipped} — "
+        f"blacklist:{skipped['blacklist']}, expired:{skipped['expired']}, "
+        f"seniority:{skipped['seniority']}, location:{skipped['location']})"
+    )
 
     if fetch_descriptions and jobs:
         print(f"  [{org_name}] Fetching descriptions for {len(jobs)} vacancies...")
@@ -1779,6 +1912,7 @@ def _extract_unops_widget_field(block_html: str, label: str) -> str:
 def _parse_unops_deadline(date_str: str):
     """Parse UNOPS deadline string into a date object. Returns None on failure."""
     from datetime import datetime
+
     for fmt in ("%d %b %Y", "%d %B %Y", "%Y-%m-%d", "%d/%m/%Y"):
         try:
             return datetime.strptime(date_str.strip(), fmt).date()
@@ -1790,6 +1924,7 @@ def _parse_unops_deadline(date_str: str):
 def _unops_deadline_expired(date_str: str) -> bool:
     """Return True if the deadline has already passed."""
     from datetime import date
+
     parsed = _parse_unops_deadline(date_str)
     if parsed is None:
         return False  # unknown format → keep the vacancy
@@ -1812,14 +1947,13 @@ def _fetch_unops_job_detail(url: str) -> str:
     # UNOPS uses a Twig template with class="section__content" for job details
     # This pattern captures the main job content section
     m = re.search(
-        r'<div[^>]+class="section__content"[^>]*>(.*?)</section>',
-        html, re.IGNORECASE | re.DOTALL
+        r'<div[^>]+class="section__content"[^>]*>(.*?)</section>', html, re.IGNORECASE | re.DOTALL
     )
     if m and len(m.group(1)) > 200:
         return _html_to_text(m.group(1))
 
     # Fallback: strip full <body> text
-    body = re.search(r'<body[^>]*>(.*?)</body>', html, re.IGNORECASE | re.DOTALL)
+    body = re.search(r"<body[^>]*>(.*?)</body>", html, re.IGNORECASE | re.DOTALL)
     return _html_to_text(body.group(1)) if body else ""
 
 
@@ -1827,16 +1961,16 @@ def _fetch_unops_job_detail(url: str) -> str:
 # Markdown parser
 # ---------------------------------------------------------------------------
 
-_FEATURED_RE = re.compile(r'\s{2,}Featured\s*$')
+_FEATURED_RE = re.compile(r"\s{2,}Featured\s*$")
 
 # Paths that are never job listings (site info pages)
 _NON_JOB_PATH_SEGMENTS = re.compile(
-    r'/(?:about|team|contact|privacy|terms|faq|donate|press|media|board)(?:/|$)',
+    r"/(?:about|team|contact|privacy|terms|faq|donate|press|media|board)(?:/|$)",
     re.IGNORECASE,
 )
 # Fragment anchors that indicate site sections, not jobs
 _NON_JOB_FRAGMENTS = re.compile(
-    r'#(?:partners|advisory-board|board|team|staff|leadership|about|contact|donate|footer|header|nav|menu|main)',
+    r"#(?:partners|advisory-board|board|team|staff|leadership|about|contact|donate|footer|header|nav|menu|main)",
     re.IGNORECASE,
 )
 
@@ -1868,16 +2002,16 @@ def _sanitize_board_title(title: str) -> str:
     Fast Forward: "VP of Programs  Featured" → "VP of Programs"
     """
     # Idealist: split on ** **  (bold org name appended to title)
-    if '** **' in title:
-        title = title.split('** **')[0]
+    if "** **" in title:
+        title = title.split("** **")[0]
     # Strip leftover markdown bold markers
-    title = title.replace('**', '').strip()
+    title = title.replace("**", "").strip()
     # Fast Forward: remove "Featured" suffix (preceded by 2+ spaces)
-    title = _FEATURED_RE.sub('', title)
+    title = _FEATURED_RE.sub("", title)
     return title.strip()
 
 
-_DEPT_COUNT_SUFFIX_RE = re.compile(r'\s*\(\d{1,2}\)\s*$')
+_DEPT_COUNT_SUFFIX_RE = re.compile(r"\s*\(\d{1,2}\)\s*$")
 
 
 def _has_dept_count_suffix(title: str) -> bool:
@@ -1890,9 +2024,7 @@ def _has_dept_count_suffix(title: str) -> bool:
     return bool(_DEPT_COUNT_SUFFIX_RE.search(title))
 
 
-_CAREERS_BOILERPLATE_PATTERNS = (
-    "freedom, justice, equality let's get to work",
-)
+_CAREERS_BOILERPLATE_PATTERNS = ("freedom, justice, equality let's get to work",)
 
 
 def _is_careers_boilerplate(text: str) -> bool:
@@ -1904,8 +2036,7 @@ def _is_careers_boilerplate(text: str) -> bool:
     return any(p in lower for p in _CAREERS_BOILERPLATE_PATTERNS)
 
 
-def parse_markdown_jobs(markdown: str, org_name: str, *,
-                        url_filter: str = "") -> list[dict]:
+def parse_markdown_jobs(markdown: str, org_name: str, *, url_filter: str = "") -> list[dict]:
     """Extract job listings from scraped markdown content.
 
     Args:
@@ -1916,17 +2047,13 @@ def parse_markdown_jobs(markdown: str, org_name: str, *,
     seen_titles = set()
     url_filter_re = re.compile(url_filter) if url_filter else None
 
-    link_pattern = re.compile(
-        r'\[([^\]]{5,100})\]\((https?://[^\)]+)\)', re.IGNORECASE
-    )
-    image_ext_re = re.compile(r'\.(webp|jpg|jpeg|png|gif|svg)(\?|$)', re.IGNORECASE)
+    link_pattern = re.compile(r"\[([^\]]{5,100})\]\((https?://[^\)]+)\)", re.IGNORECASE)
+    image_ext_re = re.compile(r"\.(webp|jpg|jpeg|png|gif|svg)(\?|$)", re.IGNORECASE)
 
     # Navigation guard: header/footer menu links repeat on every page section
     # of a scrape (nav links can appear 6+ times), while a job link appears
     # once or twice. A URL repeated 3+ times is site chrome, not a job.
-    url_counts = Counter(
-        m.group(2).strip() for m in link_pattern.finditer(markdown)
-    )
+    url_counts = Counter(m.group(2).strip() for m in link_pattern.finditer(markdown))
 
     for match in link_pattern.finditer(markdown):
         title = match.group(1).strip()
@@ -1940,7 +2067,7 @@ def parse_markdown_jobs(markdown: str, org_name: str, *,
             continue
         if _is_non_job_url(url):
             continue
-        title = re.sub(r'\s*\\+\s*', ' ', title)
+        title = re.sub(r"\s*\\+\s*", " ", title)
         title = title.strip("* ").strip()
         title = _sanitize_board_title(title)
         if _has_dept_count_suffix(title):
@@ -1958,37 +2085,41 @@ def parse_markdown_jobs(markdown: str, org_name: str, *,
                 continue
             if _is_careers_boilerplate(snippet):
                 continue
-            jobs.append({
-                "title": title,
-                "location": location,
-                "department": "",
-                "url": url,
-                "external_id": hashlib.md5(url.encode()).hexdigest()[:12],
-                "snippet": snippet,
-            })
+            jobs.append(
+                {
+                    "title": title,
+                    "location": location,
+                    "department": "",
+                    "url": url,
+                    "external_id": hashlib.md5(url.encode()).hexdigest()[:12],
+                    "snippet": snippet,
+                }
+            )
 
-    heading_pattern = re.compile(
-        r'^(?:#{1,4}\s+|\*\*)(.*?)(?:\*\*)?$', re.MULTILINE
-    )
+    heading_pattern = re.compile(r"^(?:#{1,4}\s+|\*\*)(.*?)(?:\*\*)?$", re.MULTILINE)
     for match in heading_pattern.finditer(markdown):
         title = match.group(1).strip().strip("*").strip()
         title = _sanitize_board_title(title)
         if _has_dept_count_suffix(title):
             continue
-        if (_looks_like_job_title(title) and title not in seen_titles
-                and len(title) > 10 and len(title) < 120):
+        if (
+            _looks_like_job_title(title)
+            and title not in seen_titles
+            and len(title) > 10
+            and len(title) < 120
+        ):
             seen_titles.add(title)
             location = _extract_location_near(markdown, match.start(), match.end())
 
             # Look forward for URL + snippet (GovAI / Webflow pattern:
             # # Job Title \n description... \n [Read more](url))
-            lookahead = markdown[match.end():match.end() + 600]
-            next_h = re.search(r'^(?:#{1,4}\s+|\*\*)', lookahead, re.MULTILINE)
+            lookahead = markdown[match.end() : match.end() + 600]
+            next_h = re.search(r"^(?:#{1,4}\s+|\*\*)", lookahead, re.MULTILINE)
             if next_h:
-                lookahead = lookahead[:next_h.start()]
+                lookahead = lookahead[: next_h.start()]
             url = ""
             # Find all links in lookahead; pick first that passes url_filter
-            for link_m in re.finditer(r'\[([^\]]+)\]\((https?://[^\)]+)\)', lookahead):
+            for link_m in re.finditer(r"\[([^\]]+)\]\((https?://[^\)]+)\)", lookahead):
                 candidate = link_m.group(2).strip()
                 if image_ext_re.search(candidate):
                     continue
@@ -2005,24 +2136,27 @@ def parse_markdown_jobs(markdown: str, org_name: str, *,
             if _is_bio_snippet(snippet):
                 continue
 
-            ext_id = (hashlib.md5(url.encode()).hexdigest()[:12] if url
-                      else hashlib.md5(f"{org_name}:{title}".encode()).hexdigest()[:12])
-            jobs.append({
-                "title": title,
-                "location": location,
-                "department": "",
-                "url": url,
-                "external_id": ext_id,
-                "snippet": snippet,
-            })
+            ext_id = (
+                hashlib.md5(url.encode()).hexdigest()[:12]
+                if url
+                else hashlib.md5(f"{org_name}:{title}".encode()).hexdigest()[:12]
+            )
+            jobs.append(
+                {
+                    "title": title,
+                    "location": location,
+                    "department": "",
+                    "url": url,
+                    "external_id": ext_id,
+                    "snippet": snippet,
+                }
+            )
 
     return jobs
 
 
 # Pre-compiled pattern for bio detection
-_BIO_PATTERN = re.compile(
-    r'\b(?:[A-Z][a-z]+\s+){1,3}joined\s+\w+\s+in\s+\d{4}\b'
-)
+_BIO_PATTERN = re.compile(r"\b(?:[A-Z][a-z]+\s+){1,3}joined\s+\w+\s+in\s+\d{4}\b")
 
 
 def _is_bio_snippet(snippet: str) -> bool:
@@ -2046,35 +2180,57 @@ def _looks_like_job_title(text: str) -> bool:
     text_lower = text.lower()
 
     # --- Structural heuristics (reject before keyword check) ---
-    if text.endswith('?'):
+    if text.endswith("?"):
         return False
     if len(text.split()) > 8:
         return False
-    if 'http' in text_lower or 'www.' in text_lower:
+    if "http" in text_lower or "www." in text_lower:
         return False
 
     # Reject bare plural role categories / talent pools:
     # "(Senior) Directors", "Managers", "Officers" — not real vacancies
-    stripped = re.sub(r'\([^)]+\)\s*', '', text).strip()
-    if re.fullmatch(r'[A-Z][a-z]+s', stripped):
+    stripped = re.sub(r"\([^)]+\)\s*", "", text).strip()
+    if re.fullmatch(r"[A-Z][a-z]+s", stripped):
         return False
 
     # --- Keyword check ---
     job_keywords = [
-        "manager", "director", "head", "lead", "officer", "coordinator",
-        "analyst", "associate", "specialist", "engineer", "developer",
-        "designer", "advisor", "consultant", "researcher", "assistant",
-        "vice president", "vp", "chief", "senior", "junior", "intern",
-        "partner", "recruiter", "administrator", "strategist",
-        "program", "programme", "project", "product", "operations",
+        "manager",
+        "director",
+        "head",
+        "lead",
+        "officer",
+        "coordinator",
+        "analyst",
+        "associate",
+        "specialist",
+        "engineer",
+        "developer",
+        "designer",
+        "advisor",
+        "consultant",
+        "researcher",
+        "assistant",
+        "vice president",
+        "vp",
+        "chief",
+        "senior",
+        "junior",
+        "intern",
+        "partner",
+        "recruiter",
+        "administrator",
+        "strategist",
+        "program",
+        "programme",
+        "project",
+        "product",
+        "operations",
     ]
     # Word-boundary match (allowing plural): a bare substring check let
     # "international" match "intern" and "Projected" match "project",
     # importing research articles as vacancies.
-    has_keyword = any(
-        re.search(rf'\b{re.escape(kw)}s?\b', text_lower)
-        for kw in job_keywords
-    )
+    has_keyword = any(re.search(rf"\b{re.escape(kw)}s?\b", text_lower) for kw in job_keywords)
 
     # Reject pure "FirstName LastName" pattern (2-3 capitalized words, no job keyword)
     words = text.split()
@@ -2084,19 +2240,45 @@ def _looks_like_job_title(text: str) -> bool:
 
     # --- Negative phrases ---
     skip_phrases = [
-        "about us", "our team", "benefits", "culture", "values",
-        "how to apply", "submit", "sign up", "log in", "cookie",
-        "privacy", "terms", "home", "menu", "search", "filter",
-        "all jobs", "all positions", "clear", "reset",
-        "partners", "advisory board", "our leadership", "our people",
+        "about us",
+        "our team",
+        "benefits",
+        "culture",
+        "values",
+        "how to apply",
+        "submit",
+        "sign up",
+        "log in",
+        "cookie",
+        "privacy",
+        "terms",
+        "home",
+        "menu",
+        "search",
+        "filter",
+        "all jobs",
+        "all positions",
+        "clear",
+        "reset",
+        "partners",
+        "advisory board",
+        "our leadership",
+        "our people",
         "partner with us",
-        "read more about", "recent posts",
-        "get funding", "donate to", "our funds back",
-        "product tours", "product tagging",
-        "enroll now", "talent directory",
+        "read more about",
+        "recent posts",
+        "get funding",
+        "donate to",
+        "our funds back",
+        "product tours",
+        "product tagging",
+        "enroll now",
+        "talent directory",
         "general applications",
     ]
-    is_navigation = any(re.search(rf'\b{re.escape(phrase)}\b', text_lower) for phrase in skip_phrases)
+    is_navigation = any(
+        re.search(rf"\b{re.escape(phrase)}\b", text_lower) for phrase in skip_phrases
+    )
 
     return has_keyword and not is_navigation
 
@@ -2104,21 +2286,23 @@ def _looks_like_job_title(text: str) -> bool:
 def _extract_location_near(text: str, start: int, end: int, job_url: str = "") -> str:
     """Try to find a location string near a job title in markdown."""
     if job_url:
-        workday_match = re.search(r'/job/([A-Za-z][A-Za-z\s\-]+)/[A-Z]', job_url)
+        workday_match = re.search(r"/job/([A-Za-z][A-Za-z\s\-]+)/[A-Z]", job_url)
         if workday_match:
             city = workday_match.group(1).replace("-", " ").strip()
-            if city and len(city) < 40 and not any(
-                x in city.lower() for x in ["job", "http", "www", "career", "en-us"]
+            if (
+                city
+                and len(city) < 40
+                and not any(x in city.lower() for x in ["job", "http", "www", "career", "en-us"])
             ):
                 return city
 
-        ebrd_match = re.search(r'/job/([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)-[A-Z]', job_url)
+        ebrd_match = re.search(r"/job/([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)-[A-Z]", job_url)
         if ebrd_match:
             city = ebrd_match.group(1).strip()
             if city and len(city) < 25:
                 return city
 
-    context = text[end:end + 300]
+    context = text[end : end + 300]
     if any(bad in context[:50] for bad in ["](https:", "](http:", "](//", "[!["]):
         context = ""
 
@@ -2126,8 +2310,8 @@ def _extract_location_near(text: str, start: int, end: int, job_url: str = "") -
         return ""
 
     loc_patterns = [
-        r'(?:Location|Office|Based in|\u2022)[:\s]+([A-Za-z][^\n\[\]()\u2022|]{2,50}?)(?:\s*[\u2022|\n]|$)',
-        r'\b((?:Remote|Hybrid|On-site)[^|\n\[\]()]{0,40})',
+        r"(?:Location|Office|Based in|\u2022)[:\s]+([A-Za-z][^\n\[\]()\u2022|]{2,50}?)(?:\s*[\u2022|\n]|$)",
+        r"\b((?:Remote|Hybrid|On-site)[^|\n\[\]()]{0,40})",
         _LOCATION_HINT_RE,
     ]
     for pat in loc_patterns:
@@ -2143,34 +2327,39 @@ def _extract_location_near(text: str, start: int, end: int, job_url: str = "") -
 
 def _extract_snippet_near(text: str, end: int, max_chars: int = 200) -> str:
     """Extract a short descriptive snippet from markdown text after a job link."""
-    context = text[end:end + 600]
-    context = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', context)
-    context = re.sub(r'<br\s*/?>', ' ', context, flags=re.IGNORECASE)
-    context = re.sub(r'<[^>]{1,60}>', '', context)
-    context = re.sub(r'[*_#`\\]', '', context)
-    context = re.sub(r'\n{2,}', '\n', context)
+    context = text[end : end + 600]
+    context = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", context)
+    context = re.sub(r"<br\s*/?>", " ", context, flags=re.IGNORECASE)
+    context = re.sub(r"<[^>]{1,60}>", "", context)
+    context = re.sub(r"[*_#`\\]", "", context)
+    context = re.sub(r"\n{2,}", "\n", context)
     lines = []
-    for line in context.split('\n'):
+    for line in context.split("\n"):
         line = line.strip()
         if not line or len(line) < 10:
             continue
         if _looks_like_job_title(line) and len(lines) > 0:
             break
-        if re.match(r'^(?:Full time|Part time|Remote|Hybrid|On-site|\d{2}|\w+,\s*\w{2}$)', line, re.IGNORECASE):
+        if re.match(
+            r"^(?:Full time|Part time|Remote|Hybrid|On-site|\d{2}|\w+,\s*\w{2}$)",
+            line,
+            re.IGNORECASE,
+        ):
             continue
         lines.append(line)
         if sum(len(l) for l in lines) > max_chars:
             break
 
-    snippet = ' '.join(lines).strip()
+    snippet = " ".join(lines).strip()
     if len(snippet) > max_chars:
-        snippet = snippet[:max_chars].rsplit(' ', 1)[0] + "\u2026"
+        snippet = snippet[:max_chars].rsplit(" ", 1)[0] + "\u2026"
     return snippet
 
 
 # ---------------------------------------------------------------------------
 # Job board fetchers
 # ---------------------------------------------------------------------------
+
 
 def fetch_algolia_board(board_cfg: dict) -> list[dict]:
     """Query an Algolia search index directly via REST API (free, no Firecrawl).
@@ -2194,11 +2383,13 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
     per_page = 200
 
     while True:
-        payload = json.dumps({
-            "query": "",
-            "hitsPerPage": per_page,
-            "page": page,
-        })
+        payload = json.dumps(
+            {
+                "query": "",
+                "hitsPerPage": per_page,
+                "page": page,
+            }
+        )
         try:
             resp = requests.post(url, data=payload, headers=headers, timeout=15)
             resp.raise_for_status()
@@ -2219,7 +2410,12 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
     # Apply GLOBAL_BLACKLIST + board-specific blacklist (NO caps, NO location filter, NO keyword filter)
     board_blacklist = board_cfg.get("board_blacklist", [])
     combined_blacklist = GLOBAL_BLACKLIST + board_blacklist
-    filtered = _blacklist_filter(all_hits, combined_blacklist, title_fields=["title"], substr_blacklist=GLOBAL_BLACKLIST_SUBSTR)
+    filtered = _blacklist_filter(
+        all_hits,
+        combined_blacklist,
+        title_fields=["title"],
+        substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
+    )
 
     jobs = []
     generic_filtered_out = 0
@@ -2235,15 +2431,15 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
         job_url = hit.get("url_external") or ""
         # Strip HTML from description_short
         snippet = hit.get("description_short") or ""
-        snippet = re.sub(r'<[^>]+>', ' ', snippet)
-        snippet = re.sub(r'\s+', ' ', snippet).strip()
+        snippet = re.sub(r"<[^>]+>", " ", snippet)
+        snippet = re.sub(r"\s+", " ", snippet).strip()
         if len(snippet) > 400:
             snippet = snippet[:400].rsplit(" ", 1)[0] + "\u2026"
 
         # Build full_description from all available Algolia fields
         comp_desc = hit.get("company_description") or ""
-        comp_desc = re.sub(r'<[^>]+>', ' ', comp_desc)
-        comp_desc = re.sub(r'\s+', ' ', comp_desc).strip()
+        comp_desc = re.sub(r"<[^>]+>", " ", comp_desc)
+        comp_desc = re.sub(r"\s+", " ", comp_desc).strip()
         skills = ", ".join(hit.get("tags_skill") or [])
         loc_type = ", ".join(hit.get("tags_location_type") or [])
         exp_req = ", ".join(hit.get("tags_exp_required") or [])
@@ -2269,19 +2465,21 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
 
         full_description = "\n\n".join(desc_parts)
 
-        jobs.append({
-            "title": title,
-            "location": location,
-            "department": ", ".join(hit.get("tags_area") or []),
-            "url": job_url,
-            "external_id": hit.get("objectID") or hashlib.md5(
-                f"{org}:{title}".encode()).hexdigest()[:12],
-            "snippet": snippet,
-            "full_description": full_description,
-            "compensation": hit.get("salary") or "",
-            "org_override": org,
-            "org_url": board_cfg["url"],
-        })
+        jobs.append(
+            {
+                "title": title,
+                "location": location,
+                "department": ", ".join(hit.get("tags_area") or []),
+                "url": job_url,
+                "external_id": hit.get("objectID")
+                or hashlib.md5(f"{org}:{title}".encode()).hexdigest()[:12],
+                "snippet": snippet,
+                "full_description": full_description,
+                "compensation": hit.get("salary") or "",
+                "org_override": org,
+                "org_url": board_cfg["url"],
+            }
+        )
 
     print(
         f"  [{board_name}] Algolia: {len(jobs)} relevant from {len(all_hits)} total"
@@ -2297,24 +2495,28 @@ def fetch_firecrawl_board(board_cfg: dict) -> list[dict]:
 
     raw_jobs = fetch_firecrawl_scrape(board_name, url, use_json=False)
     # Apply GLOBAL_BLACKLIST only (NO keyword filter, NO cap)
-    filtered = _blacklist_filter(raw_jobs, GLOBAL_BLACKLIST, title_fields=["title"], substr_blacklist=GLOBAL_BLACKLIST_SUBSTR)
+    filtered = _blacklist_filter(
+        raw_jobs, GLOBAL_BLACKLIST, title_fields=["title"], substr_blacklist=GLOBAL_BLACKLIST_SUBSTR
+    )
 
     jobs = []
     for job in filtered:  # NO cap — LLM scoring decides relevance
-        org = _extract_org_from_listing(
-            job.get("snippet", ""), job.get("title", ""), board_name)
-        jobs.append({
-            **job,
-            "org_override": org,
-            "org_url": job.get("url") or url,
-        })
+        org = _extract_org_from_listing(job.get("snippet", ""), job.get("title", ""), board_name)
+        jobs.append(
+            {
+                **job,
+                "org_override": org,
+                "org_url": job.get("url") or url,
+            }
+        )
 
-    print(f"  [{board_name}] Board: {len(jobs)} relevant from {len(raw_jobs)} raw (blacklist applied)")
+    print(
+        f"  [{board_name}] Board: {len(jobs)} relevant from {len(raw_jobs)} raw (blacklist applied)"
+    )
     return jobs
 
 
-def _filter_by_keywords(items: list, keywords: list[str],
-                        title_fields: list[str]) -> list:
+def _filter_by_keywords(items: list, keywords: list[str], title_fields: list[str]) -> list:
     """Keep only items where any keyword matches any title field."""
     if not keywords:
         return items
@@ -2326,9 +2528,12 @@ def _filter_by_keywords(items: list, keywords: list[str],
     return result
 
 
-def _blacklist_filter(items: list, blacklist: list[str],
-                      title_fields: list[str],
-                      substr_blacklist: list[str] | None = None) -> list:
+def _blacklist_filter(
+    items: list,
+    blacklist: list[str],
+    title_fields: list[str],
+    substr_blacklist: list[str] | None = None,
+) -> list:
     """Remove items where any blacklist term matches any title field.
 
     blacklist terms are matched with word boundaries.
@@ -2343,7 +2548,7 @@ def _blacklist_filter(items: list, blacklist: list[str],
         combined = " ".join(str(item.get(f, "")) for f in title_fields).lower()
         if any(kw in combined for kw in bl_sub):
             continue
-        if any(re.search(r'\b' + re.escape(kw) + r'\b', combined) for kw in bl):
+        if any(re.search(r"\b" + re.escape(kw) + r"\b", combined) for kw in bl):
             continue
         result.append(item)
     return result
@@ -2355,9 +2560,12 @@ def _is_generic_pipeline_title(title: str) -> bool:
     return any(re.search(pattern, title_lower) for pattern in GENERIC_PIPELINE_TITLE_PATTERNS)
 
 
-def _location_filter(items: list, locations: list[str],
-                     city_field: str = "tags_city",
-                     country_field: str = "tags_country") -> list:
+def _location_filter(
+    items: list,
+    locations: list[str],
+    city_field: str = "tags_city",
+    country_field: str = "tags_country",
+) -> list:
     """Keep only items where any location tag matches the target list."""
     if not locations:
         return items
@@ -2372,10 +2580,24 @@ def _location_filter(items: list, locations: list[str],
     return result
 
 
-_TITLE_KEYWORDS = {"Manager", "Director", "Associate", "Coordinator", "Consultant",
-                    "Advisor", "Grants", "Officer", "Specialist", "Analyst", "Lead"}
-_CITY_PREFIX_RE = re.compile(r'^(San Francisco|New York|Los Angeles|Washington|London|Berlin|Chicago|Boston|Houston|Seattle)', re.I)
-_PRICE_RE = re.compile(r'USD\s*\d|EUR\s*\d|\$\d')
+_TITLE_KEYWORDS = {
+    "Manager",
+    "Director",
+    "Associate",
+    "Coordinator",
+    "Consultant",
+    "Advisor",
+    "Grants",
+    "Officer",
+    "Specialist",
+    "Analyst",
+    "Lead",
+}
+_CITY_PREFIX_RE = re.compile(
+    r"^(San Francisco|New York|Los Angeles|Washington|London|Berlin|Chicago|Boston|Houston|Seattle)",
+    re.I,
+)
+_PRICE_RE = re.compile(r"USD\s*\d|EUR\s*\d|\$\d")
 
 
 def _is_parsing_artifact(candidate: str) -> bool:
@@ -2395,17 +2617,25 @@ def _extract_org_from_listing(snippet: str, title: str, board_name: str) -> str:
     Falls back to '[via BoardName]' if extraction fails.
     """
     # Pattern: "at OrgName" in title
-    m = re.search(r'\bat\s+([A-Z][A-Za-z0-9 &.,\-]+)', title)
+    m = re.search(r"\bat\s+([A-Z][A-Za-z0-9 &.,\-]+)", title)
     if m:
         candidate = m.group(1).strip().rstrip(".,")
-        if 3 < len(candidate) < 60 and not re.search(r'\d', candidate) and not _is_parsing_artifact(candidate):
+        if (
+            3 < len(candidate) < 60
+            and not re.search(r"\d", candidate)
+            and not _is_parsing_artifact(candidate)
+        ):
             return candidate
 
     # Pattern: bold org before pipe or dash in snippet
-    m = re.match(r'\*{0,2}([A-Z][A-Za-z0-9 &.,\-]+?)\*{0,2}\s*[|\-]', snippet)
+    m = re.match(r"\*{0,2}([A-Z][A-Za-z0-9 &.,\-]+?)\*{0,2}\s*[|\-]", snippet)
     if m:
         candidate = m.group(1).strip()
-        if 3 < len(candidate) < 60 and not re.search(r'\d', candidate) and not _is_parsing_artifact(candidate):
+        if (
+            3 < len(candidate) < 60
+            and not re.search(r"\d", candidate)
+            and not _is_parsing_artifact(candidate)
+        ):
             return candidate
 
     return f"[via {board_name}]"
@@ -2414,6 +2644,7 @@ def _extract_org_from_listing(snippet: str, title: str, board_name: str) -> str:
 # ---------------------------------------------------------------------------
 # ReliefWeb job board (RSS feed — no auth required)
 # ---------------------------------------------------------------------------
+
 
 def fetch_reliefweb_board(board_cfg: dict) -> list[dict]:
     """Fetch jobs from ReliefWeb RSS feed (free, no registration).
@@ -2457,7 +2688,9 @@ def fetch_reliefweb_board(board_cfg: dict) -> list[dict]:
         t_lower = title.lower()
         if any(kw in t_lower for kw in GLOBAL_BLACKLIST_SUBSTR):
             continue
-        if any(re.search(r'\b' + re.escape(bl.lower()) + r'\b', t_lower) for bl in GLOBAL_BLACKLIST):
+        if any(
+            re.search(r"\b" + re.escape(bl.lower()) + r"\b", t_lower) for bl in GLOBAL_BLACKLIST
+        ):
             continue
         # Board-specific blacklist (substring match)
         if any(kw in t_lower for kw in board_blacklist):
@@ -2476,22 +2709,29 @@ def fetch_reliefweb_board(board_cfg: dict) -> list[dict]:
 
         # External ID from URL (e.g. /job/4199305/...)
         ext_id_match = re.search(r"/job/(\d+)/", job_url)
-        ext_id = ext_id_match.group(1) if ext_id_match else hashlib.md5(
-            job_url.encode()).hexdigest()[:12]
+        ext_id = (
+            ext_id_match.group(1)
+            if ext_id_match
+            else hashlib.md5(job_url.encode()).hexdigest()[:12]
+        )
 
-        jobs.append({
-            "title": title,
-            "location": location,
-            "department": "",
-            "url": job_url,
-            "external_id": ext_id,
-            "snippet": snippet,
-            "deadline": deadline,
-            "org_override": org,
-            "org_url": board_cfg["url"],
-        })
+        jobs.append(
+            {
+                "title": title,
+                "location": location,
+                "department": "",
+                "url": job_url,
+                "external_id": ext_id,
+                "snippet": snippet,
+                "deadline": deadline,
+                "org_override": org,
+                "org_url": board_cfg["url"],
+            }
+        )
 
-    print(f"  [{board_name}] ReliefWeb: {len(jobs)} relevant from {total} total (blacklist applied)")
+    print(
+        f"  [{board_name}] ReliefWeb: {len(jobs)} relevant from {total} total (blacklist applied)"
+    )
     return jobs
 
 
@@ -2505,15 +2745,18 @@ def _extract_rss_field(html: str, pattern: str) -> str:
 # Impactpool board (server-rendered HTML, free)
 # ---------------------------------------------------------------------------
 
+
 def _impactpool_location_ok(loc: str) -> bool:
     # Neutral: no geography is privileged. Every location is accepted; drop a
     # location via the user profile's exclude_countries instead.
     return True
 
+
 def _impactpool_seniority_ok(level: str) -> bool:
     # Neutral: no seniority is privileged. Drop a seniority via the user
     # profile's exclude_title_keywords instead.
     return True
+
 
 def fetch_impactpool_board(board_cfg: dict) -> list[dict]:
     """Fetch jobs from impactpool.org/search by paginating server-rendered HTML.
@@ -2584,8 +2827,9 @@ def fetch_impactpool_board(board_cfg: dict) -> list[dict]:
             if any(kw in t_lower for kw in GLOBAL_BLACKLIST_SUBSTR):
                 rej["blacklist"] += 1
                 continue
-            if any(re.search(r"\b" + re.escape(bl.lower()) + r"\b", t_lower)
-                   for bl in GLOBAL_BLACKLIST):
+            if any(
+                re.search(r"\b" + re.escape(bl.lower()) + r"\b", t_lower) for bl in GLOBAL_BLACKLIST
+            ):
                 rej["blacklist"] += 1
                 continue
             if any(kw in t_lower for kw in board_blacklist):
@@ -2602,30 +2846,35 @@ def fetch_impactpool_board(board_cfg: dict) -> list[dict]:
             job_url = f"https://www.impactpool.org/jobs/{ext_id}"
             snippet = f"{org} — {location}. {seniority}".strip(" .")
 
-            jobs.append({
-                "title": title,
-                "location": location,
-                "department": "",
-                "url": job_url,
-                "external_id": ext_id,
-                "snippet": snippet,
-                "deadline": "",
-                "org_override": org,
-                "org_url": board_cfg["url"],
-            })
+            jobs.append(
+                {
+                    "title": title,
+                    "location": location,
+                    "department": "",
+                    "url": job_url,
+                    "external_id": ext_id,
+                    "snippet": snippet,
+                    "deadline": "",
+                    "org_override": org,
+                    "org_url": board_cfg["url"],
+                }
+            )
 
         if page_new_ids == 0:
             break
 
-    print(f"  [{board_name}] Impactpool: {len(jobs)} relevant from {total_seen} total "
-          f"(rejected: location={rej['location']}, seniority={rej['seniority']}, "
-          f"blacklist={rej['blacklist']})")
+    print(
+        f"  [{board_name}] Impactpool: {len(jobs)} relevant from {total_seen} total "
+        f"(rejected: location={rej['location']}, seniority={rej['seniority']}, "
+        f"blacklist={rej['blacklist']})"
+    )
     return jobs
 
 
 # ---------------------------------------------------------------------------
 # data.org board (WordPress aggregator → real employer ATS links)
 # ---------------------------------------------------------------------------
+
 
 def _fetch_datadotorg_detail(url: str, BeautifulSoup) -> dict:
     """Parse one data.org job page.
@@ -2693,8 +2942,11 @@ def _fetch_datadotorg_detail(url: str, BeautifulSoup) -> dict:
     if body:
         out["description"] = _html_to_multiline(str(body))[:8000]
     summary = s.find(class_=re.compile(r"\bc-single-job__description\b"))
-    out["snippet"] = (summary.get_text(" ", strip=True)[:500] if summary
-                      else " — ".join(filter(None, [out.get("employer"), out.get("location")])))
+    out["snippet"] = (
+        summary.get_text(" ", strip=True)[:500]
+        if summary
+        else " — ".join(filter(None, [out.get("employer"), out.get("location")]))
+    )
     return out
 
 
@@ -2722,9 +2974,15 @@ def fetch_datadotorg_board(board_cfg: dict) -> list[dict]:
         try:
             resp = requests.get(
                 api,
-                params={"per_page": 100, "page": page, "orderby": "date",
-                        "order": "desc", "_fields": "id,title,link,date"},
-                timeout=20, headers={"User-Agent": "Mozilla/5.0"},
+                params={
+                    "per_page": 100,
+                    "page": page,
+                    "orderby": "date",
+                    "order": "desc",
+                    "_fields": "id,title,link,date",
+                },
+                timeout=20,
+                headers={"User-Agent": "Mozilla/5.0"},
             )
             resp.raise_for_status()
             batch = resp.json()
@@ -2741,18 +2999,20 @@ def fetch_datadotorg_board(board_cfg: dict) -> list[dict]:
     jobs: list[dict] = []
     rej_blacklist = 0
     for item in listing:
-        title = html_module.unescape(
-            (item.get("title") or {}).get("rendered", "")).strip()
+        title = html_module.unescape((item.get("title") or {}).get("rendered", "")).strip()
         link = item.get("link", "")
         ext_id = str(item.get("id", ""))
         if not title or not link:
             continue
 
         t_lower = title.lower()
-        if (any(kw in t_lower for kw in GLOBAL_BLACKLIST_SUBSTR)
-                or any(re.search(r"\b" + re.escape(b.lower()) + r"\b", t_lower)
-                       for b in GLOBAL_BLACKLIST)
-                or any(kw in t_lower for kw in board_blacklist)):
+        if (
+            any(kw in t_lower for kw in GLOBAL_BLACKLIST_SUBSTR)
+            or any(
+                re.search(r"\b" + re.escape(b.lower()) + r"\b", t_lower) for b in GLOBAL_BLACKLIST
+            )
+            or any(kw in t_lower for kw in board_blacklist)
+        ):
             rej_blacklist += 1
             continue
 
@@ -2761,19 +3021,21 @@ def fetch_datadotorg_board(board_cfg: dict) -> list[dict]:
         if detail.get("expired"):
             continue
 
-        jobs.append({
-            "title": title,
-            "location": detail.get("location", ""),
-            "department": "",
-            "url": detail.get("apply_url") or link,
-            "external_id": ext_id,
-            "snippet": detail.get("snippet", ""),
-            "full_description": detail.get("description", ""),
-            "compensation": detail.get("salary", ""),
-            "deadline": detail.get("deadline", ""),
-            "org_override": detail.get("employer", ""),
-            "org_url": "https://data.org/jobs/",
-        })
+        jobs.append(
+            {
+                "title": title,
+                "location": detail.get("location", ""),
+                "department": "",
+                "url": detail.get("apply_url") or link,
+                "external_id": ext_id,
+                "snippet": detail.get("snippet", ""),
+                "full_description": detail.get("description", ""),
+                "compensation": detail.get("salary", ""),
+                "deadline": detail.get("deadline", ""),
+                "org_override": detail.get("employer", ""),
+                "org_url": "https://data.org/jobs/",
+            }
+        )
 
     print(f"  [{board_name}] data.org: {len(jobs)} jobs (blacklist={rej_blacklist})")
     return jobs
@@ -2782,6 +3044,7 @@ def fetch_datadotorg_board(board_cfg: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Arbeitnow board (free JSON API, European tech, visa/remote flags)
 # ---------------------------------------------------------------------------
+
 
 def _html_to_multiline(html_text: str) -> str:
     """Strip HTML but keep paragraph/list structure as newlines.
@@ -2795,12 +3058,12 @@ def _html_to_multiline(html_text: str) -> str:
     t = html_module.unescape(html_text)
     # Both opening and closing block tags break the line (HN comments often
     # start the body with an opening <p> right after the header line).
-    t = re.sub(r'(?i)<\s*/?\s*(?:br|p|div|h[1-6]|ul|ol)(?:\s[^>]*)?\s*/?\s*>', '\n', t)
-    t = re.sub(r'(?i)<\s*li\b[^>]*>', '\n- ', t)
-    t = re.sub(r'<[^>]+>', ' ', t)
-    t = re.sub(r'[ \t]+', ' ', t)
-    t = re.sub(r' ?\n ?', '\n', t)
-    t = re.sub(r'\n{3,}', '\n\n', t)
+    t = re.sub(r"(?i)<\s*/?\s*(?:br|p|div|h[1-6]|ul|ol)(?:\s[^>]*)?\s*/?\s*>", "\n", t)
+    t = re.sub(r"(?i)<\s*li\b[^>]*>", "\n- ", t)
+    t = re.sub(r"<[^>]+>", " ", t)
+    t = re.sub(r"[ \t]+", " ", t)
+    t = re.sub(r" ?\n ?", "\n", t)
+    t = re.sub(r"\n{3,}", "\n\n", t)
     return t.strip()
 
 
@@ -2840,8 +3103,10 @@ def fetch_arbeitnow_board(board_cfg: dict) -> list[dict]:
 
     board_blacklist = board_cfg.get("board_blacklist", [])
     filtered = _blacklist_filter(
-        raw, GLOBAL_BLACKLIST + board_blacklist,
-        title_fields=["title"], substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
+        raw,
+        GLOBAL_BLACKLIST + board_blacklist,
+        title_fields=["title"],
+        substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
     )
 
     jobs = []
@@ -2869,19 +3134,21 @@ def fetch_arbeitnow_board(board_cfg: dict) -> list[dict]:
         if meta:
             full_description = full_description + "\n\n" + " | ".join(meta)
 
-        jobs.append({
-            "title": title,
-            "location": loc,
-            "department": "",
-            "url": j.get("url") or "",
-            "external_id": j.get("slug") or hashlib.md5(
-                f"{org}:{title}".encode()).hexdigest()[:12],
-            "snippet": _html_to_snippet(desc_html),
-            "full_description": full_description,
-            "compensation": "",
-            "org_override": org,
-            "org_url": board_cfg["url"],
-        })
+        jobs.append(
+            {
+                "title": title,
+                "location": loc,
+                "department": "",
+                "url": j.get("url") or "",
+                "external_id": j.get("slug")
+                or hashlib.md5(f"{org}:{title}".encode()).hexdigest()[:12],
+                "snippet": _html_to_snippet(desc_html),
+                "full_description": full_description,
+                "compensation": "",
+                "org_override": org,
+                "org_url": board_cfg["url"],
+            }
+        )
 
     print(f"  [{board_name}] Arbeitnow: {len(jobs)} relevant from {total} total")
     return jobs
@@ -2890,6 +3157,7 @@ def fetch_arbeitnow_board(board_cfg: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Remotive board (free JSON API, remote-only jobs)
 # ---------------------------------------------------------------------------
+
 
 def fetch_remotive_board(board_cfg: dict) -> list[dict]:
     """Fetch jobs from the Remotive remote-jobs API (free, no key).
@@ -2928,8 +3196,10 @@ def fetch_remotive_board(board_cfg: dict) -> list[dict]:
     total = len(raw)
     board_blacklist = board_cfg.get("board_blacklist", [])
     filtered = _blacklist_filter(
-        raw, GLOBAL_BLACKLIST + board_blacklist,
-        title_fields=["title"], substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
+        raw,
+        GLOBAL_BLACKLIST + board_blacklist,
+        title_fields=["title"],
+        substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
     )
 
     jobs = []
@@ -2957,19 +3227,22 @@ def fetch_remotive_board(board_cfg: dict) -> list[dict]:
         if meta:
             full_description = full_description + "\n\n" + " | ".join(meta)
 
-        jobs.append({
-            "title": title,
-            "location": loc,
-            "department": j.get("category") or "",
-            "url": j.get("url") or "",
-            "external_id": str(j.get("id") or hashlib.md5(
-                f"{org}:{title}".encode()).hexdigest()[:12]),
-            "snippet": _html_to_snippet(desc_html),
-            "full_description": full_description,
-            "compensation": j.get("salary") or "",
-            "org_override": org,
-            "org_url": board_cfg["url"],
-        })
+        jobs.append(
+            {
+                "title": title,
+                "location": loc,
+                "department": j.get("category") or "",
+                "url": j.get("url") or "",
+                "external_id": str(
+                    j.get("id") or hashlib.md5(f"{org}:{title}".encode()).hexdigest()[:12]
+                ),
+                "snippet": _html_to_snippet(desc_html),
+                "full_description": full_description,
+                "compensation": j.get("salary") or "",
+                "org_override": org,
+                "org_url": board_cfg["url"],
+            }
+        )
 
     print(f"  [{board_name}] Remotive: {len(jobs)} relevant from {total} total")
     return jobs
@@ -2978,6 +3251,7 @@ def fetch_remotive_board(board_cfg: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 # We Work Remotely board (public RSS per category)
 # ---------------------------------------------------------------------------
+
 
 def fetch_wwr_board(board_cfg: dict) -> list[dict]:
     """Fetch jobs from We Work Remotely category RSS feeds (free, no key).
@@ -3038,8 +3312,9 @@ def fetch_wwr_board(board_cfg: dict) -> list[dict]:
         t_lower = title.lower()
         if any(kw in t_lower for kw in GLOBAL_BLACKLIST_SUBSTR):
             continue
-        if any(re.search(r'\b' + re.escape(bl.lower()) + r'\b', t_lower)
-               for bl in GLOBAL_BLACKLIST):
+        if any(
+            re.search(r"\b" + re.escape(bl.lower()) + r"\b", t_lower) for bl in GLOBAL_BLACKLIST
+        ):
             continue
         if any(kw in t_lower for kw in board_blacklist):
             continue
@@ -3053,22 +3328,26 @@ def fetch_wwr_board(board_cfg: dict) -> list[dict]:
         full_description = _html_to_multiline(desc_html)
         category = _field(item, "category")
 
-        jobs.append({
-            "title": title,
-            "location": loc,
-            "department": category,
-            "url": link,
-            "external_id": hashlib.md5(link.encode()).hexdigest()[:12],
-            "snippet": _html_to_snippet(desc_html),
-            "full_description": full_description,
-            "compensation": "",
-            "deadline": _field(item, "expires_at"),
-            "org_override": org,
-            "org_url": board_cfg["url"],
-        })
+        jobs.append(
+            {
+                "title": title,
+                "location": loc,
+                "department": category,
+                "url": link,
+                "external_id": hashlib.md5(link.encode()).hexdigest()[:12],
+                "snippet": _html_to_snippet(desc_html),
+                "full_description": full_description,
+                "compensation": "",
+                "deadline": _field(item, "expires_at"),
+                "org_override": org,
+                "org_url": board_cfg["url"],
+            }
+        )
 
-    print(f"  [{board_name}] WWR: {len(jobs)} relevant from {total} total "
-          f"(categories: {', '.join(categories)})")
+    print(
+        f"  [{board_name}] WWR: {len(jobs)} relevant from {total} total "
+        f"(categories: {', '.join(categories)})"
+    )
     return jobs
 
 
@@ -3076,7 +3355,7 @@ def fetch_wwr_board(board_cfg: dict) -> list[dict]:
 # HN "Who is hiring?" board (Algolia API, monthly thread)
 # ---------------------------------------------------------------------------
 
-_HN_SEPARATOR_RE = re.compile(r'\s*[|—]\s*')  # pipe or em dash
+_HN_SEPARATOR_RE = re.compile(r"\s*[|—]\s*")  # pipe or em dash
 
 
 def _parse_hn_comment(comment: dict) -> dict | None:
@@ -3113,12 +3392,11 @@ def _parse_hn_comment(comment: dict) -> dict | None:
     # Location best-effort: first segment after the title mentioning a work
     # mode; otherwise a "Location: ..." line in the body.
     loc = next(
-        (s for s in segments[2:]
-         if re.search(r'(?i)\bremote\b|\bon-?site\b|\bhybrid\b', s)),
+        (s for s in segments[2:] if re.search(r"(?i)\bremote\b|\bon-?site\b|\bhybrid\b", s)),
         "",
     )
     if not loc:
-        m = re.search(r'(?im)^location[:\s]+(.{3,80})$', plain)
+        m = re.search(r"(?im)^location[:\s]+(.{3,80})$", plain)
         if m:
             loc = m.group(1).strip()
 
@@ -3147,11 +3425,15 @@ def fetch_hn_whoishiring_board(board_cfg: dict) -> list[dict]:
     search_url = "https://hn.algolia.com/api/v1/search_by_date"
 
     try:
-        resp = requests.get(search_url, params={
-            "query": '"who is hiring"',
-            "tags": "story,author_whoishiring",
-            "hitsPerPage": 10,
-        }, timeout=20)
+        resp = requests.get(
+            search_url,
+            params={
+                "query": '"who is hiring"',
+                "tags": "story,author_whoishiring",
+                "hitsPerPage": 10,
+            },
+            timeout=20,
+        )
         resp.raise_for_status()
         hits = resp.json().get("hits", [])
     except Exception as e:
@@ -3159,7 +3441,7 @@ def fetch_hn_whoishiring_board(board_cfg: dict) -> list[dict]:
         return []
 
     story = next(
-        (h for h in hits if re.search(r'(?i)who is hiring', h.get("title") or "")),
+        (h for h in hits if re.search(r"(?i)who is hiring", h.get("title") or "")),
         None,
     )
     if not story:
@@ -3170,8 +3452,7 @@ def fetch_hn_whoishiring_board(board_cfg: dict) -> list[dict]:
     print(f"  [{board_name}] Thread: {story.get('title')} (id={story_id})")
 
     try:
-        resp = requests.get(
-            f"https://hn.algolia.com/api/v1/items/{story_id}", timeout=30)
+        resp = requests.get(f"https://hn.algolia.com/api/v1/items/{story_id}", timeout=30)
         resp.raise_for_status()
         children = resp.json().get("children") or []
     except Exception as e:
@@ -3183,8 +3464,10 @@ def fetch_hn_whoishiring_board(board_cfg: dict) -> list[dict]:
 
     board_blacklist = board_cfg.get("board_blacklist", [])
     filtered = _blacklist_filter(
-        parsed, GLOBAL_BLACKLIST + board_blacklist,
-        title_fields=["title"], substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
+        parsed,
+        GLOBAL_BLACKLIST + board_blacklist,
+        title_fields=["title"],
+        substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
     )
 
     jobs = []
@@ -3226,10 +3509,7 @@ def fetch_idealist_board(board_cfg: dict) -> list[dict]:
     remote_zone = board_cfg.get("remote_zone", "WORLD")
     include_onsite = bool(board_cfg.get("include_onsite", False))
 
-    algolia_url = (
-        f"https://{_IDEALIST_APP_ID}-dsn.algolia.net"
-        f"/1/indexes/{_IDEALIST_INDEX}/query"
-    )
+    algolia_url = f"https://{_IDEALIST_APP_ID}-dsn.algolia.net/1/indexes/{_IDEALIST_INDEX}/query"
     headers = {
         "X-Algolia-Application-Id": _IDEALIST_APP_ID,
         "X-Algolia-API-Key": _IDEALIST_SEARCH_KEY,
@@ -3241,19 +3521,27 @@ def fetch_idealist_board(board_cfg: dict) -> list[dict]:
         if remote_zone:
             facet.append([f"remoteZone:{remote_zone}"])
 
-    print(f"  [{board_name}] Idealist/Algolia: up to {max_pages} pages "
-          f"(remote_zone={remote_zone!r}, include_onsite={include_onsite})...")
+    print(
+        f"  [{board_name}] Idealist/Algolia: up to {max_pages} pages "
+        f"(remote_zone={remote_zone!r}, include_onsite={include_onsite})..."
+    )
 
     all_hits: list[dict] = []
     for page in range(max_pages):
-        params_str = "&".join([
-            "query=", "hitsPerPage=200", f"page={page}",
-            f"facetFilters={json.dumps(facet)}",
-        ])
+        params_str = "&".join(
+            [
+                "query=",
+                "hitsPerPage=200",
+                f"page={page}",
+                f"facetFilters={json.dumps(facet)}",
+            ]
+        )
         try:
             resp = requests.post(
-                algolia_url, data=json.dumps({"params": params_str}),
-                headers=headers, timeout=20,
+                algolia_url,
+                data=json.dumps({"params": params_str}),
+                headers=headers,
+                timeout=20,
             )
             resp.raise_for_status()
             data = resp.json()
@@ -3271,8 +3559,10 @@ def fetch_idealist_board(board_cfg: dict) -> list[dict]:
     for h in all_hits:
         h["_title_proxy"] = h.get("name", "")
     filtered = _blacklist_filter(
-        all_hits, GLOBAL_BLACKLIST + board_blacklist,
-        title_fields=["_title_proxy"], substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
+        all_hits,
+        GLOBAL_BLACKLIST + board_blacklist,
+        title_fields=["_title_proxy"],
+        substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
     )
 
     jobs: list[dict] = []
@@ -3322,26 +3612,37 @@ def fetch_idealist_board(board_cfg: dict) -> list[dict]:
                 return float(v) if v not in (None, "") else None
             except (TypeError, ValueError):
                 return None
+
         sal_min, sal_max = _as_num(hit.get("salaryMinimum")), _as_num(hit.get("salaryMaximum"))
         currency = hit.get("salaryCurrency") or "USD"
         period = (hit.get("salaryPeriod") or "YEAR").lower()
         compensation = ""
         if sal_min and sal_max:
-            compensation = (f"{currency} {sal_min:,.0f}/{period}" if sal_min == sal_max
-                            else f"{currency} {sal_min:,.0f}-{sal_max:,.0f}/{period}")
+            compensation = (
+                f"{currency} {sal_min:,.0f}/{period}"
+                if sal_min == sal_max
+                else f"{currency} {sal_min:,.0f}-{sal_max:,.0f}/{period}"
+            )
 
         org_slug = (hit.get("orgUrl") or {}).get("en") or ""
         org_url = (_IDEALIST_SITE + org_slug) if org_slug else board_cfg["url"]
 
-        external_id = hit.get("objectID") or hashlib.md5(
-            f"{org}:{title}".encode()).hexdigest()[:12]
+        external_id = hit.get("objectID") or hashlib.md5(f"{org}:{title}".encode()).hexdigest()[:12]
 
-        jobs.append({
-            "title": title, "location": location, "department": department,
-            "url": job_url, "external_id": external_id, "snippet": snippet,
-            "full_description": full_description, "compensation": compensation,
-            "org_override": org, "org_url": org_url,
-        })
+        jobs.append(
+            {
+                "title": title,
+                "location": location,
+                "department": department,
+                "url": job_url,
+                "external_id": external_id,
+                "snippet": snippet,
+                "full_description": full_description,
+                "compensation": compensation,
+                "org_override": org,
+                "org_url": org_url,
+            }
+        )
 
     print(f"  [{board_name}] Idealist: {len(jobs)} relevant from {total_seen} total")
     return jobs
@@ -3375,8 +3676,11 @@ def fetch_fastforward_board(board_cfg: dict) -> list[dict]:
 
     board_name = board_cfg["name"]
     board_blacklist = board_cfg.get("board_blacklist", [])
-    headers = {"Content-Type": "application/json", "Accept": "application/json",
-               "User-Agent": _GETRO_UA}
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": _GETRO_UA,
+    }
 
     raw_listings: list[dict] = []
     seen_ids: set = set()
@@ -3402,8 +3706,10 @@ def fetch_fastforward_board(board_cfg: dict) -> list[dict]:
             break
 
     filtered = _blacklist_filter(
-        raw_listings, GLOBAL_BLACKLIST + board_blacklist,
-        title_fields=["title"], substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
+        raw_listings,
+        GLOBAL_BLACKLIST + board_blacklist,
+        title_fields=["title"],
+        substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
     )
 
     jobs: list[dict] = []
@@ -3428,15 +3734,17 @@ def fetch_fastforward_board(board_cfg: dict) -> list[dict]:
         compensation = ""
         if j.get("compensation_public") and comp_min and comp_max:
             label = {"year": "/yr", "month": "/mo", "hour": "/hr"}.get(period, f"/{period}")
-            compensation = f"{currency} {comp_min/100:,.0f}-{comp_max/100:,.0f}{label}"
+            compensation = f"{currency} {comp_min / 100:,.0f}-{comp_max / 100:,.0f}{label}"
 
         slug = (j.get("slug") or "").strip()
         snippet = full_description = ""
         if fetch_desc and j.get("has_description") and slug:
             try:
-                dresp = requests.get(detail_tpl.format(slug=slug),
-                                     headers={"Accept": "application/json",
-                                              "User-Agent": _GETRO_UA}, timeout=15)
+                dresp = requests.get(
+                    detail_tpl.format(slug=slug),
+                    headers={"Accept": "application/json", "User-Agent": _GETRO_UA},
+                    timeout=15,
+                )
                 if dresp.status_code == 200:
                     desc_html = (dresp.json() or {}).get("description") or ""
                     full_description = _html_to_multiline(desc_html)
@@ -3447,17 +3755,26 @@ def fetch_fastforward_board(board_cfg: dict) -> list[dict]:
         org_slug = (j.get("organization") or {}).get("slug") or ""
         org_url = f"https://jobs.ffwd.org/companies/{org_slug}" if org_slug else board_cfg["url"]
         jid = j.get("id")
-        external_id = str(jid) if jid else hashlib.md5(
-            f"{org}:{title}".encode()).hexdigest()[:12]
+        external_id = str(jid) if jid else hashlib.md5(f"{org}:{title}".encode()).hexdigest()[:12]
 
-        jobs.append({
-            "title": title, "location": location, "department": "",
-            "url": (j.get("url") or "").strip(), "external_id": external_id,
-            "snippet": snippet, "full_description": full_description,
-            "compensation": compensation, "org_override": org, "org_url": org_url,
-        })
+        jobs.append(
+            {
+                "title": title,
+                "location": location,
+                "department": "",
+                "url": (j.get("url") or "").strip(),
+                "external_id": external_id,
+                "snippet": snippet,
+                "full_description": full_description,
+                "compensation": compensation,
+                "org_override": org,
+                "org_url": org_url,
+            }
+        )
 
-    print(f"  [{board_name}] Fast Forward/Getro: {len(jobs)} relevant from {len(raw_listings)} total")
+    print(
+        f"  [{board_name}] Fast Forward/Getro: {len(jobs)} relevant from {len(raw_listings)} total"
+    )
     return jobs
 
 
@@ -3478,8 +3795,9 @@ def _parse_linkedin_card(card: str) -> dict | None:
     """Extract one LinkedIn guest job card into a raw record (or None)."""
     m = re.search(r"urn:li:jobPosting:(\d+)", card)
     jid = m.group(1) if m else None
-    href_m = (re.search(r'base-card__full-link[^>]*href="([^"]+)"', card)
-              or re.search(r'href="([^"]*?/jobs/view/[^"]+)"', card))
+    href_m = re.search(r'base-card__full-link[^>]*href="([^"]+)"', card) or re.search(
+        r'href="([^"]*?/jobs/view/[^"]+)"', card
+    )
     href = (href_m.group(1) if href_m else "").replace("&amp;", "&").split("?", 1)[0]
     if not jid:
         jm = re.search(r"/jobs/view/[^\"?]*?-(\d+)(?:[/?]|$)", href)
@@ -3489,13 +3807,20 @@ def _parse_linkedin_card(card: str) -> dict | None:
     title_m = re.search(r'base-search-card__title">(.*?)</h3>', card, re.S)
     title = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", title_m.group(1))).strip() if title_m else ""
     org_m = re.search(
-        r'base-search-card__subtitle">.*?<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>', card, re.S)
+        r'base-search-card__subtitle">.*?<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>', card, re.S
+    )
     org_url = org_m.group(1).replace("&amp;", "&").split("?", 1)[0] if org_m else ""
     org = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", org_m.group(2))).strip() if org_m else ""
     loc_m = re.search(r'job-search-card__location">(.*?)</span>', card, re.S)
     loc = re.sub(r"\s+", " ", loc_m.group(1)).strip() if loc_m else ""
-    return {"title": title, "org": org, "org_url": org_url, "location": loc,
-            "url": href, "external_id": jid}
+    return {
+        "title": title,
+        "org": org,
+        "org_url": org_url,
+        "location": loc,
+        "url": href,
+        "external_id": jid,
+    }
 
 
 def fetch_linkedin_board(board_cfg: dict) -> list[dict]:
@@ -3545,8 +3870,9 @@ def fetch_linkedin_board(board_cfg: dict) -> list[dict]:
         time.sleep(delay)
         if not html:
             return ""
-        m = (re.search(r'show-more-less-html__markup[^>]*>(.*?)</div>', html, re.S)
-             or re.search(r'description__text[^>]*>(.*?)</section>', html, re.S))
+        m = re.search(r"show-more-less-html__markup[^>]*>(.*?)</div>", html, re.S) or re.search(
+            r"description__text[^>]*>(.*?)</section>", html, re.S
+        )
         return m.group(1) if m else ""
 
     raw: list[dict] = []
@@ -3557,8 +3883,7 @@ def fetch_linkedin_board(board_cfg: dict) -> list[dict]:
         if not kw:
             continue
         for page in range(pages):
-            html = _get(list_url, params={"keywords": kw, "location": loc,
-                                          "start": page * 25})
+            html = _get(list_url, params={"keywords": kw, "location": loc, "start": page * 25})
             time.sleep(delay)
             if not html:
                 break
@@ -3576,8 +3901,10 @@ def fetch_linkedin_board(board_cfg: dict) -> list[dict]:
 
     total = len(raw)
     filtered = _blacklist_filter(
-        raw, GLOBAL_BLACKLIST + board_blacklist,
-        title_fields=["title"], substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
+        raw,
+        GLOBAL_BLACKLIST + board_blacklist,
+        title_fields=["title"],
+        substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
     )
 
     jobs = []
@@ -3587,13 +3914,20 @@ def fetch_linkedin_board(board_cfg: dict) -> list[dict]:
         desc_html = _fetch_detail(rec["external_id"]) if want_detail else ""
         snippet = _html_to_snippet(desc_html) if desc_html else rec["title"]
         full_description = _html_to_multiline(desc_html) if desc_html else snippet
-        jobs.append({
-            "title": rec["title"], "location": rec["location"], "department": "",
-            "url": rec["url"], "external_id": rec["external_id"], "snippet": snippet,
-            "full_description": full_description, "compensation": "",
-            "org_override": rec["org"], "org_url": rec["org_url"] or board_cfg["url"],
-        })
+        jobs.append(
+            {
+                "title": rec["title"],
+                "location": rec["location"],
+                "department": "",
+                "url": rec["url"],
+                "external_id": rec["external_id"],
+                "snippet": snippet,
+                "full_description": full_description,
+                "compensation": "",
+                "org_override": rec["org"],
+                "org_url": rec["org_url"] or board_cfg["url"],
+            }
+        )
 
     print(f"  [{board_name}] LinkedIn guest: {len(jobs)} relevant from {total} total")
     return jobs
-

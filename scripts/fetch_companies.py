@@ -25,9 +25,11 @@ def build_parser():
     ``--help`` / ``-h`` prints usage without connecting to the database or
     loading the user profile (those happen only when a real command runs)."""
     import argparse
+
     parser = argparse.ArgumentParser(description="Fetch company data via Firecrawl")
-    parser.add_argument("--social", action="store_true",
-                        help="Fetch social signals instead of about pages")
+    parser.add_argument(
+        "--social", action="store_true", help="Fetch social signals instead of about pages"
+    )
     parser.add_argument("--limit", type=int)
     parser.add_argument("--company", type=str, help="Specific companies (comma-separated)")
     parser.add_argument("--force", action="store_true", help="Re-scrape cached companies")
@@ -36,6 +38,7 @@ def build_parser():
 
 # Print help and exit BEFORE importing anything that touches the DB or profile.
 from cli_help import wants_help
+
 if __name__ == "__main__" and wants_help():
     build_parser().parse_args()
 
@@ -49,19 +52,29 @@ _MAIN_ROOT = _get_main_repo_root()
 COMPANY_MD_CACHE = _MAIN_ROOT / ".firecrawl" / "companies"
 
 # Keywords for page discovery
-_ABOUT_PAGE_KEYWORDS = {"about", "mission", "team", "values", "impact",
-                        "who-we-are", "our-story", "what-we-do"}
+_ABOUT_PAGE_KEYWORDS = {
+    "about",
+    "mission",
+    "team",
+    "values",
+    "impact",
+    "who-we-are",
+    "our-story",
+    "what-we-do",
+}
 
 
 # ---------------------------------------------------------------------------
 # Firecrawl helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_firecrawl_client():
     """Get Firecrawl client, return None if unavailable."""
     try:
         from firecrawl import FirecrawlApp
         import os
+
         key = os.environ.get("FIRECRAWL_API_KEY", "")
         if not key:
             print("WARNING: FIRECRAWL_API_KEY not set", file=sys.stderr)
@@ -94,6 +107,7 @@ def _with_backoff(fn, *args, **kwargs):
 # Page discovery + scraping
 # ---------------------------------------------------------------------------
 
+
 def _discover_relevant_pages(client, url: str) -> list[str]:
     """Use Firecrawl map() to find about/mission/team pages."""
     parsed = urlparse(url)
@@ -107,7 +121,9 @@ def _discover_relevant_pages(client, url: str) -> list[str]:
             limit=20,
             include_subdomains=False,
         )
-        links = result.links if hasattr(result, 'links') else result if isinstance(result, list) else []
+        links = (
+            result.links if hasattr(result, "links") else result if isinstance(result, list) else []
+        )
     except Exception as e:
         print(f"    Map failed for {root}: {str(e)[:80]}")
         return [url]
@@ -118,9 +134,9 @@ def _discover_relevant_pages(client, url: str) -> list[str]:
         if isinstance(link, dict):
             link_url = link.get("url", "")
             title = link.get("title", "")
-        elif hasattr(link, 'url'):
+        elif hasattr(link, "url"):
             link_url = link.url or ""
-            title = getattr(link, 'title', "") or ""
+            title = getattr(link, "title", "") or ""
         elif isinstance(link, str):
             link_url = link
             title = ""
@@ -132,8 +148,19 @@ def _discover_relevant_pages(client, url: str) -> list[str]:
         seen.add(link_url)
         path = urlparse(link_url).path.lower().rstrip("/")
 
-        if any(skip in path for skip in ("/login", "/signup", "/register", "/privacy",
-                                          "/terms", "/cookie", "/legal", "/404")):
+        if any(
+            skip in path
+            for skip in (
+                "/login",
+                "/signup",
+                "/register",
+                "/privacy",
+                "/terms",
+                "/cookie",
+                "/legal",
+                "/404",
+            )
+        ):
             continue
 
         score = 0
@@ -158,8 +185,10 @@ def _discover_relevant_pages(client, url: str) -> list[str]:
         urls.insert(0, url)
 
     selected = urls[:3]
-    print(f"    Map found {len(links)} pages, selected {len(selected)}: "
-          + ", ".join(urlparse(u).path or "/" for u in selected))
+    print(
+        f"    Map found {len(links)} pages, selected {len(selected)}: "
+        + ", ".join(urlparse(u).path or "/" for u in selected)
+    )
     return selected
 
 
@@ -167,13 +196,16 @@ def _scrape_markdown(client, url: str) -> str:
     """Scrape single page as markdown."""
     try:
         result = _with_backoff(
-            client.scrape, url,
+            client.scrape,
+            url,
             formats=["markdown"],
             only_main_content=True,
             timeout=60000,
         )
-        md = result.markdown if hasattr(result, 'markdown') else (
-            result.get("markdown") if isinstance(result, dict) else ""
+        md = (
+            result.markdown
+            if hasattr(result, "markdown")
+            else (result.get("markdown") if isinstance(result, dict) else "")
         )
         return md or ""
     except Exception as e:
@@ -209,6 +241,7 @@ def _scrape_company_pages(client, name: str, url: str) -> tuple[str | None, int]
 # Cache management
 # ---------------------------------------------------------------------------
 
+
 def _load_scrape_cache() -> dict[str, dict]:
     """Load cached scrape results. Returns {name: {url, markdown}}."""
     if not SCRAPE_CACHE_PATH.exists():
@@ -223,7 +256,8 @@ def _save_scrape_cache(cache: dict):
     """Save scrape cache to JSON."""
     SCRAPE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     SCRAPE_CACHE_PATH.write_text(
-        json.dumps(cache, ensure_ascii=False), encoding="utf-8",
+        json.dumps(cache, ensure_ascii=False),
+        encoding="utf-8",
     )
     print(f"  Cache saved: {SCRAPE_CACHE_PATH.name} ({len(cache)} companies)")
 
@@ -242,6 +276,7 @@ def _cache_company_markdown(name: str, markdown: str):
 # Data loading
 # ---------------------------------------------------------------------------
 
+
 def _load_companies(*, company_filter=None, limit=None, for_social=False):
     """Load companies needing scrape or social enrichment.
 
@@ -255,13 +290,16 @@ def _load_companies(*, company_filter=None, limit=None, for_social=False):
 
     if company_filter:
         names = [n.strip() for n in company_filter.split(",")]
-        cur.execute("""
+        cur.execute(
+            """
             SELECT id, canonical_name, website
             FROM company
             WHERE canonical_name = ANY(%s)
               AND website IS NOT NULL AND website != ''
             ORDER BY canonical_name
-        """, (names,))
+        """,
+            (names,),
+        )
     elif for_social:
         cur.execute("""
             SELECT id, canonical_name, website
@@ -289,6 +327,7 @@ def _load_companies(*, company_filter=None, limit=None, for_social=False):
 # Social signals (Firecrawl search)
 # ---------------------------------------------------------------------------
 
+
 def _enrich_social_signals(client, name: str) -> dict | None:
     """Fetch Glassdoor rating, LinkedIn size, and recent news via Firecrawl search."""
     social = {
@@ -299,7 +338,7 @@ def _enrich_social_signals(client, name: str) -> dict | None:
     }
 
     def _get_web_results(search_data) -> list:
-        if hasattr(search_data, 'web') and search_data.web:
+        if hasattr(search_data, "web") and search_data.web:
             return search_data.web
         return []
 
@@ -308,8 +347,8 @@ def _enrich_social_signals(client, name: str) -> dict | None:
         print(f"    Searching Glassdoor for {name}...", flush=True)
         results = _with_backoff(client.search, query=f"{name} Glassdoor rating", limit=3)
         for item in _get_web_results(results):
-            snippet = getattr(item, 'description', "") or ""
-            rating_match = re.search(r'(\d\.\d)\s*/\s*5', snippet)
+            snippet = getattr(item, "description", "") or ""
+            rating_match = re.search(r"(\d\.\d)\s*/\s*5", snippet)
             if rating_match:
                 social["glassdoor_rating"] = float(rating_match.group(1))
                 break
@@ -321,12 +360,12 @@ def _enrich_social_signals(client, name: str) -> dict | None:
         print(f"    Searching LinkedIn for {name}...", flush=True)
         results = _with_backoff(client.search, query=f"{name} LinkedIn company employees", limit=3)
         for item in _get_web_results(results):
-            snippet = getattr(item, 'description', "") or ""
-            emp_match = re.search(r'([\d,]+-[\d,]+)\s*employees', snippet, re.IGNORECASE)
+            snippet = getattr(item, "description", "") or ""
+            emp_match = re.search(r"([\d,]+-[\d,]+)\s*employees", snippet, re.IGNORECASE)
             if emp_match:
                 social["linkedin_employees"] = emp_match.group(1).replace(",", "")
                 break
-            emp_match2 = re.search(r'([\d,]+)\s*employees', snippet, re.IGNORECASE)
+            emp_match2 = re.search(r"([\d,]+)\s*employees", snippet, re.IGNORECASE)
             if emp_match2:
                 social["linkedin_employees"] = emp_match2.group(1).replace(",", "")
                 break
@@ -338,8 +377,8 @@ def _enrich_social_signals(client, name: str) -> dict | None:
         print(f"    Searching news for {name}...", flush=True)
         results = _with_backoff(client.search, query=f'"{name}" news 2025 2026', limit=3)
         for item in _get_web_results(results)[:3]:
-            title = getattr(item, 'title', "") or ""
-            item_url = getattr(item, 'url', "") or ""
+            title = getattr(item, "title", "") or ""
+            item_url = getattr(item, "url", "") or ""
             if title:
                 social["recent_news"].append({"title": title[:200], "url": item_url})
     except Exception as e:
@@ -351,6 +390,7 @@ def _enrich_social_signals(client, name: str) -> dict | None:
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
+
 
 def cmd_scrape(args):
     """Scrape about pages for companies via Firecrawl."""
@@ -396,7 +436,7 @@ def cmd_scrape(args):
             print(f"  OK: {page_count} pages, {len(markdown)} chars")
         else:
             errors += 1
-            print(f"  FAILED")
+            print("  FAILED")
 
     print(f"\nDone! Scraped {scraped} companies. Errors: {errors}")
 
@@ -408,7 +448,9 @@ def cmd_social(args):
         sys.exit(1)
 
     companies = _load_companies(
-        company_filter=args.company, limit=args.limit, for_social=True,
+        company_filter=args.company,
+        limit=args.limit,
+        for_social=True,
     )
 
     if not companies:
@@ -428,7 +470,7 @@ def cmd_social(args):
 
         social = _enrich_social_signals(client, name)
         if not social:
-            print(f"  no data")
+            print("  no data")
             continue
 
         rating = social.get("glassdoor_rating", "?")
@@ -453,6 +495,7 @@ def cmd_social(args):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main():
     args = build_parser().parse_args()

@@ -75,9 +75,9 @@ def test_no_bare_score_slash_command():
 
 def test_regex_distinguishes_score_from_jobs_score():
     """Guards the matcher itself so it can never silently start passing."""
-    assert STALE_SCORE.search("run /score now")          # bare command → flagged
-    assert STALE_SCORE.search("`/score`")                # in backticks → flagged
-    assert STALE_SCORE.search("(/score)")                # in parens → flagged
+    assert STALE_SCORE.search("run /score now")  # bare command → flagged
+    assert STALE_SCORE.search("`/score`")  # in backticks → flagged
+    assert STALE_SCORE.search("(/score)")  # in parens → flagged
     assert not STALE_SCORE.search("run /jobs-score now")  # the real command
-    assert not STALE_SCORE.search("fetch/score/filter")   # path-style prose
-    assert not STALE_SCORE.search("/scoreboard")          # different command
+    assert not STALE_SCORE.search("fetch/score/filter")  # path-style prose
+    assert not STALE_SCORE.search("/scoreboard")  # different command

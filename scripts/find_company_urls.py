@@ -7,7 +7,6 @@ Usage:
     python3 scripts/find_company_urls.py [--dry-run] [--limit N]
 """
 
-import json
 import sys
 import time
 from pathlib import Path
@@ -20,6 +19,7 @@ def build_parser():
     ``--help`` / ``-h`` prints usage without connecting to the database or
     loading the user profile (those happen only when a real command runs)."""
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit", type=int, default=0)
@@ -28,26 +28,48 @@ def build_parser():
 
 # Print help and exit BEFORE importing anything that touches the DB or profile.
 from cli_help import wants_help
+
 if __name__ == "__main__" and wants_help():
     build_parser().parse_args()
 
-from config import COMPANIES, PROJECT_ROOT, get_firecrawl_client, resolve_canonical_name
+from config import get_firecrawl_client
 
 # Job board / aggregator domains to skip in search results
 SKIP_DOMAINS = {
-    "linkedin.com", "glassdoor.com", "indeed.com", "ziprecruiter.com",
-    "greenhouse.io", "lever.co", "ashbyhq.com", "workable.com",
-    "80000hours.org", "devex.com", "idealist.org", "impactsource.com",
-    "jobs.ffwd.org", "wikipedia.org", "bloomberg.com", "crunchbase.com",
-    "twitter.com", "x.com", "facebook.com", "youtube.com",
-    "angel.co", "wellfound.com", "builtinnyc.com", "builtinsf.com",
-    "charity.com", "charitynavigator.org", "guidestar.org",
+    "linkedin.com",
+    "glassdoor.com",
+    "indeed.com",
+    "ziprecruiter.com",
+    "greenhouse.io",
+    "lever.co",
+    "ashbyhq.com",
+    "workable.com",
+    "80000hours.org",
+    "devex.com",
+    "idealist.org",
+    "impactsource.com",
+    "jobs.ffwd.org",
+    "wikipedia.org",
+    "bloomberg.com",
+    "crunchbase.com",
+    "twitter.com",
+    "x.com",
+    "facebook.com",
+    "youtube.com",
+    "angel.co",
+    "wellfound.com",
+    "builtinnyc.com",
+    "builtinsf.com",
+    "charity.com",
+    "charitynavigator.org",
+    "guidestar.org",
 }
 
 
 def _load_known_companies() -> set[str]:
     """Return set of all canonical company names from Supabase."""
     from company_registry import _ALL_KNOWN_NAMES
+
     return _ALL_KNOWN_NAMES
 
 
@@ -90,17 +112,28 @@ def _load_companies_to_find() -> list[str]:
 
     enrichment = load_all_enrichment()
     junk_patterns = [
-        "[via ", " USD ", "New York", "San Francisco", "SAGE",
-        "Individual Philanthropy", "Various Fellowship", "HUD",
-        "Grants Associate", "Manager,", "Associate,", "Program Officer",
+        "[via ",
+        " USD ",
+        "New York",
+        "San Francisco",
+        "SAGE",
+        "Individual Philanthropy",
+        "Various Fellowship",
+        "HUD",
+        "Grants Associate",
+        "Manager,",
+        "Associate,",
+        "Program Officer",
     ]
 
     result = []
     for name in all_names:
         if any(p in name for p in junk_patterns):
             continue
-        has_mission = (name in enrichment and
-                       enrichment[name].get("mission_fit", {}).get("alignment_score") is not None)
+        has_mission = (
+            name in enrichment
+            and enrichment[name].get("mission_fit", {}).get("alignment_score") is not None
+        )
         if not has_mission:
             result.append(name)
 
@@ -125,7 +158,9 @@ def _search_website(client, company_name: str) -> str | None:
         results = client.search(query=query, limit=5)
 
         for item in _get_search_results(results):
-            url = getattr(item, "url", None) or (item.get("url") if isinstance(item, dict) else None)
+            url = getattr(item, "url", None) or (
+                item.get("url") if isinstance(item, dict) else None
+            )
             if not url:
                 continue
             # Skip known job boards and aggregators
@@ -149,6 +184,7 @@ def _save_found_urls(entries: list[dict]):
     if not entries:
         return
     from db_conn import get_conn
+
     conn = get_conn()
     cur = conn.cursor()
     for entry in entries:
@@ -193,31 +229,33 @@ def main():
         url = _search_website(client, company)
         if url:
             print(f"    ✅ {url}", flush=True)
-            found.append({
-                "Company Name": company,
-                "Category": "",
-                "Product": "",
-                "Website": url,
-                "Careers URL": "",
-                "Offices": "",
-                "Notes": "auto-added for enrichment",
-                "Tier": "C",
-                "Experience Match": "",
-                "Personal Interest": "",
-                "User Comments": "",
-                "Status": "candidate",
-                "Fetch Strategy": "",
-                "ATS Slug": "",
-                "ATS Config": "",
-            })
+            found.append(
+                {
+                    "Company Name": company,
+                    "Category": "",
+                    "Product": "",
+                    "Website": url,
+                    "Careers URL": "",
+                    "Offices": "",
+                    "Notes": "auto-added for enrichment",
+                    "Tier": "C",
+                    "Experience Match": "",
+                    "Personal Interest": "",
+                    "User Comments": "",
+                    "Status": "candidate",
+                    "Fetch Strategy": "",
+                    "ATS Slug": "",
+                    "ATS Config": "",
+                }
+            )
         else:
-            print(f"    ⚠ Not found", flush=True)
+            print("    ⚠ Not found", flush=True)
             not_found.append(company)
 
         # Brief pause to avoid rate limiting
         time.sleep(0.5)
 
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"✅ Found URLs: {len(found)}")
     print(f"⚠  Not found:  {len(not_found)}")
 

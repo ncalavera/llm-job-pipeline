@@ -20,17 +20,13 @@ current code — every behaviour class was verified to actually fire (no stubs).
 """
 
 import importlib
-import io
 import json
 import sys
-import types
 from datetime import date, timedelta as _td
 from pathlib import Path
 
-import pytest
 
-FIXTURE = (Path(__file__).parent / "fixtures"
-           / "filters_snapshot_vacancies.json")
+FIXTURE = Path(__file__).parent / "fixtures" / "filters_snapshot_vacancies.json"
 FROZEN_TODAY = date(2026, 6, 23)
 
 
@@ -38,18 +34,20 @@ FROZEN_TODAY = date(2026, 6, 23)
 # Harness — isolated temp SQLite + frozen clock (mirrors test_e2e_pipeline.py)
 # ---------------------------------------------------------------------------
 
+
 def _force_sqlite(monkeypatch, db_file):
     """Point the whole chain at a fresh temp SQLite file and reload it."""
     monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
     monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
-    for mod in ("database_supabase", "config", "company_registry",
-                "db_conn", "db_backend"):
+    for mod in ("database_supabase", "config", "company_registry", "db_conn", "db_backend"):
         sys.modules.pop(mod, None)
     import db_backend
+
     importlib.reload(db_backend)
     assert db_backend.IS_SQLITE, "snapshot test must run on the SQLite backend"
     import database_supabase as db
+
     return db
 
 
@@ -114,6 +112,7 @@ def _excluded_countries():
 # Seeding — pre-existing DB state described by each fixture's _seed block
 # ---------------------------------------------------------------------------
 
+
 def _seed_entry(db, entry):
     """Create whatever pre-existing state the fixture's _seed block asks for.
 
@@ -141,10 +140,17 @@ def _seed_entry(db, entry):
             "INSERT INTO vacancy (dedup_hash, company_id, title, snippet, "
             "full_description, first_seen, last_seen, locations, status) "
             "VALUES (?,?,?,?,?,?,?,?,?)",
-            (dedup_hash, company_id, title,
-             entry["job"].get("snippet", ""),
-             entry["job"].get("full_description", ""),
-             first, last_old, "[]", existing_status),
+            (
+                dedup_hash,
+                company_id,
+                title,
+                entry["job"].get("snippet", ""),
+                entry["job"].get("full_description", ""),
+                first,
+                last_old,
+                "[]",
+                existing_status,
+            ),
         )
 
     # archived_hash tombstone (rearchived / resurrection cases). Default
@@ -168,11 +174,11 @@ def _apply_first_seen(db, entry, dedup_hash):
     if days is None:
         return
     from datetime import timedelta
+
     fs = (FROZEN_TODAY - timedelta(days=days)).isoformat()
     conn = db.get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE vacancy SET first_seen = ? WHERE dedup_hash = ?",
-                (fs, dedup_hash))
+    cur.execute("UPDATE vacancy SET first_seen = ? WHERE dedup_hash = ?", (fs, dedup_hash))
     conn.commit()
     cur.close()
 
@@ -181,8 +187,7 @@ def _row_state(db, dedup_hash):
     """Return (status, last_seen) for a vacancy, or (None, None) when absent."""
     conn = db.get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT status, last_seen FROM vacancy WHERE dedup_hash = ?",
-                (dedup_hash,))
+    cur.execute("SELECT status, last_seen FROM vacancy WHERE dedup_hash = ?", (dedup_hash,))
     row = cur.fetchone()
     cur.close()
     return (row[0], row[1]) if row else (None, None)
@@ -191,6 +196,7 @@ def _row_state(db, dedup_hash):
 # ===========================================================================
 # Entry point 1 + 2 — write paths (save_vacancies / save_board_vacancies)
 # ===========================================================================
+
 
 def _run_write_path(tmp_path, monkeypatch, *, board):
     """Run every fixture through a write path, one fresh DB per fixture, and
@@ -211,8 +217,7 @@ def _run_write_path(tmp_path, monkeypatch, *, board):
 
             job = dict(entry["job"])
             if board:
-                board_cfg = {"name": entry["org"], "url": "https://board.test",
-                             "tier": "C"}
+                board_cfg = {"name": entry["org"], "url": "https://board.test", "tier": "C"}
                 # board path keys org off board name unless org_override given
                 job.setdefault("org_override", entry["org"])
                 db.save_board_vacancies(board_cfg, [job])
@@ -222,7 +227,8 @@ def _run_write_path(tmp_path, monkeypatch, *, board):
 
             status_after, last_after = _row_state(db, dedup_hash)
             outcome = _classify_write_outcome(
-                entry, status_before, status_after, last_before, last_after)
+                entry, status_before, status_after, last_before, last_after
+            )
             outcomes[_stable_key(entry)] = outcome
         finally:
             db.close_conn()
@@ -240,8 +246,7 @@ _SKIP_REASON_BY_CLASS = {
 }
 
 
-def _classify_write_outcome(entry, status_before, status_after,
-                            last_before, last_after):
+def _classify_write_outcome(entry, status_before, status_after, last_before, last_after):
     """Map (before, after) row state to a stable outcome label.
 
     A merge either INSERTs, UPDATEs (bumps last_seen, maybe resurrects), or
@@ -273,6 +278,7 @@ def _classify_write_outcome(entry, status_before, status_after,
 # Entry point 3 — classify_vacancies (read-only /filter triage)
 # ===========================================================================
 
+
 def _run_classify(tmp_path, monkeypatch):
     """Seed ALL fixtures into ONE db (classify is a whole-pool read), then map
     each stable_key to its category.
@@ -288,10 +294,10 @@ def _run_classify(tmp_path, monkeypatch):
     db = _fresh_db(tmp_path, monkeypatch, "classify.db")
     try:
         import filter_vacancies
+
         importlib.reload(filter_vacancies)
         _freeze_clock(monkeypatch, filter_vacancies)
-        monkeypatch.setattr(filter_vacancies, "_BANNED_COUNTRIES",
-                            _excluded_countries())
+        monkeypatch.setattr(filter_vacancies, "_BANNED_COUNTRIES", _excluded_countries())
         # The geo gate is inert unless a ban is configured; force it on so the
         # patched country set is honoured under the test's empty profile.
         monkeypatch.setattr(filter_vacancies, "_GEO_ACTIVE", True)
@@ -342,10 +348,17 @@ def _seed_entry_for_classify(db, entry):
         "INSERT INTO vacancy (dedup_hash, company_id, title, snippet, "
         "full_description, first_seen, last_seen, locations, status) "
         "VALUES (?,?,?,?,?,?,?,?,?)",
-        (dedup_hash, company_id, title,
-         entry["job"].get("snippet", ""),
-         entry["job"].get("full_description", ""),
-         today, today, json.dumps([loc]), status),
+        (
+            dedup_hash,
+            company_id,
+            title,
+            entry["job"].get("snippet", ""),
+            entry["job"].get("full_description", ""),
+            today,
+            today,
+            json.dumps([loc]),
+            status,
+        ),
     )
     reason = seed.get("archived_hash_reason")
     if reason:
@@ -362,6 +375,7 @@ def _seed_entry_for_classify(db, entry):
 # Entry point 4 — score._load_and_dedup
 # ===========================================================================
 
+
 def _run_score_dedup(tmp_path, monkeypatch):
     """Seed all fixtures, run _load_and_dedup, return (stats, roles_keys).
 
@@ -374,9 +388,9 @@ def _run_score_dedup(tmp_path, monkeypatch):
             _seed_entry_for_classify(db, entry)
 
         import score_vacancies
+
         importlib.reload(score_vacancies)
-        roles, _fitness, stats = score_vacancies._load_and_dedup(
-            include_candidates=False)
+        roles, _fitness, stats = score_vacancies._load_and_dedup(include_candidates=False)
         roles_keys = {key for key, _rep, _members in roles}
         return stats, roles_keys
     finally:
@@ -441,6 +455,7 @@ GOLDEN_SCORE_ROLES = {
 # TESTS
 # ===========================================================================
 
+
 def test_merge_vacancies_snapshot(tmp_path, monkeypatch):
     """Entry point 1: direct-ATS write path outcomes are pinned."""
     outcomes = _run_write_path(tmp_path, monkeypatch, board=False)
@@ -475,4 +490,5 @@ def test_backend_is_sqlite(tmp_path, monkeypatch):
     """Guard: the harness never touches a real Postgres."""
     _force_sqlite(monkeypatch, tmp_path / "guard.db")
     import db_backend
+
     assert db_backend.IS_SQLITE

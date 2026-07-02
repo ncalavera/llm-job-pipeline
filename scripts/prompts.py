@@ -114,6 +114,7 @@ def _load_user_profile() -> dict[str, str]:
 
 def _render(template: str, sections: dict[str, str]) -> str:
     """Replace {{KEY}} placeholders. Unknown keys are left as-is."""
+
     def sub(match: re.Match) -> str:
         key = match.group(1).strip().upper().replace(" ", "_")
         return sections.get(key, match.group(0))
@@ -127,8 +128,7 @@ _profile = _load_user_profile()
 #: custom boost. Read from the profile's CUSTOM_BOOST_FIELD section so the prompt
 #: and the score-ingestion code agree on ONE name. Falls back to the example
 #: default. The legacy key "mpa_narrative_boost" is still accepted downstream.
-CUSTOM_BOOST_FIELD = (_profile.get("CUSTOM_BOOST_FIELD", "").strip()
-                      or "career_narrative_boost")
+CUSTOM_BOOST_FIELD = _profile.get("CUSTOM_BOOST_FIELD", "").strip() or "career_narrative_boost"
 
 #: Keys downstream code accepts as the custom boost (configured first, then the
 #: legacy name) — back-compat for older enrichment payloads.

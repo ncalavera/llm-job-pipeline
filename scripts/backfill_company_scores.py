@@ -41,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 def _active_company_names() -> list[str]:
     from db_conn import get_conn
+
     cur = get_conn().cursor()
     cur.execute(
         "SELECT canonical_name FROM company "
@@ -54,6 +55,7 @@ def _active_company_names() -> list[str]:
 
 def _active_scores() -> list[tuple]:
     from db_conn import get_conn
+
     cur = get_conn().cursor()
     cur.execute(
         "SELECT canonical_name, alignment_score FROM company "
@@ -102,17 +104,22 @@ def cmd_prepare(args):
         if user_msg is None:
             skipped += 1
             continue
-        output.append({
-            "payload_kind": "company",
-            "id": str(c["id"]),
-            "canonical_name": c["canonical_name"],
-            "url": (c.get("website") or "").strip(),
-            "system_prompt": system_prompt,
-            "user_msg": user_msg,
-        })
+        output.append(
+            {
+                "payload_kind": "company",
+                "id": str(c["id"]),
+                "canonical_name": c["canonical_name"],
+                "url": (c.get("website") or "").strip(),
+                "system_prompt": system_prompt,
+                "user_msg": user_msg,
+            }
+        )
     if skipped:
-        print(f"  Skipped {skipped} not in scrape cache (run fetch_companies.py "
-              f"to enrich them first).", file=sys.stderr)
+        print(
+            f"  Skipped {skipped} not in scrape cache (run fetch_companies.py "
+            f"to enrich them first).",
+            file=sys.stderr,
+        )
     print(f"Prepared {len(output)} companies for scoring.", file=sys.stderr)
     sys.stdout = _real_stdout
     json.dump(output, sys.stdout, ensure_ascii=False)
@@ -120,10 +127,10 @@ def cmd_prepare(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scores", action="store_true",
-                        help="print active companies' current alignment_score")
-    parser.add_argument("--limit", type=int,
-                        help="cap how many active companies to prepare")
+    parser.add_argument(
+        "--scores", action="store_true", help="print active companies' current alignment_score"
+    )
+    parser.add_argument("--limit", type=int, help="cap how many active companies to prepare")
     args = parser.parse_args()
     if args.scores:
         cmd_scores(args)

@@ -40,12 +40,16 @@ DEFAULT_STATE_FILE = "~/.jobsearch_digest_state.json"
 try:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import settings as _settings  # noqa: E402
+
     _DIGEST = _settings.digest()
 except Exception:
     _DIGEST = {
-        "hot_vacancy_score": 55, "deadline_soon_days": 7,
-        "default_limit": 5, "default_min_score": 40,
-        "summary_fallback_chars": 600, "summary_max_chars": 1500,
+        "hot_vacancy_score": 55,
+        "deadline_soon_days": 7,
+        "default_limit": 5,
+        "default_min_score": 40,
+        "summary_fallback_chars": 600,
+        "summary_max_chars": 1500,
         "message_max_chars": 4000,
     }
 
@@ -107,6 +111,7 @@ ORDER BY v.llm_score DESC NULLS LAST, v.last_seen ASC
 
 # --- env / config -----------------------------------------------------------
 
+
 def load_dotenv_fallback():
     """Pick up a .env next to this script — for hosts without a shell profile."""
     env_path = Path(__file__).resolve().parent / ".env"
@@ -136,6 +141,7 @@ def get_config():
 
 # --- Telegram Bot API (urllib, no dependencies) -----------------------------
 
+
 def tg_call(token, method, payload, timeout=15, retries=2):
     """Call the Bot API. Short timeout + retries: one stuck call must not
     block the callback queue (a button ack lives for ~15 seconds)."""
@@ -143,9 +149,7 @@ def tg_call(token, method, payload, timeout=15, retries=2):
     data = json.dumps(payload).encode()
     last_err = None
     for attempt in range(retries + 1):
-        req = urllib.request.Request(
-            url, data=data, headers={"Content-Type": "application/json"}
-        )
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 body = json.loads(resp.read().decode())
@@ -167,6 +171,7 @@ def tg_call(token, method, payload, timeout=15, retries=2):
 
 
 # --- message building --------------------------------------------------------
+
 
 def vacancy_url(row):
     for loc in row.get("locations") or []:
@@ -335,11 +340,13 @@ def build_expiring_keyboard(vac_id):
     """👍 / 👎 / «уже подал» for an expiring-role alert. Reuses the v:<id>:<a>
     callback format so the existing poll handler records the decision."""
     return {
-        "inline_keyboard": [[
-            {"text": "👍 Liked", "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:l"},
-            {"text": "👎 Passed", "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:p"},
-            {"text": "✅ Уже подал", "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:a"},
-        ]]
+        "inline_keyboard": [
+            [
+                {"text": "👍 Liked", "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:l"},
+                {"text": "👎 Passed", "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:p"},
+                {"text": "✅ Уже подал", "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:a"},
+            ]
+        ]
     }
 
 
@@ -352,10 +359,12 @@ def build_keyboard(vac_id, chosen=None):
     elif chosen == "passed":
         pas = "✅ " + pas
     return {
-        "inline_keyboard": [[
-            {"text": like, "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:l"},
-            {"text": pas, "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:p"},
-        ]]
+        "inline_keyboard": [
+            [
+                {"text": like, "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:l"},
+                {"text": pas, "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:p"},
+            ]
+        ]
     }
 
 
@@ -371,6 +380,7 @@ def parse_callback(data):
 
 
 # --- database ----------------------------------------------------------------
+
 
 def db_connect(db_url):
     import psycopg2
@@ -423,16 +433,12 @@ def unmark_alerted(conn, vac_id):
 
 def mark_sent(conn, vac_id):
     with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE vacancy SET digest_sent_at = now() WHERE id = %s", (vac_id,)
-        )
+        cur.execute("UPDATE vacancy SET digest_sent_at = now() WHERE id = %s", (vac_id,))
 
 
 def unmark_sent(conn, vac_id):
     with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE vacancy SET digest_sent_at = NULL WHERE id = %s", (vac_id,)
-        )
+        cur.execute("UPDATE vacancy SET digest_sent_at = NULL WHERE id = %s", (vac_id,))
 
 
 def set_status(conn, vac_id, status):
@@ -449,6 +455,7 @@ def set_status(conn, vac_id, status):
 
 # --- send mode ----------------------------------------------------------------
 
+
 def send_expiring_alerts(conn, token, chat_id, expiring_rows, dry_run=False):
     """Send one loud alert per freshly-expiring protected role. Returns the
     number sent. Each is claimed (mark_alerted) before sending so a parallel run
@@ -459,28 +466,29 @@ def send_expiring_alerts(conn, token, chat_id, expiring_rows, dry_run=False):
         for row in expiring_rows:
             print("--- expiring alert ---")
             print(build_expiring_message(row))
-        print(f"[dry-run] {len(expiring_rows)} expiring alert(s), nothing sent",
-              flush=True)
+        print(f"[dry-run] {len(expiring_rows)} expiring alert(s), nothing sent", flush=True)
         return 0
     sent = 0
     for row in expiring_rows:
         mark_alerted(conn, row["id"])  # claim-first
         try:
-            tg_call(token, "sendMessage", {
-                "chat_id": chat_id,
-                "text": build_expiring_message(row),
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-                "reply_markup": build_expiring_keyboard(row["id"]),
-            })
+            tg_call(
+                token,
+                "sendMessage",
+                {
+                    "chat_id": chat_id,
+                    "text": build_expiring_message(row),
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                    "reply_markup": build_expiring_keyboard(row["id"]),
+                },
+            )
             sent += 1
             time.sleep(0.5)
         except Exception as e:
             unmark_alerted(conn, row["id"])  # release for the next run
-            print(f"ERROR expiring alert '{row.get('title')}': {e}",
-                  file=sys.stderr, flush=True)
-    print(f"Sent {sent}/{len(expiring_rows)} expiring alert(s) to chat {chat_id}",
-          flush=True)
+            print(f"ERROR expiring alert '{row.get('title')}': {e}", file=sys.stderr, flush=True)
+    print(f"Sent {sent}/{len(expiring_rows)} expiring alert(s) to chat {chat_id}", flush=True)
     return sent
 
 
@@ -492,8 +500,7 @@ def cmd_alert(args):
     if not expiring_rows:
         print("No freshly-expiring roles to alert.", flush=True)
         return
-    send_expiring_alerts(conn, token, chat_id, expiring_rows,
-                         dry_run=args.dry_run)
+    send_expiring_alerts(conn, token, chat_id, expiring_rows, dry_run=args.dry_run)
 
 
 def cmd_send(args):
@@ -501,8 +508,7 @@ def cmd_send(args):
     conn = db_connect(db_url)
     # Loud, distinct expiring alerts go FIRST — the scarce decisions we protect.
     expiring_rows = fetch_expiring(conn)
-    expiring_sent = send_expiring_alerts(conn, token, chat_id, expiring_rows,
-                                         dry_run=args.dry_run)
+    expiring_sent = send_expiring_alerts(conn, token, chat_id, expiring_rows, dry_run=args.dry_run)
 
     rows = fetch_fresh(conn, args.limit, args.min_score)
     # Strong vacancies at unreviewed companies — a separate section.
@@ -510,10 +516,14 @@ def cmd_send(args):
 
     if not rows and not hot_rows and not expiring_sent:
         if not args.dry_run:
-            tg_call(token, "sendMessage", {
-                "chat_id": chat_id,
-                "text": "🗞 No fresh vacancies for the digest today.",
-            })
+            tg_call(
+                token,
+                "sendMessage",
+                {
+                    "chat_id": chat_id,
+                    "text": "🗞 No fresh vacancies for the digest today.",
+                },
+            )
         print("No candidates — sent a 'nothing today' notice.", flush=True)
         return
 
@@ -525,41 +535,53 @@ def cmd_send(args):
             print("--- candidate hot section ---")
             print(build_candidate_hot_message(hot_rows))
         print(
-            f"\n[dry-run] {len(rows)} main + {len(hot_rows)} unreviewed, "
-            f"nothing sent", flush=True,
+            f"\n[dry-run] {len(rows)} main + {len(hot_rows)} unreviewed, nothing sent",
+            flush=True,
         )
         return
 
     if not rows:
         # Only the unreviewed-companies section — no fresh main vacancies.
-        tg_call(token, "sendMessage", {
-            "chat_id": chat_id,
-            "text": build_candidate_hot_message(hot_rows),
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        })
+        tg_call(
+            token,
+            "sendMessage",
+            {
+                "chat_id": chat_id,
+                "text": build_candidate_hot_message(hot_rows),
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            },
+        )
         print(
             f"No fresh ones; sent the unreviewed section ({len(hot_rows)}).",
             flush=True,
         )
         return
 
-    tg_call(token, "sendMessage", {
-        "chat_id": chat_id,
-        "text": f"🗞 <b>Vacancy digest</b> — {len(rows)} fresh. Tap 👍 or 👎 under each.",
-        "parse_mode": "HTML",
-    })
+    tg_call(
+        token,
+        "sendMessage",
+        {
+            "chat_id": chat_id,
+            "text": f"🗞 <b>Vacancy digest</b> — {len(rows)} fresh. Tap 👍 or 👎 under each.",
+            "parse_mode": "HTML",
+        },
+    )
     sent = 0
     for i, row in enumerate(rows, 1):
         mark_sent(conn, row["id"])  # claim-first: a parallel run won't send a dupe
         try:
-            tg_call(token, "sendMessage", {
-                "chat_id": chat_id,
-                "text": build_message(row, i),
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-                "reply_markup": build_keyboard(row["id"]),
-            })
+            tg_call(
+                token,
+                "sendMessage",
+                {
+                    "chat_id": chat_id,
+                    "text": build_message(row, i),
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                    "reply_markup": build_keyboard(row["id"]),
+                },
+            )
             sent += 1
             time.sleep(0.5)  # respect the rate limit
         except Exception as e:
@@ -570,12 +592,16 @@ def cmd_send(args):
     # The unreviewed-companies section goes as one message without buttons.
     if hot_rows:
         try:
-            tg_call(token, "sendMessage", {
-                "chat_id": chat_id,
-                "text": build_candidate_hot_message(hot_rows),
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            })
+            tg_call(
+                token,
+                "sendMessage",
+                {
+                    "chat_id": chat_id,
+                    "text": build_candidate_hot_message(hot_rows),
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                },
+            )
             print(
                 f"Unreviewed-companies section sent ({len(hot_rows)}).",
                 flush=True,
@@ -585,6 +611,7 @@ def cmd_send(args):
 
 
 # --- poll mode ----------------------------------------------------------------
+
 
 def load_offset(state_file):
     try:
@@ -625,20 +652,28 @@ def handle_callback(conn, token, cb, allowed_user=None):
     except Exception as e:
         print(f"ERROR DB update {vac_id}: {e}", file=sys.stderr, flush=True)
         if msg.get("chat"):
-            tg_call(token, "sendMessage", {
-                "chat_id": msg["chat"]["id"],
-                "text": "⚠️ Couldn't save your choice, please tap again.",
-            })
+            tg_call(
+                token,
+                "sendMessage",
+                {
+                    "chat_id": msg["chat"]["id"],
+                    "text": "⚠️ Couldn't save your choice, please tap again.",
+                },
+            )
         return
 
     # 3. Mark the chosen button with a ✅ (an edit failure is not critical).
     if title is not None and msg.get("message_id"):
         try:
-            tg_call(token, "editMessageReplyMarkup", {
-                "chat_id": msg["chat"]["id"],
-                "message_id": msg["message_id"],
-                "reply_markup": build_keyboard(vac_id, chosen=status),
-            })
+            tg_call(
+                token,
+                "editMessageReplyMarkup",
+                {
+                    "chat_id": msg["chat"]["id"],
+                    "message_id": msg["message_id"],
+                    "reply_markup": build_keyboard(vac_id, chosen=status),
+                },
+            )
         except RuntimeError as e:
             if "message is not modified" not in str(e):
                 print(f"WARN edit keyboard: {e}", file=sys.stderr, flush=True)
@@ -689,15 +724,18 @@ def main():
     sub = parser.add_subparsers(dest="mode", required=True)
 
     p_send = sub.add_parser("send", help="send the digest")
-    p_send.add_argument("--limit", type=int,
-                        default=int(os.environ.get("DIGEST_LIMIT", _DIGEST["default_limit"])))
-    p_send.add_argument("--min-score", type=int,
-                        default=int(os.environ.get("DIGEST_MIN_SCORE", _DIGEST["default_min_score"])))
+    p_send.add_argument(
+        "--limit", type=int, default=int(os.environ.get("DIGEST_LIMIT", _DIGEST["default_limit"]))
+    )
+    p_send.add_argument(
+        "--min-score",
+        type=int,
+        default=int(os.environ.get("DIGEST_MIN_SCORE", _DIGEST["default_min_score"])),
+    )
     p_send.add_argument("--dry-run", action="store_true")
     p_send.set_defaults(func=cmd_send)
 
-    p_alert = sub.add_parser(
-        "alert", help="send only the loud expiring-role alerts")
+    p_alert = sub.add_parser("alert", help="send only the loud expiring-role alerts")
     p_alert.add_argument("--dry-run", action="store_true")
     p_alert.set_defaults(func=cmd_alert)
 
