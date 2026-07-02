@@ -494,12 +494,12 @@ def cmd_save(_args):
     from database_supabase import archive_vacancies
 
     if getattr(_args, "archive", False):
+        # archive_vacancies OWNS its transaction: it commits the DELETE itself
+        # and only then writes the on-disk JSON, so the two can't diverge (the
+        # one deliberate exception to the caller-commits DAL rule). No commit
+        # needed here — and no reliance on generate_dashboard()'s snapshot commit
+        # as a side effect (which only fires in full mode).
         archived = archive_vacancies(force=True)
-        # DAL writes are not auto-committed (AGENTS.md) — persist the archival
-        # explicitly here rather than relying on generate_dashboard()'s snapshot
-        # commit as a side effect (which only fires in full mode, so simple-mode
-        # archival would otherwise roll back at exit).
-        conn.commit()
         print(f"Auto-archived {len(archived)} low-scoring unseen vacancies.")
     else:
         archive_vacancies()  # prints the "paused" notice; no-op without --archive

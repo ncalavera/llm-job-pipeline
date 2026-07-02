@@ -383,6 +383,12 @@ def parse_callback(data):
 
 
 def db_connect(db_url):
+    # Documented exception to the DAL's "autocommit OFF — callers commit" rule
+    # (database_supabase.py): the digest poller opens its OWN short-lived
+    # psycopg2 connection, separate from the shared DAL singleton, and writes
+    # one button-response status at a time. autocommit=True is intentional here
+    # so each poll persists immediately; it does not touch the DAL connection
+    # and so cannot cause a silent rollback of DAL-staged writes.
     import psycopg2
     import psycopg2.extras
 

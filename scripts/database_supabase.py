@@ -971,6 +971,11 @@ def auto_review_candidates(approve_threshold=None, reject_threshold=None, enable
     Grey zone (between thresholds) → stays candidate for manual review.
 
     Returns summary: {"approved": [...], "rejected": [...], "pending": [...]}.
+
+    COMMIT CONTRACT: like every other write in this module, this stages its
+    UPDATEs on the shared connection and leaves the commit to the caller (see
+    the module docstring). Call ``get_conn().commit()`` after it or the
+    approve/reject changes are silently rolled back at connection close.
     """
     import os
 
@@ -1028,7 +1033,7 @@ def auto_review_candidates(approve_threshold=None, reject_threshold=None, enable
             pending.append(name)
 
     cur.close()
-    conn.commit()
+    # No commit here — the caller owns the transaction (see docstring).
     return {"approved": approved, "rejected": rejected, "pending": pending}
 
 
@@ -1488,7 +1493,18 @@ def archive_vacancies(threshold: int = LLM_SCORE_THRESHOLD, force: bool = False)
     if not to_remove:
         return []
 
-    # Write local archive first
+    # Atomicity contract: the DB DELETE and the on-disk JSON archive must never
+    # disagree about what was removed. So we (1) build the archive
+    # payload in memory, (2) DELETE + record tombstones and COMMIT, then (3)
+    # write the JSON — only AFTER the commit succeeds. Ordering rationale:
+    #   * JSON-before-DELETE (the old flow) could leave a file claiming a
+    #     removal that a later rollback undid — a divergence.
+    #   * COMMIT-before-JSON makes the committed DELETE the single source of
+    #     truth; the file can only ever describe rows that are genuinely gone.
+    # archive_vacancies OWNS its transaction (it does NOT leave the commit to
+    # the caller like the other DAL writes) precisely because that disk artifact
+    # must be tied to a durable delete. This is the one intentional exception to
+    # the "callers commit" rule; see AGENTS.md.
     archive_dir = VACANCIES_DIR / "archive"
     archive_dir.mkdir(parents=True, exist_ok=True)
     archive_path = archive_dir / f"archived_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
@@ -1507,21 +1523,8 @@ def archive_vacancies(threshold: int = LLM_SCORE_THRESHOLD, force: bool = False)
         vac["company_id"] = str(vac["company_id"])
         archived_data[uid] = vac
 
-    with open(archive_path, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "archived_at": datetime.now().isoformat(),
-                "threshold": threshold,
-                "count": len(archived_data),
-                "vacancies": archived_data,
-            },
-            f,
-            indent=2,
-            ensure_ascii=False,
-            default=str,
-        )
-
-    # Delete from Supabase
+    # Delete from the DB and record dedup tombstones, then COMMIT — the durable
+    # source of truth for what was archived.
     uuids = [r["id"] for r in to_remove]
     cur = conn.cursor()
     cur.execute("DELETE FROM vacancy WHERE id = ANY(%s::uuid[])", (uuids,))
@@ -1536,6 +1539,23 @@ def archive_vacancies(threshold: int = LLM_SCORE_THRESHOLD, force: bool = False)
             archive_hashes,
         )
     cur.close()
+    conn.commit()
+
+    # Write the on-disk archive ONLY after the DELETE committed, so the file and
+    # the database can never disagree about what was removed.
+    with open(archive_path, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "archived_at": datetime.now().isoformat(),
+                "threshold": threshold,
+                "count": len(archived_data),
+                "vacancies": archived_data,
+            },
+            f,
+            indent=2,
+            ensure_ascii=False,
+            default=str,
+        )
 
     print(
         f"  Archived {len(to_remove)} vacancies below LLM score {threshold}"
