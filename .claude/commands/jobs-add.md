@@ -181,21 +181,27 @@ Report `new_count`:
 
 ### C3. Unknown-company handling
 
-`save_vacancies` calls `ensure_company(org, status=AUTO_DISCOVERED_STATUS)` when
-the org is not already in the registry — this creates a **fetch-less stub
-company** (no `fetch_strategy`, no `ats_slug`). Warn the user:
+`save_vacancies` calls `ensure_company(org, status=_auto_discovery_status())`
+when the org is not already in the registry — this creates a **fetch-less
+stub company** (no `fetch_strategy`, no `ats_slug`), landing `candidate` by
+default (config `auto_discovery_status`, the SAME gate every other
+auto-discovered company goes through — see database_supabase.py). Warn the
+user:
 
 ```
 "{ORG}" was not a tracked company — I created a stub for it so the vacancy
-could be saved. WARNING: this stub has no ATS config, so /jobs-new will NOT
-auto-fetch new roles from {ORG}. The single vacancy you added will still score.
+could be saved. It's a candidate pending review (same gate as any
+board-discovered company); the single vacancy you added still scores via the
+candidate-rescue path on the next /jobs-new. WARNING: this stub has no ATS
+config, so /jobs-new will NOT auto-fetch new roles from {ORG}.
 ```
 
 Then offer two follow-ups:
 1. **Configure the ATS** so future roles auto-fetch → route to **Mode A
    (company)** for `{ORG}` (auto-detect + set `fetch_strategy`/`ats_slug`).
-2. **Just set it active** and move on (the single vacancy still scores; no future
-   auto-fetch).
+2. **Approve it now** — set `status='active'` directly if you already know you
+   want this company (an explicit yes, skipping the review gate on purpose).
+   No future auto-fetch either way without step 1.
 
 If the org already exists, skip this step.
 
