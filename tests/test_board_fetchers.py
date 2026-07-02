@@ -484,8 +484,11 @@ def test_new_boards_registered_and_opt_in(monkeypatch):
 
     # The monthly HN thread carries the long TTL.
     assert cfg._ALL_JOB_BOARDS["hn_whoishiring"]["ttl_days"] == 30
-    # LinkedIn ships a default query set (merged LinkedIn + LinkedIn Non-profits).
-    assert len(cfg._ALL_JOB_BOARDS["linkedin"]["queries"]) >= 1
+    # LinkedIn ships NO queries — they come from the user profile (target roles +
+    # geography), not a maintainer-shaped default (STRATEGY guardrail 1).
+    assert not cfg._ALL_JOB_BOARDS["linkedin"].get("queries")
+    # ...and it is flagged as a general board (fits any field).
+    assert cfg._ALL_JOB_BOARDS["linkedin"].get("general") is True
 
 
 def test_cfi_board_registered_and_disabled_by_default(monkeypatch):

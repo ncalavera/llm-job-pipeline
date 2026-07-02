@@ -67,6 +67,27 @@ foundation strategy roles.
 **Not a target:** pure engineering roles, sales/BD, very junior
 (coordinator/assistant), VP/C-level requiring 15+ years.
 
+## LINKEDIN_QUERIES
+
+<!--
+Search terms for the LinkedIn board (enable it with `sources.py enable-board
+linkedin`). OPTIONAL — leave this section empty and the pipeline DERIVES queries
+from your TARGET_ROLES above + your target locations, defaulting to Remote. Fill
+it in only when you want exact control (specific phrasing, specific cities).
+
+One query per line: `keywords | location`. The location is optional (blank =
+LinkedIn's default, worldwide). Works for any field — a nurse might write
+`ICU Nurse | Manchester`; a game designer `Level Designer | Remote`. The shipped
+config carries NO queries: they always come from here or from your TARGET_ROLES,
+never from a default someone else picked.
+
+    Director of Operations | Berlin
+    Chief of Staff | London
+    Programme Manager | Remote
+
+Leave the block empty (or delete it) to use the derived queries.
+-->
+
 ## EXCLUDE_PATTERNS
 
 <!--
