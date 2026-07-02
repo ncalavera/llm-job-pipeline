@@ -1342,7 +1342,23 @@ def record_archived_hashes(entries: list[tuple[str, str]]):
 # ---------------------------------------------------------------------------
 
 
-def archive_gone_vacancies(org_name: str, fetched_jobs: list[dict]) -> int:
+class ArchivedCount(int):
+    """Archived-as-gone count that also carries the protected-expiring count.
+
+    Behaves as a plain ``int`` (comparisons, arithmetic, ``int(x or 0)``) so
+    existing callers that treat the return value as an archived count keep
+    working unchanged. New callers can read ``.protected`` for the count of
+    high-fit roles flipped to 'expiring' instead of archived — those still
+    vanished from the source and belong in "gone" telemetry.
+    """
+
+    def __new__(cls, archived: int, protected: int = 0):
+        obj = super().__new__(cls, archived)
+        obj.protected = protected
+        return obj
+
+
+def archive_gone_vacancies(org_name: str, fetched_jobs: list[dict]) -> "ArchivedCount":
     """Archive unseen vacancies absent from a fresh direct-ATS listing.
 
     The company's own ATS is ground truth: an unseen vacancy whose dedup_hash
@@ -1359,7 +1375,7 @@ def archive_gone_vacancies(org_name: str, fetched_jobs: list[dict]) -> int:
     org = resolve_canonical_name(org_name)
     company_id = resolve_company_id(org)
     if company_id is None:
-        return 0
+        return ArchivedCount(0)
     fetched_hashes = {
         make_vacancy_id(org, _sanitize_title(j.get("title", ""))) for j in fetched_jobs
     }
@@ -1373,7 +1389,7 @@ def archive_gone_vacancies(org_name: str, fetched_jobs: list[dict]) -> int:
     gone = [r for r in cur.fetchall() if r["dedup_hash"] not in fetched_hashes]
     if not gone:
         cur.close()
-        return 0
+        return ArchivedCount(0)
 
     # Latency protection (KTD1/KTD2): a high-fit role that vanished from its
     # source is exactly the scarce decision we must not lose silently. Flip it
@@ -1405,7 +1421,7 @@ def archive_gone_vacancies(org_name: str, fetched_jobs: list[dict]) -> int:
             f"  [{org}] PROTECTED {len(protected)} high-fit gone from source → expiring: {ptitles}",
             flush=True,
         )
-    return len(to_archive)
+    return ArchivedCount(len(to_archive), len(protected))
 
 
 # ---------------------------------------------------------------------------

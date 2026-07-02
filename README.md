@@ -204,9 +204,12 @@ You only need three:
 | `/jobs-new` | daily | Fetch → filter → score → top new matches in chat, like/pass verdicts saved |
 | `/jobs-review` | weekly | Deep review of liked vacancies — decide what to actually apply to |
 
-`/jobs-new` runs the whole machinery (fetching, junk filtering, scoring,
-archiving), so you never think about the stages. To add a company, just ask
-the agent ("add Stripe") — it uses `/jobs-add` itself.
+`/jobs-new` calls one Python driver (`scripts/run_daily.py`) that owns the whole
+machinery — stage order, checkpoints, the live progress card, and the publish
+gate. You never think about the stages, and the agent cannot run them out of
+order: it only supplies judgment (scoring, verdicts) at the points the driver
+pauses on, then resumes it. To add a company, just ask the agent ("add
+Stripe") — it uses `/jobs-add` itself.
 
 <details>
 <summary><b>Advanced commands</b> — individual stages, for fine control</summary>
@@ -222,8 +225,11 @@ the agent ("add Stripe") — it uses `/jobs-add` itself.
 </details>
 
 Runbooks live in `.claude/commands/` — slash commands in Claude Code, plain
-markdown runbooks for any other agent (see [AGENTS.md](AGENTS.md)). Full
-reference: [docs/SKILLS.md](docs/SKILLS.md).
+markdown runbooks for any other agent (see [AGENTS.md](AGENTS.md)). "Works with
+any agent" is real because the deterministic core is Python: any agent that can
+run shell drives the daily loop with `python3 scripts/run_daily.py` and only
+does the LLM scoring + user verdicts at the gates it prints. Full reference:
+[docs/SKILLS.md](docs/SKILLS.md).
 
 ## Command changes (old → new)
 

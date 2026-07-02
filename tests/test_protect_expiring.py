@@ -80,6 +80,7 @@ def test_high_fit_gone_becomes_expiring_not_archived(dal):
     archived = dal.archive_gone_vacancies("Acme Robotics", [])  # empty listing
     _commit(dal)
     assert archived == 0, "a protected role must not count as archived"
+    assert archived.protected == 1, "it must still be counted as vanished-from-source"
     assert dal.load_vacancies()[vid]["status"] == "expiring"
     # NOT tombstoned — a re-listing must be free to resurrect it.
     h = dal.load_vacancies()[vid]["dedup_hash"]
@@ -96,7 +97,31 @@ def test_low_fit_gone_still_archived(dal):
     archived = dal.archive_gone_vacancies("Acme Robotics", [])
     _commit(dal)
     assert archived == 1
+    assert archived.protected == 0
     assert dal.load_vacancies()[vid]["status"] == "archived"
+
+
+def test_archived_count_is_backward_compatible_int_with_protected_extra(dal):
+    """archive_gone_vacancies must keep behaving as a plain int for callers
+    that only ever cared about the archived count (arithmetic, int(x or 0),
+    equality) while exposing the protected count as an extra attribute — this
+    is what lets fetch_vacancies.py fold protected-expiring into its "gone"
+    telemetry without breaking any existing caller."""
+    dal.ensure_company("Acme Robotics", status="active")
+    dal.save_vacancies("Acme Robotics", "A", [_job("Head of Programmes"), _job("Filing Assistant")])
+    _commit(dal)
+    _set(dal, _id_by_title(dal, "Head of Programmes"), llm_score=72)  # protected
+    _set(dal, _id_by_title(dal, "Filing Assistant"), llm_score=30)  # archived
+
+    result = dal.archive_gone_vacancies("Acme Robotics", [])
+    _commit(dal)
+    assert result == 1  # archived count, unchanged contract
+    assert isinstance(result, int)
+    assert int(result or 0) == 1
+    assert result.protected == 1
+    # This is exactly the sum fetch_vacancies.py writes into fetch_stats.json's
+    # "gone" telemetry so the publish gate sees every vanished-from-source role.
+    assert int(result or 0) + result.protected == 2
 
 
 # ---------------------------------------------------------------------------
