@@ -345,34 +345,56 @@ def test_pass_expired_vacancies(dal):
 
 
 # ---------------------------------------------------------------------------
-# Simple-mode company gate — board path must NOT blackhole vacancies.
-#
-# In SQLite (simple) mode there is no dashboard review step, so a board-created
-# company must be usable WITHOUT manual approval: ensure_company / merge create
-# it 'active' and its vacancies are immediately visible to load_vacancies.
+# Company gate — SAME rule on SQLite as on Postgres (STRATEGY guardrail 2: no
+# product decision branches on IS_SQLITE). A board/ATS-discovered company
+# lands 'candidate' and goes through the daily driver's company_scoring gate
+# before its vacancies show up in the default (active-only) dashboard view —
+# see scripts/run_daily.py's company_scoring stage and score_vacancies.py's
+# candidate-rescue path for how a strong candidate role still gets scored.
 # ---------------------------------------------------------------------------
 
 
-def test_board_company_is_active_in_sqlite(dal):
-    """A company auto-created by the board/ATS path (default 'candidate') lands
-    'active' in SQLite mode, so its vacancies are visible without approval."""
+def test_board_company_is_candidate_in_sqlite(dal):
+    """A company auto-created by the board/ATS path lands 'candidate' in
+    SQLite mode too — identical to full mode, not auto-activated."""
     # save_vacancies auto-creates the unknown org via ensure_company(candidate).
     new = dal.save_vacancies("Newly Discovered Org", "B", [_fake_job()])
     _commit(dal)
     assert new == 1
 
-    # Default load (active companies only) must see it — no manual approval.
+    # Default load (active companies only) must NOT see it — pending review.
     vacs = dal.load_vacancies()
-    assert len(vacs) == 1
+    assert len(vacs) == 0
 
-    # And the company really is 'active', not 'candidate'.
+    # But it is there for the candidate-review flow.
+    vacs_with_candidates = dal.load_vacancies(include_candidate_companies=True)
+    assert len(vacs_with_candidates) == 1
+
+    # And the company really is 'candidate', not fast-tracked to 'active'.
     fitness = dal.get_company_fitness_map()
-    assert fitness["Newly Discovered Org"]["status"] == "active"
+    assert fitness["Newly Discovered Org"]["status"] == "candidate"
 
 
-def test_auto_discovered_status_is_active_in_sqlite(dal):
-    """The board auto-discovery status resolves to 'active' in SQLite mode."""
-    assert dal.AUTO_DISCOVERED_STATUS == "active"
+def test_auto_discovered_status_is_candidate_in_sqlite(dal):
+    """The board auto-discovery status resolves to 'candidate' in SQLite mode
+    by default — the SAME as Postgres. It's a setting
+    (config/defaults.toml [thresholds] auto_discovery_status /
+    env AUTO_DISCOVERY_STATUS), not a derivative of the backend."""
+    assert dal._auto_discovery_status() == "candidate"
+
+
+def test_auto_discovery_status_setting_can_opt_into_active_in_sqlite(dal, monkeypatch):
+    """An operator who explicitly opts in (env AUTO_DISCOVERY_STATUS=active)
+    gets the old zero-review behaviour back — as an explicit choice, not a
+    silent backend default."""
+    monkeypatch.setenv("AUTO_DISCOVERY_STATUS", "active")
+    assert dal._auto_discovery_status() == "active"
+
+    new = dal.save_vacancies("Opted-In Org", "B", [_fake_job()])
+    _commit(dal)
+    assert new == 1
+    fitness = dal.get_company_fitness_map()
+    assert fitness["Opted-In Org"]["status"] == "active"
 
 
 def test_explicit_candidate_still_honoured_in_sqlite(dal):

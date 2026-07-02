@@ -100,27 +100,58 @@ def test_ensure_company_default_status_is_candidate(backend):
     assert fitness["Contoso Relief Fund"]["status"] == "candidate"
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "Known, tracked divergence: database_supabase.AUTO_DISCOVERED_STATUS "
-        "lands a brand-new board/ATS-discovered company 'active' on SQLite but "
-        "'candidate' on Postgres, so simple mode skips the company-review gate "
-        "entirely. A parallel fix unifies this to 'candidate' on both backends; "
-        "once it lands the SQLite side of this test should pass too and this "
-        "xfail marker should be removed."
-    ),
-)
 def test_auto_discovered_company_status_matches_across_backends(backend):
     """save_vacancies() auto-discovering a brand-new company (no prior
-    ensure_company call) must land it in the SAME status on both backends.
-    Today it does not -- see the xfail reason above."""
+    ensure_company call) must land it in the SAME status on both backends --
+    the default rule (config/defaults.toml [thresholds] auto_discovery_status,
+    "candidate") is a setting, not a derivative of IS_SQLITE."""
     dal = backend
     new = dal.save_vacancies("Fictive Wildlife Alliance", "B", [_job("Ops Lead")])
     _commit(dal)
     assert new == 1
     fitness = dal.get_company_fitness_map()
     assert fitness["Fictive Wildlife Alliance"]["status"] == "candidate"
+
+
+def test_auto_discovered_company_known_registry_name_still_gated(backend, monkeypatch):
+    """A brand-new company whose name happens to match
+    company_registry._ALL_KNOWN_NAMES must NOT be fast-tracked to 'active' --
+    on EITHER backend. Regression for the old save_board_vacancies branch that
+    special-cased a "known" name straight to status='active', skipping the
+    candidate gate regardless of backend. The fixed DAL does not even look at
+    the registry for this decision any more; patching it here proves that."""
+    import company_registry
+
+    dal = backend
+    monkeypatch.setattr(company_registry, "_ALL_KNOWN_NAMES", {"Fictive Registry Org"})
+
+    board_cfg = {
+        "name": "Fictive Registry Org",
+        "strategy": "custom",
+        "tier": "B",
+        "url": "https://board.example/fictive-registry",
+    }
+    new = dal.save_board_vacancies(board_cfg, [_job("Registry Role")])
+    _commit(dal)
+
+    assert new == 1
+    fitness = dal.get_company_fitness_map()
+    assert fitness["Fictive Registry Org"]["status"] == "candidate"  # gated, not fast-tracked
+
+
+def test_auto_discovery_status_setting_overrides_identically(backend, monkeypatch):
+    """The auto-discovery status rule is a setting: overriding it via
+    AUTO_DISCOVERY_STATUS must flip the outcome the SAME way on both
+    backends."""
+    dal = backend
+    monkeypatch.setenv("AUTO_DISCOVERY_STATUS", "active")
+
+    new = dal.save_vacancies("Fictive Opt-In Org", "B", [_job("Program Lead")])
+    _commit(dal)
+
+    assert new == 1
+    fitness = dal.get_company_fitness_map()
+    assert fitness["Fictive Opt-In Org"]["status"] == "active"
 
 
 def test_auto_review_candidates_approves_and_rejects_by_threshold(backend):

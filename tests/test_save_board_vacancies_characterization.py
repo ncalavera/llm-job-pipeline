@@ -187,36 +187,33 @@ def test_inactive_company_skipped(dal):
 
 
 # ===========================================================================
-# 3. Auto-created company status branch
+# 3. Auto-created company status -- SAME rule regardless of backend or
+#    whether the name happens to be "known" (STRATEGY guardrail 2: no
+#    IS_SQLITE branching, no "known name" fast lane around the review gate).
 # ===========================================================================
 
 
-def test_unknown_company_created_active_in_sqlite(dal):
-    """An unknown org (not in _ALL_CSV_NAMES, no '[via ' prefix) is created with
-    status=AUTO_DISCOVERED_STATUS, which is 'active' on the SQLite backend.
+def test_unknown_company_created_candidate_in_sqlite(dal):
+    """An unknown org is created with status=_auto_discovery_status(), which
+    defaults to 'candidate' -- identical to the Postgres/full-mode rule.
     """
-    assert dal.AUTO_DISCOVERED_STATUS == "active"  # SQLite branch
+    assert dal._auto_discovery_status() == "candidate"  # default, both backends
     new = dal.save_board_vacancies(_board("BrandNewCo"), [_job("New Role")])
     dal.get_conn().commit()
     assert new == 1
     cur = dal.get_conn().cursor()
     cur.execute("SELECT status FROM company WHERE canonical_name=%s", ("BrandNewCo",))
-    assert cur.fetchone()[0] == "active"
+    assert cur.fetchone()[0] == "candidate"
     cur.close()
 
 
-def test_via_prefixed_company_created_active(dal):
-    """An org_override starting with '[via ' takes the else-branch and is created
-    with status='active'.
-
-    NOTE (divergence from the test brief): the '_ALL_CSV_NAMES' sub-case cannot
-    be distinguished from the unknown-company case on SQLite — _ALL_CSV_NAMES is
-    empty in this environment (no company CSV / example profile), AND
-    AUTO_DISCOVERED_STATUS is already 'active' on SQLite, so BOTH branches of the
-    if/else produce status='active'. Only the '[via ' literal-prefix branch is
-    observable here, and it also yields 'active'.
+def test_via_prefixed_company_created_candidate_not_fast_tracked(dal):
+    """An org_override starting with '[via ' (an aggregator placeholder the
+    board scraper emits when it can't extract a real org name) is created
+    'candidate' like any other new name -- it is NOT special-cased to
+    'active'. filter_companies.py's aggregator check prunes it later, from the
+    candidate pool, exactly like any other structural junk company.
     """
-    assert dal._ALL_CSV_NAMES == set() or len(dal._ALL_CSV_NAMES) == 0
     via_org = "[via SomeBoard] Imaginary Org"
     new = dal.save_board_vacancies(_board("ViaBoard"), [_job("Via Role", org=via_org)])
     dal.get_conn().commit()
@@ -224,7 +221,27 @@ def test_via_prefixed_company_created_active(dal):
     canonical = dal.resolve_canonical_name(via_org)
     cur = dal.get_conn().cursor()
     cur.execute("SELECT status FROM company WHERE canonical_name=%s", (canonical,))
-    assert cur.fetchone()[0] == "active"
+    assert cur.fetchone()[0] == "candidate"
+    cur.close()
+
+
+def test_known_registry_name_does_not_skip_the_gate(dal, monkeypatch):
+    """A brand-new org whose name happens to appear in
+    company_registry._ALL_KNOWN_NAMES must NOT be fast-tracked to 'active'.
+    Regression for the old save_board_vacancies branch that special-cased a
+    "known" name straight to status='active' on ANY backend, bypassing the
+    candidate gate. The fixed code doesn't consult the registry for this
+    decision at all; patching the registry set here proves that.
+    """
+    import company_registry
+
+    monkeypatch.setattr(company_registry, "_ALL_KNOWN_NAMES", {"RecognisedCo"})
+    new = dal.save_board_vacancies(_board("RecognisedCo"), [_job("Recognised Role")])
+    dal.get_conn().commit()
+    assert new == 1
+    cur = dal.get_conn().cursor()
+    cur.execute("SELECT status FROM company WHERE canonical_name=%s", ("RecognisedCo",))
+    assert cur.fetchone()[0] == "candidate"
     cur.close()
 
 
