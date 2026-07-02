@@ -178,7 +178,13 @@ keeps its cheap score, sorted out of view.
   escalated to the strong model. Calibrated so the cheap screen drops none of the
   roles the strong model would surface; the default (50) also diverts the weak
   majority. Lower it for more caution (more escalations, less saving); raise it to
-  save more. Empty/omitted or out of range → 50.
+  save more. Empty/omitted or out of range → 50. Honest tradeoff: raising it above
+  the dashboard's visible match band (APPLYABLE_SCORE, default 60) means kept-cheap
+  screen scores start showing up as if they were confirmed matches — the
+  dashboard's "screen score" badge (from vacancy.scored_by) is what keeps them
+  distinguishable, so don't turn that badge off if you raise this. A value near
+  100 effectively disables the strong pass entirely (real screen scores rarely
+  reach it) — the driver warns loudly if you set it that high.
 - max_per_run: the most vacancies (and candidate companies) to score in one run
   when you don't pass --limit. A quiet day scores 20-30; this cap keeps a burst
   day (hundreds of new roles) from silently draining your plan — the overflow is
