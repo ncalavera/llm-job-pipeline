@@ -1,9 +1,10 @@
-"""Tests for the vac.py CLI status transitions — the /jobs-apply contract.
+"""Tests for the vac.py CLI status transitions — the /jobs-review contract.
 
-The apply / triage runbooks (`/jobs-apply`, `/jobs-vac`) lean on
-``vac.py mark <id> <status>`` to move a vacancy between states. These tests lock
-that contract: seed a vacancy, run mark through liked → passed → unseen, and
-assert each status persists and round-trips through the DAL on a fresh read.
+The apply / triage modes of the review hub (`/jobs-review apply`,
+`/jobs-review vac`) lean on ``vac.py mark <id> <status>`` to move a vacancy
+between states. These tests lock that contract: seed a vacancy, run mark
+through liked → passed → unseen, and assert each status persists and
+round-trips through the DAL on a fresh read.
 
 Drives vac.py's command handlers in-process (cmd_mark / cmd_list) against an
 isolated temp SQLite DB. Fully offline.
