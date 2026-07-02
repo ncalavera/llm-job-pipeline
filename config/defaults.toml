@@ -760,3 +760,21 @@ board_blacklist = []
 ttl_days = 3
 tier = "B"
 free = true
+
+# Consultants for Impact — curated roles for strategy consultants moving into
+# social-impact work; the widget itself aggregates + rescores 80,000 Hours and
+# Probably Good listings (~1.5k entries), so expect heavy overlap with
+# [boards.80k_hours]. Listing-only (no full description) — the later blind-
+# enrichment pass scrapes each entry's direct employer URL. max_jobs caps
+# first-run volume (STRATEGY guardrail 3); the feed is pre-ranked best-first
+# by CFI's own score, so a cap keeps the top slice.
+[boards.consultants_for_impact]
+strategy = "cfi_board_json"
+name = "Consultants for Impact"
+url = "https://www.consultantsforimpact.org/job-board"
+data_url = "https://cfi-job-board.netlify.app/board-data.json"
+max_jobs = 150
+board_blacklist = []
+ttl_days = 3
+tier = "B"
+free = true
