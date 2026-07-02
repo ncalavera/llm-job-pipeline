@@ -108,7 +108,9 @@ def load_factors(sections: dict[str, str] | None = None) -> list[Factor]:
     # strength but are structured fields, handled by hard_filters/geo, not
     # movable free-text factors, so they are not enumerated here).
     for kw in _title_keywords(sections):
-        factors.append(Factor(text=kw, strength=FILTER, section="HARD_FILTERS", scorer_visible=True))
+        factors.append(
+            Factor(text=kw, strength=FILTER, section="HARD_FILTERS", scorer_visible=True)
+        )
 
     # PENALTY strength — the scorer-visible taste patterns.
     for text in _bullets(sections.get("EXCLUDE_PATTERNS")):

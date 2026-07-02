@@ -568,9 +568,9 @@ def _learning_gate_text(review: dict) -> str:
         f"     a dirty candidate lists the exact roles it would have wrongly killed).\n"
         f"  2. Apply ONLY the ones the user approves:\n"
         f"       python3 scripts/learning.py apply --type add_filter_word --word W\n"
-        f"       python3 scripts/learning.py apply --type move_factor --factor \"...\" --keyword K\n"
+        f'       python3 scripts/learning.py apply --type move_factor --factor "..." --keyword K\n'
         f"       python3 scripts/learning.py apply --type disable_board --board B\n"
-        f"  3. Filter-kill revision (\"anything alive here?\"): for any killed title the\n"
+        f'  3. Filter-kill revision ("anything alive here?"): for any killed title the\n'
         f"     user says is actually good, weaken its culprit rule:\n"
         f"       python3 scripts/learning.py apply --type weaken_filter_word --word CULPRIT\n"
         f"  4. When done (you engaged — even if you applied nothing), close the cycle so\n"
