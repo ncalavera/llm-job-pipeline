@@ -1,15 +1,15 @@
-"""Diff-test: prove that the two existing _is_blacklisted copies agree on a
-curated corpus.
+"""Diff-test: prove the consolidated filters.py blacklist logic still matches
+the pre-refactor algorithm on a curated corpus.
 
-Two live implementations under test:
-  - database_supabase._is_blacklisted  (DAL impl — pre-compiled alternation regex)
-  - score_vacancies._is_blacklisted    (scoring impl — per-keyword re.search loop)
-
-Plus a frozen reference copy of the score-impl algorithm. The frozen copy is
-inlined here so this test remains valid after the real score-copy is deleted
-during the filters-refactor (task B1/B2). The frozen function is intentionally
-NOT a mock: it is the exact loop logic from score_vacancies.py:108-119 at the
-time this test was written and must never be updated to track score_vacancies.
+database_supabase.py and score_vacancies.py used to each carry their own
+``_is_blacklisted`` copy; both now delegate to ``filters.py`` (see
+``dal_impl``/``score_impl`` below — kept as two names for the sanity-check
+tests, but they are the SAME function post-refactor, so there is nothing left
+to diff between them). The real diff is against a frozen reference copy of the
+original algorithm, inlined here so it stays valid even if filters.py's
+internals change shape. The frozen function is intentionally NOT a mock: it is
+the exact loop logic from score_vacancies.py:108-119 at the time this test was
+written and must never be updated to track score_vacancies or filters.
 
 Categories covered (60 cases total):
   POS  — positive by GLOBAL_BLACKLIST (exact whole-word match on title)
@@ -45,11 +45,15 @@ def filters_impl(title: str, description: str = "") -> bool:
 
 
 # The DAL and score modules no longer expose their own blacklist copies after
-# the filters-refactor consolidation — both now delegate to filters.*. The diff
-# corpus below is preserved unchanged; the "dal" and "score" probes simply read
-# the single filters implementation (the composition the old aliases performed).
+# the filters-refactor consolidation — both now delegate to filters.*. There is
+# only one implementation left to test; `dal_impl` is the name the sanity
+# checks below call. (There used to also be a `score_impl` alias and a
+# `test_all_three_impls_agree` test that compared dal_impl == score_impl ==
+# frozen — since dal_impl and score_impl are literally the same object, that
+# reduced to a tautology (filters_impl(x) == filters_impl(x)) wrapped around
+# the one real assertion, filters_impl == frozen, which `test_filters_matches_
+# frozen_reference` below already covers. Removed rather than kept as noise.)
 dal_impl = filters_impl
-score_impl = filters_impl
 
 
 # ---------------------------------------------------------------------------
@@ -298,29 +302,13 @@ _CORPUS = _make_corpus()
 
 
 # ---------------------------------------------------------------------------
-# Parametrized diff-test
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("case_id,title,description", _CORPUS, ids=[c[0] for c in _CORPUS])
-def test_all_three_impls_agree(case_id, title, description):
-    """All three implementations must return the identical boolean."""
-    dal = dal_impl(title, description)
-    score = score_impl(title, description)
-    ref = frozen(title, description)
-
-    # Report all three values on failure for easy diagnosis
-    desc_snip = description[:120]
-    assert dal == score == ref, (
-        f"[{case_id}] Disagreement: dal={dal}, score={score}, frozen={ref}\n"
-        f"  title={title!r}\n  desc={desc_snip!r}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Stage 2 (filters-refactor): the consolidated filters.py implementation must
+# Parametrized diff-test: the consolidated filters.py implementation must
 # match the FROZEN reference for every corpus case. This proves filters ==
-# the old _is_blacklisted, independent of the now-aliased dal/score copies.
+# the old _is_blacklisted. (A former `test_all_three_impls_agree` also diffed
+# dal_impl/score_impl against this frozen reference, but since the
+# filters-refactor collapsed both into the same `filters_impl` object, that
+# check was a tautology wrapped around this one — removed, see the comment on
+# `dal_impl` above.)
 # ---------------------------------------------------------------------------
 
 
