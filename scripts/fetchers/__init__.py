@@ -76,21 +76,24 @@ from fetchers.firecrawl import (
     _fetch_local_scrape,
     _enrich_blind_jobs,
 )
-from fetchers.legacy import (
-    # ATS / company fetchers
-    fetch_greenhouse,
-    fetch_workday_api,
-    fetch_lever,
-    fetch_ashby,
-    fetch_workable,
-    fetch_recruitee,
-    fetch_teamtailor_rss,
-    fetch_bamboohr,
+from fetchers.ats.greenhouse import fetch_greenhouse
+from fetchers.ats.workday import fetch_workday_api
+from fetchers.ats.lever import fetch_lever
+from fetchers.ats.ashby import fetch_ashby
+from fetchers.ats.workable import fetch_workable
+from fetchers.ats.recruitee import fetch_recruitee
+from fetchers.ats.teamtailor import fetch_teamtailor_rss
+from fetchers.ats.bamboohr import fetch_bamboohr
+from fetchers.ats.successfactors import (
     fetch_successfactors,
-    fetch_adp_json,
-    fetch_amazon_jobs,
-    fetch_apple_jobs,
-    fetch_unops_widget,
+    _parse_successfactors_tiles,
+    _sf_base_url,
+)
+from fetchers.ats.adp import fetch_adp_json, _adp_cid, _adp_location, _adp_job_url, _adp_snippet
+from fetchers.ats.amazon import fetch_amazon_jobs
+from fetchers.ats.apple import fetch_apple_jobs
+from fetchers.ats.unops import fetch_unops_widget, _fetch_unops_job_detail
+from fetchers.legacy import (
     # Job boards
     fetch_algolia_board,
     fetch_firecrawl_board,
@@ -106,11 +109,4 @@ from fetchers.legacy import (
     fetch_linkedin_board,
     # Adapter-specific helpers used by tests / sibling scripts
     _parse_hn_comment,
-    _parse_successfactors_tiles,
-    _sf_base_url,
-    _adp_cid,
-    _adp_location,
-    _adp_job_url,
-    _adp_snippet,
-    _fetch_unops_job_detail,
 )
