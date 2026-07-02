@@ -93,20 +93,19 @@ from fetchers.ats.adp import fetch_adp_json, _adp_cid, _adp_location, _adp_job_u
 from fetchers.ats.amazon import fetch_amazon_jobs
 from fetchers.ats.apple import fetch_apple_jobs
 from fetchers.ats.unops import fetch_unops_widget, _fetch_unops_job_detail
-from fetchers.legacy import (
-    # Job boards
-    fetch_algolia_board,
-    fetch_firecrawl_board,
-    fetch_reliefweb_board,
-    fetch_impactpool_board,
-    fetch_datadotorg_board,
-    fetch_arbeitnow_board,
-    fetch_remotive_board,
-    fetch_wwr_board,
-    fetch_hn_whoishiring_board,
-    fetch_idealist_board,
-    fetch_fastforward_board,
-    fetch_linkedin_board,
-    # Adapter-specific helpers used by tests / sibling scripts
-    _parse_hn_comment,
-)
+from fetchers.boards.algolia import fetch_algolia_board
+from fetchers.boards.firecrawl_board import fetch_firecrawl_board
+from fetchers.boards.reliefweb import fetch_reliefweb_board
+from fetchers.boards.impactpool import fetch_impactpool_board
+from fetchers.boards.datadotorg import fetch_datadotorg_board
+from fetchers.boards.arbeitnow import fetch_arbeitnow_board
+from fetchers.boards.remotive import fetch_remotive_board
+from fetchers.boards.wwr import fetch_wwr_board
+from fetchers.boards.hn_whoishiring import fetch_hn_whoishiring_board, _parse_hn_comment
+from fetchers.boards.idealist import fetch_idealist_board
+from fetchers.boards.fastforward import fetch_fastforward_board
+from fetchers.boards.linkedin import fetch_linkedin_board
+
+# Auto-discover any extra adapters dropped into ats/ or boards/ (one-file sources).
+from fetchers import ats as _ats  # noqa: F401
+from fetchers import boards as _boards  # noqa: F401
