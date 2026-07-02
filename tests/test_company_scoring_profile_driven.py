@@ -19,6 +19,7 @@ if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
 import prompts  # noqa: E402
+from test_no_hardcoded_data import WORLDVIEW_TOKEN  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ENGINEER = FIXTURES / "profile_engineer.md"
@@ -123,3 +124,19 @@ def test_no_foreign_anchor_survives_for_a_neutral_profile(monkeypatch):
         rendered = _render_company_prompt(monkeypatch, profile).lower()
         leaked = [tok for tok in _FORBIDDEN_ANCHORS if tok in rendered]
         assert not leaked, f"foreign anchor(s) leaked for {profile.name}: {leaked}"
+
+
+# ---------------------------------------------------------------------------
+# The dimension DEFINITIONS themselves carry no social-good/NGO worldview
+# ---------------------------------------------------------------------------
+
+
+def test_rendered_engineer_prompt_has_no_worldview_tokens(monkeypatch):
+    """Reuses the same WORLDVIEW_TOKEN denylist as the static guard in
+    test_no_hardcoded_data.py, checked here against the fully RENDERED prompt
+    (post profile-substitution) for an engineer profile — proving a devtools
+    company can score high on mission_authenticity without the template
+    implying charity work is the reference point."""
+    rendered = _render_company_prompt(monkeypatch, ENGINEER)
+    hit = WORLDVIEW_TOKEN.search(rendered)
+    assert hit is None, f"worldview token leaked into the rendered prompt: {hit.group(0)!r}"

@@ -32,12 +32,12 @@ Input may contain MULTIPLE sources (company website, web search results, news, t
 
 Score the company on exactly these SEVEN dimensions. Each score must be backed by concrete facts from the provided content — no vibes, no assumptions.
 
-1. **mission_authenticity** [judgment] — Is the social good DIRECT and real?
-   - HIGH (80–100): The good IS the product — foundations, direct giving, grantmaking, direct service delivery. Corporate philanthropic arms qualify if the good they do is direct (a corporate foundation making direct grants scores high; the corporate origin doesn't reduce directness).
-   - MID (50–79): Indirect benefit — a product sold TO the sector (e.g. fundraising software, measurement tools). Real value, but the social good goes through an intermediary layer.
-   - LOW (20–49): Peripheral or partial — social good is one arm of a mostly commercial business, or the impact is diffuse and hard to trace.
-   - OUT (0–19): CSR veneer — social-good language used as marketing on an ordinary commercial core. Anti-list orgs.
-   - RULE: Corporate ≠ indirect. The money's origin (corporate, government, individual) does NOT determine directness — the nature of the output does. A product sold TO mission organisations (e.g. fundraising software) is indirect; an org that makes direct grants or delivers programmes itself is direct.
+1. **mission_authenticity** [judgment] — Is this org's connection to what the candidate says matters to them (their stated mission / values / domain interests in CANDIDATE PROFILE) DIRECT and real, or just claimed?
+   - HIGH (80–100): The org's own product or core output IS a direct instance of what the candidate values — not something that merely serves or talks about it. A structurally separate arm (an internal team, division, or dedicated entity) still counts as direct if the work IT does is itself the thing the candidate cares about; sitting inside a larger commercial parent doesn't reduce directness.
+   - MID (50–79): Indirect — a product or service sold TO the people/organisations who do the thing the candidate values (e.g. tooling, infrastructure, or measurement for that field). Real value, but it reaches the candidate's stated interest through an intermediary layer.
+   - LOW (20–49): Peripheral or partial — the candidate's stated interest is one arm of an otherwise unrelated business, or the connection is diffuse and hard to trace.
+   - OUT (0–19): Veneer — language borrowed from the candidate's stated values used as marketing on an otherwise unrelated commercial core. Anti-list orgs.
+   - RULE: Structural origin ≠ indirect. Whether the work sits inside a corporate division, a standalone company, or a public body does NOT determine directness — the nature of the output does. A product sold TO the field the candidate cares about is indirect; an org that itself produces that outcome is direct.
 
 2. **domain_desirability** [judgment] — What does the org work on, and how much does THIS candidate want that field? BUILD THE TIERS FROM THE CANDIDATE'S OWN PROFILE — never from a fixed sector list baked into this prompt:
    - TOP tier (85–100): the domains the candidate most wants — the fields they name as energising / "want to work in" in CANDIDATE PROFILE, and the sectors their TARGET ROLES naturally sit in.
@@ -47,11 +47,11 @@ Score the company on exactly these SEVEN dimensions. Each score must be backed b
    - Apply the candidate's domain-preference notes directly, including any stated per-domain penalties. When the profile is silent about a domain, score it MID and say so — do NOT invent a preference or import an outside worldview.
 
 3. **breadth_rotation** [judgment] — Does this org let the candidate grow broad rather than narrow?
-   - Breadth has TWO axes: topic variety (many causes / programme areas / geographies) AND role/function rotation (generalist tracks, cross-functional movement, the chance to do more than one job). Score on BOTH together, not topics alone.
-   - HIGH (80–100): Many areas, functions, or geographies with real room to rotate between them; generalist paths are valued. Examples: an umbrella org spanning several programme areas, or a multi-directional org running many workstreams at once with room to move between them.
+   - Breadth has TWO axes: topic variety (many focus areas / product lines / geographies) AND role/function rotation (generalist tracks, cross-functional movement, the chance to do more than one job). Score on BOTH together, not topics alone.
+   - HIGH (80–100): Many areas, functions, or geographies with real room to rotate between them; generalist paths are valued. Examples: an umbrella org spanning several focus areas, or a multi-directional org running many workstreams at once with room to move between them.
    - MID (40–79): Some breadth but limited rotation — one or two main areas with modest cross-functional movement.
-   - LOW (0–39): Single narrow cause or function; deep specialist culture; candidate would be slotted into one lane with little rotation. NOTE: a beloved narrow theme still scores high on domain_desirability — this dimension is separate. A narrow org in the candidate's TOP domain gets high domain_desirability and low breadth_rotation; that combination is correct and expected.
-   - GENERALIST-TRACK RULE: A research-led org is NOT automatically low here. If it spans many areas AND hires generalist tracks (roles that move across topics or cause areas), it is MID-HIGH on breadth, not low — its core function being "research" does not cap it.
+   - LOW (0–39): Single narrow focus or function; deep specialist culture; candidate would be slotted into one lane with little rotation. NOTE: a beloved narrow theme still scores high on domain_desirability — this dimension is separate. A narrow org in the candidate's TOP domain gets high domain_desirability and low breadth_rotation; that combination is correct and expected.
+   - GENERALIST-TRACK RULE: A research-led org is NOT automatically low here. If it spans many areas AND hires generalist tracks (roles that move across topics or focus areas), it is MID-HIGH on breadth, not low — its core function being "research" does not cap it.
 
 4. **builder_stage** [judgment] — Is this a 0→1 environment with enough of a cushion?
    - IDEAL (75–100): Mandate to build new things INSIDE a stable, resourced organisation — explicit 0→1 work without existential risk. Examples: programme incubator at a large foundation, new-initiative team at a well-funded org.
@@ -74,7 +74,7 @@ Score the company on exactly these SEVEN dimensions. Each score must be backed b
    - LOW (0–39): Financially fragile — early-stage startup, single-grant-dependent nonprofit, unclear funding. Salary likely below benchmark.
    - NOTE: This is a SEPARATE axis from builder_stage. builder_stage = "is there building to do?"; money_stability = "is the employer financially safe and well-paying?". An org can be high on one and low on the other. Justify with facts from the content (funding round, endowment size, funding body, employee count).
 
-7. **culture_fit** [judgment, evidence-backed] — How the org works: analytical, fact-based, entrepreneurial, modern, smart business-like peers vs oldschool, bureaucratic, traditional-NGO.
+7. **culture_fit** [judgment, evidence-backed] — How the org works: analytical, fact-based, entrepreneurial, modern, smart business-like peers vs oldschool, bureaucratic, traditional-institution.
    - HIGH (80–100): Data-driven, analytical, entrepreneurial, modern. Decisions are evidence-led; the org proposes and tests new methods; leaders come from analytical or operator backgrounds; public output is data-rich; the language is "experiment / iterate / build" not "committee / process / mandate".
    - MID (40–79): Mixed — some analytical rigor but meaningful traditional-institution drag, or a modern unit inside an older parent.
    - LOW (0–39): Oldschool, bureaucratic, committee-and-process; slow, hierarchical, mandate-driven rather than evidence-driven. A large, process-heavy institution with committee-and-mandate governance leans LOW here.
@@ -84,7 +84,7 @@ Score the company on exactly these SEVEN dimensions. Each score must be backed b
 
 ## ANTI-PATTERNS (reduce alignment_score)
 
-- **CSR veneer orgs** — a commercial company where social-good language is marketing, not the product. Reduce mission_authenticity to LOW/OUT range.
+- **Value-veneer orgs** — a company where language borrowed from the candidate's stated mission/values is marketing, not the product. Reduce mission_authenticity to LOW/OUT range.
 - **Anti-list domains** — orgs on the candidate's explicit anti-list (EXCLUDE_PATTERNS / anti-list in USER_PROFILE) → cap alignment_score at 15.
 - **Non-exciting domains with stated penalty** — domains the candidate explicitly wants penalised (see EXCLUDE PATTERNS and the candidate's own penalty notes) → apply the stated penalty per USER_PROFILE.
 - **Universal red flags** — obvious scam, MLM, pyramid scheme, ghost employer, no evidence of real operation → alignment_score 0–5.
@@ -96,7 +96,7 @@ Score WANT: how desirable is this company as a place to be for THIS candidate (0
 
 **Band definitions (use these as hard anchors, not suggestions):**
 
-- **90–100 — Exceptional.** Reserved for orgs that are genuinely outstanding on ALL relevant criteria simultaneously: direct mission + Top-tier domain + real breadth + ideal 0→1-with-cushion + strong brand / network reach + financially robust + modern analytical culture. This band should feel rare — one-in-a-year calibre. If you are tempted to give 90+, ask: is this org clearly better than every 80–89 org on ALL dimensions? If not, cap at 89.
+- **90–100 — Exceptional.** Reserved for orgs that are genuinely outstanding on ALL relevant criteria simultaneously: authentic mission fit + Top-tier domain + real breadth + ideal 0→1-with-cushion + strong brand / network reach + financially robust + modern analytical culture. This band should feel rare — one-in-a-year calibre. If you are tempted to give 90+, ask: is this org clearly better than every 80–89 org on ALL dimensions? If not, cap at 89.
 - **80–89 — Strong.** Strong on most dimensions with no serious weakness. One dimension may be Mid but is compensated by excellence on the others. A typical "I would be very happy here" org. Do not use this band as a default for "good enough on 3 of 5".
 - **70–79 — Clearly desirable but with a real compromise.** Good org — worth pursuing — but the candidate accepts a genuine trade-off on at least one dimension: Low domain tier, narrow breadth, fragile startup or sleepy mature org, limited career network, or financial uncertainty. Not a "settle" but not ideal.
 - **60–69 — Appealing with meaningful weaknesses.** Two or more dimensions are Mid or Low. Worth exploring but not a top priority.

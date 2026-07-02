@@ -411,16 +411,19 @@ def test_no_geo_proper_noun_in_branch_literals():
 # The scoring rubric must take the candidate's salary benchmark and every other
 # money anchor FROM THE USER PROFILE, never from a figure baked into the shipped
 # template (the leak was a "€7k/month benchmark" welded into company-scoring.md).
-# A currency-symbol-plus-digit or a "<n>k/month"-style pay figure in a prompt is
-# therefore always a regression. Score bands ("85–100"), runway durations
-# ("18–24 months") and a bare "$X" placeholder carry no currency+digit, so they
-# do not trip this guard.
+# A currency-symbol-plus-digit, a currency-code-plus-digit (either order), or a
+# "<n>k/month"-style pay figure (with "/", "per", or "a" as the connector) in a
+# prompt is therefore always a regression. Score bands ("85–100"), runway
+# durations ("18–24 months") and a bare "$X" placeholder carry no currency+digit
+# pairing, so they do not trip this guard.
 # ---------------------------------------------------------------------------
 
 MONEY_LITERAL = re.compile(
-    r"[€$£¥]\s?\d"  # €7, $5,000, £4000
-    r"|\b\d[\d,.]*\s?k?\s?/\s?(?:month|mo|year|yr|hour|hr)\b"  # 7k/month, 5000/yr
-    r"|\b\d[\d,.]*\s?(?:USD|EUR|GBP|CAD|AUD)\b",  # 5000 USD
+    r"[€$£¥₹₽]\s?\d"  # €7, $5,000, £4000, ₹50000, ₽70000
+    r"|\b\d[\d,.]*\s?k?\s?(?:/|per|a)\s?(?:month|mo|year|yr|hour|hr)\b"  # 7k/month, 7k per month, 5,000 a month
+    r"|\b(?:USD|EUR|GBP|CAD|AUD|CHF|JPY)\s?\d[\d,.]*k?\b"  # USD 7k, EUR 5000 (code before amount)
+    r"|\b\d[\d,.]*k?\s?(?:USD|EUR|GBP|CAD|AUD|CHF|JPY)\b"  # 5000 USD, 7k EUR (amount before code)
+    r"|\b\d[\d,.]*\s?k?\s?(?:dollars?|euros?)\b",  # 7000 dollars, 5k euros (spelled out)
     re.IGNORECASE,
 )
 
@@ -431,6 +434,85 @@ def test_no_money_amount_in_prompt_templates():
         "A literal money amount leaked into an LLM prompt template — the salary "
         "benchmark and every money anchor must come from the user profile, not a "
         "figure baked into the shipped prompt:\n" + "\n".join(hits)
+    )
+
+
+# Regression cases for the MONEY_LITERAL regex itself (not file scans) — each
+# form below was a mutation-confirmed miss of the previous, narrower pattern.
+_MONEY_LITERAL_POSITIVE_CASES = [
+    "€7,000/month",
+    "$5000/mo",
+    "£4000/yr",
+    "5000 USD",
+    "USD 7k",  # currency-code-first, no connector
+    "USD 7k per month",  # currency-code-first + "per" connector, no slash
+    "EUR 5000",  # currency-code-first
+    "7k EUR",  # currency-code-suffix with "k" shorthand
+    "7k per month",  # amount + "per month", no slash, no currency code
+    "5,000 a month",  # amount + "a month", no slash, no currency code
+    "CHF 6000",  # Swiss franc code
+    "JPY 500000",  # Japanese yen code
+    "₹50000",  # Indian rupee symbol
+    "₽70000",  # Russian ruble symbol
+    "7000 dollars",  # spelled-out currency
+    "5k euros",  # spelled-out currency
+]
+
+_MONEY_LITERAL_NEGATIVE_CASES = [
+    "Score bands: 85–100, 60–74",
+    "18–24 months runway",
+    "a bare $X placeholder",
+    "Series C+/revenue-positive startup",
+    "0→1 with cushion",
+]
+
+
+@pytest.mark.parametrize("text", _MONEY_LITERAL_POSITIVE_CASES)
+def test_money_literal_regex_catches_known_forms(text):
+    assert MONEY_LITERAL.search(text), f"MONEY_LITERAL should catch: {text!r}"
+
+
+@pytest.mark.parametrize("text", _MONEY_LITERAL_NEGATIVE_CASES)
+def test_money_literal_regex_ignores_non_money(text):
+    assert not MONEY_LITERAL.search(text), f"MONEY_LITERAL should NOT catch: {text!r}"
+
+
+# ---------------------------------------------------------------------------
+# 8c. No impact-sector / social-good worldview language in the LLM prompt
+# templates.
+#
+# The seven WANT dimensions in company-scoring.md must be defined relative to
+# the CANDIDATE's own stated mission / values / domain interests (injected
+# from the profile via USER_PROFILE / TARGET_ROLES / EXCLUDE_PATTERNS), never
+# relative to a baked-in social-good/NGO/charity frame (the leak was
+# mission_authenticity being defined as "is the social good direct", with
+# grantmaking/CSR/"traditional-NGO" vocabulary throughout). A devtools company
+# scored against an engineer profile must be able to score high on
+# mission_authenticity without the template implying charity work is the
+# reference point. Tokens are tuned to avoid legitimate false positives (e.g.
+# "root cause", "CSRF", "grants", "nonprofit" as a funding-structure label are
+# all still allowed).
+# ---------------------------------------------------------------------------
+
+WORLDVIEW_TOKEN = re.compile(
+    r"social good"
+    r"|\bNGOs?\b"
+    r"|grantmaking"
+    r"|charit(?:y|ies|able)"
+    r"|\bcauses\b"
+    r"|programme areas?\b"
+    r"|\bCSR\b",
+    re.IGNORECASE,
+)
+
+
+def test_no_worldview_frame_in_prompt_templates():
+    hits = _scan(_prompt_files(), WORLDVIEW_TOKEN)
+    assert not hits, (
+        "Impact-sector/social-good worldview language leaked into an LLM prompt "
+        "template — the WANT dimensions must be defined relative to the "
+        "candidate's own stated mission/values from the profile, not a baked-in "
+        "sector frame:\n" + "\n".join(hits)
     )
 
 
