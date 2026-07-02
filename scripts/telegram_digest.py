@@ -13,7 +13,7 @@ long-lived daemon (e.g. a systemd service or supervisor process) so taps are
 always captured, and run `send` from a scheduler / cron once a day. Only one
 process per bot token may call getUpdates at a time.
 
-Configuration (env vars, or a .env file next to this script):
+Configuration (env vars, or the repo-root .env — auto-loaded, existing env wins):
   SUPABASE_DB_URL            — Postgres connection string (required)
   TELEGRAM_BOT_TOKEN         — bot token (required)
   TELEGRAM_CHAT_ID           — recipient chat id (required)
@@ -113,17 +113,38 @@ ORDER BY v.llm_score DESC NULLS LAST, v.last_seen ASC
 
 
 def load_dotenv_fallback():
-    """Pick up a .env next to this script — for hosts without a shell profile."""
-    env_path = Path(__file__).resolve().parent / ".env"
-    if not env_path.exists():
+    """Load the repo-root ``.env`` so a host without a shell profile still runs.
+
+    Reuses ``db_backend.load_dotenv`` so the digest reads exactly the same file
+    (repo root, existing env wins) as the rest of the pipeline. On a bare host
+    without the project tree, fall back to a local parse of a ``.env`` at the
+    repo root or next to this script.
+    """
+    try:
+        import db_backend
+
+        # Importing db_backend already ran load_dotenv() once; this explicit
+        # call is a harmless no-op then (setdefault never overwrites existing
+        # vars) and only matters if db_backend was imported before the .env
+        # existed or with loading disabled. Kept for clarity: this script's
+        # config contract is "repo-root .env is loaded by the time get_config
+        # runs", independent of import order.
+        db_backend.load_dotenv()
         return
-    for line in env_path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
+    except Exception:
+        pass
+
+    here = Path(__file__).resolve().parent
+    for env_path in (here.parent / ".env", here / ".env"):
+        if not env_path.exists():
             continue
-        key, _, value = line.partition("=")
-        key, value = key.strip(), value.strip().strip("'\"")
-        os.environ.setdefault(key, value)
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+        return
 
 
 def get_config():

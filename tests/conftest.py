@@ -6,6 +6,19 @@ import tempfile
 import pytest
 
 # ---------------------------------------------------------------------------
+# Disable the automatic repo-root .env load for the WHOLE test session.
+#
+# Must be set BEFORE any pipeline module is imported: db_backend.load_dotenv()
+# runs at db_backend import time and would re-inject the maintainer's real
+# SUPABASE_DB_URL / SUPABASE_DIRECT_URL via setdefault AFTER the pops below
+# (they run at conftest import; db_backend imports later, during collection) —
+# silently pointing the offline suite at a live Supabase. With this flag
+# load_dotenv() is a no-op. Tests that exercise the loader itself clear the
+# flag locally and point the loader at tmp files, never at the real repo root.
+# ---------------------------------------------------------------------------
+os.environ["LLM_PIPELINE_DISABLE_DOTENV"] = "1"
+
+# ---------------------------------------------------------------------------
 # Isolate the default SQLite path for the whole offline run.
 #
 # With no SUPABASE_DB_URL set, the registry/DAL now connect to the local SQLite

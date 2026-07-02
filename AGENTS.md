@@ -47,7 +47,8 @@ benchmarked with Claude models; other models work but calibration may differ.
 
 ## Ground rules
 
-- Python scripts read `.env` from the repo root; never commit `.env` or
+- Python scripts auto-load `.env` from the repo root (via `db_backend`; an
+  already-exported shell var wins over the file); never commit `.env` or
   `config/user_profile.md` (both gitignored).
 - `config/user_profile.md` is the user's candidate profile — treat as private
   data, never paste it into commits, issues, or logs.
