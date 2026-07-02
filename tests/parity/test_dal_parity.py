@@ -200,9 +200,7 @@ def test_company_evidence_research_write_parity(backend):
     cid = dal.ensure_company("Northwind Aid Trust", status="active")
     _commit(dal)
 
-    dal.save_company_evidence(
-        cid, "manual_url", url="https://example.test/impact", content="first"
-    )
+    dal.save_company_evidence(cid, "manual_url", url="https://example.test/impact", content="first")
     dal.save_company_evidence(
         cid, "manual_url", url="https://example.test/impact", content="second"
     )

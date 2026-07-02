@@ -54,7 +54,9 @@ def cmd_list() -> int:
     print("Enabled job boards (persist across runs; --boards / JOB_BOARDS add more for one run):")
     if enabled:
         for bid in enabled:
-            unknown = "" if bid in _ALL_JOB_BOARDS else "   [unknown id — not in config, will be skipped]"
+            unknown = (
+                "" if bid in _ALL_JOB_BOARDS else "   [unknown id — not in config, will be skipped]"
+            )
             print(f"  {bid:<16} {_board_name(bid)}{unknown}")
     else:
         print("  (none — enable one:  python3 scripts/sources.py enable-board <id>)")
@@ -65,7 +67,9 @@ def cmd_list() -> int:
         print(f"  {name}")
 
     print()
-    print(f"Total sources feeding the pipeline: {len(enabled)} board(s) + {len(active)} company(ies)")
+    print(
+        f"Total sources feeding the pipeline: {len(enabled)} board(s) + {len(active)} company(ies)"
+    )
     return 0
 
 

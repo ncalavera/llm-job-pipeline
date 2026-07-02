@@ -79,6 +79,7 @@ def _status_label(status):
     """Localized button/label text for a recorded status (liked/passed/applied)."""
     return _t(f"digest_status_{status}")
 
+
 SELECT_FRESH_SQL = """
 SELECT v.id, v.title, c.canonical_name AS org, v.llm_score, v.llm_summary,
        v.full_description, v.snippet, v.locations, v.compensation
@@ -384,7 +385,10 @@ def build_expiring_keyboard(vac_id):
             [
                 {"text": _status_label("liked"), "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:l"},
                 {"text": _status_label("passed"), "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:p"},
-                {"text": _status_label("applied"), "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:a"},
+                {
+                    "text": _status_label("applied"),
+                    "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:a",
+                },
             ]
         ]
     }

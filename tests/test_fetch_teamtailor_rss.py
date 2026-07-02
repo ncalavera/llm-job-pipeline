@@ -132,9 +132,7 @@ class TestFetchTeamtailorRss:
     def test_both_hosts_broken_returns_empty_without_crash(self, monkeypatch):
         fake = FakeRequests({})  # every host 404s
         monkeypatch.setattr(fetchers, "requests", fake)
-        jobs = fetch_teamtailor_rss(
-            "Acme", "acme", careers_url="https://www.acme.example/careers"
-        )
+        jobs = fetch_teamtailor_rss("Acme", "acme", careers_url="https://www.acme.example/careers")
         assert jobs == []
         # both candidate hosts were tried before giving up.
         assert len(fake.calls) == 2
@@ -150,9 +148,7 @@ class TestFetchTeamtailorRss:
             }
         )
         monkeypatch.setattr(fetchers, "requests", fake)
-        jobs = fetch_teamtailor_rss(
-            "Acme", "acme", careers_url="https://careers.acme.example/jobs"
-        )
+        jobs = fetch_teamtailor_rss("Acme", "acme", careers_url="https://careers.acme.example/jobs")
         assert len(jobs) == 2  # the working default host's feed, not the SPA
         assert fake.calls == [
             "https://careers.acme.example/jobs.rss",  # tried first, rejected
@@ -165,8 +161,6 @@ class TestFetchTeamtailorRss:
         # as [] and the default host must never be touched (no false failure).
         fake = FakeRequests({"careers.acme.example": FakeResponse(text=EMPTY_RSS)})
         monkeypatch.setattr(fetchers, "requests", fake)
-        jobs = fetch_teamtailor_rss(
-            "Acme", "acme", careers_url="https://careers.acme.example/jobs"
-        )
+        jobs = fetch_teamtailor_rss("Acme", "acme", careers_url="https://careers.acme.example/jobs")
         assert jobs == []
         assert fake.calls == ["https://careers.acme.example/jobs.rss"]
