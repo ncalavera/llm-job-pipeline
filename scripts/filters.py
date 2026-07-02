@@ -39,18 +39,31 @@ DESCRIPTION_BLACKLIST_PHRASES = GLOBAL_BLACKLIST_DESC_SUBSTR
 # Title / description blacklist
 # ---------------------------------------------------------------------------
 
-# Pre-compiled blacklist: single alternation regex, sorted by length desc to
-# prevent shorter substrings matching prematurely. Compiled once at module load
-# (~10-50x faster than iterating individual re.search() calls per vacancy).
-# A trailing (?:es|s)? lets a singular keyword also catch its plural, so
-# "developer" matches "developers", "fellow" → "fellows", "internship" →
-# "internships" without listing every plural by hand.
-_TITLE_BLACKLIST_PATTERN = re.compile(
-    r"\b(?:"
-    + "|".join(re.escape(kw) for kw in sorted(TITLE_BLACKLIST_WORDS, key=len, reverse=True))
-    + r")(?:es|s)?\b",
-    re.IGNORECASE,
-)
+
+def build_title_blacklist_pattern(words) -> re.Pattern:
+    """Compile the whole-word title-blacklist regex for an arbitrary keyword
+    list — single alternation regex, words sorted by length desc to prevent
+    shorter substrings matching prematurely. A trailing (?:es|s)? lets a
+    singular keyword also catch its plural, so "developer" matches
+    "developers", "fellow" -> "fellows", "coach" -> "coaches" without listing
+    every plural by hand.
+
+    This is the ONE place the live title filter's matching semantics are
+    defined — callers that need to know what the filter would do to a
+    candidate word (e.g. the learning cycle's backtest) must call this
+    instead of hand-rolling an equivalent regex, or the two can drift apart.
+    """
+    return re.compile(
+        r"\b(?:"
+        + "|".join(re.escape(kw) for kw in sorted(words, key=len, reverse=True))
+        + r")(?:es|s)?\b",
+        re.IGNORECASE,
+    )
+
+
+# Pre-compiled blacklist (~10-50x faster than iterating individual re.search()
+# calls per vacancy) — compiled once at module load from the real keyword list.
+_TITLE_BLACKLIST_PATTERN = build_title_blacklist_pattern(TITLE_BLACKLIST_WORDS)
 
 
 def title_words_blacklisted(title: str) -> bool:

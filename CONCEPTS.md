@@ -41,6 +41,23 @@ The per-database record of which migration versions are resolved for that databa
 ### Tombstone
 A record that keeps a deliberately removed vacancy from coming back. Written when a vacancy is archived for scoring below threshold or for disappearing from its source; on re-encounter, the save layer sees the tombstone and skips the row instead of resurrecting, re-scoring, and re-archiving it. A renamed variant of a buried role inherits the block, so retitling does not resurrect it. Distinct from Expiring: an expiring role is protected and awaits a decision; a tombstoned role has been decided against or dropped.
 
+## Learning cycle
+
+### Factor strength
+The declared force of a user taste factor: **filter** (a hard block — the role is dropped before scoring), **penalty** (subtracts points during scoring), or **note** (display-only — never reaches the scorer, never changes passage or score). The same factor is a filter for one user and a penalty for another; the strength is the user's choice. In the profile: filters live in `## HARD_FILTERS`, penalties in `## EXCLUDE_PATTERNS`, notes in `## NOTES`. A note fed to the scorer would silently become a penalty, so the scoring prompt is rendered without the notes section by construction.
+
+### Learning review
+The verdict-driven gate at the START of a run (before the fetch): it turns the verdicts accumulated since last time into PROPOSED corrections to the filters, scoring and board set. Skippable in a hurry. Every proposal is a yes/no; nothing edits itself, and each applied change is logged. Deterministic mechanics (proposals, backtest, rollover) are Python; the agent supplies only the user's yes/no.
+
+### Rollover
+The skip semantics of the learning review. A completed review writes a `reviewed` ledger row whose timestamp is the cursor; verdicts decided after the cursor are the undiscussed ones. Skipping writes no row, so the cursor does not move and the same verdicts reappear next run together with new ones — a skipped verdict is never lost.
+
+### Not-mine vs garbage
+Two distinct pass signals. **Not mine** is a plain `passed` status: the role was real and in-scope but not for this user — it calibrates scoring. **Garbage** is a filter hole: the role should never have reached scoring at all (it burned a scoring request for nothing) — it is recorded separately and feeds filter-word proposals, not scoring calibration.
+
+### Backtest (clean)
+The safety check every filter-word proposal must pass before it is offered. A candidate word is **clean** when it matches (whole-word) no title in the liked history AND no title of a vacancy scored ≥ 40 — i.e. adding it to the filter would have killed nothing good. A dirty candidate is not proposed; the exact roles it would have wrongly killed (its collisions) are shown instead. Pure string matching — no LLM.
+
 ## Flagged ambiguities
 
 - "Expiring" had been used for both the stored protected status and for liked roles past their deadline (one Triage column mixed both) — these are distinct concepts; the derived display state is now called Expired.

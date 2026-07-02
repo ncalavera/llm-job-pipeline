@@ -205,6 +205,70 @@ def test_disagreements_sorted_nearest_boundary_first():
 
 
 # ---------------------------------------------------------------------------
+# Learning-cycle seam — `measure` persists a summary; scripts/learning.py's
+# agreement adapter reads it back via scoring_agreement_pct/_summary.
+# ---------------------------------------------------------------------------
+
+
+def test_write_summary_persists_the_headline_fields(tmp_path):
+    recs = _records(["fit", "fit", "nofit", "nofit"])
+    scores = {r["id"]: (80 if r["label"] == "fit" else 10) for r in recs}
+    m = g.compute_metrics(recs, scores, threshold=60)
+    path = tmp_path / "golden_set_summary.json"
+
+    summary = g.write_summary(path, m, version=3)
+
+    assert path.exists()
+    on_disk = json.loads(path.read_text(encoding="utf-8"))
+    assert on_disk == summary
+    assert summary["agreement_pct"] == 100.0
+    assert summary["set_size"] == 4
+    assert summary["set_version"] == 3
+    assert summary["threshold"] == 60
+    assert "measured_at" in summary and summary["measured_at"]
+
+
+def test_scoring_agreement_summary_and_pct_absent_when_never_measured(tmp_path, monkeypatch):
+    monkeypatch.setenv("GOLDEN_SET_DIR", str(tmp_path))
+    assert g.scoring_agreement_summary() is None
+    assert g.scoring_agreement_pct() is None
+
+
+def test_scoring_agreement_pct_reads_the_persisted_summary(tmp_path, monkeypatch):
+    monkeypatch.setenv("GOLDEN_SET_DIR", str(tmp_path))
+    recs = _records(["fit", "nofit"])
+    scores = {recs[0]["id"]: 80, recs[1]["id"]: 10}
+    m = g.compute_metrics(recs, scores, threshold=60)
+    g.write_summary(g._summary_path(), m, version=1)
+
+    assert g.scoring_agreement_pct() == 100.0
+    summary = g.scoring_agreement_summary()
+    assert summary["set_size"] == 2 and summary["set_version"] == 1
+
+
+def test_cmd_measure_persists_the_summary_end_to_end(tmp_path, monkeypatch, capsys):
+    import argparse
+    import io
+
+    monkeypatch.setenv("GOLDEN_SET_DIR", str(tmp_path))
+    store = g._store_path()
+    recs = [g.make_record(_vac("a", "liked", score=80), "fit", "", "seed:liked")]
+    g.append_records(store, recs)
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps([{"id": "a", "score": 80}])))
+    args = argparse.Namespace(version=None, threshold=60)
+    rc = g.cmd_measure(args)
+    assert rc == 0
+
+    summary = g.scoring_agreement_summary()
+    assert summary is not None
+    assert summary["agreement_pct"] == 100.0
+    assert summary["set_size"] == 1
+    assert summary["set_version"] == 1
+    assert summary["threshold"] == 60
+
+
+# ---------------------------------------------------------------------------
 # Payload builder — reuses the pipeline prompt, stays blind to the label
 # ---------------------------------------------------------------------------
 

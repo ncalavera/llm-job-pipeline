@@ -52,6 +52,7 @@ STATE_PATH = PROJECT_ROOT / "vacancies" / "run_state.json"
 FETCH_STATS_PATH = PROJECT_ROOT / "vacancies" / "fetch_stats.json"
 VAC_PAYLOAD_PATH = PROJECT_ROOT / "vacancies" / "score_vacancies_payload.json"
 CO_PAYLOAD_PATH = PROJECT_ROOT / "vacancies" / "score_companies_payload.json"
+LEARNING_PAYLOAD_PATH = PROJECT_ROOT / "vacancies" / "learning_review.json"
 
 EXIT_DONE = 0
 EXIT_GATE = 10
@@ -67,11 +68,12 @@ GONE_ARCHIVE_MIN_COUNT = 3
 # The canonical stage order. This list — not the runbook, not the maintainer's
 # memory — is the single source of truth for what happens when.
 #
-# One position is still a reserved insertion point and currently no-op (it only
-# prints a one-line note):
-#   * learning_review  — a future verdict-driven feedback loop that offers
-#                        filter/scoring corrections at the START of a run
-#                        (skippable, rolls over — STRATEGY guardrail 8).
+#   * learning_review  — the verdict-driven feedback loop (STRATEGY guardrail 8):
+#                        before a new fetch it offers filter/scoring/board
+#                        corrections derived from the verdicts accumulated since
+#                        last time. GATE when there is something to review, else
+#                        a clean skip. Skippable in a hurry — skipped verdicts
+#                        roll over to next run (the mechanics live in learning.py).
 # company_scoring now runs the full candidate chain: drop junk → find a
 # missing website → collect primary-source evidence → WANT-score. Scored
 # candidates land in Pending for review.
@@ -79,7 +81,7 @@ STAGE_ORDER = [
     "validate_profile",  # AUTO  — abort early on a missing/placeholder profile
     "preflight",  # AUTO  — DB-outage hard-stop, first-run + resume detect
     "onboarding",  # GATE  — only when the company table is empty
-    "learning_review",  # noop  — reserved insertion point (skipped)
+    "learning_review",  # GATE  — verdict-driven corrections (skippable, rolls over)
     "fetch",  # AUTO  — pull new vacancies (heartbeat inside the script)
     "enrich",  # AUTO  — backfill blind descriptions (Firecrawl)
     "filter",  # AUTO  — quality report; never auto-deletes
@@ -526,11 +528,60 @@ immediately so an interruption keeps captured decisions:
 from database_supabase import update_vacancy_status; from db_conn import get_conn;\\
 update_vacancy_status('<VACANCY_ID>','liked'); get_conn().commit()"
 
-Statuses: liked | passed | skipped | to_apply. This is the quick daily pass; the
-deep structured review of liked roles lives in /jobs-review.
+Statuses: liked | passed | skipped | to_apply. A plain `passed` means "not for
+me" and calibrates scoring. If instead a role is GARBAGE — it should never have
+reached scoring at all (a filter hole that burned tokens) — pass it AND flag it,
+so next run's learning review can propose a filter for it:
 
-Then --resume to publish.
+  python3 scripts/learning.py record-garbage --vacancy <VACANCY_ID> \\
+      --title "<title>" --source "<board/ats>" --score <llm_score>
+
+This is the quick daily pass; the deep structured review of liked roles lives in
+/jobs-review. Then --resume to publish.
 """.strip()
+
+
+def _learning_gate_text(review: dict) -> str:
+    fw = review["proposals"]["filter_words"]
+    fm = review["proposals"]["factor_moves"]
+    rev = review["revision"]
+    agr = review["agreement"]
+    if agr.get("measured"):
+        agr_line = f"{agr['value']:.0f}%"
+        if agr.get("measured_at"):
+            agr_line += f" (measured {agr['measured_at']})"
+        if agr.get("previous") is not None:
+            agr_line += f", was {agr['previous']}"
+    else:
+        agr_line = "not yet measured — run /jobs-eval"
+    return (
+        f"LEARNING REVIEW — verdicts since your last review teach the filters,\n"
+        f"scoring and boards. Nothing changes without your explicit yes; every\n"
+        f"applied change is logged. In a hurry? SKIP — just --resume and these\n"
+        f"roll over to next time.\n\n"
+        f"  • {review['verdicts_since_last_review']} verdict(s) since last review;"
+        f" {review['garbage_count']} flagged garbage (filter holes)\n"
+        f"  • scoring agreement with your verdicts: {agr_line}\n"
+        f"  • {len(fw)} filter-word proposal(s), {len(fm)} factor-move proposal(s),"
+        f" {len(rev)} killed title(s) to revisit\n\n"
+        f"Full payload (proposals each carry their backtest): {LEARNING_PAYLOAD_PATH}\n\n"
+        f"Do this:\n"
+        f"  1. Read the payload. For EACH proposal, show the user the word/move and\n"
+        f"     its backtest (clean = it would have killed 0 liked/high-scored roles;\n"
+        f"     a dirty candidate lists the exact roles it would have wrongly killed).\n"
+        f"  2. Apply ONLY the ones the user approves:\n"
+        f"       python3 scripts/learning.py apply --type add_filter_word --word W\n"
+        f'       python3 scripts/learning.py apply --type move_factor --factor "..." --keyword K\n'
+        f"       python3 scripts/learning.py apply --type disable_board --board B\n"
+        f'  3. Filter-kill revision ("anything alive here?"): for any killed title the\n'
+        f"     user says is actually good, weaken its culprit rule:\n"
+        f"       python3 scripts/learning.py apply --type weaken_filter_word --word CULPRIT\n"
+        f"  4. When done (you engaged — even if you applied nothing), close the cycle so\n"
+        f"     these verdicts do not reappear next run:\n"
+        f"       python3 scripts/learning.py complete --agreement <n|skip> --applied <k>"
+        f" [--revision-shown]\n"
+        f"     To SKIP instead, do NOT run 'complete' — just --resume; verdicts roll over.\n"
+    )
 
 
 def _vacancy_gate_text(payloads: list, opts: Opts) -> str:
@@ -633,14 +684,58 @@ def _h_onboarding(state, entry, opts):
 
 
 def _h_learning_review(state, entry, opts):
-    # Reserved insertion point. When implemented, this stage offers verdict-driven
-    # filter/scoring corrections at the START of a run (skippable; skipped
-    # verdicts roll over — STRATEGY guardrail 8).
-    return (
-        "skip",
-        "learning review skipped — verdict-driven corrections not yet implemented; "
-        "insertion point reserved",
-    )
+    # Verdict-driven feedback loop at the START of a run (STRATEGY guardrail 8).
+    # Deterministic mechanics live in learning.py; here we only decide whether to
+    # stop for the agent's judgment. On resume (emitted) we always advance — the
+    # agent either engaged (and ran `learning.py complete`, moving the rollover
+    # cursor) or skipped (cursor unchanged → verdicts roll over next run).
+    if entry.get("emitted"):
+        return "advance", "learning review done (or skipped — skipped verdicts roll over)"
+
+    # First run has no verdict history to learn from; onboarding just happened.
+    if state.get("first_run"):
+        return "skip", "first run — no verdict history to learn from yet"
+
+    try:
+        import learning
+    except Exception as exc:  # never let the learning loop break the daily run
+        return "skip", f"learning review skipped — module unavailable ({type(exc).__name__})"
+
+    try:
+        if not learning.table_ready():
+            return (
+                "skip",
+                "learning review skipped — learning_log table missing; run scripts/migrate.py "
+                "to enable verdict-driven corrections",
+            )
+        if learning.cursor_ts() is None:
+            # Cold start: the ledger has never recorded a completed review — a
+            # fresh deploy of the learning cycle over an EXISTING verdict
+            # back-catalog (this is not the empty-DB first_run case above,
+            # which is handled separately). Dumping the whole history as a
+            # review the first time it runs would be a wall of noise, so seed
+            # the rollover cursor silently and start counting from adoption.
+            learning.mark_reviewed(agreement=None, applied_count=0, revision_shown=False)
+            return (
+                "skip",
+                "learning cycle just adopted — cursor seeded silently; counting verdicts "
+                "from now on",
+            )
+        review = learning.build_review()
+    except Exception as exc:
+        # A learning glitch must never block the daily loop (reliability first).
+        return "skip", f"learning review skipped — could not build review ({type(exc).__name__})"
+
+    if not review.get("has_content"):
+        return "advance", "no accumulated verdicts or proposals — nothing to review this run"
+
+    _write_payload(LEARNING_PAYLOAD_PATH, review)
+    return "gate", {
+        "action": "learning_review",
+        "count": review["verdicts_since_last_review"],
+        "payload_path": str(LEARNING_PAYLOAD_PATH),
+        "instructions": _learning_gate_text(review),
+    }
 
 
 def _h_fetch(state, entry, opts):

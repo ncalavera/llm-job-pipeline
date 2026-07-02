@@ -68,6 +68,37 @@ yes**, then `migrate.py` and insert the approved companies as `active`. Then
 `--resume`. (The driver only reaches this gate when the company table is empty
 AND the registry loaded fine — a DB outage aborts instead, never onboards.)
 
+### Learning review (verdict-driven corrections — before the fetch)
+Runs before fetching when there are verdicts to learn from (skipped on the first
+run and on a quiet day with nothing to review). The driver writes the review to
+`vacancies/learning_review.json`; the deterministic mechanics (proposals,
+backtests, rollover) live in `scripts/learning.py` — **no LLM calls**. Your job:
+
+1. Read the payload. For **each** proposal, show the user the word/move **and its
+   backtest** — clean means it would have killed 0 liked / ≥40-scored roles; a
+   dirty candidate lists the exact roles it would have wrongly killed.
+2. Apply **only** what the user approves (nothing changes without a yes; each
+   apply is logged):
+   ```bash
+   python3 scripts/learning.py apply --type add_filter_word --word W
+   python3 scripts/learning.py apply --type move_factor --factor "…" --keyword K
+   python3 scripts/learning.py apply --type disable_board --board B
+   ```
+3. Filter-kill revision ("anything alive here?"): for any killed title the user
+   says is actually good, weaken its culprit rule:
+   ```bash
+   python3 scripts/learning.py apply --type weaken_filter_word --word CULPRIT
+   ```
+4. When you engaged (even if you applied nothing), close the cycle so these
+   verdicts don't reappear next run:
+   ```bash
+   python3 scripts/learning.py complete --agreement <n|skip> --applied <k>
+   ```
+   **In a hurry? SKIP** — do *not* run `complete`; just `--resume`. Skipped
+   verdicts roll over and are reviewed next time together with new ones.
+
+Then `--resume`.
+
 ### Company scoring (WANT-score new candidate companies)
 The driver scrapes about-pages and prints scoring payloads to
 `vacancies/score_companies_payload.json`. For **each** company, run **one**
@@ -112,8 +143,18 @@ from database_supabase import update_vacancy_status; from db_conn import get_con
 update_vacancy_status('<VACANCY_ID>','liked'); get_conn().commit()"
 ```
 
-Statuses: `liked | passed | skipped | to_apply`. The deep structured review of
-liked roles lives in `/jobs-review`. Then `--resume` to publish.
+Statuses: `liked | passed | skipped | to_apply`. A plain `passed` = "not for me"
+and calibrates scoring. If a role is **garbage** — it should never have reached
+scoring (a filter hole) — pass it *and* flag it so next run's learning review can
+propose a filter:
+
+```bash
+python3 scripts/learning.py record-garbage --vacancy <VACANCY_ID> \
+    --title "<title>" --source "<board/ats>" --score <llm_score>
+```
+
+The deep structured review of liked roles lives in `/jobs-review`. Then
+`--resume` to publish.
 
 ---
 

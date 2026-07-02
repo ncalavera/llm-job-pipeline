@@ -29,7 +29,10 @@ orchestrating agent is the scorer (see AGENTS.md):
   2. the agent scores EACH payload independently (one request per vacancy —
      batching is banned repo-wide, it over-scores) and collects [{id, score}].
   3. ``measure`` reads those scores from stdin and prints the agreement number,
-     precision/recall at the score threshold, and the disagreement list.
+     precision/recall at the score threshold, and the disagreement list. It also
+     persists a small summary (agreement_pct, set size/version, threshold,
+     measured-at) next to the golden set — the ONE seam scripts/learning.py's
+     zero-LLM review reads to show the last measured agreement.
 
 Storage & versioning
 --------------------
@@ -91,6 +94,16 @@ def _store_path(base_dir: Path | None = None) -> Path:
 
 def _template_path(base_dir: Path | None = None) -> Path:
     return (base_dir or _default_dir()) / "label_template.jsonl"
+
+
+def _summary_path(base_dir: Path | None = None) -> Path:
+    """Where the last-measured-agreement summary lives — a small, gitignored
+    snapshot next to the golden set (respects GOLDEN_SET_DIR, same as the
+    set itself). This is the file scripts/learning.py's agreement seam reads
+    (via scoring_agreement_pct / scoring_agreement_summary below), so the
+    /jobs-new learning review can show the LAST measured number without
+    re-running an LLM eval."""
+    return (base_dir or _default_dir()) / "golden_set_summary.json"
 
 
 def _now() -> str:
@@ -329,6 +342,51 @@ def compute_metrics(records: list[dict], scores: dict[str, int], threshold: int)
         "n_fit": sum(1 for r in records if r["label"] == LABEL_FIT),
         "n_nofit": sum(1 for r in records if r["label"] == LABEL_NOFIT),
     }
+
+
+# ---------------------------------------------------------------------------
+# Learning-cycle seam — persist the headline of the LAST measurement so
+# scripts/learning.py's agreement adapter can show it without re-running an
+# LLM eval (that module never computes its own agreement number; see its
+# "Scoring-agreement adapter" section).
+# ---------------------------------------------------------------------------
+
+
+def write_summary(path: Path, m: dict, version: int) -> dict:
+    """Persist the headline measurement next to the golden set. Overwrites —
+    this is a snapshot of the LATEST run, not a ledger; the append-only
+    golden_set.jsonl remains the source of truth for labels."""
+    summary = {
+        "agreement_pct": round(m["agreement"] * 100, 1),
+        "set_size": m["n"],
+        "set_version": version,
+        "threshold": m["threshold"],
+        "measured_at": _now(),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    return summary
+
+
+def scoring_agreement_summary() -> dict | None:
+    """The last-persisted measurement (agreement_pct, set_size, set_version,
+    threshold, measured_at) — or None if `measure` has never run. This is the
+    richer of the two functions scripts/learning.py's agreement seam probes
+    for (module ``golden_set``); it carries the measured-at date the plain
+    percentage does not."""
+    path = _summary_path()
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def scoring_agreement_pct() -> float | None:
+    """The bare agreement percentage (0-100), or None if never measured."""
+    summary = scoring_agreement_summary()
+    return summary.get("agreement_pct") if summary else None
 
 
 def format_report(m: dict) -> str:
@@ -601,6 +659,8 @@ def cmd_measure(args) -> int:
         )
         return 1
     m = compute_metrics(records, scores, args.threshold)
+    version_shown = args.version if args.version is not None else current_version(store)
+    write_summary(_summary_path(), m, version_shown)
     print(format_report(m))
     return 0
 
