@@ -33,13 +33,19 @@ def test_verdict_label_none_for_non_verdict_statuses():
 
 
 def test_auto_expiry_only_passed_with_past_deadline():
-    assert g.is_probable_auto_expiry({"status": "passed", "deadline": "2000-01-01"}, today="2026-07-02")
+    assert g.is_probable_auto_expiry(
+        {"status": "passed", "deadline": "2000-01-01"}, today="2026-07-02"
+    )
     # future deadline → a real pass
-    assert not g.is_probable_auto_expiry({"status": "passed", "deadline": "2999-01-01"}, today="2026-07-02")
+    assert not g.is_probable_auto_expiry(
+        {"status": "passed", "deadline": "2999-01-01"}, today="2026-07-02"
+    )
     # no deadline → a real pass
     assert not g.is_probable_auto_expiry({"status": "passed"}, today="2026-07-02")
     # skipped is always a genuine user verdict, never auto-expiry
-    assert not g.is_probable_auto_expiry({"status": "skipped", "deadline": "2000-01-01"}, today="2026-07-02")
+    assert not g.is_probable_auto_expiry(
+        {"status": "skipped", "deadline": "2000-01-01"}, today="2026-07-02"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +53,9 @@ def test_auto_expiry_only_passed_with_past_deadline():
 # ---------------------------------------------------------------------------
 
 
-def _vac(h, status, score=50, desc="a description long enough", updated="2026-01-01", deadline=None):
+def _vac(
+    h, status, score=50, desc="a description long enough", updated="2026-01-01", deadline=None
+):
     v = {
         "dedup_hash": h,
         "status": status,
@@ -63,8 +71,8 @@ def _vac(h, status, score=50, desc="a description long enough", updated="2026-01
 
 
 def test_seed_balance_guarantees_scarce_fit_examples():
-    vacs = [_vac(f"f{i}", "liked", score=80, updated=f"2026-01-0{i+1}") for i in range(2)]
-    vacs += [_vac(f"n{i}", "passed", score=10, updated=f"2026-02-{i+1:02d}") for i in range(20)]
+    vacs = [_vac(f"f{i}", "liked", score=80, updated=f"2026-01-0{i + 1}") for i in range(2)]
+    vacs += [_vac(f"n{i}", "passed", score=10, updated=f"2026-02-{i + 1:02d}") for i in range(20)]
     recs = g.select_seed_records(vacs, limit=10, balance=True)
     assert len(recs) == 10
     assert sum(1 for r in recs if r["label"] == "fit") == 2  # both scarce positives kept
@@ -140,7 +148,10 @@ def test_new_batch_increments_version_and_old_rows_frozen(store):
 
 
 def _records(labels):
-    return [g.make_record(_vac(str(i), "liked" if lbl == "fit" else "passed"), lbl, f"r{i}", "x") for i, lbl in enumerate(labels)]
+    return [
+        g.make_record(_vac(str(i), "liked" if lbl == "fit" else "passed"), lbl, f"r{i}", "x")
+        for i, lbl in enumerate(labels)
+    ]
 
 
 def test_metrics_perfect_agreement():
@@ -199,7 +210,14 @@ def test_disagreements_sorted_nearest_boundary_first():
 
 
 def test_build_payloads_are_blind_and_use_the_real_prompt():
-    recs = [g.make_record(_vac("a", "liked", desc="Lead operations for a mission-driven org."), "fit", "secret reason", "seed:liked")]
+    recs = [
+        g.make_record(
+            _vac("a", "liked", desc="Lead operations for a mission-driven org."),
+            "fit",
+            "secret reason",
+            "seed:liked",
+        )
+    ]
     payloads = g.build_payloads(recs)
     assert len(payloads) == 1
     p = payloads[0]

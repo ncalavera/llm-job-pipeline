@@ -194,7 +194,9 @@ def select_seed_records(
     records = []
     for v in chosen:
         label = verdict_label(v.get("status"))
-        records.append(make_record(v, label, f"user verdict: {v.get('status')}", f"seed:{v.get('status')}"))
+        records.append(
+            make_record(v, label, f"user verdict: {v.get('status')}", f"seed:{v.get('status')}")
+        )
     return records
 
 
@@ -310,11 +312,7 @@ def compute_metrics(records: list[dict], scores: dict[str, int], threshold: int)
     agreement = agree / n if n else 0.0
     precision = tp / (tp + fp) if (tp + fp) else None
     recall = tp / (tp + fn) if (tp + fn) else None
-    f1 = (
-        2 * precision * recall / (precision + recall)
-        if precision and recall
-        else None
-    )
+    f1 = 2 * precision * recall / (precision + recall) if precision and recall else None
     # Disagreements closest to the boundary are the most actionable to fix.
     disagreements.sort(key=lambda d: abs(d["model_score"] - threshold))
     return {
@@ -339,7 +337,9 @@ def format_report(m: dict) -> str:
     lines = []
     pct = f"{m['agreement'] * 100:.0f}%"
     lines.append("")
-    lines.append(f"  AGREEMENT: {pct}  ({m['agree']}/{m['n']} labels match the model at threshold {m['threshold']})")
+    lines.append(
+        f"  AGREEMENT: {pct}  ({m['agree']}/{m['n']} labels match the model at threshold {m['threshold']})"
+    )
     lines.append("")
 
     def fmt(x):
@@ -347,17 +347,25 @@ def format_report(m: dict) -> str:
 
     c = m["confusion"]
     lines.append(f"  Fit = score >= {m['threshold']}. Positive class = 'fit'.")
-    lines.append(f"  precision {fmt(m['precision'])}   recall {fmt(m['recall'])}   F1 {fmt(m['f1'])}")
+    lines.append(
+        f"  precision {fmt(m['precision'])}   recall {fmt(m['recall'])}   F1 {fmt(m['f1'])}"
+    )
     lines.append(
         f"  confusion: TP {c['tp']}  FP {c['fp']}  FN {c['fn']}  TN {c['tn']}"
         f"   (set: {m['n_fit']} fit / {m['n_nofit']} nofit)"
     )
     if m["missing_scores"]:
-        lines.append(f"  ⚠ {len(m['missing_scores'])} labelled rows had no score submitted (excluded).")
+        lines.append(
+            f"  ⚠ {len(m['missing_scores'])} labelled rows had no score submitted (excluded)."
+        )
     lines.append("")
     if m["disagreements"]:
-        lines.append(f"  DISAGREEMENTS ({len(m['disagreements'])}) — what to look at, nearest-boundary first:")
-        lines.append("  (FN = you liked it, model scored low · FP = you passed it, model scored high)")
+        lines.append(
+            f"  DISAGREEMENTS ({len(m['disagreements'])}) — what to look at, nearest-boundary first:"
+        )
+        lines.append(
+            "  (FN = you liked it, model scored low · FP = you passed it, model scored high)"
+        )
         for d in m["disagreements"]:
             tag = "FN" if d["kind"] == "false_negative" else "FP"
             org = (d["org"] or "?")[:28]
@@ -493,7 +501,7 @@ def cmd_template(args) -> int:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
     print(
         f"Wrote {len(pool)} rows to label (blind — no scores shown):\n  {tmpl}\n"
-        "Edit each line: set \"label\" to fit or nofit and add a short \"reason\". "
+        'Edit each line: set "label" to fit or nofit and add a short "reason". '
         "Leave a line's label empty to skip it. Then run:\n"
         "  python3 scripts/golden_set.py add-template",
         file=sys.stderr,
@@ -568,7 +576,7 @@ def cmd_emit(args) -> int:
         f"Emitting {len(payloads)} scoring payloads "
         f"(golden set version <= {version_shown}). "
         "Score EACH independently — one request per vacancy — and pipe "
-        "[{\"id\":..., \"score\":...}] to `measure`.",
+        '[{"id":..., "score":...}] to `measure`.',
         file=sys.stderr,
     )
     json.dump(payloads, real_stdout, ensure_ascii=False)
@@ -588,7 +596,7 @@ def cmd_measure(args) -> int:
             scores[item["id"]] = int(item["score"])
     if not scores:
         print(
-            "No scores on stdin. Pipe the agent's [{\"id\":..., \"score\":...}] array in.",
+            'No scores on stdin. Pipe the agent\'s [{"id":..., "score":...}] array in.',
             file=sys.stderr,
         )
         return 1
@@ -633,10 +641,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Take strictly most-recent verdicts instead of guaranteeing fit examples.",
     )
-    sp.add_argument("--dry-run", action="store_true", help="Show what would be added; write nothing.")
+    sp.add_argument(
+        "--dry-run", action="store_true", help="Show what would be added; write nothing."
+    )
     sp.set_defaults(func=cmd_seed)
 
-    tp = sub.add_parser("template", help="Write a blind labelling template from your own vacancies.")
+    tp = sub.add_parser(
+        "template", help="Write a blind labelling template from your own vacancies."
+    )
     tp.add_argument("--limit", type=int, default=25, help="Rows to template (default 25).")
     tp.set_defaults(func=cmd_template)
 
