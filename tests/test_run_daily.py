@@ -28,6 +28,7 @@ def rd(monkeypatch, tmp_path):
     importlib.reload(run_daily)
     monkeypatch.setattr(run_daily, "STATE_PATH", tmp_path / "run_state.json")
     monkeypatch.setattr(run_daily, "FETCH_STATS_PATH", tmp_path / "fetch_stats.json")
+    monkeypatch.setattr(run_daily, "LEARNING_PAYLOAD_PATH", tmp_path / "learning_review.json")
     return run_daily
 
 
@@ -323,3 +324,110 @@ def test_onboarding_skipped_when_companies_exist(rd, monkeypatch, tmp_path):
     kind, note = rd._h_onboarding(state, rd._stage(state, "onboarding"), rd.Opts())
     assert kind == "skip"
     db.close_conn()
+
+
+# ---------------------------------------------------------------------------
+# 6. Learning-review gate — trigger, skip/rollover, no-content, guards.
+#
+# The gate decision is DB-free here: we inject a stub ``learning`` module so the
+# driver's WIRING (when to stop, when to advance) is asserted in isolation from
+# the learning mechanics (those are covered in test_learning.py).
+# ---------------------------------------------------------------------------
+
+import types  # noqa: E402
+
+
+def _stub_learning(monkeypatch, *, table_ready=True, has_content=True):
+    review = {
+        "ready": True,
+        "has_content": has_content,
+        "cursor_at": None,
+        "verdicts_since_last_review": 4,
+        "garbage_count": 2,
+        "agreement": {
+            "value": None,
+            "previous": None,
+            "measured": False,
+            "note": "not yet measured — harness absent",
+        },
+        "proposals": {
+            "filter_words": [
+                {
+                    "word": "casino",
+                    "garbage_hits": 2,
+                    "backtest": {
+                        "clean": True,
+                        "checked_liked": 1,
+                        "checked_high": 1,
+                        "collisions": [],
+                    },
+                }
+            ],
+            "filter_words_rejected": [],
+            "factor_moves": [],
+        },
+        "revision": [],
+        "applied_recent": [],
+    }
+    stub = types.ModuleType("learning")
+    stub.table_ready = lambda: table_ready
+    stub.build_review = lambda: review
+    monkeypatch.setitem(sys.modules, "learning", stub)
+    return review
+
+
+def _live_state(rd, first_run=False):
+    state = rd._new_state(rd.Opts())
+    state["first_run"] = first_run
+    return state
+
+
+def test_learning_review_gates_when_there_are_verdicts_to_review(rd, monkeypatch):
+    _stub_learning(monkeypatch, has_content=True)
+    state = _live_state(rd)
+    entry = rd._stage(state, "learning_review")
+    kind, info = rd._h_learning_review(state, entry, rd.Opts())
+    assert kind == "gate"
+    assert info["action"] == "learning_review"
+    # The gate writes a machine-readable payload for the agent to read.
+    import json
+
+    payload = json.loads(rd.LEARNING_PAYLOAD_PATH.read_text())
+    assert payload["proposals"]["filter_words"][0]["word"] == "casino"
+
+
+def test_learning_review_advances_when_nothing_to_review(rd, monkeypatch):
+    _stub_learning(monkeypatch, has_content=False)
+    state = _live_state(rd)
+    kind, note = rd._h_learning_review(state, rd._stage(state, "learning_review"), rd.Opts())
+    assert kind == "advance"
+
+
+def test_learning_review_skips_on_first_run(rd, monkeypatch):
+    # A stub is present, but first-run short-circuits before it is consulted.
+    _stub_learning(monkeypatch, has_content=True)
+    state = _live_state(rd, first_run=True)
+    kind, note = rd._h_learning_review(state, rd._stage(state, "learning_review"), rd.Opts())
+    assert kind == "skip"
+    assert "first run" in note
+
+
+def test_learning_review_skips_when_ledger_table_missing(rd, monkeypatch):
+    _stub_learning(monkeypatch, table_ready=False)
+    state = _live_state(rd)
+    kind, note = rd._h_learning_review(state, rd._stage(state, "learning_review"), rd.Opts())
+    assert kind == "skip"
+    assert "migrate" in note
+
+
+def test_learning_review_advances_on_resume_so_skip_rolls_over(rd, monkeypatch):
+    """On resume the stage is already 'emitted': it advances WITHOUT touching the
+    rollover cursor, so a skipped review's verdicts are still undiscussed next
+    run. (The cursor only moves when the agent runs `learning.py complete`.)"""
+    _stub_learning(monkeypatch, has_content=True)
+    state = _live_state(rd)
+    entry = rd._stage(state, "learning_review")
+    entry["emitted"] = True
+    kind, note = rd._h_learning_review(state, entry, rd.Opts())
+    assert kind == "advance"
+    assert "roll over" in note
