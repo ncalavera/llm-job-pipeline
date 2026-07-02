@@ -84,18 +84,30 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## What it costs (honestly)
 
-- **Required: a coding-agent subscription you likely already have** —
+There is no per-token bill, but scoring is not free either — it draws on your
+coding-agent plan. The real driver is one formula:
+**plan tier × scoring model × number of vacancies scored.** The model tier is
+the dial you set to match your plan.
+
+- **Coding-agent subscription (required)** —
   [Claude Code](https://claude.com/claude-code) (recommended; scoring
   benchmarked with Claude) or Codex and others, see [AGENTS.md](AGENTS.md).
-  Scoring runs inside that subscription — no API keys, no per-token bills. Scoring ~50 vacancies is a normal daily session within plan limits.
+  Scoring runs inside that subscription — no API keys — as one LLM request per
+  vacancy. A budget plan (~$20) should score with **Sonnet**; a bigger plan
+  (~$100-200) can afford **Opus**. You pick the model at onboarding and change it
+  in one line — the `## VOLUME` section of your profile (`scoring_model`). A
+  quiet day scores 20-30 vacancies; a spike day is capped (`max_per_run`,
+  default 150) so it can't silently drain your plan — the overflow is offered on
+  the next run.
 - **Supabase** — only in full mode; free tier covers ~5,000 vacancies
-  comfortably. Simple mode uses a local SQLite file: $0, no account.
+  comfortably. Simple mode uses a local SQLite file: no account needed.
 - **Firecrawl** — optional and off by default. The local fetcher covers most
   ATS for free; Firecrawl ($20+/mo, free tier 500 scrapes) only adds
   enrichment for stubborn JS-heavy pages.
 - **Vercel, GitHub** — free for a personal project.
 
-Typical setup: **subscription you already have + $0/month.**
+So the infrastructure is free; the variable cost is the plan usage your chosen
+model spends on the vacancies you score each day.
 
 ## What it does NOT do
 

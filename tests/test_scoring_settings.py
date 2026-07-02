@@ -1,0 +1,255 @@
+"""Tests for the ``## VOLUME`` cost/volume settings + the per-run scoring cap.
+
+The scoring model and the spike-day per-run cap are per-user knobs tied to the
+plan tier, so they live in the profile (``## VOLUME``), read by
+``scripts/scoring_settings.py``. Covered here:
+
+  1. ``scoring_model`` / ``max_per_run`` read from a profile fixture.
+  2. Missing section / missing key / placeholder / garbage / unknown value all
+     fall back to the neutral defaults (sonnet, 150) — never raise.
+  3. HTML-comment example lines are not parsed as real values.
+  4. With no explicit ``--limit``, the per-run cap CUTS the role list and the
+     run's stderr honestly reports "Scoring X of Y" plus a deferral note.
+
+Never reads the maintainer's real ``config/user_profile.md`` — every profile is
+a ``tmp_path`` fixture pinned via ``USER_PROFILE_PATH``.
+"""
+
+import importlib
+import json
+import sys
+import types
+from pathlib import Path
+
+import pytest
+
+import prompts
+import scoring_settings as ss
+
+
+# ---------------------------------------------------------------------------
+# Profile fixtures
+# ---------------------------------------------------------------------------
+
+
+def _write_profile(tmp_path: Path, volume_block: str | None) -> Path:
+    """Write a minimal profile; ``volume_block=None`` omits the VOLUME section.
+
+    Section headers stay at column 0 — the profile parser requires that.
+    """
+    body = "## USER_PROFILE\n\nTest person.\n\n"
+    if volume_block is not None:
+        body += f"## VOLUME\n\n{volume_block}\n\n"
+    body += "## OUTPUT_LANGUAGE\n\nEnglish\n"
+    profile = tmp_path / "user_profile.md"
+    profile.write_text(body, encoding="utf-8")
+    return profile
+
+
+@pytest.fixture()
+def use_profile(tmp_path, monkeypatch):
+    """Return a helper that pins the profile reader at a tmp VOLUME block."""
+
+    def _apply(volume_block: str | None):
+        path = _write_profile(tmp_path, volume_block)
+        monkeypatch.setenv("USER_PROFILE_PATH", str(path))
+        prompts.clear_profile_cache()
+        return path
+
+    yield _apply
+    prompts.clear_profile_cache()
+
+
+# ---------------------------------------------------------------------------
+# scoring_model
+# ---------------------------------------------------------------------------
+
+
+def test_scoring_model_read_from_profile(use_profile):
+    use_profile("scoring_model: opus\nmax_per_run: 150")
+    assert ss.scoring_model() == "opus"
+
+
+def test_scoring_model_case_insensitive(use_profile):
+    use_profile("scoring_model: OPUS")
+    assert ss.scoring_model() == "opus"
+
+
+def test_scoring_model_default_when_section_missing(use_profile):
+    use_profile(None)
+    assert ss.scoring_model() == ss.DEFAULT_SCORING_MODEL == "sonnet"
+
+
+def test_scoring_model_default_when_key_missing(use_profile):
+    use_profile("max_per_run: 200")
+    assert ss.scoring_model() == "sonnet"
+
+
+def test_scoring_model_placeholder_is_default(use_profile):
+    use_profile("scoring_model: (none)")
+    assert ss.scoring_model() == "sonnet"
+
+
+def test_scoring_model_unknown_value_is_default(use_profile):
+    use_profile("scoring_model: gpt-9")
+    assert ss.scoring_model() == "sonnet"
+
+
+# ---------------------------------------------------------------------------
+# max_per_run
+# ---------------------------------------------------------------------------
+
+
+def test_max_per_run_read_from_profile(use_profile):
+    use_profile("scoring_model: sonnet\nmax_per_run: 120")
+    assert ss.max_per_run() == 120
+
+
+def test_max_per_run_default_when_missing(use_profile):
+    use_profile("scoring_model: sonnet")
+    assert ss.max_per_run() == ss.DEFAULT_MAX_PER_RUN == 150
+
+
+def test_max_per_run_garbage_is_default(use_profile):
+    use_profile("max_per_run: lots")
+    assert ss.max_per_run() == 150
+
+
+def test_max_per_run_nonpositive_is_default(use_profile):
+    use_profile("max_per_run: 0")
+    assert ss.max_per_run() == 150
+
+
+def test_volume_html_comment_examples_ignored(use_profile):
+    use_profile(
+        "<!-- example: scoring_model: opus\nmax_per_run: 999 -->\n"
+        "scoring_model: sonnet\nmax_per_run: 150"
+    )
+    assert ss.scoring_model() == "sonnet"
+    assert ss.max_per_run() == 150
+
+
+def test_missing_profile_file_falls_back_to_defaults(monkeypatch):
+    monkeypatch.setenv("USER_PROFILE_PATH", "/nonexistent/does_not_exist.md")
+    prompts.clear_profile_cache()
+    try:
+        assert ss.scoring_model() == "sonnet"
+        assert ss.max_per_run() == 150
+    finally:
+        prompts.clear_profile_cache()
+
+
+# ---------------------------------------------------------------------------
+# Per-run cap: cuts the list + honest "Scoring X of Y" message
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def sqlite_dal(tmp_path, monkeypatch):
+    """Fresh SQLite-backed DAL on an isolated temp DB (no Supabase)."""
+    db_file = tmp_path / "jobsearch.db"
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
+    monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
+
+    for mod in ("database_supabase", "config", "company_registry", "db_conn", "db_backend"):
+        sys.modules.pop(mod, None)
+
+    import db_backend
+
+    importlib.reload(db_backend)
+    assert db_backend.IS_SQLITE
+
+    import database_supabase as db
+
+    yield db
+    db.close_conn()
+
+
+def _seed_vacancies(db, n: int) -> None:
+    """Seed ``n`` unscored vacancies under one active company (distinct titles
+    so each becomes its own (org, title) role)."""
+    db.ensure_company("Acme Robotics", status="active")
+    db.save_vacancies(
+        "Acme Robotics",
+        "A",
+        [
+            {
+                "title": f"Programme Manager {i}",
+                "snippet": "Lead programmes.",
+                "full_description": "Lead our global programme portfolio. " * 8,
+                "location": "Berlin, Germany",
+                "url": f"https://acme.example/job/{i}",
+            }
+            for i in range(n)
+        ],
+    )
+    db.get_conn().commit()
+
+
+def test_load_and_dedup_reports_available_and_truncates(sqlite_dal):
+    _seed_vacancies(sqlite_dal, 5)
+    import score_vacancies
+
+    importlib.reload(score_vacancies)
+
+    roles, _fmap, stats = score_vacancies._load_and_dedup(limit=2)
+    assert stats["roles_available"] == 5
+    assert len(roles) == 2
+
+    roles_all, _f, stats_all = score_vacancies._load_and_dedup(limit=None)
+    assert stats_all["roles_available"] == 5
+    assert len(roles_all) == 5
+
+
+def test_cmd_local_default_cap_cuts_list_and_message_honest(sqlite_dal, monkeypatch, capsys):
+    """No --limit → the profile cap truncates the batch and the stderr line
+    honestly says 'Scoring 2 of 5' plus a deferral note."""
+    _seed_vacancies(sqlite_dal, 5)
+
+    import scoring_settings
+
+    monkeypatch.setattr(scoring_settings, "max_per_run", lambda: 2)
+    monkeypatch.setattr(scoring_settings, "scoring_model", lambda: "sonnet")
+
+    import score_vacancies
+
+    importlib.reload(score_vacancies)
+
+    args = types.SimpleNamespace(
+        limit=None, force=False, include_passed=False, no_candidates=False, offset=0
+    )
+    score_vacancies.cmd_local(args)
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert len(payload) == 2  # cap cut 5 → 2 prepared payloads
+    assert "Scoring 2 of 5" in captured.err
+    assert "Per-run cap reached (2)" in captured.err
+    assert "Scoring model: sonnet" in captured.err
+
+
+def test_cmd_local_explicit_limit_skips_cap_note(sqlite_dal, monkeypatch, capsys):
+    """An explicit --limit wins over the cap and prints no cap-reached note."""
+    _seed_vacancies(sqlite_dal, 5)
+
+    import scoring_settings
+
+    monkeypatch.setattr(scoring_settings, "max_per_run", lambda: 2)
+    monkeypatch.setattr(scoring_settings, "scoring_model", lambda: "opus")
+
+    import score_vacancies
+
+    importlib.reload(score_vacancies)
+
+    args = types.SimpleNamespace(
+        limit=3, force=False, include_passed=False, no_candidates=False, offset=0
+    )
+    score_vacancies.cmd_local(args)
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert len(payload) == 3
+    assert "Scoring 3 of 5" in captured.err
+    assert "Per-run cap reached" not in captured.err
+    assert "Scoring model: opus" in captured.err

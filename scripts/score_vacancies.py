@@ -247,6 +247,9 @@ def _load_and_dedup(
         roles.append((key, rep, members))
 
     roles = roles[offset:]
+    # Count schedulable roles (post-filter, post-offset) BEFORE the cap so the
+    # caller can print an honest "scored X of Y" line.
+    stats["roles_available"] = len(roles)
     if limit:
         roles = roles[:limit]
 
@@ -316,23 +319,46 @@ def _make_score_data(result: dict, rep: dict) -> dict:
 
 def cmd_local(args):
     """Output JSON to stdout for subagent scoring."""
+    from scoring_settings import max_per_run, scoring_model
+
     _real_stdout = sys.stdout
     sys.stdout = sys.stderr
+
+    # An explicit --limit wins; otherwise the per-run spike-day cap applies so a
+    # burst day (hundreds of new roles at once) can't silently burn the plan.
+    cap = args.limit if args.limit is not None else max_per_run()
 
     roles, _fitness_map, stats = _load_and_dedup(
         force=args.force,
         include_passed=args.include_passed,
         include_candidates=not args.no_candidates,
-        limit=args.limit,
+        limit=cap,
         offset=args.offset,
     )
+
+    available = stats.get("roles_available", len(roles))
 
     if not roles:
         sys.stdout = _real_stdout
         json.dump([], _real_stdout, ensure_ascii=False)
         return
 
-    print(f"Preparing {len(roles)} roles for subagent scoring", file=sys.stderr)
+    # Honest one-liner: which model will score, and X of Y this run.
+    print(
+        f"Scoring model: {scoring_model()} "
+        f"(set '[## VOLUME] scoring_model' in your profile to change).",
+        file=sys.stderr,
+    )
+    print(
+        f"Scoring {len(roles)} of {available} new vacancies for subagent scoring", file=sys.stderr
+    )
+    if len(roles) < available and args.limit is None:
+        deferred = available - len(roles)
+        print(
+            f"  Per-run cap reached ({cap}): {deferred} more will be offered next run. "
+            f"Raise '[## VOLUME] max_per_run' or pass --limit to score more now.",
+            file=sys.stderr,
+        )
 
     output = []
     for _key, rep, members in roles:

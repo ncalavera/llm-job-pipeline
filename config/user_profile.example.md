@@ -127,6 +127,26 @@ onsite_penalty: 0
 exclude_countries: (none)
 exclude_title_keywords: (none)
 
+## VOLUME
+
+<!--
+Cost/volume knobs tied to YOUR plan tier. The scoring model is the main cost
+dial; the per-run cap is a spike-day safety net.
+
+- scoring_model: which model tier scores each vacancy — haiku | sonnet | opus.
+  Scoring is one LLM request per vacancy and runs inside your coding-agent plan,
+  so match the model to your plan: a budget plan (~$20) → sonnet; a bigger plan
+  (~$100-200) → opus. Empty/omitted → sonnet (the cheap default).
+- max_per_run: the most vacancies (and candidate companies) to score in one run
+  when you don't pass --limit. A quiet day scores 20-30; this cap keeps a burst
+  day (hundreds of new roles) from silently draining your plan — the overflow is
+  offered on the next run, and the run prints "scored X of Y". Empty/omitted or a
+  non-positive value → 150.
+-->
+
+scoring_model: sonnet
+max_per_run: 150
+
 ## SHORT_SUMMARY_INSTRUCTION
 
 A 4–6 sentence factual summary in **English** for the dashboard card.
