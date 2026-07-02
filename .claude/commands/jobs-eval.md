@@ -113,3 +113,6 @@ frozen data), pass `--version N` to `emit` / `measure` / `stats`.
   says so and exits — build history with a few `/jobs-new` runs first.
 - Never run this from a throwaway checkout expecting the set to persist —
   `evals/` lives in your working copy.
+- If you override `GOLDEN_SET_DIR`, keep it pointed OUTSIDE the repo or at a
+  gitignored path: the commit guards only block the default `evals/` location,
+  and your golden set contains real vacancy data that must never be committed.
