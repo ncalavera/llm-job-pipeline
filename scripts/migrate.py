@@ -254,8 +254,6 @@ class _Sqlite:
             try:
                 self.conn.executescript(sql)  # not transactional — covered by restore()
             except sqlite3.OperationalError as e:
-                if "duplicate column name" not in str(e):
-                    raise
                 # SQLite has no ADD COLUMN IF NOT EXISTS (unlike the guarded
                 # Postgres siblings), and the frozen baseline schema already
                 # declares a couple of columns that a later migration also
@@ -264,6 +262,17 @@ class _Sqlite:
                 # inconsistency. On a fresh install the column is already
                 # there via the baseline, so the ADD is a no-op: treat the
                 # migration as applied instead of aborting the whole run.
+                #
+                # This guard is scoped to those two known versions on purpose.
+                # A future multi-statement migration could hit "duplicate
+                # column name" on its *second* statement after a *first*
+                # statement (e.g. CREATE TABLE) already ran — swallowing that
+                # would mark the migration applied while only half of it took
+                # effect. New migrations must be idempotent on their own
+                # terms (e.g. ``ADD COLUMN IF NOT EXISTS`` as in 0006) rather
+                # than relying on this catch.
+                if version not in ("0003", "0005") or "duplicate column name" not in str(e):
+                    raise
                 print(f"    (column already present — treating {version} as applied: {e})")
         self.conn.execute("INSERT INTO schema_migrations(version) VALUES (?)", (version,))
         self.conn.commit()
