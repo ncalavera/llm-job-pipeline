@@ -19,7 +19,8 @@ pytestmark = pytest.mark.parity
 # Tables both dialects ship (dashboard_snapshot / company_evidence are
 # Postgres-only by design -- full mode's live-dashboard read path and
 # evidence store, never touched by SQLite/simple mode; not compared here).
-SHARED_TABLES = ("company", "vacancy", "archived_hash", "board")
+# ``application`` (migration 0010) ships as a dialect pair, so it IS compared.
+SHARED_TABLES = ("company", "vacancy", "archived_hash", "board", "application")
 
 
 # ---------------------------------------------------------------------------

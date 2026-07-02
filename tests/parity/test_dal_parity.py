@@ -129,6 +129,59 @@ def test_save_vacancies_merges_second_location_into_same_role(backend):
 
 
 # ---------------------------------------------------------------------------
+# Application entity -- create / idempotent-per-vacancy / status move
+# must behave identically on SQLite and Postgres, including artifact-JSON merge.
+# ---------------------------------------------------------------------------
+
+
+def test_application_lifecycle_parity(backend):
+    dal = backend
+    import applications
+
+    cid = dal.ensure_company("Northwind Aid Trust", status="active")
+    _commit(dal)
+    dal.save_vacancies("Northwind Aid Trust", "B", [_job("Programme Officer")])
+    _commit(dal)
+    vid = _by_title(dal, "Programme Officer")
+
+    app_id = applications.record_application(
+        cid, vid, channel="site", artifacts={"cv_version": "v1.pdf"}
+    )
+    # Idempotent per vacancy: a second record UPDATES the same row and MERGES
+    # artifacts -- identical on both backends despite JSONB vs JSON-text storage.
+    again = applications.record_application(
+        cid, vid, status="interview", artifacts={"cover_letter_path": "cl.md"}
+    )
+    assert app_id == again
+    assert len(applications.list_for_company(cid)) == 1
+
+    app = applications.get_for_vacancy(vid)
+    assert app["status"] == "interview"
+    assert app["artifacts"] == {"cv_version": "v1.pdf", "cover_letter_path": "cl.md"}
+
+    assert applications.set_status(app_id, "offer")
+    assert applications.get(app_id)["status"] == "offer"
+
+
+def test_company_evidence_research_write_parity(backend):
+    """save_company_evidence lands research in the same table the WANT scorer
+    reads, idempotent by (company_id, source, url), on both backends."""
+    dal = backend
+    cid = dal.ensure_company("Northwind Aid Trust", status="active")
+    _commit(dal)
+
+    dal.save_company_evidence(
+        cid, "manual_url", url="https://example.test/impact", content="first"
+    )
+    dal.save_company_evidence(
+        cid, "manual_url", url="https://example.test/impact", content="second"
+    )
+    rows = dal.load_company_evidence_summary().get(str(cid), [])
+    assert len(rows) == 1
+    assert rows[0]["source"] == "manual_url"
+
+
+# ---------------------------------------------------------------------------
 # 2. Company status
 # ---------------------------------------------------------------------------
 

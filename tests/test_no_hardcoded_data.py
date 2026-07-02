@@ -572,3 +572,55 @@ def test_no_owner_infra_or_branding_traces():
     _run_private_check(
         "owner_infra", _owner_trace_files(), "Owner infra / branding / shell / locale trace"
     )
+
+
+# ---------------------------------------------------------------------------
+# 10. Private artifact zone. Application artifacts (CV versions, cover
+# letters, interview answers, research links) and the personal case bank are
+# PRIVATE data: they live ONLY in the gitignored zone (config.PRIVATE_DIR) and
+# the database, never in public code or on the public dashboard. Two generic
+# guards (no private tokens — they describe shapes that must never appear in ANY
+# public fork) protect that boundary as the new surfaces land:
+#
+#   (a) No absolute personal filesystem path baked into code. The artifact/case
+#       -bank location MUST be a config key (JOBSEARCH_PRIVATE_DIR), never a
+#       hardcoded /Users/<name>/ or /home/<name>/ path — that would both leak the
+#       owner and break a clean public setup.
+#   (b) The default private zone MUST be gitignored, so an artifact or case-bank
+#       file can never be committed.
+# ---------------------------------------------------------------------------
+
+# /Users/<name>/ or /home/<name>/ — a personal home directory welded into a file.
+_ABS_HOME_PATH = re.compile(r"/(?:Users|home)/[A-Za-z0-9._-]+/")
+
+
+def test_no_absolute_personal_paths():
+    hits = _scan(_owner_trace_files(), _ABS_HOME_PATH)
+    assert not hits, (
+        "An absolute personal filesystem path (/Users/<name>/ or /home/<name>/) "
+        "is baked into a public file — the private artifact zone / case bank must "
+        "be a config key (JOBSEARCH_PRIVATE_DIR), never a hardcoded personal "
+        "path:\n" + "\n".join(hits)
+    )
+
+
+def test_private_artifact_zone_is_gitignored():
+    """The default private zone (config.PRIVATE_DIR = ``private/``) must be
+    gitignored, and the case-bank / application-artifact dirs must sit inside it,
+    so nothing personal can ever enter git."""
+    gitignore = REPO / ".gitignore"
+    ignored = {ln.strip() for ln in gitignore.read_text(encoding="utf-8").splitlines()}
+    assert "private/" in ignored, (
+        "the default private artifact zone must be gitignored (add `private/` to "
+        ".gitignore) so application artifacts + the case bank never enter git"
+    )
+
+    import sys
+
+    if str(SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS))
+    import config
+
+    # The case bank and application artifacts live INSIDE the private zone.
+    assert config.CASE_BANK_DIR.parent == config.PRIVATE_DIR
+    assert config.APPLICATION_ARTIFACTS_DIR.parent == config.PRIVATE_DIR
