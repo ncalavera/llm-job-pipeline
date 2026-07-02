@@ -492,6 +492,16 @@ class _SqliteCursor:
     def close(self):
         self._cur.close()
 
+    # psycopg2 cursors are context managers (``with conn.cursor() as cur:``) that
+    # close on exit WITHOUT committing. Mirror that so DAL code written against
+    # psycopg2 (e.g. collect_company_evidence) runs unchanged on SQLite.
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
+
     def __iter__(self):
         for r in self._cur:
             yield self._row(r)
