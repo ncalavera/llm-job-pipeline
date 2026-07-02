@@ -260,12 +260,25 @@ def last_reviewed_detail() -> dict | None:
 
 
 def word_matches_title(word: str, title: str) -> bool:
-    """Whole-word (with optional trailing plural 's'), case-insensitive — the
-    same shape as the title blacklist matcher, so the backtest predicts exactly
-    what adding the word to the filter would kill."""
+    """Would the LIVE title filter (scripts/filters.py) kill this title if
+    ``word`` were added to ``exclude_title_keywords``?
+
+    Reuses filters.build_title_blacklist_pattern — the exact function that
+    compiles the real ``_TITLE_BLACKLIST_PATTERN`` — instead of a hand-rolled
+    regex, so the backtest cannot silently drift from what the live filter
+    actually does (e.g. its "es"-or-"s" plural handling: "coach" also matches
+    "Coaches").
+
+    Scope: this models ONLY the title-keyword filter in scripts/filters.py.
+    It does NOT model scripts/fetchers/parsing.py::_blacklist_filter (used by
+    board fetchers), which matches the same GLOBAL_BLACKLIST words but with a
+    plain ``\\bword\\b`` — no plural handling — a different rule set.
+    """
     if not word or not title:
         return False
-    pat = re.compile(r"\b" + re.escape(word.strip().lower()) + r"(?:s)?\b", re.IGNORECASE)
+    from filters import build_title_blacklist_pattern
+
+    pat = build_title_blacklist_pattern([word.strip().lower()])
     return bool(pat.search(title))
 
 
@@ -629,6 +642,24 @@ def _refresh_config():
         pass
 
 
+def _atomic_write_profile(path: Path, new_text: str, previous_text: str) -> None:
+    """Snapshot the pre-edit profile to a sibling ``.bak`` then atomically
+    replace the live file — tmp file in the same directory + os.replace, the
+    project's existing idiom (see run_daily.py's ``_save_state``,
+    dedup_sweep.py's ``_archive_losers``). ``config/user_profile.md`` is
+    gitignored and un-versioned, so this is its only safety net.
+
+    If ``os.replace`` raises (e.g. a crash mid-write), the live file at
+    ``path`` was never touched — only the tmp file — so the original content
+    survives.
+    """
+    backup = path.with_name(path.name + ".bak")
+    backup.write_text(previous_text, encoding="utf-8")
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(new_text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def apply_add_filter_word(word: str) -> dict:
     """Add a title keyword to the hard filter (approved 'add word W'). Logged."""
     word = word.strip().lower()
@@ -637,7 +668,7 @@ def apply_add_filter_word(word: str) -> dict:
     new_text, new_list = _edit_title_keyword_line(
         text, lambda lst: lst if word in lst else lst + [word]
     )
-    path.write_text(new_text, encoding="utf-8")
+    _atomic_write_profile(path, new_text, text)
     _refresh_config()
     record_applied("add_filter_word", {"word": word, "result_list": new_list})
     return {"word": word, "filters_now": new_list}
@@ -649,7 +680,7 @@ def apply_remove_filter_word(word: str) -> dict:
     path = _profile_path()
     text = path.read_text(encoding="utf-8")
     new_text, new_list = _edit_title_keyword_line(text, lambda lst: [w for w in lst if w != word])
-    path.write_text(new_text, encoding="utf-8")
+    _atomic_write_profile(path, new_text, text)
     _refresh_config()
     record_applied("weaken_filter_word", {"word": word, "result_list": new_list})
     return {"word": word, "filters_now": new_list}
@@ -660,12 +691,12 @@ def apply_factor_move(factor_text: str, keyword: str) -> dict:
     the keyword to the hard filter. Both edits, then log. Never called without an
     explicit user yes."""
     path = _profile_path()
-    text = path.read_text(encoding="utf-8")
-    text, removed = _remove_penalty_bullet(text, factor_text)
+    original = path.read_text(encoding="utf-8")
+    text, removed = _remove_penalty_bullet(original, factor_text)
     new_text, new_list = _edit_title_keyword_line(
         text, lambda lst: lst if keyword.strip().lower() in lst else lst + [keyword.strip().lower()]
     )
-    path.write_text(new_text, encoding="utf-8")
+    _atomic_write_profile(path, new_text, original)
     _refresh_config()
     record_applied(
         "move_factor",
@@ -692,23 +723,28 @@ def apply_disable_board(board: str) -> dict:
 
 # ---------------------------------------------------------------------------
 # Scoring-agreement adapter — the ONE integration point for the golden-set eval
-# harness (built as a separate, parallel piece of work).
-#
-# That harness OWNS the agreement computation. This module never computes its own
-# number; it reads the harness's number via this small, clearly-marked seam and
-# falls back to "not yet measured" until the harness lands. To wire it up, the
-# harness should EITHER:
-#   * expose a module ``golden_eval`` with ``scoring_agreement_pct() -> float``
-#     (0-100), OR
-#   * set the env var LEARNING_AGREEMENT_CMD to a shell command that prints the
-#     percentage on stdout.
-# Nothing else in this file needs to change.
+# harness (scripts/golden_set.py). The gate stays zero-LLM: this module never
+# computes its own agreement number, it reads the LAST measurement the harness
+# persisted (``python3 scripts/golden_set.py measure`` writes a small summary
+# JSON next to the golden set — see golden_set.write_summary /
+# scoring_agreement_summary) via this small, clearly-marked seam, and falls
+# back to "not yet measured" until you run it at least once. A provider can
+# wire in by exposing a module with EITHER:
+#   * ``scoring_agreement_summary() -> dict | None`` — {agreement_pct,
+#     measured_at, ...}, preferred (carries the measured-at date), OR
+#   * ``scoring_agreement_pct() -> float | None`` (0-100), no timestamp.
+# The env var LEARNING_AGREEMENT_CMD (a shell command printing the percentage
+# on stdout) remains an escape hatch that bypasses both.
 # ---------------------------------------------------------------------------
 
 _AGREEMENT_PROVIDERS = ("golden_eval", "golden_set", "score_eval")
 
 
 def _measure_agreement():
+    """Returns (value, source, measured_at). ``value`` is a 0-100 percentage or
+    None; ``measured_at`` is an ISO timestamp when the provider carries one
+    (the golden-set summary does; the LEARNING_AGREEMENT_CMD escape hatch does
+    not)."""
     cmd = os.environ.get("LEARNING_AGREEMENT_CMD")
     if cmd:
         import subprocess
@@ -719,28 +755,39 @@ def _measure_agreement():
             ).stdout
             m = re.search(r"-?\d+(?:\.\d+)?", out)
             if m:
-                return float(m.group(0)), f"cmd:{cmd.split()[0]}"
+                return float(m.group(0)), f"cmd:{cmd.split()[0]}", None
         except Exception:
-            return None, None
+            return None, None, None
     for mod_name in _AGREEMENT_PROVIDERS:
         try:
             mod = __import__(mod_name)
-            fn = getattr(mod, "scoring_agreement_pct", None)
-            if callable(fn):
-                val = fn()
-                if val is not None:
-                    return float(val), mod_name
         except Exception:
             continue
-    return None, None
+        summary_fn = getattr(mod, "scoring_agreement_summary", None)
+        if callable(summary_fn):
+            try:
+                summary = summary_fn()
+            except Exception:
+                summary = None
+            if summary and summary.get("agreement_pct") is not None:
+                return float(summary["agreement_pct"]), mod_name, summary.get("measured_at")
+        fn = getattr(mod, "scoring_agreement_pct", None)
+        if callable(fn):
+            try:
+                val = fn()
+            except Exception:
+                val = None
+            if val is not None:
+                return float(val), mod_name, None
+    return None, None, None
 
 
 def scoring_agreement() -> dict:
     """Scoring agreement with the user's verdicts, as a number, tracked cycle to
     cycle. Delegates measurement to the golden-set eval harness (see the seam
     above) and reads the PREVIOUS cycle's number from the ledger for a trend.
-    Graceful fallback when the harness is not available yet."""
-    value, source = _measure_agreement()
+    Graceful fallback when it has never been measured."""
+    value, source, measured_at = _measure_agreement()
     previous = None
     try:
         prev = last_reviewed_detail()
@@ -750,13 +797,14 @@ def scoring_agreement() -> dict:
         previous = None
     return {
         "value": value,
+        "measured_at": measured_at,
         "previous": previous,
         "measured": value is not None,
         "source": source,
         "note": None
         if value is not None
-        else "not yet measured — the golden-set eval harness is not wired in "
-        "(review still works; the agreement number will fill in once it lands)",
+        else "not yet measured — run /jobs-eval to build a golden set and score it "
+        "(review still works; the number fills in once you measure)",
     }
 
 

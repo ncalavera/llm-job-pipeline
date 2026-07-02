@@ -546,11 +546,14 @@ def _learning_gate_text(review: dict) -> str:
     fm = review["proposals"]["factor_moves"]
     rev = review["revision"]
     agr = review["agreement"]
-    agr_line = (
-        f"{agr['value']:.0f}% (was {agr['previous']})"
-        if agr.get("measured")
-        else f"not yet measured ({agr.get('note', '').split(' — ')[0]})"
-    )
+    if agr.get("measured"):
+        agr_line = f"{agr['value']:.0f}%"
+        if agr.get("measured_at"):
+            agr_line += f" (measured {agr['measured_at']})"
+        if agr.get("previous") is not None:
+            agr_line += f", was {agr['previous']}"
+    else:
+        agr_line = "not yet measured — run /jobs-eval"
     return (
         f"LEARNING REVIEW — verdicts since your last review teach the filters,\n"
         f"scoring and boards. Nothing changes without your explicit yes; every\n"
@@ -704,6 +707,19 @@ def _h_learning_review(state, entry, opts):
                 "skip",
                 "learning review skipped — learning_log table missing; run scripts/migrate.py "
                 "to enable verdict-driven corrections",
+            )
+        if learning.cursor_ts() is None:
+            # Cold start: the ledger has never recorded a completed review — a
+            # fresh deploy of the learning cycle over an EXISTING verdict
+            # back-catalog (this is not the empty-DB first_run case above,
+            # which is handled separately). Dumping the whole history as a
+            # review the first time it runs would be a wall of noise, so seed
+            # the rollover cursor silently and start counting from adoption.
+            learning.mark_reviewed(agreement=None, applied_count=0, revision_shown=False)
+            return (
+                "skip",
+                "learning cycle just adopted — cursor seeded silently; counting verdicts "
+                "from now on",
             )
         review = learning.build_review()
     except Exception as exc:

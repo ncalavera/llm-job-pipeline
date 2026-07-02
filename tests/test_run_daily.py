@@ -337,7 +337,7 @@ def test_onboarding_skipped_when_companies_exist(rd, monkeypatch, tmp_path):
 import types  # noqa: E402
 
 
-def _stub_learning(monkeypatch, *, table_ready=True, has_content=True):
+def _stub_learning(monkeypatch, *, table_ready=True, has_content=True, cursor_ts="2026-01-01"):
     review = {
         "ready": True,
         "has_content": has_content,
@@ -372,6 +372,10 @@ def _stub_learning(monkeypatch, *, table_ready=True, has_content=True):
     stub = types.ModuleType("learning")
     stub.table_ready = lambda: table_ready
     stub.build_review = lambda: review
+    # cursor_ts=None models the cold-start case (never reviewed); mark_reviewed
+    # is the seeding call the driver makes in that case — a no-op spy here.
+    stub.cursor_ts = lambda: cursor_ts
+    stub.mark_reviewed = lambda **kwargs: None
     monkeypatch.setitem(sys.modules, "learning", stub)
     return review
 
@@ -420,6 +424,24 @@ def test_learning_review_skips_when_ledger_table_missing(rd, monkeypatch):
     assert "migrate" in note
 
 
+def test_learning_review_seeds_cursor_silently_on_cold_start(rd, monkeypatch):
+    """cursor_ts() is None — never reviewed — but this is NOT the empty-DB
+    first_run case (first_run is False here): it's a fresh deploy of the
+    learning cycle over an existing verdict back-catalog. The driver must not
+    dump that whole history as a gate; it seeds the rollover cursor silently
+    (via mark_reviewed) and skips, so the loop counts from adoption."""
+    _stub_learning(monkeypatch, has_content=True, cursor_ts=None)
+    seeded = []
+    monkeypatch.setattr(sys.modules["learning"], "mark_reviewed", lambda **kw: seeded.append(kw))
+
+    state = _live_state(rd)
+    kind, note = rd._h_learning_review(state, rd._stage(state, "learning_review"), rd.Opts())
+
+    assert kind == "skip"
+    assert len(seeded) == 1  # the cursor was seeded exactly once
+    assert seeded[0]["applied_count"] == 0
+
+
 def test_learning_review_advances_on_resume_so_skip_rolls_over(rd, monkeypatch):
     """On resume the stage is already 'emitted': it advances WITHOUT touching the
     rollover cursor, so a skipped review's verdicts are still undiscussed next
@@ -431,3 +453,33 @@ def test_learning_review_advances_on_resume_so_skip_rolls_over(rd, monkeypatch):
     kind, note = rd._h_learning_review(state, entry, rd.Opts())
     assert kind == "advance"
     assert "roll over" in note
+
+
+def _minimal_review(agreement):
+    return {
+        "verdicts_since_last_review": 1,
+        "garbage_count": 0,
+        "agreement": agreement,
+        "proposals": {"filter_words": [], "factor_moves": []},
+        "revision": [],
+    }
+
+
+def test_learning_gate_text_shows_the_number_with_its_measured_at_date(rd):
+    review = _minimal_review(
+        {
+            "value": 91.0,
+            "measured": True,
+            "measured_at": "2026-07-01T12:00:00+00:00",
+            "previous": None,
+        }
+    )
+    text = rd._learning_gate_text(review)
+    assert "91%" in text
+    assert "2026-07-01T12:00:00+00:00" in text
+
+
+def test_learning_gate_text_points_at_jobs_eval_when_unmeasured(rd):
+    review = _minimal_review({"value": None, "measured": False, "note": "not yet measured"})
+    text = rd._learning_gate_text(review)
+    assert "not yet measured — run /jobs-eval" in text

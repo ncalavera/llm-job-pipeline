@@ -38,6 +38,33 @@ def test_word_matches_title_is_whole_word_with_plural():
     assert not learning.word_matches_title("cas", "Online Casino Host")  # not a substring hit
 
 
+def test_word_matches_title_matches_the_es_plural_like_the_live_filter():
+    # The exact regression scenario: liked title "Head of Coaches", candidate
+    # word "coach" — the live filter (scripts/filters.py) uses (?:es|s)?, so
+    # "coach" DOES match "Coaches". A backtest that missed this ("s"-only
+    # plural) would say CLEAN and let the user approve a word that then kills
+    # the liked role for real.
+    assert learning.word_matches_title("coach", "Head of Coaches")
+    assert learning.word_matches_title("coach", "Senior Coach")
+    assert not learning.word_matches_title("coach", "Coaching Programme")  # not a boundary match
+
+
+def test_backtest_catches_the_es_plural_collision():
+    bt = learning.backtest_filter_word("coach", ["Head of Coaches"], [])
+    assert bt["clean"] is False
+    assert bt["collisions"] == ["Head of Coaches"]
+
+
+def test_word_matches_title_escapes_regex_special_characters():
+    # A user word containing regex metacharacters (".", "&", ...) must be
+    # treated as a LITERAL string, not compiled as a pattern — "." should not
+    # act as "any character", and the word must not crash the compile.
+    assert learning.word_matches_title("a.b", "See a.b standalone")
+    assert not learning.word_matches_title("a.b", "See axb standalone")  # "." != any char
+    assert learning.word_matches_title("m&e", "Head of M&E")
+    assert not learning.word_matches_title("m&e", "Head of Me")  # "&" is literal, not optional
+
+
 def test_backtest_clean_word_has_no_collisions():
     bt = learning.backtest_filter_word("casino", LIKED, HIGH)
     assert bt["clean"] is True
@@ -141,15 +168,54 @@ def test_sample_filter_kills_reads_archives_and_attaches_culprit(tmp_path, monke
 
 def test_measure_agreement_reads_from_the_env_cmd_seam(monkeypatch):
     monkeypatch.setenv("LEARNING_AGREEMENT_CMD", "echo 87.5")
-    val, src = learning._measure_agreement()
+    val, src, measured_at = learning._measure_agreement()
     assert val == 87.5
     assert src and src.startswith("cmd:")
+    assert measured_at is None  # the cmd escape hatch carries no timestamp
 
 
-def test_measure_agreement_falls_back_when_no_provider(monkeypatch):
+def test_measure_agreement_falls_back_when_no_provider(monkeypatch, tmp_path):
     monkeypatch.delenv("LEARNING_AGREEMENT_CMD", raising=False)
-    val, src = learning._measure_agreement()
-    assert val is None and src is None
+    monkeypatch.setenv("GOLDEN_SET_DIR", str(tmp_path / "evals"))  # never measured here
+    val, src, measured_at = learning._measure_agreement()
+    assert val is None and src is None and measured_at is None
+
+
+def test_measure_agreement_wires_the_golden_set_summary_end_to_end(monkeypatch, tmp_path):
+    """golden_set.py's `measure` persists a summary; learning.py's probe
+    (module 'golden_set') must find it and carry both the number and the
+    measured-at date through to the review payload."""
+    import json
+
+    monkeypatch.delenv("LEARNING_AGREEMENT_CMD", raising=False)
+    monkeypatch.setenv("GOLDEN_SET_DIR", str(tmp_path / "evals"))
+
+    import golden_set
+
+    summary_path = golden_set._summary_path()
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        json.dumps(
+            {
+                "agreement_pct": 91.0,
+                "set_size": 12,
+                "set_version": 3,
+                "threshold": 60,
+                "measured_at": "2026-07-01T12:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    val, src, measured_at = learning._measure_agreement()
+    assert val == 91.0
+    assert src == "golden_set"
+    assert measured_at == "2026-07-01T12:00:00+00:00"
+
+    payload = learning.scoring_agreement()
+    assert payload["value"] == 91.0
+    assert payload["measured"] is True
+    assert payload["measured_at"] == "2026-07-01T12:00:00+00:00"
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +236,10 @@ def learn_db(tmp_path, monkeypatch):
     prof.write_text(src, encoding="utf-8")
     monkeypatch.setenv("USER_PROFILE_PATH", str(prof))
     monkeypatch.setenv("LEARNING_ARCHIVE_DIR", str(tmp_path / "archive"))
+    # Isolate the golden-set dir too, so a real evals/golden_set_summary.json
+    # left over from an actual /jobs-eval run on the developer's machine can
+    # never leak an agreement number into these tests.
+    monkeypatch.setenv("GOLDEN_SET_DIR", str(tmp_path / "evals"))
 
     for mod in (
         "database_supabase",
@@ -281,6 +351,36 @@ def test_apply_add_filter_word_edits_profile_and_logs(learn_db):
     assert "casino" in hard_filters.load_hard_filters()["exclude_title_keywords"]
     log = lrn.applied_log()
     assert any(e["kind"] == "add_filter_word" and e["detail"]["word"] == "casino" for e in log)
+
+
+def test_apply_add_filter_word_snapshots_a_backup(learn_db):
+    lrn, prof = learn_db
+    _seed(lrn)
+    original = prof.read_text(encoding="utf-8")
+    lrn.apply_add_filter_word("casino")
+    backup = prof.with_name(prof.name + ".bak")
+    assert backup.exists()
+    assert backup.read_text(encoding="utf-8") == original
+
+
+def test_apply_add_filter_word_crash_before_replace_leaves_original_intact(learn_db, monkeypatch):
+    """Simulated crash between the tmp write and the atomic rename: os.replace
+    raises, so the live profile file must be untouched (only the tmp path was
+    written to)."""
+    lrn, prof = learn_db
+    _seed(lrn)
+    original = prof.read_text(encoding="utf-8")
+
+    def boom(*args, **kwargs):
+        raise OSError("simulated crash before replace")
+
+    monkeypatch.setattr(lrn.os, "replace", boom)
+
+    with pytest.raises(OSError):
+        lrn.apply_add_filter_word("casino")
+
+    assert prof.read_text(encoding="utf-8") == original
+    assert not any(e["kind"] == "add_filter_word" for e in lrn.applied_log())
 
 
 def test_weaken_filter_word_removes_culprit_and_logs(learn_db):

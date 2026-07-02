@@ -18,9 +18,12 @@ the single reader of that declaration. The existing HARD_FILTERS vs
 EXCLUDE_PATTERNS split in the profile is the embryo of this model; ``## NOTES``
 completes it with the display-only strength.
 
-Load-bearing invariant (guarded by a test): a NOTE is never fed to the scorer.
-The scoring prompt is rendered from the profile sections EXCEPT the ones named in
-``SCORER_HIDDEN_SECTIONS`` — otherwise a note would become an implicit penalty.
+Load-bearing invariant (guarded by a test, not a runtime check): a NOTE is
+never fed to the scorer. The scorer templates in scripts/prompts/ simply never
+reference a ``{{NOTES}}`` placeholder — tests/test_factors.py's
+``test_scoring_prompt_never_carries_a_note`` asserts that over EVERY template
+file in the real prompts dir, so a future scorer template that adds one fails
+CI instead of silently turning a display-only note into an implicit penalty.
 """
 
 from __future__ import annotations
@@ -37,12 +40,6 @@ FILTER = "filter"
 PENALTY = "penalty"
 NOTE = "note"
 STRENGTHS = (FILTER, PENALTY, NOTE)
-
-#: Profile sections that must NEVER be substituted into a scorer prompt. A note
-#: that reached the scorer would silently act as a penalty, so ``## NOTES`` is
-#: display-only by construction: prompts.py renders without it, and this set is
-#: the machine-readable statement of that contract (asserted by a test).
-SCORER_HIDDEN_SECTIONS = frozenset({"NOTES"})
 
 # A profile bullet line: "- text" or "* text".
 _BULLET = re.compile(r"^\s*[-*]\s+(.*\S)\s*$")

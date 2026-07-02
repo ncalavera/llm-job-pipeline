@@ -44,23 +44,29 @@ def test_notes_are_not_scorer_visible():
         assert f.is_note == (f.strength == factors.NOTE)
 
 
-def test_notes_section_is_declared_scorer_hidden():
-    assert factors.SCORER_HIDDEN_SECTIONS == frozenset({"NOTES"})
+#: The one profile section that must never reach a scorer template — see
+#: factors.py's module docstring. Hardcoded here rather than read off a
+#: runtime constant: the guarantee IS this test, checked against every real
+#: template file so a newly added one is covered automatically.
+_SCORER_HIDDEN_SECTION = "NOTES"
 
 
 def test_scoring_prompt_never_carries_a_note():
-    """The load-bearing guarantee: rendering the scorer prompt with a NOTES
-    section present must NOT surface any note text (the template references no
-    {{NOTES}} placeholder), so a note can never become an implicit penalty."""
-    from prompts import _render, _load_template
+    """The load-bearing guarantee: rendering EVERY real scorer template (not a
+    hardcoded pair — the whole prompts dir, so a future template is covered
+    too) with a NOTES section present must NOT surface any note text, because
+    none of them reference a {{NOTES}} placeholder. That is what keeps a note
+    from ever becoming an implicit penalty."""
+    from prompts import _PROMPTS_DIR, _render
 
-    for tpl_name in ("vacancy-scoring.md", "company-scoring.md"):
-        template = _load_template(tpl_name)
-        # No hidden section is wired into the prompt as a placeholder.
-        for hidden in factors.SCORER_HIDDEN_SECTIONS:
-            assert "{{" + hidden + "}}" not in template.replace(" ", "")
+    templates = sorted(_PROMPTS_DIR.glob("*.md"))
+    assert templates, "expected at least one scorer template in scripts/prompts/"
+    for tpl_path in templates:
+        template = tpl_path.read_text(encoding="utf-8").strip()
+        placeholder = "{{" + _SCORER_HIDDEN_SECTION + "}}"
+        assert placeholder not in template.replace(" ", ""), tpl_path.name
         rendered = _render(template, _SECTIONS)
-        assert "SENTINEL_NOTE_XYZ" not in rendered
+        assert "SENTINEL_NOTE_XYZ" not in rendered, tpl_path.name
 
 
 def test_empty_profile_declares_nothing():

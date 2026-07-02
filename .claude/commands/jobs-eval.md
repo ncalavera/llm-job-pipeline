@@ -93,6 +93,10 @@ fixes. Turn a recurring pattern into a rule tweak in
 `scripts/prompts/vacancy-scoring.md` or a profile filter, then re-run `measure`
 to confirm the number moved. Nothing self-edits; you make the change.
 
+`measure` also records the result (agreement %, set size/version, threshold,
+measured-at) next to the golden set — the next `/jobs-new` learning review
+reads it and shows your last measured agreement instead of "not yet measured".
+
 ---
 
 ## Freezing a version
