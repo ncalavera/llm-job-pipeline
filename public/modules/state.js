@@ -89,11 +89,14 @@ export const TRIAGE_COLUMNS = [
     compact: true,
   },
   {
-    // Protected roles (status='expiring') + liked roles past their deadline:
-    // visible for an explicit decision instead of being silently passed.
-    key: "expiring",
-    label: "Expiring",
-    color: "var(--coral)",
+    // Roles that fell out of actuality (deadline lapsed or gone from source):
+    // surfaced together for an explicit decision instead of silently passing.
+    // Display-only — 'expired' is not a real DB status, so cards can be dragged
+    // OUT to a decision but never dropped IN (see `derived`).
+    key: "expired",
+    label: "Expired",
+    color: "var(--terracotta)",
+    derived: true,
   },
   {
     key: "to_apply",

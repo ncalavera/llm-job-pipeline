@@ -426,6 +426,11 @@ body::after {
   background: #fef2f2;
 }
 
+.card-deadline--soon {
+  color: var(--amber);
+  background: var(--amber-tint);
+}
+
 .card-deadline--expired {
   color: var(--muted);
   background: var(--surface);
@@ -3525,6 +3530,32 @@ a.pipe-grp-role-title:hover {
   font-size: var(--text-xs);
   color: var(--amber);
   margin-top: 4px;
+}
+/* Triage deadline pill + staleness line — urgency-coloured. */
+.pipe-card-fresh {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pipe-deadline {
+  display: inline-block;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  padding: 1px 8px;
+  border-radius: 9999px;
+}
+.pipe-deadline--expired {
+  color: var(--coral);
+  background: var(--rose-tint);
+}
+.pipe-deadline--soon {
+  color: var(--amber);
+  background: var(--amber-tint);
+}
+.pipe-deadline--active {
+  color: var(--muted);
+  background: var(--surface);
 }
 .pipe-card-note {
   font-size: var(--text-xs);
