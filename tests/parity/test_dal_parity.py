@@ -67,8 +67,11 @@ def test_save_vacancies_merges_renamed_role_on_both_backends(backend):
     (one vacancy), inheriting a user decision instead of resurfacing as unseen
     -- identical on SQLite and Postgres."""
     dal = backend
+    req = "https://example.test/req/geo-pm"  # same req across the rename
     dal.ensure_company("Northwind Aid Trust", status="active")
-    dal.save_vacancies("Northwind Aid Trust", "B", [_job("Product Manager, Geo Expansion")])
+    dal.save_vacancies(
+        "Northwind Aid Trust", "B", [_job("Product Manager, Geo Expansion", url=req)]
+    )
     _commit(dal)
     h = dal.make_vacancy_id("Northwind Aid Trust", "Product Manager, Geo Expansion")
     cur = dal.get_conn().cursor()
@@ -77,7 +80,7 @@ def test_save_vacancies_merges_renamed_role_on_both_backends(backend):
     _commit(dal)
 
     new = dal.save_vacancies(
-        "Northwind Aid Trust", "B", [_job("Senior Product Manager, Geo Expansion")]
+        "Northwind Aid Trust", "B", [_job("Senior Product Manager, Geo Expansion", url=req)]
     )
     _commit(dal)
 
@@ -91,11 +94,12 @@ def test_archive_gone_keeps_renamed_live_role_on_both_backends(backend):
     """A role re-listed under a renamed title is still live -- archive_gone must
     not tombstone it, on either backend."""
     dal = backend
+    req = "https://example.test/req/analyst"  # same req across the rename
     dal.ensure_company("Northwind Aid Trust", status="active")
-    dal.save_vacancies("Northwind Aid Trust", "B", [_job("Data Analyst")])
+    dal.save_vacancies("Northwind Aid Trust", "B", [_job("Data Analyst", url=req)])
     _commit(dal)
 
-    listing = [_job("Senior Data Analyst")]
+    listing = [_job("Senior Data Analyst", url=req)]
     dal.save_vacancies("Northwind Aid Trust", "B", listing)
     _commit(dal)
     archived = dal.archive_gone_vacancies("Northwind Aid Trust", listing)
