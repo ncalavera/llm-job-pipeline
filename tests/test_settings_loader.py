@@ -5,7 +5,6 @@ documented neutral fallback (never crashes); types are correct; and a temp
 defaults.toml drives the loader's output (proving config is data, not code).
 """
 
-import importlib
 import sys
 import textwrap
 from pathlib import Path
@@ -34,6 +33,7 @@ def _point_at(monkeypatch, path: Path):
 # ---------------------------------------------------------------------------
 # Reads the shipped defaults.toml
 # ---------------------------------------------------------------------------
+
 
 def test_loads_shipped_defaults_non_empty():
     data = settings.load_defaults()
@@ -81,6 +81,7 @@ def test_boards_have_empty_blacklist():
 # Robustness — missing file / section / key → documented neutral fallback
 # ---------------------------------------------------------------------------
 
+
 def test_missing_file_falls_back_to_neutral(monkeypatch, tmp_path):
     _point_at(monkeypatch, tmp_path / "does_not_exist.toml")
     assert settings.load_defaults() == {}
@@ -117,9 +118,11 @@ def test_malformed_toml_does_not_crash(monkeypatch, tmp_path):
 # A temp defaults.toml drives the loader (config is data, not code)
 # ---------------------------------------------------------------------------
 
+
 def test_temp_toml_overrides_values(monkeypatch, tmp_path):
     p = tmp_path / "defaults.toml"
-    p.write_text(textwrap.dedent("""
+    p.write_text(
+        textwrap.dedent("""
         [thresholds]
         llm_score_threshold = 42
         tier_s = 90
@@ -132,7 +135,10 @@ def test_temp_toml_overrides_values(monkeypatch, tmp_path):
         name = "My Board"
         url = "https://example.org"
         ttl_days = 9
-    """).strip() + "\n", encoding="utf-8")
+    """).strip()
+        + "\n",
+        encoding="utf-8",
+    )
     _point_at(monkeypatch, p)
 
     assert settings.thresholds()["llm_score_threshold"] == 42

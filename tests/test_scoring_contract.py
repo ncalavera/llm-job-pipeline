@@ -28,20 +28,22 @@ def dal(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
     monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(tmp_path / "jobsearch.db"))
-    for mod in ("database_supabase", "config", "company_registry",
-                "db_conn", "db_backend"):
+    for mod in ("database_supabase", "config", "company_registry", "db_conn", "db_backend"):
         sys.modules.pop(mod, None)
     import db_backend
+
     importlib.reload(db_backend)
     assert db_backend.IS_SQLITE
     import database_supabase as db
+
     yield db
     db.close_conn()
 
 
 def _stub_report(monkeypatch):
     monkeypatch.setitem(
-        sys.modules, "report",
+        sys.modules,
+        "report",
         types.SimpleNamespace(generate_dashboard=lambda *a, **k: None),
     )
 
@@ -65,12 +67,16 @@ def _seed(db, titles):
 
 def _local(monkeypatch):
     import score_vacancies
+
     importlib.reload(score_vacancies)
     buf = io.StringIO()
     monkeypatch.setattr(sys, "stdout", buf)
     args = types.SimpleNamespace(
-        force=False, include_passed=False, no_candidates=False,
-        limit=None, offset=0,
+        force=False,
+        include_passed=False,
+        no_candidates=False,
+        limit=None,
+        offset=0,
     )
     try:
         score_vacancies.cmd_local(args)
@@ -81,6 +87,7 @@ def _local(monkeypatch):
 
 def _save(monkeypatch, payload):
     import score_vacancies
+
     importlib.reload(score_vacancies)
     _stub_report(monkeypatch)
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
@@ -93,6 +100,7 @@ _LONG = "Detailed deterministic summary sentence. " * 8  # > 200 chars
 # ---------------------------------------------------------------------------
 # Direction 1: --local payload shape
 # ---------------------------------------------------------------------------
+
 
 def test_local_payload_uses_real_uuid_member_ids(dal, monkeypatch):
     ids = _seed(dal, ["Operations Lead", "Data Analyst"])
@@ -111,24 +119,30 @@ def test_local_payload_uses_real_uuid_member_ids(dal, monkeypatch):
 # Direction 2: --save persists score + full summary via member_ids
 # ---------------------------------------------------------------------------
 
+
 def test_save_persists_score_and_full_summary(dal, monkeypatch):
     ids = _seed(dal, ["Operations Lead"])
     payload = _local(monkeypatch)
     item = payload[0]
-    _save(monkeypatch, [{
-        "payload_kind": "vacancy",
-        "member_ids": item["member_ids"],
-        "org": item["org"],
-        "title": item["title"],
-        "score": 73,
-        "reasoning": "Strong ops fit.",
-        "short_summary": _LONG,
-        "hard_requirements": ["5y ops"],
-        "tags": ["ops"],
-    }])
+    _save(
+        monkeypatch,
+        [
+            {
+                "payload_kind": "vacancy",
+                "member_ids": item["member_ids"],
+                "org": item["org"],
+                "title": item["title"],
+                "score": 73,
+                "reasoning": "Strong ops fit.",
+                "short_summary": _LONG,
+                "hard_requirements": ["5y ops"],
+                "tags": ["ops"],
+            }
+        ],
+    )
     v = dal.load_vacancies()[ids["Operations Lead"]]
     assert v["llm_score"] == 73
-    assert v["llm_summary"] == _LONG          # FULL summary persisted, not truncated
+    assert v["llm_summary"] == _LONG  # FULL summary persisted, not truncated
     assert v["llm_scored_at"]
     assert v["llm_hard_requirements"] == ["5y ops"]
 
@@ -143,13 +157,20 @@ def test_save_maps_each_member_id(dal, monkeypatch):
     dal.save_vacancies("Globex", "A", [_job("Analyst")])
     dal.get_conn().commit()
     payload = _local(monkeypatch)
-    save = [{
-        "payload_kind": "vacancy",
-        "member_ids": p["member_ids"],
-        "org": p["org"], "title": p["title"],
-        "score": 50, "reasoning": "ok", "short_summary": _LONG,
-        "hard_requirements": [], "tags": [],
-    } for p in payload]
+    save = [
+        {
+            "payload_kind": "vacancy",
+            "member_ids": p["member_ids"],
+            "org": p["org"],
+            "title": p["title"],
+            "score": 50,
+            "reasoning": "ok",
+            "short_summary": _LONG,
+            "hard_requirements": [],
+            "tags": [],
+        }
+        for p in payload
+    ]
     _save(monkeypatch, save)
     for v in dal.load_vacancies().values():
         assert v["llm_score"] == 50
@@ -159,16 +180,24 @@ def test_save_maps_each_member_id(dal, monkeypatch):
 # Graceful rejection of malformed replies
 # ---------------------------------------------------------------------------
 
+
 def test_save_rejects_wrong_payload_kind(dal, monkeypatch, capsys):
     ids = _seed(dal, ["Operations Lead"])
     payload = _local(monkeypatch)
     item = payload[0]
-    _save(monkeypatch, [{
-        "payload_kind": "company",          # wrong kind → skipped
-        "member_ids": item["member_ids"],
-        "org": item["org"], "title": item["title"],
-        "score": 99, "short_summary": _LONG,
-    }])
+    _save(
+        monkeypatch,
+        [
+            {
+                "payload_kind": "company",  # wrong kind → skipped
+                "member_ids": item["member_ids"],
+                "org": item["org"],
+                "title": item["title"],
+                "score": 99,
+                "short_summary": _LONG,
+            }
+        ],
+    )
     # The good row was NOT scored (the bad entry was rejected, not applied).
     assert dal.load_vacancies()[ids["Operations Lead"]]["llm_score"] is None
     assert "wrong payload_kind" in capsys.readouterr().err
@@ -178,26 +207,41 @@ def test_save_rejects_missing_score(dal, monkeypatch, capsys):
     ids = _seed(dal, ["Operations Lead"])
     payload = _local(monkeypatch)
     item = payload[0]
-    _save(monkeypatch, [{
-        "payload_kind": "vacancy",
-        "member_ids": item["member_ids"],
-        "org": item["org"], "title": item["title"],
-        # no "score" and no "score_data"
-        "short_summary": _LONG,
-    }])
+    _save(
+        monkeypatch,
+        [
+            {
+                "payload_kind": "vacancy",
+                "member_ids": item["member_ids"],
+                "org": item["org"],
+                "title": item["title"],
+                # no "score" and no "score_data"
+                "short_summary": _LONG,
+            }
+        ],
+    )
     assert dal.load_vacancies()[ids["Operations Lead"]]["llm_score"] is None
     assert "missing both score_data and a top-level score" in capsys.readouterr().err
 
 
 def test_save_warns_on_unknown_uuid_without_crashing(dal, monkeypatch, capsys):
     _seed(dal, ["Operations Lead"])
-    _save(monkeypatch, [{
-        "payload_kind": "vacancy",
-        "member_ids": ["00000000-0000-0000-0000-000000000000"],  # not in DB
-        "org": "Globex", "title": "Ghost Role",
-        "score": 42, "reasoning": "x", "short_summary": _LONG,
-        "hard_requirements": [], "tags": [],
-    }])
+    _save(
+        monkeypatch,
+        [
+            {
+                "payload_kind": "vacancy",
+                "member_ids": ["00000000-0000-0000-0000-000000000000"],  # not in DB
+                "org": "Globex",
+                "title": "Ghost Role",
+                "score": 42,
+                "reasoning": "x",
+                "short_summary": _LONG,
+                "hard_requirements": [],
+                "tags": [],
+            }
+        ],
+    )
     # No crash; a warning is printed and the good row stays unscored.
     assert "not found in DB" in capsys.readouterr().err
 

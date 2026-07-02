@@ -23,7 +23,9 @@ def build_parser(handlers: dict | None = None) -> argparse.ArgumentParser:
     loading the user profile. ``handlers`` maps each subcommand to its function
     (only needed when actually dispatching; for ``--help`` it may be omitted)."""
     h = handlers or {}
-    parser = argparse.ArgumentParser(prog="vac", description="KISS vacancy triage from the terminal.")
+    parser = argparse.ArgumentParser(
+        prog="vac", description="KISS vacancy triage from the terminal."
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_list = sub.add_parser("list", help="List vacancies with filters.")
@@ -33,8 +35,15 @@ def build_parser(handlers: dict | None = None) -> argparse.ArgumentParser:
     p_list.add_argument("--org", help="Filter by company-name substring.")
     p_list.add_argument("--limit", type=int, help="How many rows to show.")
     p_list.add_argument("--sort", choices=["score", "recent", "company"], default="score")
-    p_list.add_argument("--include-candidates", action="store_true", help="Show vacancies from non-approved companies.")
-    p_list.add_argument("--geo", help="Geo buckets, comma-separated: uk,germany,europe,us,cis,other,unknown. Shows vacancies with at least one location in the chosen buckets.")
+    p_list.add_argument(
+        "--include-candidates",
+        action="store_true",
+        help="Show vacancies from non-approved companies.",
+    )
+    p_list.add_argument(
+        "--geo",
+        help="Geo buckets, comma-separated: uk,germany,europe,us,cis,other,unknown. Shows vacancies with at least one location in the chosen buckets.",
+    )
     if "list" in h:
         p_list.set_defaults(func=h["list"])
 
@@ -66,6 +75,7 @@ def build_parser(handlers: dict | None = None) -> argparse.ArgumentParser:
 
 # Print help and exit BEFORE importing anything that touches the DB or profile.
 from cli_help import wants_help
+
 if __name__ == "__main__" and wants_help():
     build_parser().parse_args()
 
@@ -77,9 +87,16 @@ from database_supabase import (
 from geo import geo_bucket
 
 VALID_STATUSES = {
-    "unseen", "liked", "passed",
-    "to_apply", "to_research", "to_network",
-    "skipped", "applied", "expiring", "archived",
+    "unseen",
+    "liked",
+    "passed",
+    "to_apply",
+    "to_research",
+    "to_network",
+    "skipped",
+    "applied",
+    "expiring",
+    "archived",
 }
 
 GEO_BUCKETS = {"uk", "germany", "europe", "us", "cis", "other", "unknown"}
@@ -109,9 +126,13 @@ def _color_score(score) -> str:
 
 def _color_status(status: str) -> str:
     colors = {
-        "liked": "32", "to_apply": "32;1", "applied": "36",
-        "to_research": "34", "to_network": "34",
-        "passed": "90", "skipped": "90",
+        "liked": "32",
+        "to_apply": "32;1",
+        "applied": "36",
+        "to_research": "34",
+        "to_network": "34",
+        "passed": "90",
+        "skipped": "90",
         "unseen": "37",
     }
     return _ansi(colors.get(status, "0"), status or "?")
@@ -167,8 +188,10 @@ def cmd_list(args):
         geo_filter = {g.strip().lower() for g in args.geo.split(",") if g.strip()}
         bad = geo_filter - GEO_BUCKETS
         if bad:
-            print(f"Unknown geo buckets: {', '.join(sorted(bad))}. "
-                  f"Allowed: {', '.join(sorted(GEO_BUCKETS))}")
+            print(
+                f"Unknown geo buckets: {', '.join(sorted(bad))}. "
+                f"Allowed: {', '.join(sorted(GEO_BUCKETS))}"
+            )
             sys.exit(1)
 
     rows = []
@@ -189,7 +212,7 @@ def cmd_list(args):
         rows.append((uid, v))
 
     if args.sort == "score":
-        rows.sort(key=lambda r: (r[1].get("llm_score") or 0), reverse=True)
+        rows.sort(key=lambda r: r[1].get("llm_score") or 0, reverse=True)
     elif args.sort == "recent":
         rows.sort(key=lambda r: r[1].get("created_at") or "", reverse=True)
     elif args.sort == "company":
@@ -205,8 +228,10 @@ def cmd_list(args):
             print("  or /jobs-add to add a company by name.")
         else:
             # Rows exist but every one was filtered out.
-            print("No vacancies match these filters. Loosen --status / --min-score / "
-                  "--tier / --org / --geo, or run /jobs-new for fresh listings.")
+            print(
+                "No vacancies match these filters. Loosen --status / --min-score / "
+                "--tier / --org / --geo, or run /jobs-new for fresh listings."
+            )
         return
 
     width = _term_width()
@@ -223,7 +248,9 @@ def cmd_list(args):
         score_s = _color_score(v.get("llm_score"))
         status_s = _color_status(v.get("status") or "unseen")
         loc = _location_brief(v.get("locations"))[:14]
-        print(f"{_short_id(uid):<8} {company:<{company_w}} {title:<{title_w}} {score_s} {status_s:<19} {loc:<14}")
+        print(
+            f"{_short_id(uid):<8} {company:<{company_w}} {title:<{title_w}} {score_s} {status_s:<19} {loc:<14}"
+        )
 
     print()
     print(f"Total: {len(rows)}")
@@ -243,7 +270,9 @@ def cmd_show(args):
     width = min(_term_width(), 100)
 
     print(_ansi("1", f"{v.get('org', '—')} — {v.get('title', '—')}"))
-    print(f"ID: {uid}   Score: {v.get('llm_score') or '—'}   Status: {_color_status(v.get('status') or 'unseen')}")
+    print(
+        f"ID: {uid}   Score: {v.get('llm_score') or '—'}   Status: {_color_status(v.get('status') or 'unseen')}"
+    )
     if v.get("compensation"):
         print(f"Compensation: {v['compensation']}")
     if v.get("deadline"):
@@ -253,7 +282,11 @@ def cmd_show(args):
         print("Locations:")
         for loc in locs:
             url = loc.get("url") or ""
-            bits = [loc.get("work_mode") or "", loc.get("city") or loc.get("country") or "", loc.get("compensation") or ""]
+            bits = [
+                loc.get("work_mode") or "",
+                loc.get("city") or loc.get("country") or "",
+                loc.get("compensation") or "",
+            ]
             print(f"  - {' / '.join(b for b in bits if b)}  {url}")
     if v.get("llm_summary"):
         print()
@@ -322,9 +355,11 @@ def cmd_open(args):
 
 def cmd_companies(args):
     from database_supabase import get_conn as gc
+
     conn = gc()
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute(
+        """
         SELECT c.canonical_name, c.tier, c.alignment_score, c.status,
                COUNT(v.id) FILTER (WHERE v.status != 'unseen') AS triaged,
                COUNT(v.id) AS total
@@ -334,14 +369,18 @@ def cmd_companies(args):
         GROUP BY c.id, c.canonical_name, c.tier, c.alignment_score, c.status
         ORDER BY c.alignment_score DESC NULLS LAST, c.canonical_name
         LIMIT %s
-    """, (args.status, args.status, args.limit))
+    """,
+        (args.status, args.status, args.limit),
+    )
     rows = cur.fetchall()
     cur.close()
 
     if not rows:
         if args.status:
-            print(f"No companies with status '{args.status}'. "
-                  "Drop --status to see all tracked companies.")
+            print(
+                f"No companies with status '{args.status}'. "
+                "Drop --status to see all tracked companies."
+            )
         else:
             print("No companies tracked yet.")
             print("  Run /jobs-new to discover your first companies,")
@@ -353,19 +392,23 @@ def cmd_companies(args):
     for name, tier, align, status, triaged, total in rows:
         align_s = f"{align:>3}" if align is not None else "  —"
         triaged_s = f"{triaged}/{total}"
-        print(f"{(name or '')[:32]:<32} {tier or '—':<5} {align_s}  {_color_status(status):<19} {triaged_s:>10}")
+        print(
+            f"{(name or '')[:32]:<32} {tier or '—':<5} {align_s}  {_color_status(status):<19} {triaged_s:>10}"
+        )
     print()
     print(f"Total: {len(rows)}")
 
 
 def main():
-    parser = build_parser({
-        "list": cmd_list,
-        "show": cmd_show,
-        "mark": cmd_mark,
-        "open": cmd_open,
-        "companies": cmd_companies,
-    })
+    parser = build_parser(
+        {
+            "list": cmd_list,
+            "show": cmd_show,
+            "mark": cmd_mark,
+            "open": cmd_open,
+            "companies": cmd_companies,
+        }
+    )
     args = parser.parse_args()
     args.func(args)
 

@@ -53,16 +53,13 @@ def _write_profile(tmp_path: Path, hard_filters_block: str) -> Path:
 
 
 def test_parse_none_placeholder_is_empty():
-    parsed = hf._parse_section(
-        "exclude_countries: (none)\nexclude_title_keywords: (none)"
-    )
+    parsed = hf._parse_section("exclude_countries: (none)\nexclude_title_keywords: (none)")
     assert parsed == dict(hf._GEO_DEFAULTS)
 
 
 def test_parse_lists_lowercased_and_trimmed():
     parsed = hf._parse_section(
-        "exclude_countries: United States, Canada\n"
-        "exclude_title_keywords:  Engineer ,Developer "
+        "exclude_countries: United States, Canada\nexclude_title_keywords:  Engineer ,Developer "
     )
     assert parsed["exclude_countries"] == ["united states", "canada"]
     assert parsed["exclude_title_keywords"] == ["engineer", "developer"]
@@ -120,8 +117,12 @@ def test_load_missing_profile_returns_empty(monkeypatch):
 ENG_US_VAC = {
     "title": "Senior Software Engineer",
     "locations": [
-        {"country": "United States", "region": "americas", "city": "New York",
-         "work_mode": "onsite"},
+        {
+            "country": "United States",
+            "region": "americas",
+            "city": "New York",
+            "work_mode": "onsite",
+        },
     ],
 }
 
@@ -139,6 +140,7 @@ def _reload_pipeline(profile_path: Path):
     import config
     import database_supabase
     import filter_vacancies
+
     # Reload in dependency order.
     importlib.reload(prompts)
     importlib.reload(hard_filters)
@@ -146,6 +148,7 @@ def _reload_pipeline(profile_path: Path):
     importlib.reload(database_supabase)
     importlib.reload(filter_vacancies)
     import filters  # reloaded in place by database_supabase's import above
+
     return config, filter_vacancies, filters
 
 
@@ -158,8 +161,7 @@ def restore_default_profile():
         os.environ.pop("USER_PROFILE_PATH", None)
     else:
         os.environ["USER_PROFILE_PATH"] = saved
-    for mod in ("prompts", "hard_filters", "config",
-                "database_supabase", "filter_vacancies"):
+    for mod in ("prompts", "hard_filters", "config", "database_supabase", "filter_vacancies"):
         if mod in sys.modules:
             importlib.reload(sys.modules[mod])
 
@@ -182,8 +184,7 @@ def test_empty_profile_keeps_engineering_and_us(tmp_path, restore_default_profil
 def test_profile_with_filters_drops_engineering_and_us(tmp_path, restore_default_profile):
     profile = _write_profile(
         tmp_path,
-        "exclude_countries: united states, canada\n"
-        "exclude_title_keywords: engineer, developer",
+        "exclude_countries: united states, canada\nexclude_title_keywords: engineer, developer",
     )
     config, filter_vacancies, filters = _reload_pipeline(profile)
 
@@ -195,9 +196,12 @@ def test_profile_with_filters_drops_engineering_and_us(tmp_path, restore_default
     assert filter_vacancies._all_locations_excluded(ENG_US_VAC) is True
     # A non-excluded, non-engineering role still survives.
     assert filters.title_words_blacklisted("Head of Operations") is False
-    assert filter_vacancies._all_locations_excluded({
-        "locations": [{"country": "Germany", "city": "Berlin"}]
-    }) is False
+    assert (
+        filter_vacancies._all_locations_excluded(
+            {"locations": [{"country": "Germany", "city": "Berlin"}]}
+        )
+        is False
+    )
     # Universal junk is still dropped regardless of profile.
     assert filters.title_words_blacklisted("Talent Pool — Future Roles") is True
     # A format role NOT in the profile keywords still survives.
@@ -210,9 +214,7 @@ def test_region_ban_drops_country_but_whitelist_and_remote_survive(
     """ban_regions drops on-site banned-region roles; whitelist + remote survive."""
     profile = _write_profile(
         tmp_path,
-        "ban_regions: south_asia, ex_ussr\n"
-        "keep_countries: georgia\n"
-        "exclude_title_keywords: (none)",
+        "ban_regions: south_asia, ex_ussr\nkeep_countries: georgia\nexclude_title_keywords: (none)",
     )
     _config, filter_vacancies, _filters = _reload_pipeline(profile)
     ax = filter_vacancies._all_locations_excluded
@@ -236,8 +238,10 @@ def test_excluded_country_keeps_multi_country_posting(tmp_path, restore_default_
         "exclude_countries: united states\nexclude_title_keywords: (none)",
     )
     _config, filter_vacancies, _filters = _reload_pipeline(profile)
-    vac = {"locations": [
-        {"country": "United States", "city": "New York"},
-        {"country": "United Kingdom", "city": "London"},
-    ]}
+    vac = {
+        "locations": [
+            {"country": "United States", "city": "New York"},
+            {"country": "United Kingdom", "city": "London"},
+        ]
+    }
     assert filter_vacancies._all_locations_excluded(vac) is False

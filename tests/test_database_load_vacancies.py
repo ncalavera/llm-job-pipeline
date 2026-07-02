@@ -10,8 +10,6 @@ See docs/plans/2026-04-22-001-refactor-dal-egress-narrowing-plan.md for rational
 import inspect
 from unittest.mock import MagicMock
 
-import pytest
-
 
 def _mock_conn():
     """Build a MagicMock that looks like a psycopg2 connection.
@@ -64,13 +62,11 @@ def test_load_vacancies_light_excludes_full_description(monkeypatch):
 
     sql = _captured_sql(cur)
     assert "full_description" not in sql, (
-        "light=True SQL must NOT select full_description. "
-        f"\nSQL was:\n{sql}"
+        f"light=True SQL must NOT select full_description. \nSQL was:\n{sql}"
     )
     # Must be an explicit list — bare v.* would pull everything.
     assert "v.*" not in sql, (
-        "light=True must use an explicit column list, not v.*."
-        f"\nSQL was:\n{sql}"
+        f"light=True must use an explicit column list, not v.*.\nSQL was:\n{sql}"
     )
 
 
@@ -85,14 +81,8 @@ def test_load_vacancies_light_still_includes_locations_and_status(monkeypatch):
     db.load_vacancies(light=True)
 
     sql = _captured_sql(cur)
-    assert "v.locations" in sql, (
-        "light=True must still SELECT v.locations."
-        f"\nSQL was:\n{sql}"
-    )
-    assert "v.status" in sql, (
-        "light=True must still SELECT v.status."
-        f"\nSQL was:\n{sql}"
-    )
+    assert "v.locations" in sql, f"light=True must still SELECT v.locations.\nSQL was:\n{sql}"
+    assert "v.status" in sql, f"light=True must still SELECT v.status.\nSQL was:\n{sql}"
 
 
 def test_load_vacancies_status_exclude_filters_in_sql(monkeypatch):
@@ -146,6 +136,4 @@ def test_load_vacancies_light_default_is_false():
     sig = inspect.signature(db.load_vacancies)
     assert "light" in sig.parameters, "load_vacancies must accept a `light` kwarg"
     default = sig.parameters["light"].default
-    assert default is False, (
-        f"load_vacancies(light=...) default must be False; got {default!r}"
-    )
+    assert default is False, f"load_vacancies(light=...) default must be False; got {default!r}"

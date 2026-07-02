@@ -24,11 +24,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import requests
 
 from config import get_firecrawl_client
-from fetchers import (_fetch_unops_job_detail, _html_to_markdown,
-                      _html_to_text, _LOCAL_UA)
-from quality import (_COOKIE_BANNER_RE, COOKIE_MIN_REMAINDER,
-                     COOKIE_SCORE_POLLUTION, _find_cookie_banner_end,
-                     is_cookie_boilerplate, strip_cookie_boilerplate)
+from fetchers import _fetch_unops_job_detail, _html_to_markdown, _html_to_text, _LOCAL_UA
+from quality import (
+    _COOKIE_BANNER_RE,
+    COOKIE_MIN_REMAINDER,
+    COOKIE_SCORE_POLLUTION,
+    _find_cookie_banner_end,
+    is_cookie_boilerplate,
+    strip_cookie_boilerplate,
+)
 import filters
 import run_status  # progress heartbeat (vacancies/run_status.json)
 from filter_vacancies import _all_locations_excluded
@@ -37,6 +41,7 @@ from filter_vacancies import _all_locations_excluded
 # ---------------------------------------------------------------------------
 # Direct (no-Firecrawl) detail fetchers for server-rendered ATS hosts
 # ---------------------------------------------------------------------------
+
 
 def _fetch_pageup_detail(url: str) -> str:
     """PageUp (jobs.unicef.org) detail pages are server-rendered — plain GET.
@@ -78,15 +83,15 @@ _DIRECT_HOST_FETCHERS = {
 def _extract_text_from_markdown(md: str) -> str:
     """Convert markdown to plain text for vacancy description."""
     # Remove images
-    md = re.sub(r'!\[([^\]]*)\]\([^)]+\)', '', md)
+    md = re.sub(r"!\[([^\]]*)\]\([^)]+\)", "", md)
     # Convert links to text
-    md = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', md)
+    md = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", md)
     # Remove HTML tags
-    md = re.sub(r'<[^>]{1,200}>', '', md)
+    md = re.sub(r"<[^>]{1,200}>", "", md)
     # Remove markdown formatting
-    md = re.sub(r'[*_`#\\]', '', md)
+    md = re.sub(r"[*_`#\\]", "", md)
     # Collapse whitespace
-    md = re.sub(r'\n{3,}', '\n\n', md)
+    md = re.sub(r"\n{3,}", "\n\n", md)
     return md.strip()
 
 
@@ -150,7 +155,6 @@ def main():
             limit = int(sys.argv[i + 1])
 
     from database_supabase import load_vacancies, get_conn
-    from psycopg2.extras import Json
 
     # Scope to active-company, unscored vacancies only: enriching inactive or
     # already-scored rows wastes Firecrawl credits and re-parses vacancies the
@@ -188,7 +192,9 @@ def main():
         blind = blind[:limit]
 
     if skipped_blacklist or skipped_excluded or skipped_no_url:
-        print(f"Pre-filtered: {skipped_blacklist} blacklisted, {skipped_excluded} excluded-country, {skipped_no_url} no URL")
+        print(
+            f"Pre-filtered: {skipped_blacklist} blacklisted, {skipped_excluded} excluded-country, {skipped_no_url} no URL"
+        )
     print(f"Found {len(blind)} blind vacancies with URLs to enrich")
     print(f"Estimated Firecrawl credits: ~{len(blind)} (1 per page)")
 
@@ -211,7 +217,7 @@ def main():
     run_status.begin("enrich", len(blind))
 
     for i, (vid, vac, url) in enumerate(blind, 1):
-        run_status.step(vac['org'], i - 1, enriched=enriched)
+        run_status.step(vac["org"], i - 1, enriched=enriched)
         print(f"  [{i}/{len(blind)}] {vac['org']:25s} {vac['title'][:45]:45s}", end="", flush=True)
 
         text = _fetch_description(client, url)
@@ -219,7 +225,7 @@ def main():
         if text and is_cookie_boilerplate(text):
             # Cookie wall with no real content behind it — page needs JS.
             # Saving it would poison scoring, so treat as a failed scrape.
-            print(f"  -> cookie/consent page, NOT saved (js_required)", flush=True)
+            print("  -> cookie/consent page, NOT saved (js_required)", flush=True)
             cookie_pages += 1
             errors += 1
         else:
@@ -240,7 +246,7 @@ def main():
                 print(f"  -> too short ({len(text)} chars)")
                 errors += 1
             else:
-                print(f"  -> empty")
+                print("  -> empty")
                 errors += 1
 
         # Commit every 10
@@ -296,17 +302,24 @@ def clean_cookie_pages():
             to_strip.append((vid, org, title, desc, end, stripped, rescore))
 
     rescore_n = sum(1 for r in to_strip if r[6]) + len(to_blind)
-    print(f"Found {len(to_strip) + len(to_blind)} descriptions with a leading "
-          f"cookie banner ({len(to_blind)} pure cookie walls, "
-          f"{rescore_n} need rescoring)", flush=True)
+    print(
+        f"Found {len(to_strip) + len(to_blind)} descriptions with a leading "
+        f"cookie banner ({len(to_blind)} pure cookie walls, "
+        f"{rescore_n} need rescoring)",
+        flush=True,
+    )
 
     for vid, org, title, desc, end, stripped, rescore in to_strip:
         action = "strip+rescore" if rescore else "strip        "
-        print(f"  {action} | {vid} | {org[:28]:28s} | {title[:38]:38s} "
-              f"| -{end} chars | {desc[:100]!r}")
+        print(
+            f"  {action} | {vid} | {org[:28]:28s} | {title[:38]:38s} "
+            f"| -{end} chars | {desc[:100]!r}"
+        )
     for vid, org, title, desc, end in to_blind:
-        print(f"  blind+rescore | {vid} | {org[:28]:28s} | {title[:38]:38s} "
-              f"| -{end} chars | {desc[:100]!r}")
+        print(
+            f"  blind+rescore | {vid} | {org[:28]:28s} | {title[:38]:38s} "
+            f"| -{end} chars | {desc[:100]!r}"
+        )
 
     if not apply:
         print("\nDry run — nothing changed. Re-run with --apply to execute.")
@@ -331,8 +344,10 @@ def clean_cookie_pages():
             (vid,),
         )
     conn.commit()
-    print(f"\nDone! Stripped banner from {len(to_strip)} descriptions, "
-          f"reset {len(to_blind)} to blind, {rescore_n} queued for rescoring.")
+    print(
+        f"\nDone! Stripped banner from {len(to_strip)} descriptions, "
+        f"reset {len(to_blind)} to blind, {rescore_n} queued for rescoring."
+    )
 
 
 if __name__ == "__main__":

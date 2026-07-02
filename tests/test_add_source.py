@@ -28,13 +28,14 @@ def dal(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
     monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
-    for mod in ("database_supabase", "config", "company_registry",
-                "db_conn", "db_backend"):
+    for mod in ("database_supabase", "config", "company_registry", "db_conn", "db_backend"):
         sys.modules.pop(mod, None)
     import db_backend
+
     importlib.reload(db_backend)
     assert db_backend.IS_SQLITE
     import database_supabase as db
+
     yield db
     db.close_conn()
 
@@ -53,8 +54,7 @@ def _company_row(db, canonical):
     conn = db.get_conn()
     cur = conn.cursor()
     cur.execute(
-        "SELECT vacancy_count, fetch_status, last_fetched FROM company "
-        "WHERE canonical_name = %s",
+        "SELECT vacancy_count, fetch_status, last_fetched FROM company WHERE canonical_name = %s",
         (canonical,),
     )
     row = cur.fetchone()
@@ -65,6 +65,7 @@ def _company_row(db, canonical):
 # ---------------------------------------------------------------------------
 # Signature-drift guard — the positional contract the runbook relies on.
 # ---------------------------------------------------------------------------
+
 
 def test_merge_vacancies_signature(dal):
     sig = inspect.signature(dal.save_vacancies)
@@ -83,6 +84,7 @@ def test_update_source_tracking_signature(dal):
 # save_vacancies inserts and auto-creates the company (add-source happy path).
 # ---------------------------------------------------------------------------
 
+
 def test_merge_vacancies_inserts_and_creates_company(dal):
     """Calling save_vacancies for a brand-new org (as /jobs-add does) creates
     the company and inserts its vacancies."""
@@ -90,8 +92,7 @@ def test_merge_vacancies_inserts_and_creates_company(dal):
     dal.get_conn().commit()
     assert new == 2
 
-    vacs = dal.load_vacancies(include_candidate_companies=True,
-                              include_inactive_companies=True)
+    vacs = dal.load_vacancies(include_candidate_companies=True, include_inactive_companies=True)
     titles = {v["title"] for v in vacs.values()}
     assert titles == {"Engineer", "Designer"}
     assert all(v["org"] == "NewCo" for v in vacs.values())
@@ -102,6 +103,7 @@ def test_merge_vacancies_inserts_and_creates_company(dal):
 # ---------------------------------------------------------------------------
 # update_source_tracking updates company metadata.
 # ---------------------------------------------------------------------------
+
 
 def test_update_source_tracking_records_counts(dal):
     dal.save_vacancies("NewCo", "B", [_job("Engineer")])
@@ -123,8 +125,9 @@ def test_update_source_tracking_ok_with_zero_becomes_no_data(dal):
     dal.ensure_company("EmptyCo", status="active")
     dal.get_conn().commit()
 
-    dal.update_source_tracking("EmptyCo", "B", "greenhouse", new_count=0,
-                               fetch_status=dal.FETCH_STATUS_OK)
+    dal.update_source_tracking(
+        "EmptyCo", "B", "greenhouse", new_count=0, fetch_status=dal.FETCH_STATUS_OK
+    )
     dal.get_conn().commit()
 
     vacancy_count, fetch_status, _ = _company_row(dal, "EmptyCo")
@@ -139,8 +142,7 @@ def test_add_source_full_round_trip(dal):
     dal.update_source_tracking("NewCo", "A", "lever", new_count=new)
     dal.get_conn().commit()
 
-    vacs = dal.load_vacancies(include_candidate_companies=True,
-                              include_inactive_companies=True)
+    vacs = dal.load_vacancies(include_candidate_companies=True, include_inactive_companies=True)
     assert any(v["title"] == "Head of Ops" for v in vacs.values())
     vacancy_count, fetch_status, _ = _company_row(dal, "NewCo")
     assert vacancy_count == 1

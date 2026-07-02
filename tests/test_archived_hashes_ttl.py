@@ -37,18 +37,20 @@ import pytest
 # Helpers — isolated temp SQLite DB (copied from test_e2e_pipeline.py)
 # ---------------------------------------------------------------------------
 
+
 def _force_sqlite(monkeypatch, db_file):
     """Point the whole chain at a fresh temp SQLite file and reload it."""
     monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
     monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
-    for mod in ("database_supabase", "config", "company_registry",
-                "db_conn", "db_backend"):
+    for mod in ("database_supabase", "config", "company_registry", "db_conn", "db_backend"):
         sys.modules.pop(mod, None)
     import db_backend
+
     importlib.reload(db_backend)
     assert db_backend.IS_SQLITE, "TTL test must run on the SQLite backend"
     import database_supabase as db
+
     return db
 
 
@@ -82,6 +84,7 @@ def dal(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # TTL assertions
 # ---------------------------------------------------------------------------
+
 
 def test_default_ttl_excludes_old_includes_recent(dal):
     """Default 90-day window: h_recent in, h_old out."""

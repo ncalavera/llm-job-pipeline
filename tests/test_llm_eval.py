@@ -22,9 +22,7 @@ import pytest
 
 pytestmark = pytest.mark.eval
 
-_RUN = os.environ.get("RUN_LLM_EVAL") == "1" and bool(
-    os.environ.get("ANTHROPIC_API_KEY")
-)
+_RUN = os.environ.get("RUN_LLM_EVAL") == "1" and bool(os.environ.get("ANTHROPIC_API_KEY"))
 skip_reason = "set RUN_LLM_EVAL=1 and ANTHROPIC_API_KEY to run the live LLM eval"
 
 # Model id kept in one place; override via env for cheaper/newer models.
@@ -34,6 +32,7 @@ EVAL_MODEL = os.environ.get("LLM_EVAL_MODEL", "claude-sonnet-4-5")
 # ---------------------------------------------------------------------------
 # Golden set — generic, placeholder roles. No real org, no real person.
 # ---------------------------------------------------------------------------
+
 
 def _vac(title, description, *, org="Placeholder Org"):
     return {
@@ -79,6 +78,7 @@ def _score_one(vac):
     """
     import sys
     from pathlib import Path
+
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
     from anthropic import Anthropic
@@ -93,9 +93,7 @@ def _score_one(vac):
         system=VACANCY_SCORING_PROMPT,
         messages=[{"role": "user", "content": user_msg}],
     )
-    text = "".join(
-        block.text for block in resp.content if getattr(block, "type", "") == "text"
-    )
+    text = "".join(block.text for block in resp.content if getattr(block, "type", "") == "text")
     parsed = score_vacancies._parse_json(text)
     assert "score" in parsed, f"model returned no score: {text[:300]}"
     return int(parsed["score"])
@@ -105,13 +103,17 @@ def _score_one(vac):
 def use_example_profile():
     """Point the prompt loader at the bundled EXAMPLE profile (generic)."""
     from pathlib import Path
+
     example = Path(__file__).resolve().parent.parent / "config" / "user_profile.example.md"
     assert example.exists(), "example profile must ship for the eval"
     saved = os.environ.get("USER_PROFILE_PATH")
     os.environ["USER_PROFILE_PATH"] = str(example)
-    import importlib, sys
+    import importlib
+    import sys
+
     sys.path.insert(0, str(example.parent.parent / "scripts"))
     import prompts
+
     importlib.reload(prompts)
     yield
     if saved is None:
@@ -133,9 +135,7 @@ def test_match_outranks_mismatch(use_example_profile):
     """A profile-matching role scores higher than a clearly-mismatching one."""
     match = _score_one(MATCH_VAC)
     mismatch = _score_one(MISMATCH_VAC)
-    assert match > mismatch, (
-        f"expected match ({match}) > mismatch ({mismatch})"
-    )
+    assert match > mismatch, f"expected match ({match}) > mismatch ({mismatch})"
 
 
 @pytest.mark.skipif(not _RUN, reason=skip_reason)

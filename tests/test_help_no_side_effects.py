@@ -54,9 +54,7 @@ def test_help_has_no_side_effects(entry):
     )
     combined = proc.stdout + proc.stderr
 
-    assert proc.returncode == 0, (
-        f"{entry} --help exited {proc.returncode}\n{combined}"
-    )
+    assert proc.returncode == 0, f"{entry} --help exited {proc.returncode}\n{combined}"
     assert "usage" in combined.lower(), f"{entry} --help printed no usage:\n{combined}"
 
     for marker in DB_MARKERS:

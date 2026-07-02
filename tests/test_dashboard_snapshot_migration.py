@@ -21,6 +21,7 @@ _SCHEMA = _ROOT / "sql" / "schema.sql"
 def _migrate_module():
     sys.path.insert(0, str(_ROOT / "scripts"))
     import migrate  # noqa: E402
+
     return migrate
 
 

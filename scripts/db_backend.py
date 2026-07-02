@@ -47,6 +47,7 @@ def print_backend_banner(stream=None) -> None:
     the start of fetch / score / filter.
     """
     import sys
+
     out = stream or sys.stderr
     if IS_SQLITE:
         print(f"Backend: local SQLite ({sqlite_db_path()})", file=out, flush=True)
@@ -112,17 +113,33 @@ else:
 
 # Columns stored as JSON TEXT in SQLite, decoded back to list/dict on read so
 # callers see the same shapes psycopg2 returns for JSONB / TEXT[].
-_JSON_COLUMNS = frozenset({
-    "locations", "triage", "about", "mission_fit", "ats_config",
-    "aliases", "llm_tags", "llm_hard_requirements",
-})
+_JSON_COLUMNS = frozenset(
+    {
+        "locations",
+        "triage",
+        "about",
+        "mission_fit",
+        "ats_config",
+        "aliases",
+        "llm_tags",
+        "llm_hard_requirements",
+    }
+)
 
 # Columns psycopg2 returns as datetime/date objects. SQLite stores them as
 # ISO strings; decode them back so callers can use .isoformat(), .days, tzinfo.
-_DATETIME_COLUMNS = frozenset({
-    "created_at", "updated_at", "status_updated_at", "llm_scored_at",
-    "last_fetched", "enriched_at", "digest_sent_at", "archived_at",
-})
+_DATETIME_COLUMNS = frozenset(
+    {
+        "created_at",
+        "updated_at",
+        "status_updated_at",
+        "llm_scored_at",
+        "last_fetched",
+        "enriched_at",
+        "digest_sent_at",
+        "archived_at",
+    }
+)
 _DATE_COLUMNS = frozenset({"first_seen", "last_seen", "deadline"})
 
 
@@ -136,6 +153,7 @@ def _decode_temporal(col_name, value):
     if value is None or not isinstance(value, str):
         return value
     from datetime import datetime as _dt, date as _date, timezone as _tz
+
     if col_name in _DATETIME_COLUMNS:
         try:
             parsed = _dt.fromisoformat(value.replace(" ", "T"))
@@ -151,6 +169,7 @@ def _decode_temporal(col_name, value):
             return value
     return value
 
+
 # Compiled once. Each entry rewrites one Postgres idiom into its SQLite form.
 # Order matters: array/json operators run before the generic %s -> ? swap so
 # the cast/operator regexes still see their original text.
@@ -158,19 +177,11 @@ def _decode_temporal(col_name, value):
 _JSON_ARROW_RE = re.compile(r"(\w+(?:\.\w+)?)\s*->>\s*'([^']+)'")
 _ANY_UUID_RE = re.compile(r"=\s*ANY\(%s::uuid\[\]\)", re.IGNORECASE)
 _ANY_TEXT_RE = re.compile(r"=\s*ANY\(%s(?:::text\[\])?\)", re.IGNORECASE)
-_CONTAINS_RE = re.compile(
-    r"aliases\s*@>\s*ARRAY\[%s\](?:::text\[\])?", re.IGNORECASE
-)
-_ARRAY_LENGTH_RE = re.compile(
-    r"array_length\(\s*aliases\s*,\s*1\s*\)\s*>\s*0", re.IGNORECASE
-)
-_INTERVAL_RE = re.compile(
-    r"now\(\)\s*-\s*interval\s+'(\d+)\s*days?'", re.IGNORECASE
-)
+_CONTAINS_RE = re.compile(r"aliases\s*@>\s*ARRAY\[%s\](?:::text\[\])?", re.IGNORECASE)
+_ARRAY_LENGTH_RE = re.compile(r"array_length\(\s*aliases\s*,\s*1\s*\)\s*>\s*0", re.IGNORECASE)
+_INTERVAL_RE = re.compile(r"now\(\)\s*-\s*interval\s+'(\d+)\s*days?'", re.IGNORECASE)
 # Parameterised interval: interval '%s days'
-_INTERVAL_PARAM_RE = re.compile(
-    r"now\(\)\s*-\s*interval\s+'%s\s*days?'", re.IGNORECASE
-)
+_INTERVAL_PARAM_RE = re.compile(r"now\(\)\s*-\s*interval\s+'%s\s*days?'", re.IGNORECASE)
 _NOW_RE = re.compile(r"\bnow\(\)", re.IGNORECASE)
 _CURRENT_DATE_RE = re.compile(r"\bCURRENT_DATE\b", re.IGNORECASE)
 _GEN_UUID_RE = re.compile(r"\bgen_random_uuid\(\)", re.IGNORECASE)
@@ -402,9 +413,7 @@ def _connect_sqlite():
     else:
         # Idempotent: schema uses IF NOT EXISTS, safe to re-apply cheaply only
         # when the core table is missing (e.g. truncated file).
-        cur = raw.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='company'"
-        )
+        cur = raw.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='company'")
         if cur.fetchone() is None:
             _apply_sqlite_schema(raw)
     print(f"  SQLite: connected ({path})", flush=True)

@@ -76,6 +76,7 @@ def canonical_country(name: str) -> str:
     norm = (name or "").lower().strip()
     return _COUNTRY_ALIASES.get(norm, norm)
 
+
 # Internal bucket ORDER for classification (most specific → least). The TOML key
 # is the bucket id; the returned label maps the "de" TOML key to "germany". This
 # is a neutral lookup table — no bucket is privileged, the order only resolves
@@ -149,8 +150,10 @@ def _all_country_names() -> set[str]:
 
 def _city_to_country() -> dict[str, str]:
     """city (lowercased) → country name (lowercased), from geo.city_country."""
-    return {str(k).lower().strip(): str(v).lower().strip()
-            for k, v in settings.geo_city_country().items()}
+    return {
+        str(k).lower().strip(): str(v).lower().strip()
+        for k, v in settings.geo_city_country().items()
+    }
 
 
 def country_for_location(loc: dict) -> str | None:

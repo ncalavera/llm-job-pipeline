@@ -42,8 +42,9 @@ FORCE_DELETE_IDS = {"a16z"}
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Show what would change without writing")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would change without writing"
+    )
     args = parser.parse_args()
 
     all_boards = dict(config._ALL_JOB_BOARDS)

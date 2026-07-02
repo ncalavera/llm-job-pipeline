@@ -1,5 +1,7 @@
 # llm-job-pipeline
 
+[![CI](https://github.com/ncalavera/llm-job-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/ncalavera/llm-job-pipeline/actions/workflows/ci.yml)
+
 Your own AI-powered job search: fetches vacancies from company career pages,
 scores each one against *your* profile with Claude, and gives you a dashboard,
 a terminal triage CLI and a daily Telegram digest. Self-hosted, MIT-licensed,

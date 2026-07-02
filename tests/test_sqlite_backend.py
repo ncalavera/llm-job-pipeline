@@ -10,7 +10,6 @@ backend/registry/DAL chain so module-level state picks up the env.
 """
 
 import importlib
-import os
 import sys
 
 import pytest
@@ -26,15 +25,16 @@ def dal(tmp_path, monkeypatch):
 
     # Reload the connection/registry/DAL chain so IS_SQLITE and the singleton
     # connection are rebuilt for this temp DB.
-    for mod in ("database_supabase", "config", "company_registry",
-                "db_conn", "db_backend"):
+    for mod in ("database_supabase", "config", "company_registry", "db_conn", "db_backend"):
         sys.modules.pop(mod, None)
 
     import db_backend
+
     importlib.reload(db_backend)
     assert db_backend.IS_SQLITE, "test must run on the SQLite backend"
 
     import database_supabase as db
+
     yield db
 
     db.close_conn()
@@ -58,6 +58,7 @@ def _fake_job(title="Head of Community", city="Berlin, Germany"):
 # Schema bootstrap
 # ---------------------------------------------------------------------------
 
+
 def test_schema_autocreated(dal):
     """First connection creates the three tables with zero manual steps."""
     cur = dal.get_conn().cursor()
@@ -70,6 +71,7 @@ def test_schema_autocreated(dal):
 # ---------------------------------------------------------------------------
 # Company ensure / resolve
 # ---------------------------------------------------------------------------
+
 
 def test_ensure_and_resolve_company(dal):
     cid = dal.ensure_company("Acme Robotics", status="active")
@@ -101,8 +103,7 @@ def test_registry_loads_company_in_sqlite_mode(dal, monkeypatch):
     conn = dal.get_conn()
     cur = conn.cursor()
     cur.execute(
-        "UPDATE company SET fetch_strategy = %s, ats_slug = %s, careers_url = %s "
-        "WHERE id = %s",
+        "UPDATE company SET fetch_strategy = %s, ats_slug = %s, careers_url = %s WHERE id = %s",
         ("greenhouse", "acmerobotics", "https://acme.example/careers", cid),
     )
     conn.commit()
@@ -112,16 +113,19 @@ def test_registry_loads_company_in_sqlite_mode(dal, monkeypatch):
     # db_backend/db_conn stay loaded so the SQLite singleton/env persists.
     sys.modules.pop("config", None)
     import company_registry
+
     importlib.reload(company_registry)
 
-    assert "Acme Robotics" in company_registry.COMPANIES, \
+    assert "Acme Robotics" in company_registry.COMPANIES, (
         "registry must contain the active company in SQLite mode"
+    )
     assert company_registry.COMPANIES["Acme Robotics"]["strategy"] == "greenhouse"
 
     # fetch's resolution path: resolve_canonical_name + COMPANIES membership.
     assert company_registry.resolve_canonical_name("acme robotics") == "Acme Robotics"
 
     import config
+
     importlib.reload(config)
     assert "Acme Robotics" in config.COMPANIES
 
@@ -129,6 +133,7 @@ def test_registry_loads_company_in_sqlite_mode(dal, monkeypatch):
 # ---------------------------------------------------------------------------
 # Merge + load
 # ---------------------------------------------------------------------------
+
 
 def test_merge_then_load(dal):
     dal.ensure_company("Acme Robotics", status="active")
@@ -171,6 +176,7 @@ def test_merge_second_location_merges_into_one_row(dal):
 # Status updates
 # ---------------------------------------------------------------------------
 
+
 def test_status_update_and_readback(dal):
     dal.ensure_company("Acme Robotics", status="active")
     dal.save_vacancies("Acme Robotics", "A", [_fake_job()])
@@ -195,12 +201,15 @@ def test_scoring_roundtrip(dal):
     _commit(dal)
     vid = next(iter(dal.load_vacancies()))
 
-    dal.update_llm_score(vid, {
-        "llm_score": 72,
-        "llm_reasoning": "strong fit",
-        "llm_summary": "Great match for the role.",
-        "llm_hard_requirements": ["5y experience"],
-    })
+    dal.update_llm_score(
+        vid,
+        {
+            "llm_score": 72,
+            "llm_reasoning": "strong fit",
+            "llm_summary": "Great match for the role.",
+            "llm_hard_requirements": ["5y experience"],
+        },
+    )
     _commit(dal)
     v = dal.load_vacancies()[vid]
     assert v["llm_score"] == 72
@@ -211,6 +220,7 @@ def test_scoring_roundtrip(dal):
 # Archived flows
 # ---------------------------------------------------------------------------
 
+
 def test_archived_hash_roundtrip(dal):
     dal.record_archived_hashes([("abc123", "score_below_threshold")])
     _commit(dal)
@@ -219,15 +229,17 @@ def test_archived_hash_roundtrip(dal):
 
 def test_gone_from_source_archives_unseen(dal):
     dal.ensure_company("Acme Robotics", status="active")
-    dal.save_vacancies("Acme Robotics", "A", [
-        _fake_job(title="Head of Community"),
-        _fake_job(title="Programme Lead"),
-    ])
+    dal.save_vacancies(
+        "Acme Robotics",
+        "A",
+        [
+            _fake_job(title="Head of Community"),
+            _fake_job(title="Programme Lead"),
+        ],
+    )
     _commit(dal)
     # Fresh listing only contains one of the two roles → the other is gone.
-    archived = dal.archive_gone_vacancies(
-        "Acme Robotics", [{"title": "Head of Community"}]
-    )
+    archived = dal.archive_gone_vacancies("Acme Robotics", [{"title": "Head of Community"}])
     _commit(dal)
     assert archived == 1
     # The gone role is now archived; the live catalog (archived excluded) shows
@@ -240,10 +252,14 @@ def test_gone_from_source_archives_unseen(dal):
 
 def test_delete_vacancies_by_uuid_list(dal):
     dal.ensure_company("Acme Robotics", status="active")
-    dal.save_vacancies("Acme Robotics", "A", [
-        _fake_job(title="Role One"),
-        _fake_job(title="Role Two"),
-    ])
+    dal.save_vacancies(
+        "Acme Robotics",
+        "A",
+        [
+            _fake_job(title="Role One"),
+            _fake_job(title="Role Two"),
+        ],
+    )
     _commit(dal)
     ids = list(dal.load_vacancies().keys())
     deleted = dal.delete_vacancies(ids[:1])
@@ -256,6 +272,7 @@ def test_delete_vacancies_by_uuid_list(dal):
 # Candidate companies + auto-review
 # ---------------------------------------------------------------------------
 
+
 def test_auto_review_candidates(dal):
     dal.ensure_company("Highfit Inc", status="candidate")
     dal.save_company_enrichment("Highfit Inc", alignment_score=80)
@@ -264,8 +281,7 @@ def test_auto_review_candidates(dal):
     _commit(dal)
 
     # auto-review is opt-in (no human in the loop); enable it explicitly here.
-    result = dal.auto_review_candidates(
-        approve_threshold=60, reject_threshold=25, enabled=True)
+    result = dal.auto_review_candidates(approve_threshold=60, reject_threshold=25, enabled=True)
     assert "Highfit Inc" in result["approved"]
     assert "Lowfit Inc" in result["rejected"]
 
@@ -283,6 +299,7 @@ def test_candidate_company_vacancies_hidden_until_active(dal):
 # ---------------------------------------------------------------------------
 # Enrichment + fitness map
 # ---------------------------------------------------------------------------
+
 
 def test_enrichment_roundtrip(dal):
     dal.ensure_company("Acme Robotics", status="active")
@@ -304,6 +321,7 @@ def test_enrichment_roundtrip(dal):
 # ---------------------------------------------------------------------------
 # Validation + expiry
 # ---------------------------------------------------------------------------
+
 
 def test_validate_db_clean(dal):
     dal.ensure_company("Acme Robotics", status="active")
@@ -333,6 +351,7 @@ def test_pass_expired_vacancies(dal):
 # company must be usable WITHOUT manual approval: ensure_company / merge create
 # it 'active' and its vacancies are immediately visible to load_vacancies.
 # ---------------------------------------------------------------------------
+
 
 def test_board_company_is_active_in_sqlite(dal):
     """A company auto-created by the board/ATS path (default 'candidate') lands

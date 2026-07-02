@@ -10,8 +10,8 @@ a temporary profile. So the test proves the MECHANISM, never that any real-world
 country is "the" excluded one. Swapping the excluded country in the profile is
 all it takes to change behaviour — there is no hardcoded geography.
 """
+
 import importlib
-import os
 import sys
 import textwrap
 from pathlib import Path
@@ -24,7 +24,8 @@ if SCRIPTS not in sys.path:
 
 # Fictional countries, each pinned to a neutral structural bucket in the temp
 # geo map. "country a" is the one the profile will exclude; the rest are kept.
-_GEO_TOML = textwrap.dedent("""
+_GEO_TOML = (
+    textwrap.dedent("""
     [geo.countries]
     uk = ["country b"]
     de = ["country c"]
@@ -42,13 +43,16 @@ _GEO_TOML = textwrap.dedent("""
     [geo.work_mode]
     remote = ["remote"]
     hybrid = ["hybrid"]
-""").strip() + "\n"
+""").strip()
+    + "\n"
+)
 
 _RELOAD_CHAIN = ("settings", "geo", "prompts", "hard_filters", "config", "filter_vacancies")
 
 
 def _reload_all():
     import settings
+
     settings.clear_cache()
     for mod in _RELOAD_CHAIN:
         if mod in sys.modules:
@@ -70,16 +74,21 @@ def fv_factory(tmp_path, monkeypatch):
 
     def build(exclude_countries: list[str]):
         excl = ", ".join(exclude_countries) if exclude_countries else "(none)"
-        profile_path.write_text(textwrap.dedent(f"""
+        profile_path.write_text(
+            textwrap.dedent(f"""
             ## HARD_FILTERS
 
             exclude_countries: {excl}
             exclude_title_keywords: (none)
-        """).strip() + "\n", encoding="utf-8")
+        """).strip()
+            + "\n",
+            encoding="utf-8",
+        )
         monkeypatch.setenv("DEFAULTS_TOML_PATH", str(toml_path))
         monkeypatch.setenv("USER_PROFILE_PATH", str(profile_path))
         _reload_all()
         import filter_vacancies
+
         importlib.reload(filter_vacancies)
         return filter_vacancies
 
@@ -94,6 +103,7 @@ def fv_factory(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # Core mechanism — one excluded country ("Country A").
 # ---------------------------------------------------------------------------
+
 
 def test_single_excluded_location_drops(fv_factory):
     """A vacancy located only in the excluded country drops."""
@@ -114,10 +124,12 @@ def test_single_nonexcluded_location_survives(fv_factory):
 def test_multi_location_with_any_nonexcluded_survives(fv_factory):
     """[Country A (excluded), Country B (kept)] → the kept country wins."""
     fv = fv_factory(["country a"])
-    vac = {"locations": [
-        {"country": "Country A", "city": "City A"},
-        {"country": "Country B", "city": "City B"},
-    ]}
+    vac = {
+        "locations": [
+            {"country": "Country A", "city": "City A"},
+            {"country": "Country B", "city": "City B"},
+        ]
+    }
     assert fv._all_locations_excluded(vac) is False
     assert fv._geo_delete_category(vac) is None
 
@@ -125,10 +137,12 @@ def test_multi_location_with_any_nonexcluded_survives(fv_factory):
 def test_multi_location_all_excluded_drops(fv_factory):
     """Every location in an excluded country → drop (multiple excluded)."""
     fv = fv_factory(["country a", "country f"])
-    vac = {"locations": [
-        {"country": "Country A", "city": "City A"},
-        {"country": "Country F", "city": "City F"},
-    ]}
+    vac = {
+        "locations": [
+            {"country": "Country A", "city": "City A"},
+            {"country": "Country F", "city": "City F"},
+        ]
+    }
     assert fv._all_locations_excluded(vac) is True
     assert fv._geo_delete_category(vac) == "delete_geo"
 
@@ -145,17 +159,21 @@ def test_empty_profile_drops_nothing(fv_factory):
 # Symmetry — ANY country can be the excluded one. No bucket is privileged.
 # ---------------------------------------------------------------------------
 
+
 # (excluded country, a control country in a DIFFERENT bucket that must survive).
 # Each excluded country lives in a distinct structural bucket, proving the gate
 # is symmetric across buckets — none is special-cased. The control sits in
 # another bucket so bucket-level exclusion never touches it.
-@pytest.mark.parametrize("excluded,excl_city,control,ctrl_city", [
-    ("country a", "City A", "Country B", "City B"),  # other  → control uk
-    ("country b", "City B", "Country C", "City C"),  # uk     → control de
-    ("country c", "City C", "Country D", "City D"),  # de     → control europe
-    ("country d", "City D", "Country E", "City E"),  # europe → control us
-    ("country e", "City E", "Country A", "City A"),  # us     → control other
-])
+@pytest.mark.parametrize(
+    "excluded,excl_city,control,ctrl_city",
+    [
+        ("country a", "City A", "Country B", "City B"),  # other  → control uk
+        ("country b", "City B", "Country C", "City C"),  # uk     → control de
+        ("country c", "City C", "Country D", "City D"),  # de     → control europe
+        ("country d", "City D", "Country E", "City E"),  # europe → control us
+        ("country e", "City E", "Country A", "City A"),  # us     → control other
+    ],
+)
 def test_any_country_excludes_symmetrically(fv_factory, excluded, excl_city, control, ctrl_city):
     """Whichever country the profile names is the one that drops — identical
     mechanism across every structural bucket, none special-cased. A country in a
@@ -172,6 +190,7 @@ def test_any_country_excludes_symmetrically(fv_factory, excluded, excl_city, con
 # ---------------------------------------------------------------------------
 # Edge cases independent of which country is named.
 # ---------------------------------------------------------------------------
+
 
 def test_empty_locations_survives(fv_factory):
     fv = fv_factory(["country a"])
@@ -201,10 +220,12 @@ def test_v1_freetext_excluded_drops(fv_factory):
 
 def test_v1_freetext_mixed_survives(fv_factory):
     fv = fv_factory(["country a"])
-    vac = {"locations": [
-        {"location": "City A, Country A"},
-        {"location": "City B, Country B"},
-    ]}
+    vac = {
+        "locations": [
+            {"location": "City A, Country A"},
+            {"location": "City B, Country B"},
+        ]
+    }
     assert fv._all_locations_excluded(vac) is False
 
 
@@ -217,7 +238,8 @@ def test_v1_freetext_mixed_survives(fv_factory):
 # bucket and prove that excluding one leaves the other untouched.
 # ---------------------------------------------------------------------------
 
-_SAME_BUCKET_TOML = textwrap.dedent("""
+_SAME_BUCKET_TOML = (
+    textwrap.dedent("""
     [geo.countries]
     uk = []
     de = []
@@ -235,7 +257,9 @@ _SAME_BUCKET_TOML = textwrap.dedent("""
     [geo.work_mode]
     remote = ["remote"]
     hybrid = ["hybrid"]
-""").strip() + "\n"
+""").strip()
+    + "\n"
+)
 
 
 @pytest.fixture
@@ -247,16 +271,21 @@ def fv_same_bucket(tmp_path, monkeypatch):
 
     def build(exclude_countries):
         excl = ", ".join(exclude_countries) if exclude_countries else "(none)"
-        profile_path.write_text(textwrap.dedent(f"""
+        profile_path.write_text(
+            textwrap.dedent(f"""
             ## HARD_FILTERS
 
             exclude_countries: {excl}
             exclude_title_keywords: (none)
-        """).strip() + "\n", encoding="utf-8")
+        """).strip()
+            + "\n",
+            encoding="utf-8",
+        )
         monkeypatch.setenv("DEFAULTS_TOML_PATH", str(toml_path))
         monkeypatch.setenv("USER_PROFILE_PATH", str(profile_path))
         _reload_all()
         import filter_vacancies
+
         importlib.reload(filter_vacancies)
         return filter_vacancies
 
@@ -299,9 +328,11 @@ def test_multi_country_exact_matching_across_buckets(fv_same_bucket):
 def test_multi_location_mixed_excluded_sibling_survives(fv_same_bucket):
     """[excluded U1, kept-sibling U2] in the same bucket → kept sibling wins."""
     fv = fv_same_bucket(["country u1"])
-    vac = {"locations": [
-        {"country": "Country U1", "city": "City U1"},
-        {"country": "Country U2", "city": "City U2"},
-    ]}
+    vac = {
+        "locations": [
+            {"country": "Country U1", "city": "City U1"},
+            {"country": "Country U2", "city": "City U2"},
+        ]
+    }
     assert fv._all_locations_excluded(vac) is False
     assert fv._geo_delete_category(vac) is None

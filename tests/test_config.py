@@ -4,6 +4,7 @@ These exercise the alias-resolution LOGIC, not any specific company. They use
 the registry as loaded (which is empty without a DB / SUPABASE_DB_URL) and
 made-up placeholder names, so they encode no particular company list.
 """
+
 import pytest
 from config import resolve_canonical_name, COMPANIES
 
@@ -11,6 +12,7 @@ from config import resolve_canonical_name, COMPANIES
 # ---------------------------------------------------------------------------
 # resolve_canonical_name — generic machinery
 # ---------------------------------------------------------------------------
+
 
 def test_CN01_exact_companies_key_returned_as_is():
     """An exact registry key resolves to itself."""
@@ -47,6 +49,7 @@ def test_CN09_backward_compat_all_csv_names():
     """The _ALL_CSV_NAMES backward-compat re-export is present and covers the
     registry."""
     from config import _ALL_CSV_NAMES
+
     assert len(_ALL_CSV_NAMES) >= len(COMPANIES)
 
 
@@ -54,15 +57,18 @@ def test_CN09_backward_compat_all_csv_names():
 # Job boards are opt-in
 # ---------------------------------------------------------------------------
 
+
 def test_boards_disabled_by_default(monkeypatch):
     monkeypatch.delenv("JOB_BOARDS", raising=False)
     import config as cfg
+
     assert cfg._select_enabled_boards() == {}
 
 
 def test_boards_enable_subset_via_env(monkeypatch):
     monkeypatch.setenv("JOB_BOARDS", "reliefweb")
     import config as cfg
+
     enabled = cfg._select_enabled_boards()
     assert set(enabled) == {"reliefweb"}
 
@@ -70,6 +76,7 @@ def test_boards_enable_subset_via_env(monkeypatch):
 def test_boards_enable_all_via_env(monkeypatch):
     monkeypatch.setenv("JOB_BOARDS", "all")
     import config as cfg
+
     enabled = cfg._select_enabled_boards()
     assert set(enabled) == set(cfg._ALL_JOB_BOARDS)
 
@@ -77,5 +84,6 @@ def test_boards_enable_all_via_env(monkeypatch):
 def test_boards_unknown_id_ignored(monkeypatch):
     monkeypatch.setenv("JOB_BOARDS", "80k_hours,does_not_exist")
     import config as cfg
+
     enabled = cfg._select_enabled_boards()
     assert set(enabled) == {"80k_hours"}

@@ -12,7 +12,6 @@ import re
 import subprocess
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -44,13 +43,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", type=str)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-workers", type=int, default=MAX_CONCURRENT)
-    parser.add_argument("--no-auto-review", action="store_true",
-                        help="Skip auto_review_candidates() — scored companies stay 'candidate'")
+    parser.add_argument(
+        "--no-auto-review",
+        action="store_true",
+        help="Skip auto_review_candidates() — scored companies stay 'candidate'",
+    )
     return parser
 
 
 # Print help and exit BEFORE importing anything that touches the DB or profile.
 from cli_help import wants_help
+
 if __name__ == "__main__" and wants_help():
     build_parser().parse_args()
 
@@ -63,7 +66,6 @@ if "--local" in sys.argv:
 from prompts import (  # noqa: E402
     COMPANY_SCORING_PROMPT,
     COMPANY_SCORING_USER_TEMPLATE,
-    CUSTOM_BOOST_FIELD,
     CUSTOM_BOOST_KEYS,
 )
 
@@ -71,8 +73,12 @@ sys.stdout = _real_stdout
 
 # Placeholder values to sanitize from LLM output
 _PLACEHOLDER_VALUES = {
-    "not specified", "n/a", "unknown", "year not specified",
-    "na", "none",
+    "not specified",
+    "n/a",
+    "unknown",
+    "year not specified",
+    "na",
+    "none",
 }
 
 # Strategy sections to extract from strategy.md
@@ -90,20 +96,21 @@ _STRATEGY_SECTIONS = [
 # Inline utilities
 # ---------------------------------------------------------------------------
 
+
 def _parse_json(text: str) -> dict:
     """Parse JSON from LLM response, handling fences, nested objects."""
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    fence = re.search(r'```(?:json)?\s*\n?(.*?)```', text, re.DOTALL)
+    fence = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
     if fence:
         try:
             return json.loads(fence.group(1).strip())
         except json.JSONDecodeError:
             pass
     # Greedy match for outermost braces (company responses have nested objects)
-    brace = re.search(r'\{.*\}', text, re.DOTALL)
+    brace = re.search(r"\{.*\}", text, re.DOTALL)
     if brace:
         try:
             return json.loads(brace.group(0))
@@ -126,7 +133,9 @@ def _get_main_repo_root() -> Path:
     try:
         git_common = subprocess.run(
             ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.strip()
         return Path(git_common).parent
     except Exception:
@@ -181,6 +190,7 @@ def _load_company_evidence_map(company_ids: list) -> dict[str, list[dict]]:
     ordered by _EVIDENCE_SOURCE_ORDER. Companies with no rows are absent from the dict.
     """
     from db_conn import get_conn
+
     if not company_ids:
         return {}
     conn = get_conn()
@@ -265,8 +275,9 @@ def _build_csv_context(company: dict) -> str:
     return "Additional context:\n" + "\n".join(parts)
 
 
-def _build_user_msg(company: dict, scrape_cache: dict, strategy_context: str,
-                    evidence_map: dict | None = None) -> str | None:
+def _build_user_msg(
+    company: dict, scrape_cache: dict, strategy_context: str, evidence_map: dict | None = None
+) -> str | None:
     """Build user message — identical for all backends.
 
     Prefers company_evidence rows (evidence_map keyed by company_id str) over the
@@ -317,6 +328,7 @@ def _build_user_msg(company: dict, scrape_cache: dict, strategy_context: str,
 # System prompt (with strategy context injected)
 # ---------------------------------------------------------------------------
 
+
 def _get_system_prompt() -> str:
     """Build system prompt with strategy context."""
     strategy = _load_strategy_context()
@@ -328,6 +340,7 @@ def _get_system_prompt() -> str:
 # ---------------------------------------------------------------------------
 # API backend
 # ---------------------------------------------------------------------------
+
 
 def _score_api(client, model: str, system_prompt: str, user_msg: str) -> dict:
     """Score via Anthropic API with exponential backoff."""
@@ -361,6 +374,7 @@ def _score_api(client, model: str, system_prompt: str, user_msg: str) -> dict:
 # Data loading
 # ---------------------------------------------------------------------------
 
+
 def _load_companies(*, company_filter=None, limit=None):
     """Load candidate companies needing scoring (have website, no alignment_score).
 
@@ -373,14 +387,17 @@ def _load_companies(*, company_filter=None, limit=None):
 
     if company_filter:
         names = [n.strip() for n in company_filter.split(",")]
-        cur.execute("""
+        cur.execute(
+            """
             SELECT id, canonical_name, website, category, product, tier,
                    user_comments, experience_match, personal_interest
             FROM company
             WHERE canonical_name = ANY(%s)
               AND website IS NOT NULL AND website != ''
             ORDER BY canonical_name
-        """, (names,))
+        """,
+            (names,),
+        )
     else:
         cur.execute("""
             SELECT id, canonical_name, website, category, product, tier,
@@ -401,6 +418,7 @@ def _load_companies(*, company_filter=None, limit=None):
 # ---------------------------------------------------------------------------
 # Shared: extract enrichment from LLM result
 # ---------------------------------------------------------------------------
+
 
 def _read_custom_boost(mission: dict):
     """Return the custom-boost value from a mission_fit dict, or None.
@@ -451,14 +469,19 @@ def _extract_enrichment(result: dict) -> dict | None:
     mission_data = mission if isinstance(mission, dict) else {}
     boost_keys = set(CUSTOM_BOOST_KEYS) | {f"{k}_reasoning" for k in CUSTOM_BOOST_KEYS}
     keep_keys = (
-        "alignment_score", "alignment_label", "dimensions", "strengths", "risks",
-        "approach", "experience_match_reasoning", "mission_verdict",
-        "evidence_anchors", "culture_fit",
+        "alignment_score",
+        "alignment_label",
+        "dimensions",
+        "strengths",
+        "risks",
+        "approach",
+        "experience_match_reasoning",
+        "mission_verdict",
+        "evidence_anchors",
+        "culture_fit",
     ) + tuple(boost_keys)
     mission_fit = {
-        k: mission_data[k]
-        for k in keep_keys
-        if k in mission_data and mission_data[k] is not None
+        k: mission_data[k] for k in keep_keys if k in mission_data and mission_data[k] is not None
     }
     mission_fit["mission_fit_enriched_at"] = now
 
@@ -472,6 +495,7 @@ def _extract_enrichment(result: dict) -> dict | None:
 # ---------------------------------------------------------------------------
 # Mode: --local
 # ---------------------------------------------------------------------------
+
 
 def cmd_local(args):
     """Output JSON to stdout for subagent scoring."""
@@ -504,14 +528,16 @@ def cmd_local(args):
             skipped += 1
             continue
 
-        output.append({
-            "payload_kind": "company",
-            "id": str(c["id"]),
-            "canonical_name": c["canonical_name"],
-            "url": (c.get("website") or "").strip(),
-            "system_prompt": system_prompt,
-            "user_msg": user_msg,
-        })
+        output.append(
+            {
+                "payload_kind": "company",
+                "id": str(c["id"]),
+                "canonical_name": c["canonical_name"],
+                "url": (c.get("website") or "").strip(),
+                "system_prompt": system_prompt,
+                "user_msg": user_msg,
+            }
+        )
 
     if skipped:
         print(f"  Skipped {skipped} companies (not in scrape cache or evidence)", file=sys.stderr)
@@ -529,10 +555,13 @@ def cmd_local(args):
             if rows:
                 print(f"  sources ({len(rows)}):", file=_real_stdout)
                 for r in rows:
-                    print(f"    {r['source']:20s}  {len(r['content']):>7,} chars  {r['url']}", file=_real_stdout)
+                    print(
+                        f"    {r['source']:20s}  {len(r['content']):>7,} chars  {r['url']}",
+                        file=_real_stdout,
+                    )
             else:
-                print(f"  source: scrape_cache (fallback)", file=_real_stdout)
-            print(f"  --- first 15 lines of user_msg ---", file=_real_stdout)
+                print("  source: scrape_cache (fallback)", file=_real_stdout)
+            print("  --- first 15 lines of user_msg ---", file=_real_stdout)
             for line in msg.splitlines()[:15]:
                 print(f"  {line}", file=_real_stdout)
         return
@@ -544,6 +573,7 @@ def cmd_local(args):
 # ---------------------------------------------------------------------------
 # Mode: --save
 # ---------------------------------------------------------------------------
+
 
 def cmd_save(_args):
     """Read scored results from stdin JSON, save to DB."""
@@ -644,6 +674,7 @@ def cmd_save(_args):
             vals.append(alignment)
 
             from database_supabase import calculate_company_tier
+
             boost = _read_custom_boost(mission)
             tier, _ = calculate_company_tier(alignment, boost)
             if tier is not None:
@@ -684,6 +715,7 @@ def cmd_save(_args):
 # Mode: --api
 # ---------------------------------------------------------------------------
 
+
 def cmd_api(args):
     """Score companies via Anthropic API."""
     import anthropic
@@ -702,7 +734,6 @@ def cmd_api(args):
         return
 
     from database_supabase import save_company_enrichment, auto_review_candidates, get_conn
-    from psycopg2.extras import Json
 
     conn = get_conn()
     print(f"Scoring {len(companies)} companies with {model}")
@@ -769,6 +800,7 @@ def cmd_api(args):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main():
     args = build_parser().parse_args()

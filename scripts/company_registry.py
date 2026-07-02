@@ -16,7 +16,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Strategy validation sets
 # ---------------------------------------------------------------------------
 
-_STRATEGY_REQUIRES_SLUG = {"greenhouse", "lever", "ashby", "workable", "recruitee", "teamtailor_rss", "bamboohr"}
+_STRATEGY_REQUIRES_SLUG = {
+    "greenhouse",
+    "lever",
+    "ashby",
+    "workable",
+    "recruitee",
+    "teamtailor_rss",
+    "bamboohr",
+}
 _STRATEGY_REQUIRES_URL = {"firecrawl_scrape", "unops_widget"}
 
 # ---------------------------------------------------------------------------
@@ -68,8 +76,7 @@ def _build_companies_from_db() -> dict:
         cur.close()
         conn.commit()
     except Exception as exc:  # noqa: BLE001 — registry must never crash import
-        print(f"⚠ Company registry: backend unavailable, empty registry ({exc})",
-              file=sys.stderr)
+        print(f"⚠ Company registry: backend unavailable, empty registry ({exc})", file=sys.stderr)
         REGISTRY_LOAD_FAILED = True
         REGISTRY_LOAD_ERROR = str(exc)
         return {}
@@ -78,9 +85,7 @@ def _build_companies_from_db() -> dict:
     REGISTRY_LOAD_ERROR = None
 
     companies: dict[str, dict] = {}
-    for (name, strategy, status, tier, careers_url,
-         ats_slug, ats_config, category) in rows:
-
+    for name, strategy, status, tier, careers_url, ats_slug, ats_config, category in rows:
         tier_val = tier if tier in ("S", "A", "B", "C") else None
 
         config: dict = {
@@ -240,7 +245,9 @@ def validate_company_registry():
         if strategy in _STRATEGY_REQUIRES_SLUG and not cfg.get("slug"):
             warnings.append(f"  {name}: {strategy} strategy needs 'ats_slug'")
         if strategy in _STRATEGY_REQUIRES_URL and not cfg.get("url"):
-            warnings.append(f"  {name}: {strategy} strategy needs 'url' (ats_config or careers_url)")
+            warnings.append(
+                f"  {name}: {strategy} strategy needs 'url' (ats_config or careers_url)"
+            )
 
     # 2. Alias index entries pointing to non-existent canonical names
     for alias, target in _ALIAS_INDEX.items():

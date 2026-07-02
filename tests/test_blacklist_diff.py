@@ -39,8 +39,9 @@ from config import GLOBAL_BLACKLIST, GLOBAL_BLACKLIST_SUBSTR, GLOBAL_BLACKLIST_D
 def filters_impl(title: str, description: str = "") -> bool:
     """The consolidated filters.py implementation, composed exactly as the
     legacy _is_blacklisted(title, desc) did: title words/stems OR desc phrase."""
-    return (filters.title_words_blacklisted(title)
-            or filters.description_words_blacklisted(description))
+    return filters.title_words_blacklisted(title) or filters.description_words_blacklisted(
+        description
+    )
 
 
 # The DAL and score modules no longer expose their own blacklist copies after
@@ -56,6 +57,7 @@ score_impl = filters_impl
 # Do NOT edit this function to track future changes in score_vacancies.py.
 # ---------------------------------------------------------------------------
 
+
 def _frozen_score_impl(
     title: str,
     desc: str,
@@ -67,7 +69,7 @@ def _frozen_score_impl(
     t = title.lower()
     if any(kw in t for kw in substr):
         return True
-    if any(re.search(r'\b' + re.escape(kw) + r'\b', t) for kw in words):
+    if any(re.search(r"\b" + re.escape(kw) + r"\b", t) for kw in words):
         return True
     if desc:
         d = desc.lower()
@@ -79,6 +81,7 @@ def _frozen_score_impl(
 # ---------------------------------------------------------------------------
 # Helper: wrap frozen impl with runtime config (called once per param case)
 # ---------------------------------------------------------------------------
+
 
 def frozen(title: str, description: str = "") -> bool:
     return _frozen_score_impl(
@@ -113,7 +116,7 @@ _POS_CASES = [
     ("POS-08", "Talent Network Sign-up", ""),
     ("POS-09", "Join Our Talent Pipeline", ""),
     ("POS-10", "expression of interest (lowercase entire title)", ""),
-    ("POS-11", "TALENT POOL — ALL CAPS TITLE", ""),         # case insensitivity
+    ("POS-11", "TALENT POOL — ALL CAPS TITLE", ""),  # case insensitivity
     ("POS-12", "Talent Community Manager (title contains phrase)", ""),
     ("POS-13", "Interest in a Talent Pool Registration", ""),
     ("POS-14", "General Application — Product, Growth, Ops", ""),
@@ -138,11 +141,11 @@ _NEG_CASES = [
     ("NEG-08", "Volunteer Coordinator", ""),
     ("NEG-09", "Research Fellowship Program", ""),
     ("NEG-10", "Summer Internship — Data Science", ""),
-    ("NEG-11", "Talent Acquisition Specialist", ""),   # 'talent' alone is not in list
-    ("NEG-12", "Application Engineer", ""),            # 'application' alone is not
-    ("NEG-13", "Network Security Engineer", ""),       # 'network' alone is not
-    ("NEG-14", "Future-Focused Policy Analyst", ""),   # 'future' alone is not
-    ("NEG-15", "Interest Rate Analyst", ""),           # 'interest' alone is not
+    ("NEG-11", "Talent Acquisition Specialist", ""),  # 'talent' alone is not in list
+    ("NEG-12", "Application Engineer", ""),  # 'application' alone is not
+    ("NEG-13", "Network Security Engineer", ""),  # 'network' alone is not
+    ("NEG-14", "Future-Focused Policy Analyst", ""),  # 'future' alone is not
+    ("NEG-15", "Interest Rate Analyst", ""),  # 'interest' alone is not
 ]
 
 # --- ADV: adversarial — blacklist word embedded inside a larger word ---
@@ -270,6 +273,7 @@ _DPOS_CASES = [
 # Build final parametrized list
 # ---------------------------------------------------------------------------
 
+
 def _make_corpus():
     corpus = []
     # POS
@@ -297,12 +301,13 @@ _CORPUS = _make_corpus()
 # Parametrized diff-test
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("case_id,title,description", _CORPUS, ids=[c[0] for c in _CORPUS])
 def test_all_three_impls_agree(case_id, title, description):
     """All three implementations must return the identical boolean."""
-    dal   = dal_impl(title, description)
+    dal = dal_impl(title, description)
     score = score_impl(title, description)
-    ref   = frozen(title, description)
+    ref = frozen(title, description)
 
     # Report all three values on failure for easy diagnosis
     desc_snip = description[:120]
@@ -317,6 +322,7 @@ def test_all_three_impls_agree(case_id, title, description):
 # match the FROZEN reference for every corpus case. This proves filters ==
 # the old _is_blacklisted, independent of the now-aliased dal/score copies.
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("case_id,title,description", _CORPUS, ids=[c[0] for c in _CORPUS])
 def test_filters_matches_frozen_reference(case_id, title, description):
@@ -334,6 +340,7 @@ def test_filters_matches_frozen_reference(case_id, title, description):
 # ---------------------------------------------------------------------------
 # Sanity: each category produces expected polarity (catches corpus mistakes)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("case_id,title,description", _POS_CASES, ids=[c[0] for c in _POS_CASES])
 def test_pos_cases_are_actually_blacklisted(case_id, title, description):

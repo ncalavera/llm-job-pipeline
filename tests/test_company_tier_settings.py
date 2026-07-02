@@ -5,6 +5,7 @@ hardcoded in scripts/database_supabase.py, so editing config/defaults.toml never
 moved a single tier. These tests point the loader at a temp defaults.toml and
 prove that changing the TOML changes the computed tier + composite.
 """
+
 import importlib
 import sys
 import textwrap
@@ -24,6 +25,7 @@ def _reload_db(monkeypatch, toml_path: Path):
     monkeypatch.setenv("DEFAULTS_TOML_PATH", str(toml_path))
     settings.clear_cache()
     import database_supabase
+
     importlib.reload(database_supabase)
     return database_supabase
 
@@ -34,11 +36,13 @@ def _restore(monkeypatch):
     monkeypatch.delenv("DEFAULTS_TOML_PATH", raising=False)
     settings.clear_cache()
     import database_supabase
+
     importlib.reload(database_supabase)
 
 
 def _write_toml(path: Path, *, s, a, b, alpha, beta):
-    path.write_text(textwrap.dedent(f"""
+    path.write_text(
+        textwrap.dedent(f"""
         [thresholds]
         tier_s = {s}
         tier_a = {a}
@@ -46,7 +50,10 @@ def _write_toml(path: Path, *, s, a, b, alpha, beta):
         tier_c = 0
         composite_alignment_weight = {alpha}
         composite_boost_weight = {beta}
-    """).strip() + "\n", encoding="utf-8")
+    """).strip()
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def test_default_cutoffs_match_shipped(monkeypatch, tmp_path):
@@ -65,9 +72,9 @@ def test_changing_cutoffs_moves_tier(monkeypatch, tmp_path):
     toml = tmp_path / "defaults.toml"
     _write_toml(toml, s=60, a=45, b=30, alpha=0.70, beta=0.30)
     db = _reload_db(monkeypatch, toml)
-    assert db.calculate_company_tier(62) == ("S", 62.0)   # 62 >= 60 now
-    assert db.calculate_company_tier(46) == ("A", 46.0)   # 46 >= 45 now
-    assert db.calculate_company_tier(31) == ("B", 31.0)   # 31 >= 30 now
+    assert db.calculate_company_tier(62) == ("S", 62.0)  # 62 >= 60 now
+    assert db.calculate_company_tier(46) == ("A", 46.0)  # 46 >= 45 now
+    assert db.calculate_company_tier(31) == ("B", 31.0)  # 31 >= 30 now
 
 
 def test_changing_weights_moves_composite(monkeypatch, tmp_path):

@@ -69,6 +69,7 @@ def clear_cache() -> None:
 # Small helpers
 # ---------------------------------------------------------------------------
 
+
 def _section(*names: str) -> dict:
     """Walk nested TOML tables; return {} if any level is missing/non-dict."""
     node: Any = load_defaults()
@@ -92,6 +93,7 @@ def _num(section: dict, key: str, fallback: float) -> float:
 # ---------------------------------------------------------------------------
 # Thresholds
 # ---------------------------------------------------------------------------
+
 
 def thresholds() -> dict:
     """Numeric thresholds with neutral fallbacks (today's numbers).
@@ -121,6 +123,7 @@ def thresholds() -> dict:
 # Dashboard presentation knobs
 # ---------------------------------------------------------------------------
 
+
 def dashboard() -> dict:
     """Dashboard presentation knobs (env vars override at the call site).
 
@@ -140,6 +143,7 @@ def dashboard() -> dict:
 # Junk / blacklist data
 # ---------------------------------------------------------------------------
 
+
 def junk() -> dict:
     """Universal-junk lists. Empty fallbacks → nothing extra filtered.
 
@@ -157,6 +161,7 @@ def junk() -> dict:
 # Region keyword buckets (display-only `region` stamping). Empty by default.
 # ---------------------------------------------------------------------------
 
+
 def region_keywords() -> dict:
     """{europe, us, remote} keyword lists. Empty fallbacks (no region privileged)."""
     sec = _section("regions")
@@ -170,6 +175,7 @@ def region_keywords() -> dict:
 # ---------------------------------------------------------------------------
 # Geo classification DATA (logic stays in geo.py)
 # ---------------------------------------------------------------------------
+
 
 def geo_country_map() -> dict[str, set]:
     """bucket → set of country names. Empty sets if missing."""
@@ -217,8 +223,7 @@ def geo_country_region() -> dict:
     not this map, decides which regions to ban or penalise.
     """
     sec = _section("geo", "country_region")
-    return {str(k).lower().strip(): str(v).lower().strip()
-            for k, v in sec.items()} if sec else {}
+    return {str(k).lower().strip(): str(v).lower().strip() for k, v in sec.items()} if sec else {}
 
 
 def geo_country_aliases() -> dict:
@@ -235,6 +240,7 @@ def geo_country_aliases() -> dict:
 # Parsing heuristics
 # ---------------------------------------------------------------------------
 
+
 def parsing_location_hint_cities() -> list:
     """City tokens for the markdown location EXTRACTOR (never a filter). []."""
     return _list(_section("parsing"), "location_hint_cities")
@@ -243,6 +249,7 @@ def parsing_location_hint_cities() -> list:
 # ---------------------------------------------------------------------------
 # Telegram digest
 # ---------------------------------------------------------------------------
+
 
 def digest() -> dict:
     """Digest defaults (env vars still override at the call site)."""
@@ -261,6 +268,7 @@ def digest() -> dict:
 # ---------------------------------------------------------------------------
 # Job boards
 # ---------------------------------------------------------------------------
+
 
 def boards() -> dict:
     """All defined boards as {board_id: cfg dict}. {} if none defined.

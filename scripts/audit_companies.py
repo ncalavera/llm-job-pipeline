@@ -30,27 +30,29 @@ def build_parser() -> argparse.ArgumentParser:
     ``--help`` / ``-h`` prints usage without connecting to the database or
     loading the user profile (those happen only when a real command runs)."""
     parser = argparse.ArgumentParser(description="Company registry audit")
-    parser.add_argument("--fix", action="store_true",
-                        help="Auto-remediate detected issues")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Show what --fix would do without executing")
-    parser.add_argument("--no-desc-quality", action="store_true",
-                        help="Skip description quality audit (faster)")
-    parser.add_argument("--cleanup-unseen", action="store_true",
-                        help="Archive unseen vacancies from inactive companies")
+    parser.add_argument("--fix", action="store_true", help="Auto-remediate detected issues")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Show what --fix would do without executing"
+    )
+    parser.add_argument(
+        "--no-desc-quality", action="store_true", help="Skip description quality audit (faster)"
+    )
+    parser.add_argument(
+        "--cleanup-unseen",
+        action="store_true",
+        help="Archive unseen vacancies from inactive companies",
+    )
     return parser
 
 
 # Print help and exit BEFORE importing anything that touches the DB or profile.
 from cli_help import wants_help
+
 if __name__ == "__main__" and wants_help():
     build_parser().parse_args()
 
 from company_registry import (
-    COMPANIES,
-    _ALL_KNOWN_NAMES,
     _STRATEGY_REQUIRES_SLUG,
-    resolve_canonical_name,
 )
 from database_supabase import is_fetch_error
 from db_conn import get_conn
@@ -62,6 +64,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # ---------------------------------------------------------------------------
 # Core audit logic
 # ---------------------------------------------------------------------------
+
 
 def audit_all_companies() -> dict:
     """Run all audit checks against Supabase data.
@@ -92,50 +95,79 @@ def audit_all_companies() -> dict:
     unsourced_active = []
     data_quality = []
 
-    for (name, strategy, status, tier, careers_url, ats_slug,
-         website, last_fetched, fetch_status, aliases,
-         alignment_score, vacancy_count) in rows:
-
-        if status == 'inactive':
+    for (
+        name,
+        strategy,
+        status,
+        tier,
+        careers_url,
+        ats_slug,
+        website,
+        last_fetched,
+        fetch_status,
+        aliases,
+        alignment_score,
+        vacancy_count,
+    ) in rows:
+        if status == "inactive":
             continue
 
         has_strategy = bool(strategy and strategy.strip())
 
         if has_strategy and vacancy_count > 0:
             # Group 1: Active monitored
-            monitored_active.append({
-                "name": name,
-                "strategy": strategy,
-                "vacancy_count": vacancy_count,
-                "last_fetched": last_fetched.isoformat() if last_fetched else "",
-                "fetch_status": fetch_status or "",
-                "tier": tier or "-",
-                "alignment_score": alignment_score,
-                "issues": _detect_issues(name, strategy, ats_slug, careers_url,
-                                         last_fetched, fetch_status, vacancy_count),
-            })
+            monitored_active.append(
+                {
+                    "name": name,
+                    "strategy": strategy,
+                    "vacancy_count": vacancy_count,
+                    "last_fetched": last_fetched.isoformat() if last_fetched else "",
+                    "fetch_status": fetch_status or "",
+                    "tier": tier or "-",
+                    "alignment_score": alignment_score,
+                    "issues": _detect_issues(
+                        name,
+                        strategy,
+                        ats_slug,
+                        careers_url,
+                        last_fetched,
+                        fetch_status,
+                        vacancy_count,
+                    ),
+                }
+            )
         elif has_strategy and vacancy_count == 0:
             # Group 2: Active with strategy but 0 vacancies
-            monitored_zero.append({
-                "name": name,
-                "strategy": strategy,
-                "last_fetched": last_fetched.isoformat() if last_fetched else "",
-                "fetch_status": fetch_status or "",
-                "issues": _detect_issues(name, strategy, ats_slug, careers_url,
-                                         last_fetched, fetch_status, vacancy_count),
-            })
-        elif status == 'active' and not has_strategy:
+            monitored_zero.append(
+                {
+                    "name": name,
+                    "strategy": strategy,
+                    "last_fetched": last_fetched.isoformat() if last_fetched else "",
+                    "fetch_status": fetch_status or "",
+                    "issues": _detect_issues(
+                        name,
+                        strategy,
+                        ats_slug,
+                        careers_url,
+                        last_fetched,
+                        fetch_status,
+                        vacancy_count,
+                    ),
+                }
+            )
+        elif status == "active" and not has_strategy:
             # Group 3: Active but unsourced
-            unsourced_active.append({
-                "name": name,
-                "website": website or "",
-                "careers_url": careers_url or "",
-                "alignment_score": alignment_score,
-            })
+            unsourced_active.append(
+                {
+                    "name": name,
+                    "website": website or "",
+                    "careers_url": careers_url or "",
+                    "alignment_score": alignment_score,
+                }
+            )
 
         # Group 4: Data quality issues
-        issues = _detect_data_issues(name, strategy, ats_slug, careers_url,
-                                      website, aliases)
+        issues = _detect_data_issues(name, strategy, ats_slug, careers_url, website, aliases)
         if issues:
             for issue in issues:
                 data_quality.append({"name": name, **issue})
@@ -163,8 +195,9 @@ def audit_all_companies() -> dict:
     }
 
 
-def _detect_issues(name, strategy, ats_slug, careers_url,
-                    last_fetched, fetch_status, vacancy_count):
+def _detect_issues(
+    name, strategy, ats_slug, careers_url, last_fetched, fetch_status, vacancy_count
+):
     """Detect per-company operational issues."""
     issues = []
     if vacancy_count == 0:
@@ -210,10 +243,12 @@ def _check_alias_health():
         HAVING count(*) > 1
     """)
     for alias, companies in cur.fetchall():
-        issues.append({
-            "type": "duplicate_alias",
-            "detail": f"alias '{alias}' claimed by: {', '.join(companies)}",
-        })
+        issues.append(
+            {
+                "type": "duplicate_alias",
+                "detail": f"alias '{alias}' claimed by: {', '.join(companies)}",
+            }
+        )
 
     cur.close()
     return issues
@@ -222,6 +257,7 @@ def _check_alias_health():
 # ---------------------------------------------------------------------------
 # Vacancy description quality audit
 # ---------------------------------------------------------------------------
+
 
 def audit_description_quality(sample_size: int = 30) -> dict:
     """Audit quality of vacancy.full_description via clean_description().
@@ -259,25 +295,29 @@ def audit_description_quality(sample_size: int = 30) -> dict:
         _, verdict = clean_description(description or "")
         counters[verdict] = counters.get(verdict, 0) + 1
         if verdict != "ok":
-            non_ok.append({
-                "id": str(vac_id),
-                "org": org or "?",
-                "title": title or "?",
-                "verdict": verdict,
-                "preview": (description or "")[:80],
-            })
+            non_ok.append(
+                {
+                    "id": str(vac_id),
+                    "org": org or "?",
+                    "title": title or "?",
+                    "verdict": verdict,
+                    "preview": (description or "")[:80],
+                }
+            )
 
     # Random sample (capped at available rows)
     sample_rows = random.sample(all_rows, min(sample_size, len(all_rows)))
     sample_results = []
     for vac_id, org, title, description in sample_rows:
         _, verdict = clean_description(description or "")
-        sample_results.append({
-            "org": org or "?",
-            "title": title or "?",
-            "verdict": verdict,
-            "preview": (description or "")[:80],
-        })
+        sample_results.append(
+            {
+                "org": org or "?",
+                "title": title or "?",
+                "verdict": verdict,
+                "preview": (description or "")[:80],
+            }
+        )
 
     # Worst 10: non-ok verdicts, ordered by verdict type then org
     worst_10 = sorted(non_ok, key=lambda x: (x["verdict"], x["org"]))[:10]
@@ -302,6 +342,7 @@ def audit_description_quality(sample_size: int = 30) -> dict:
 # Cleanup: archive unseen vacancies from inactive companies
 # ---------------------------------------------------------------------------
 
+
 def cleanup_unseen_inactive(dry_run: bool = False) -> int:
     """Archive unseen vacancies whose company is inactive.
 
@@ -321,9 +362,9 @@ def cleanup_unseen_inactive(dry_run: bool = False) -> int:
     rows = cur.fetchall()
     count = len(rows)
 
-    print(f"\n{'='*50}", flush=True)
+    print(f"\n{'=' * 50}", flush=True)
     print(f"  Cleanup: unseen vacancies from inactive companies — {count} total", flush=True)
-    print(f"{'='*50}", flush=True)
+    print(f"{'=' * 50}", flush=True)
 
     for vac_id, org, title in rows:
         print(f"    [{org}] {title}", flush=True)
@@ -368,6 +409,7 @@ def cleanup_unseen_inactive(dry_run: bool = False) -> int:
 # Report generation
 # ---------------------------------------------------------------------------
 
+
 def generate_report(audit: dict, desc_quality: dict | None = None) -> str:
     """Generate markdown report from audit results."""
     stats = audit["stats"]
@@ -375,7 +417,7 @@ def generate_report(audit: dict, desc_quality: dict | None = None) -> str:
         "# Company Registry Audit Report",
         "",
         f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-        f"Source: Supabase (sole source of truth)",
+        "Source: Supabase (sole source of truth)",
         "",
         "## Summary",
         "",
@@ -395,13 +437,19 @@ def generate_report(audit: dict, desc_quality: dict | None = None) -> str:
     lines.append(f"## 1. Monitored Active ({len(active)} companies)")
     lines.append("")
     if active:
-        lines.append("| Company | Strategy | Vacancies | Last Fetched | Tier | Alignment | Issues |")
-        lines.append("|---------|----------|-----------|--------------|------|-----------|--------|")
+        lines.append(
+            "| Company | Strategy | Vacancies | Last Fetched | Tier | Alignment | Issues |"
+        )
+        lines.append(
+            "|---------|----------|-----------|--------------|------|-----------|--------|"
+        )
         for c in active:
             last = c["last_fetched"][:10] if c["last_fetched"] else "never"
             align = str(c["alignment_score"]) if c["alignment_score"] is not None else "-"
             issues = ", ".join(c["issues"]) if c["issues"] else "-"
-            lines.append(f"| {c['name']} | {c['strategy']} | {c['vacancy_count']} | {last} | {c['tier']} | {align} | {issues} |")
+            lines.append(
+                f"| {c['name']} | {c['strategy']} | {c['vacancy_count']} | {last} | {c['tier']} | {align} | {issues} |"
+            )
     lines.append("")
 
     # Group 2: Monitored zero
@@ -430,7 +478,9 @@ def generate_report(audit: dict, desc_quality: dict | None = None) -> str:
         for c in unsourced:
             align = str(c["alignment_score"]) if c["alignment_score"] is not None else "-"
             website = c["website"][:40] if c["website"] else "-"
-            lines.append(f"| {c['name']} | {website} | {c['careers_url'][:40] if c['careers_url'] else '-'} | {align} |")
+            lines.append(
+                f"| {c['name']} | {website} | {c['careers_url'][:40] if c['careers_url'] else '-'} | {align} |"
+            )
     lines.append("")
 
     # Group 4: Data quality
@@ -481,14 +531,16 @@ def generate_report(audit: dict, desc_quality: dict | None = None) -> str:
         lines.append("")
 
         worst = desc_quality["worst_10"]
-        lines.append(f"### 10 worst descriptions (non-ok)")
+        lines.append("### 10 worst descriptions (non-ok)")
         lines.append("")
         if worst:
             lines.append("| Org | Title | Verdict | Preview |")
             lines.append("|-----|-------|---------|---------|")
             for row in worst:
                 preview = row["preview"].replace("|", "\\|").replace("\n", " ")[:60]
-                lines.append(f"| {row['org']} | {row['title'][:40]} | {row['verdict']} | {preview} |")
+                lines.append(
+                    f"| {row['org']} | {row['title'][:40]} | {row['verdict']} | {preview} |"
+                )
         else:
             lines.append("All descriptions passed quality check.")
         lines.append("")
@@ -499,6 +551,7 @@ def generate_report(audit: dict, desc_quality: dict | None = None) -> str:
 # ---------------------------------------------------------------------------
 # Reconcile stale vacancy_count (U8 / WS6)
 # ---------------------------------------------------------------------------
+
 
 def reconcile_vacancy_counts(dry_run: bool = False) -> list[dict]:
     """Persist the true vacancy-row count into company.vacancy_count.
@@ -548,6 +601,7 @@ def reconcile_vacancy_counts(dry_run: bool = False) -> list[dict]:
 # Fix mode — auto-remediate detected issues
 # ---------------------------------------------------------------------------
 
+
 def _fix_issues(audit_result: dict, dry_run: bool = False) -> None:
     """Auto-remediate issues found by audit.
 
@@ -568,29 +622,36 @@ def _fix_issues(audit_result: dict, dry_run: bool = False) -> None:
     actions_taken = []
 
     # --- Action 0: reconcile stale vacancy_count (U8) ---
-    print(f"\n{'='*50}")
-    print(f"  FIX: Reconcile stale vacancy_count")
-    print(f"{'='*50}")
+    print(f"\n{'=' * 50}")
+    print("  FIX: Reconcile stale vacancy_count")
+    print(f"{'=' * 50}")
     drift = reconcile_vacancy_counts(dry_run=dry_run)
     if drift:
         actions_taken.append(
             f"{'would reconcile' if dry_run else 'reconciled'} "
-            f"vacancy_count for {len(drift)} companies")
+            f"vacancy_count for {len(drift)} companies"
+        )
 
     # --- Action 1: ATS discovery for unsourced companies ---
     if unsourced:
-        print(f"\n{'='*50}")
+        print(f"\n{'=' * 50}")
         print(f"  FIX: ATS Discovery for {len(unsourced)} unsourced companies")
-        print(f"{'='*50}")
+        print(f"{'=' * 50}")
         if dry_run:
-            print("  [DRY RUN] Would run: discover_ats.py --unsourced --all-tiers --html-scan --apply")
+            print(
+                "  [DRY RUN] Would run: discover_ats.py --unsourced --all-tiers --html-scan --apply"
+            )
             for c in unsourced:
                 print(f"    - {c['name']} ({c['website'] or c['careers_url'] or 'no URL'})")
             actions_taken.append(f"discover_ats --apply on {len(unsourced)} unsourced companies")
         else:
             cmd = [
-                sys.executable, str(PROJECT_ROOT / "scripts" / "discover_ats.py"),
-                "--unsourced", "--all-tiers", "--html-scan", "--apply",
+                sys.executable,
+                str(PROJECT_ROOT / "scripts" / "discover_ats.py"),
+                "--unsourced",
+                "--all-tiers",
+                "--html-scan",
+                "--apply",
             ]
             print(f"  Running: {' '.join(cmd[-5:])}")
             try:
@@ -611,9 +672,9 @@ def _fix_issues(audit_result: dict, dry_run: bool = False) -> None:
             strat = c.get("strategy", "unknown")
             by_strategy.setdefault(strat, []).append(c["name"])
 
-        print(f"\n{'='*50}")
+        print(f"\n{'=' * 50}")
         print(f"  FIX: Fetch {len(never_fetched)} never-fetched companies")
-        print(f"{'='*50}")
+        print(f"{'=' * 50}")
 
         for strat, names in sorted(by_strategy.items()):
             print(f"\n  Strategy: {strat} ({len(names)} companies)")
@@ -625,13 +686,18 @@ def _fix_issues(audit_result: dict, dry_run: bool = False) -> None:
                 continue
 
             if dry_run:
-                print(f"    [DRY RUN] Would run: fetch_vacancies.py --companies \"{','.join(names)}\" --no-boards")
+                print(
+                    f'    [DRY RUN] Would run: fetch_vacancies.py --companies "{",".join(names)}" --no-boards'
+                )
                 actions_taken.append(f"fetch {len(names)} {strat} companies")
             else:
                 companies_arg = ",".join(names)
                 cmd = [
-                    sys.executable, str(PROJECT_ROOT / "scripts" / "fetch_vacancies.py"),
-                    "--companies", companies_arg, "--no-boards",
+                    sys.executable,
+                    str(PROJECT_ROOT / "scripts" / "fetch_vacancies.py"),
+                    "--companies",
+                    companies_arg,
+                    "--no-boards",
                 ]
                 print(f"    Running fetch for {len(names)} companies...")
                 try:
@@ -645,9 +711,9 @@ def _fix_issues(audit_result: dict, dry_run: bool = False) -> None:
         print("\n  No never-fetched companies — skipping fetch")
 
     # --- Summary ---
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"  FIX SUMMARY {'(DRY RUN)' if dry_run else ''}")
-    print(f"{'='*50}")
+    print(f"{'=' * 50}")
     if actions_taken:
         for action in actions_taken:
             print(f"  ✓ {action}")
@@ -658,6 +724,7 @@ def _fix_issues(audit_result: dict, dry_run: bool = False) -> None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main():
     args = build_parser().parse_args()
@@ -675,7 +742,7 @@ def main():
     report_path.write_text(report, encoding="utf-8")
 
     stats = audit_result["stats"]
-    print(f"\nAudit complete:", flush=True)
+    print("\nAudit complete:", flush=True)
     print(f"  Monitored active:    {stats['monitored_active']}", flush=True)
     print(f"  Monitored zero:      {stats['monitored_zero']}", flush=True)
     print(f"  Unsourced active:    {stats['unsourced_active']}", flush=True)

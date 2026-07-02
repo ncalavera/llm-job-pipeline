@@ -29,17 +29,20 @@ from config import (
     GEO_BAN_US_ONLY,
 )
 from geo import country_banned, is_remote_mode
+
 # Json / RealDictCursor come from db_backend so they work under both the
 # Supabase (psycopg2) and the local SQLite backend without importing psycopg2.
 from db_backend import IS_SQLITE, Json, RealDictCursor
 from db_conn import get_conn, close_conn
 import filters
+
 # filters caches the blacklist (a compiled alternation pattern) from config at
 # its own import time. When the pipeline reloads config under a new profile it
 # also reloads this module; mirror that here so the cached pattern rebinds to
 # the fresh blacklist (matches the pre-refactor behaviour, when the pattern
 # lived in this module and was rebuilt on every reload).
 import importlib as _importlib
+
 _importlib.reload(filters)
 from quality import clean_description
 
@@ -59,7 +62,9 @@ FETCH_STATUS_CREDIT_EXHAUSTED = "credit_exhausted"
 
 # Statuses that are NOT operational errors (a genuinely-empty listing is fine).
 _FETCH_STATUS_NON_ERROR = (
-    FETCH_STATUS_OK, FETCH_STATUS_NO_DATA, FETCH_STATUS_RENDER_OK_ZERO,
+    FETCH_STATUS_OK,
+    FETCH_STATUS_NO_DATA,
+    FETCH_STATUS_RENDER_OK_ZERO,
 )
 
 
@@ -94,6 +99,7 @@ def classify_region(location: str) -> str | None:
     if not location:
         return None
     from geo import bucket_for_country
+
     bucket = bucket_for_country(location)
     if bucket in ("uk", "germany", "europe"):
         return "europe"
@@ -169,13 +175,16 @@ def _sanitize_title(title: str) -> str:
     Applied before make_vacancy_id() so dedup_hash is clean.
     """
     import html as _html_mod
-    title = _html_mod.unescape(title)                          # &amp; → &, &nbsp; → space
-    title = re.sub(r'\*\*', '', title)                          # markdown bold
-    title = re.sub(r'\s*!\[.*$', '', title)                     # markdown image refs
-    title = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', title)      # [text](url) → text
-    title = re.sub(r'<(?:br|strong|em|b|i|span)[^>]*>', '', title, flags=re.IGNORECASE)  # light HTML tags
-    title = re.sub(r'</(?:strong|em|b|i|span)>', '', title, flags=re.IGNORECASE)
-    title = re.sub(r'  +', ' ', title)                          # collapse double spaces
+
+    title = _html_mod.unescape(title)  # &amp; → &, &nbsp; → space
+    title = re.sub(r"\*\*", "", title)  # markdown bold
+    title = re.sub(r"\s*!\[.*$", "", title)  # markdown image refs
+    title = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", title)  # [text](url) → text
+    title = re.sub(
+        r"<(?:br|strong|em|b|i|span)[^>]*>", "", title, flags=re.IGNORECASE
+    )  # light HTML tags
+    title = re.sub(r"</(?:strong|em|b|i|span)>", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"  +", " ", title)  # collapse double spaces
     return title.strip()
 
 
@@ -186,7 +195,8 @@ def _sanitize_title(title: str) -> str:
 # are stripped — "(Spanish)", "(Maternity cover)" etc. stay, so genuinely
 # distinct roles are not merged.
 _TITLE_GEO_SUFFIX = re.compile(
-    r"\s*\((?:remote|hybrid|on[\s-]?site|onsite|wfh|hq)\b[^)]*\)\s*$", re.I)
+    r"\s*\((?:remote|hybrid|on[\s-]?site|onsite|wfh|hq)\b[^)]*\)\s*$", re.I
+)
 
 
 def _normalize_title_for_dedup(title: str) -> str:
@@ -221,7 +231,7 @@ def _make_location_entry(job: dict) -> dict:
 def _parse_comp_value(comp_str: str) -> float:
     if not comp_str:
         return 0.0
-    nums = re.findall(r'[\d,]+', comp_str)
+    nums = re.findall(r"[\d,]+", comp_str)
     if not nums:
         return 0.0
     val = max(float(n.replace(",", "")) for n in nums)
@@ -239,6 +249,7 @@ def _parse_comp_value(comp_str: str) -> float:
 # ---------------------------------------------------------------------------
 # Company resolution
 # ---------------------------------------------------------------------------
+
 
 def resolve_company_id(org_name: str):
     """Resolve org name to company UUID.
@@ -312,21 +323,42 @@ def ensure_company(org_name: str, status: str = "candidate"):
 # Vacancy columns loaded when light=True. Intentionally excludes full_description
 # (~8 KB p90) to cut Supabase egress for callers that only need metadata.
 _VACANCY_LIGHT_COLUMNS = (
-    "id", "created_at", "updated_at",
-    "dedup_hash", "company_id", "title", "snippet",
-    "compensation", "deadline", "locations", "department",
-    "llm_score", "llm_summary", "llm_reasoning",
-    "llm_hard_requirements", "llm_scored_at", "us_eligibility",
-    "status", "status_updated_at",
-    "first_seen", "last_seen", "triage",
+    "id",
+    "created_at",
+    "updated_at",
+    "dedup_hash",
+    "company_id",
+    "title",
+    "snippet",
+    "compensation",
+    "deadline",
+    "locations",
+    "department",
+    "llm_score",
+    "llm_summary",
+    "llm_reasoning",
+    "llm_hard_requirements",
+    "llm_scored_at",
+    "us_eligibility",
+    "status",
+    "status_updated_at",
+    "first_seen",
+    "last_seen",
+    "triage",
 )
 
 
-def load_vacancies(*, company_name=None, status=None, status_exclude=None,
-                   unscored_only=False, limit=None,
-                   include_inactive_companies=False,
-                   include_candidate_companies=False,
-                   light: bool = False) -> dict[str, dict]:
+def load_vacancies(
+    *,
+    company_name=None,
+    status=None,
+    status_exclude=None,
+    unscored_only=False,
+    limit=None,
+    include_inactive_companies=False,
+    include_candidate_companies=False,
+    light: bool = False,
+) -> dict[str, dict]:
     """Load vacancies from Supabase. Returns {uuid_str: vacancy_dict}.
 
     By default shows only vacancies from active (approved) companies.
@@ -429,7 +461,8 @@ CANDIDATE_ALIGNMENT_FLOOR = 30
 
 
 def load_candidate_vacancies_for_scoring(
-    *, limit: int = CANDIDATE_SCORE_LIMIT,
+    *,
+    limit: int = CANDIDATE_SCORE_LIMIT,
     status_exclude=None,
 ) -> dict[str, dict]:
     """Load unscored vacancies from *candidate* companies that look promising.
@@ -490,14 +523,17 @@ def upsert_vacancy(dedup_hash: str, data: dict):
 
     if existing:
         uuid_val = existing[0]
-        fields_to_update = {k: v for k, v in data.items()
-                           if k not in ("id", "dedup_hash", "created_at")}
+        fields_to_update = {
+            k: v for k, v in data.items() if k not in ("id", "dedup_hash", "created_at")
+        }
         if fields_to_update:
             set_clauses = []
             vals = []
             for k, v in fields_to_update.items():
                 set_clauses.append(f"{k} = %s")
-                vals.append(Json(v) if isinstance(v, (dict, list)) and k in ("locations", "triage") else v)
+                vals.append(
+                    Json(v) if isinstance(v, (dict, list)) and k in ("locations", "triage") else v
+                )
             vals.append(uuid_val)
             cur.execute(
                 f"UPDATE vacancy SET {', '.join(set_clauses)} WHERE id = %s",
@@ -509,8 +545,11 @@ def upsert_vacancy(dedup_hash: str, data: dict):
         # Insert
         cols = ["dedup_hash"] + [k for k in data if k not in ("id", "dedup_hash")]
         vals = [dedup_hash] + [
-            Json(data[k]) if isinstance(data[k], (dict, list)) and k in ("locations", "triage") else data[k]
-            for k in data if k not in ("id", "dedup_hash")
+            Json(data[k])
+            if isinstance(data[k], (dict, list)) and k in ("locations", "triage")
+            else data[k]
+            for k in data
+            if k not in ("id", "dedup_hash")
         ]
         placeholders = ", ".join(["%s"] * len(cols))
         cur.execute(
@@ -560,6 +599,7 @@ def delete_vacancies(vacancy_uuids: list[str]) -> int:
 # Merge logic
 # ---------------------------------------------------------------------------
 
+
 def _safe_deadline(raw: str | None) -> str | None:
     """Parse free-text deadline into ISO date, return None on failure."""
     if not raw:
@@ -573,9 +613,9 @@ def _safe_deadline(raw: str | None) -> str | None:
 
 
 _DEADLINE_RE = re.compile(
-    r'(?:[Dd]eadline|[Cc]losing\s+date|[Aa]pply\s+by|[Aa]pplications?\s+close)'
-    r'[:\s]+'
-    r'(\d{4}-\d{2}-\d{2}|[A-Za-z0-9,\s]+\d{4})'
+    r"(?:[Dd]eadline|[Cc]losing\s+date|[Aa]pply\s+by|[Aa]pplications?\s+close)"
+    r"[:\s]+"
+    r"(\d{4}-\d{2}-\d{2}|[A-Za-z0-9,\s]+\d{4})"
 )
 
 
@@ -587,9 +627,9 @@ def _extract_deadline_from_description(html: str) -> str:
     """
     if not html:
         return ""
-    text = re.sub(r'<[^>]+>', ' ', html)
+    text = re.sub(r"<[^>]+>", " ", html)
     text = text.replace("&nbsp;", " ").replace("&amp;", "&")
-    text = re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
     m = _DEADLINE_RE.search(text)
     return m.group(1).strip() if m else ""
 
@@ -647,8 +687,9 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
             continue
 
         loc_entry = _make_location_entry(job)
-        loc_key = (loc_entry.get("city") or loc_entry.get("country")
-                   or loc_entry.get("work_mode") or "")
+        loc_key = (
+            loc_entry.get("city") or loc_entry.get("country") or loc_entry.get("work_mode") or ""
+        )
 
         # Check existing
         cur.execute("SELECT * FROM vacancy WHERE dedup_hash = %s", (dedup_hash,))
@@ -677,8 +718,7 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
                     updates["deadline"] = parsed_dl
             # Fallback: extract deadline from description if still missing
             if not existing.get("deadline") and "deadline" not in updates:
-                extracted = _extract_deadline_from_description(
-                    job.get("full_description") or "")
+                extracted = _extract_deadline_from_description(job.get("full_description") or "")
                 if extracted:
                     parsed_dl = _safe_deadline(extracted)
                     if parsed_dl:
@@ -689,8 +729,7 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
             # Merge locations
             locs = existing.get("locations") or []
             existing_loc_keys = {
-                l.get("city") or l.get("country") or l.get("work_mode") or ""
-                for l in locs
+                l.get("city") or l.get("country") or l.get("work_mode") or "" for l in locs
             }
             if loc_key not in existing_loc_keys:
                 locs.append(loc_entry)
@@ -710,8 +749,7 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
             # Resolve deadline: fetcher-provided or fallback regex from description
             deadline_raw = job.get("deadline") or ""
             if not deadline_raw:
-                deadline_raw = _extract_deadline_from_description(
-                    job.get("full_description") or "")
+                deadline_raw = _extract_deadline_from_description(job.get("full_description") or "")
             parsed_deadline = _safe_deadline(deadline_raw) if deadline_raw else None
             cur.execute(
                 """INSERT INTO vacancy (
@@ -720,12 +758,15 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
                        first_seen, last_seen, locations, department
                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
-                    dedup_hash, company_id, title,
+                    dedup_hash,
+                    company_id,
+                    title,
                     job.get("snippet", ""),
                     job.get("full_description", ""),
                     job.get("compensation", ""),
                     parsed_deadline,
-                    today, today,
+                    today,
+                    today,
                     Json([loc_entry]),
                     job.get("department"),
                 ),
@@ -736,7 +777,10 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     if skipped_archived:
         print(f"  [{org_name}] skipped {skipped_archived} recently archived", flush=True)
     if skipped_boilerplate:
-        print(f"  [{org_name}] gate dropped {skipped_boilerplate} boilerplate descriptions", flush=True)
+        print(
+            f"  [{org_name}] gate dropped {skipped_boilerplate} boilerplate descriptions",
+            flush=True,
+        )
     if skipped_junk:
         print(f"  [{org_name}] skipped {skipped_junk} junk content", flush=True)
     if resurrected:
@@ -816,8 +860,9 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
             skipped_archived += 1
             continue
         loc_entry = _make_location_entry(job)
-        loc_key = (loc_entry.get("city") or loc_entry.get("country")
-                   or loc_entry.get("work_mode") or "")
+        loc_key = (
+            loc_entry.get("city") or loc_entry.get("country") or loc_entry.get("work_mode") or ""
+        )
 
         cur.execute("SELECT * FROM vacancy WHERE dedup_hash = %s", (dedup_hash,))
         existing = cur.fetchone()
@@ -837,8 +882,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
                     updates["deadline"] = parsed_dl
             # Fallback: extract deadline from description if still missing
             if not existing.get("deadline") and "deadline" not in updates:
-                extracted = _extract_deadline_from_description(
-                    job.get("full_description") or "")
+                extracted = _extract_deadline_from_description(job.get("full_description") or "")
                 if extracted:
                     parsed_dl = _safe_deadline(extracted)
                     if parsed_dl:
@@ -846,8 +890,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
 
             locs = existing.get("locations") or []
             existing_loc_keys = {
-                l.get("city") or l.get("country") or l.get("work_mode") or ""
-                for l in locs
+                l.get("city") or l.get("country") or l.get("work_mode") or "" for l in locs
             }
             if loc_key not in existing_loc_keys:
                 locs.append(loc_entry)
@@ -860,8 +903,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
             # Resolve deadline: fetcher-provided or fallback regex from description
             deadline_raw = job.get("deadline") or ""
             if not deadline_raw:
-                deadline_raw = _extract_deadline_from_description(
-                    job.get("full_description") or "")
+                deadline_raw = _extract_deadline_from_description(job.get("full_description") or "")
             parsed_deadline = _safe_deadline(deadline_raw) if deadline_raw else None
             cur.execute(
                 """INSERT INTO vacancy (
@@ -870,12 +912,15 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
                        first_seen, last_seen, locations
                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
-                    dedup_hash, company_id, title,
+                    dedup_hash,
+                    company_id,
+                    title,
                     job.get("snippet", ""),
                     job.get("full_description", ""),
                     job.get("compensation", ""),
                     parsed_deadline,
-                    today, today,
+                    today,
+                    today,
                     Json([loc_entry]),
                 ),
             )
@@ -885,7 +930,10 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
     if skipped_archived:
         print(f"  [{board_name}] skipped {skipped_archived} recently archived", flush=True)
     if skipped_boilerplate:
-        print(f"  [{board_name}] gate dropped {skipped_boilerplate} boilerplate descriptions", flush=True)
+        print(
+            f"  [{board_name}] gate dropped {skipped_boilerplate} boilerplate descriptions",
+            flush=True,
+        )
     if skipped_junk:
         print(f"  [{board_name}] skipped {skipped_junk} junk content", flush=True)
     if resurrected:
@@ -906,8 +954,8 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
 # Company fitness (for filter gate)
 # ---------------------------------------------------------------------------
 
-def auto_review_candidates(approve_threshold=None, reject_threshold=None,
-                           enabled=None) -> dict:
+
+def auto_review_candidates(approve_threshold=None, reject_threshold=None, enabled=None) -> dict:
     """Auto-approve/reject candidate companies by alignment_score threshold.
 
     OPT-IN: this mutates company status with no human in the loop, so it does
@@ -928,7 +976,10 @@ def auto_review_candidates(approve_threshold=None, reject_threshold=None,
 
     if enabled is None:
         enabled = os.environ.get("AUTO_REVIEW_CANDIDATES", "").lower() in (
-            "1", "true", "yes", "on",
+            "1",
+            "true",
+            "yes",
+            "on",
         )
     if approve_threshold is None:
         approve_threshold = int(os.environ.get("AUTO_REVIEW_APPROVE", "60"))
@@ -996,6 +1047,7 @@ def get_company_fitness_map() -> dict[str, dict]:
 # ---------------------------------------------------------------------------
 # Status
 # ---------------------------------------------------------------------------
+
 
 def get_vacancy_statuses() -> dict[str, str]:
     """Return {uuid_str: status} for all vacancies."""
@@ -1136,8 +1188,10 @@ def update_llm_score(vacancy_uuid: str, score_data: dict):
 # Source tracking
 # ---------------------------------------------------------------------------
 
-def update_source_tracking(org_name: str, tier, strategy: str,
-                           new_count: int, fetch_status: str = FETCH_STATUS_OK):
+
+def update_source_tracking(
+    org_name: str, tier, strategy: str, new_count: int, fetch_status: str = FETCH_STATUS_OK
+):
     """Update company source tracking metadata.
 
     If fetch succeeded (status=ok) but vacancy_count=0, status becomes no_data.
@@ -1244,8 +1298,8 @@ def mark_board_fetched(board_id: str):
 # Archive hash dedup
 # ---------------------------------------------------------------------------
 
-def get_archived_hashes(ttl_days: int = ARCHIVE_TTL_DAYS, *,
-                        include_gone: bool = True) -> set[str]:
+
+def get_archived_hashes(ttl_days: int = ARCHIVE_TTL_DAYS, *, include_gone: bool = True) -> set[str]:
     """Return dedup_hashes archived within TTL.
 
     include_gone=False excludes 'gone_from_source' tombstones, matching the
@@ -1256,8 +1310,7 @@ def get_archived_hashes(ttl_days: int = ARCHIVE_TTL_DAYS, *,
     """
     conn = get_conn()
     cur = conn.cursor()
-    query = ("SELECT dedup_hash FROM archived_hash "
-             "WHERE archived_at > now() - interval '%s days'")
+    query = "SELECT dedup_hash FROM archived_hash WHERE archived_at > now() - interval '%s days'"
     if not include_gone:
         query += " AND reason IS DISTINCT FROM 'gone_from_source'"
     cur.execute(query, (ttl_days,))
@@ -1283,6 +1336,7 @@ def record_archived_hashes(entries: list[tuple[str, str]]):
 # Gone-from-source detection
 # ---------------------------------------------------------------------------
 
+
 def archive_gone_vacancies(org_name: str, fetched_jobs: list[dict]) -> int:
     """Archive unseen vacancies absent from a fresh direct-ATS listing.
 
@@ -1302,8 +1356,7 @@ def archive_gone_vacancies(org_name: str, fetched_jobs: list[dict]) -> int:
     if company_id is None:
         return 0
     fetched_hashes = {
-        make_vacancy_id(org, _sanitize_title(j.get("title", "")))
-        for j in fetched_jobs
+        make_vacancy_id(org, _sanitize_title(j.get("title", ""))) for j in fetched_jobs
     }
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -1338,22 +1391,22 @@ def archive_gone_vacancies(org_name: str, fetched_jobs: list[dict]) -> int:
         )
     cur.close()
     if to_archive:
-        record_archived_hashes(
-            [(r["dedup_hash"], "gone_from_source") for r in to_archive]
-        )
+        record_archived_hashes([(r["dedup_hash"], "gone_from_source") for r in to_archive])
         titles = ", ".join(sorted(r["title"] for r in to_archive)[:3])
-        print(f"  [{org}] archived {len(to_archive)} gone from source: {titles}",
-              flush=True)
+        print(f"  [{org}] archived {len(to_archive)} gone from source: {titles}", flush=True)
     if protected:
         ptitles = ", ".join(sorted(r["title"] for r in protected)[:3])
-        print(f"  [{org}] PROTECTED {len(protected)} high-fit gone from source "
-              f"→ expiring: {ptitles}", flush=True)
+        print(
+            f"  [{org}] PROTECTED {len(protected)} high-fit gone from source → expiring: {ptitles}",
+            flush=True,
+        )
     return len(to_archive)
 
 
 # ---------------------------------------------------------------------------
 # Auto-pass expired
 # ---------------------------------------------------------------------------
+
 
 def pass_expired_vacancies() -> int:
     """Auto-resolve expired unseen vacancies past their deadline.
@@ -1366,13 +1419,16 @@ def pass_expired_vacancies() -> int:
     conn = get_conn()
     cur = conn.cursor()
     # Protect first so the rows leave 'unseen' before the pass sweep runs.
-    cur.execute("""
+    cur.execute(
+        """
         UPDATE vacancy SET status = 'expiring', status_updated_at = NOW()
         WHERE deadline IS NOT NULL
           AND deadline < CURRENT_DATE
           AND status = 'unseen'
           AND COALESCE(llm_score, 0) >= %s
-    """, (PROTECT_SCORE,))
+    """,
+        (PROTECT_SCORE,),
+    )
     protected = cur.rowcount
     cur.execute("""
         UPDATE vacancy SET status = 'passed', status_updated_at = NOW()
@@ -1385,14 +1441,14 @@ def pass_expired_vacancies() -> int:
     if count:
         print(f"  Auto-passed {count} expired unseen vacancies", flush=True)
     if protected:
-        print(f"  PROTECTED {protected} expired high-fit roles → expiring",
-              flush=True)
+        print(f"  PROTECTED {protected} expired high-fit roles → expiring", flush=True)
     return count
 
 
 # ---------------------------------------------------------------------------
 # Archive
 # ---------------------------------------------------------------------------
+
 
 def archive_vacancies(threshold: int = LLM_SCORE_THRESHOLD, force: bool = False) -> list[str]:
     """Archive low-scoring unseen vacancies.
@@ -1405,8 +1461,10 @@ def archive_vacancies(threshold: int = LLM_SCORE_THRESHOLD, force: bool = False)
     # eligible roles. Archival stays opt-in via force=True until thresholds
     # are recalibrated for the pure-fit scale.
     if not force:
-        print("  Score-threshold archival paused (pure-fit scoring); thresholds "
-              "need recalibration. Pass force=True to override.")
+        print(
+            "  Score-threshold archival paused (pure-fit scoring); thresholds "
+            "need recalibration. Pass force=True to override."
+        )
         return []
 
     conn = get_conn()
@@ -1450,12 +1508,18 @@ def archive_vacancies(threshold: int = LLM_SCORE_THRESHOLD, force: bool = False)
         archived_data[uid] = vac
 
     with open(archive_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "archived_at": datetime.now().isoformat(),
-            "threshold": threshold,
-            "count": len(archived_data),
-            "vacancies": archived_data,
-        }, f, indent=2, ensure_ascii=False, default=str)
+        json.dump(
+            {
+                "archived_at": datetime.now().isoformat(),
+                "threshold": threshold,
+                "count": len(archived_data),
+                "vacancies": archived_data,
+            },
+            f,
+            indent=2,
+            ensure_ascii=False,
+            default=str,
+        )
 
     # Delete from Supabase
     uuids = [r["id"] for r in to_remove]
@@ -1464,8 +1528,7 @@ def archive_vacancies(threshold: int = LLM_SCORE_THRESHOLD, force: bool = False)
 
     # Record archived hashes for dedup (prevents re-fetch → re-score → re-archive)
     archive_hashes = [
-        (r.get("dedup_hash"), "score_below_threshold")
-        for r in to_remove if r.get("dedup_hash")
+        (r.get("dedup_hash"), "score_below_threshold") for r in to_remove if r.get("dedup_hash")
     ]
     if archive_hashes:
         cur.executemany(
@@ -1474,14 +1537,17 @@ def archive_vacancies(threshold: int = LLM_SCORE_THRESHOLD, force: bool = False)
         )
     cur.close()
 
-    print(f"  Archived {len(to_remove)} vacancies below LLM score {threshold}"
-          f"\n  Archive: {archive_path.name}")
+    print(
+        f"  Archived {len(to_remove)} vacancies below LLM score {threshold}"
+        f"\n  Archive: {archive_path.name}"
+    )
     return [str(u) for u in uuids]
 
 
 # ---------------------------------------------------------------------------
 # Enrichment (replaces enriched.json)
 # ---------------------------------------------------------------------------
+
 
 def load_company_enrichment(org_name: str) -> dict:
     """Load enrichment data for a single company."""
@@ -1499,7 +1565,9 @@ def load_company_enrichment(org_name: str) -> dict:
     return {
         "about": row["about"] or {},
         "mission_fit": row["mission_fit"] or {},
-        "alignment_score": float(row["alignment_score"]) if row["alignment_score"] is not None else None,
+        "alignment_score": float(row["alignment_score"])
+        if row["alignment_score"] is not None
+        else None,
         "enriched_at": row["enriched_at"].isoformat() if row["enriched_at"] else None,
     }
 
@@ -1521,10 +1589,9 @@ def calculate_company_tier(alignment_score, custom_boost=None):
     th = settings.thresholds()
     composite = float(alignment_score)
     if custom_boost is not None:
-        composite = (
-            th["composite_alignment_weight"] * composite
-            + th["composite_boost_weight"] * float(custom_boost)
-        )
+        composite = th["composite_alignment_weight"] * composite + th[
+            "composite_boost_weight"
+        ] * float(custom_boost)
     composite = round(composite, 1)
     if composite >= th["tier_s"]:
         tier = "S"
@@ -1537,8 +1604,7 @@ def calculate_company_tier(alignment_score, custom_boost=None):
     return tier, composite
 
 
-def save_company_enrichment(org_name: str, about=None, mission_fit=None,
-                            alignment_score=None):
+def save_company_enrichment(org_name: str, about=None, mission_fit=None, alignment_score=None):
     """Save enrichment data for a company."""
     canonical = resolve_canonical_name(org_name)
     conn = get_conn()
@@ -1580,7 +1646,9 @@ def load_all_enrichment() -> dict[str, dict]:
         result[row["canonical_name"]] = {
             "about": row["about"] or {},
             "mission_fit": row["mission_fit"] or {},
-            "alignment_score": float(row["alignment_score"]) if row["alignment_score"] is not None else None,
+            "alignment_score": float(row["alignment_score"])
+            if row["alignment_score"] is not None
+            else None,
             "enriched_at": row["enriched_at"].isoformat() if row["enriched_at"] else None,
         }
     cur.close()
@@ -1590,6 +1658,7 @@ def load_all_enrichment() -> dict[str, dict]:
 # ---------------------------------------------------------------------------
 # Reconciliation
 # ---------------------------------------------------------------------------
+
 
 def print_reconciliation_report():
     """Post-run summary: candidates, status distribution, errors."""
@@ -1613,22 +1682,33 @@ def print_reconciliation_report():
 
     cur.close()
 
-    print(f"\n{'='*50}")
-    print(f"  Reconciliation Report")
-    print(f"{'='*50}")
+    print(f"\n{'=' * 50}")
+    print("  Reconciliation Report")
+    print(f"{'=' * 50}")
     print(f"  Companies: {active} active, {candidates} candidates")
     print(f"  Vacancies: {total_vac} total, {scored} scored")
-    print(f"  Status distribution:")
+    print("  Status distribution:")
     for status, cnt in status_dist:
         print(f"    {status}: {cnt}")
-    print(f"{'='*50}")
+    print(f"{'=' * 50}")
 
 
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
 
-VALID_STATUSES = {"unseen", "liked", "passed", "to_apply", "to_research", "to_network", "skipped", "applied", "expiring", "archived"}
+VALID_STATUSES = {
+    "unseen",
+    "liked",
+    "passed",
+    "to_apply",
+    "to_research",
+    "to_network",
+    "skipped",
+    "applied",
+    "expiring",
+    "archived",
+}
 
 
 def validate_db() -> list[str]:
@@ -1650,7 +1730,9 @@ def validate_db() -> list[str]:
             warnings.append(f"  Invalid vacancy status: '{s}'")
 
     # 3. Duplicate dedup_hash
-    cur.execute("SELECT dedup_hash, count(*) FROM vacancy WHERE dedup_hash IS NOT NULL GROUP BY dedup_hash HAVING count(*) > 1")
+    cur.execute(
+        "SELECT dedup_hash, count(*) FROM vacancy WHERE dedup_hash IS NOT NULL GROUP BY dedup_hash HAVING count(*) > 1"
+    )
     dupes = cur.fetchall()
     if dupes:
         warnings.append(f"  {len(dupes)} duplicate dedup_hash values")
@@ -1662,10 +1744,14 @@ def validate_db() -> list[str]:
         warnings.append(f"  {n} scored vacancies missing llm_summary")
 
     # 5. Duplicate company canonical_name
-    cur.execute("SELECT canonical_name, count(*) FROM company GROUP BY canonical_name HAVING count(*) > 1")
+    cur.execute(
+        "SELECT canonical_name, count(*) FROM company GROUP BY canonical_name HAVING count(*) > 1"
+    )
     dupes = cur.fetchall()
     if dupes:
-        warnings.append(f"  {len(dupes)} duplicate company canonical_names: {[d[0] for d in dupes]}")
+        warnings.append(
+            f"  {len(dupes)} duplicate company canonical_names: {[d[0] for d in dupes]}"
+        )
 
     # 6. Descriptions polluted by a cookie/consent banner (second line of
     #    defence behind the merge-time gate). One ILIKE over the main anchors.
@@ -1678,8 +1764,10 @@ def validate_db() -> list[str]:
     """)
     n = cur.fetchone()[0]
     if n:
-        warnings.append(f"  {n} descriptions match cookie-banner anchors "
-                        f"(run enrich_blind_vacancies.py --clean-cookie-pages)")
+        warnings.append(
+            f"  {n} descriptions match cookie-banner anchors "
+            f"(run enrich_blind_vacancies.py --clean-cookie-pages)"
+        )
 
     cur.close()
 

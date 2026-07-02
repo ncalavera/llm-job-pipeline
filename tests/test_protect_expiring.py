@@ -20,13 +20,14 @@ def dal(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
     monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
-    for mod in ("database_supabase", "config", "company_registry",
-                "db_conn", "db_backend"):
+    for mod in ("database_supabase", "config", "company_registry", "db_conn", "db_backend"):
         sys.modules.pop(mod, None)
     import db_backend
+
     importlib.reload(db_backend)
     assert db_backend.IS_SQLITE
     import database_supabase as db
+
     yield db
     db.close_conn()
 
@@ -55,20 +56,19 @@ def _commit(db):
 def _set(db, vid, **cols):
     cur = db.get_conn().cursor()
     sets = ", ".join(f"{k} = %s" for k in cols)
-    cur.execute(f"UPDATE vacancy SET {sets} WHERE id = %s",
-                list(cols.values()) + [vid])
+    cur.execute(f"UPDATE vacancy SET {sets} WHERE id = %s", list(cols.values()) + [vid])
     cur.close()
     _commit(db)
 
 
 def _status(db, title):
-    return db.load_vacancies(include_inactive_companies=True)[
-        _id_by_title(db, title)]["status"]
+    return db.load_vacancies(include_inactive_companies=True)[_id_by_title(db, title)]["status"]
 
 
 # ---------------------------------------------------------------------------
 # Gone-from-source: protect >= PROTECT_SCORE, archive the rest
 # ---------------------------------------------------------------------------
+
 
 def test_high_fit_gone_becomes_expiring_not_archived(dal):
     dal.ensure_company("Acme Robotics", status="active")
@@ -103,11 +103,17 @@ def test_low_fit_gone_still_archived(dal):
 # Past deadline: protect >= PROTECT_SCORE, pass the rest
 # ---------------------------------------------------------------------------
 
+
 def test_high_fit_expired_becomes_expiring_not_passed(dal):
     dal.ensure_company("Acme Robotics", status="active")
-    dal.save_vacancies("Acme Robotics", "A", [
-        _job("Head of Programmes"), _job("Filing Assistant"),
-    ])
+    dal.save_vacancies(
+        "Acme Robotics",
+        "A",
+        [
+            _job("Head of Programmes"),
+            _job("Filing Assistant"),
+        ],
+    )
     _commit(dal)
     hi = _id_by_title(dal, "Head of Programmes")
     lo = _id_by_title(dal, "Filing Assistant")
@@ -138,6 +144,7 @@ def test_decided_role_untouched_by_auto_pass(dal):
 # ---------------------------------------------------------------------------
 # Resurrection: a re-listed expiring role returns to active
 # ---------------------------------------------------------------------------
+
 
 def test_expiring_role_resurrects_on_relisting(dal):
     dal.ensure_company("Acme Robotics", status="active")

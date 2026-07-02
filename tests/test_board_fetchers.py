@@ -4,7 +4,6 @@ opt-in selection and quality-gate junk rejection on the merge path.
 """
 
 import importlib
-import json
 import sys
 
 import pytest
@@ -23,6 +22,7 @@ from fetchers import (
 # ---------------------------------------------------------------------------
 # Fake requests plumbing
 # ---------------------------------------------------------------------------
+
 
 class FakeResponse:
     def __init__(self, *, json_data=None, content=b"", status=200):
@@ -101,8 +101,11 @@ ARBEITNOW_PAGE = {
 }
 
 ARBEITNOW_CFG = {
-    "strategy": "arbeitnow_api", "name": "Arbeitnow",
-    "url": "https://www.arbeitnow.com", "pages": 3, "board_blacklist": [],
+    "strategy": "arbeitnow_api",
+    "name": "Arbeitnow",
+    "url": "https://www.arbeitnow.com",
+    "pages": 3,
+    "board_blacklist": [],
 }
 
 
@@ -156,6 +159,7 @@ def test_arbeitnow_stops_when_no_next_page(monkeypatch):
 # Remotive
 # ---------------------------------------------------------------------------
 
+
 def _remotive_payload(jobs):
     return {"job-count": len(jobs), "jobs": jobs}
 
@@ -177,14 +181,17 @@ REMOTIVE_JOB = {
 
 def test_remotive_single_request_and_parsing(monkeypatch):
     monkeypatch.delenv("REMOTIVE_CATEGORIES", raising=False)
-    fake = FakeRequests(lambda url, p: FakeResponse(
-        json_data=_remotive_payload([REMOTIVE_JOB])))
+    fake = FakeRequests(lambda url, p: FakeResponse(json_data=_remotive_payload([REMOTIVE_JOB])))
     monkeypatch.setattr(fetchers, "requests", fake)
 
-    jobs = fetch_remotive_board({
-        "strategy": "remotive_api", "name": "Remotive",
-        "url": "https://remotive.com", "board_blacklist": [],
-    })
+    jobs = fetch_remotive_board(
+        {
+            "strategy": "remotive_api",
+            "name": "Remotive",
+            "url": "https://remotive.com",
+            "board_blacklist": [],
+        }
+    )
     assert len(fake.calls) == 1  # respect their limits: one request per run
     assert fake.calls[0]["params"] == {}
 
@@ -201,14 +208,17 @@ def test_remotive_single_request_and_parsing(monkeypatch):
 def test_remotive_one_request_per_category_and_dedup(monkeypatch):
     monkeypatch.setenv("REMOTIVE_CATEGORIES", "product, marketing")
     # Same job returned in both categories -> must dedup by id.
-    fake = FakeRequests(lambda url, p: FakeResponse(
-        json_data=_remotive_payload([REMOTIVE_JOB])))
+    fake = FakeRequests(lambda url, p: FakeResponse(json_data=_remotive_payload([REMOTIVE_JOB])))
     monkeypatch.setattr(fetchers, "requests", fake)
 
-    jobs = fetch_remotive_board({
-        "strategy": "remotive_api", "name": "Remotive",
-        "url": "https://remotive.com", "board_blacklist": [],
-    })
+    jobs = fetch_remotive_board(
+        {
+            "strategy": "remotive_api",
+            "name": "Remotive",
+            "url": "https://remotive.com",
+            "board_blacklist": [],
+        }
+    )
     assert len(fake.calls) == 2
     assert {c["params"].get("category") for c in fake.calls} == {"product", "marketing"}
     assert len(jobs) == 1  # deduped across the two requests
@@ -218,14 +228,19 @@ def test_remotive_blacklist_applied(monkeypatch):
     monkeypatch.delenv("REMOTIVE_CATEGORIES", raising=False)
     # Universal junk = a non-job pipeline entry, NOT a real role of any kind.
     junk = dict(REMOTIVE_JOB, id=2, title="Expression of Interest")
-    fake = FakeRequests(lambda url, p: FakeResponse(
-        json_data=_remotive_payload([REMOTIVE_JOB, junk])))
+    fake = FakeRequests(
+        lambda url, p: FakeResponse(json_data=_remotive_payload([REMOTIVE_JOB, junk]))
+    )
     monkeypatch.setattr(fetchers, "requests", fake)
 
-    jobs = fetch_remotive_board({
-        "strategy": "remotive_api", "name": "Remotive",
-        "url": "https://remotive.com", "board_blacklist": [],
-    })
+    jobs = fetch_remotive_board(
+        {
+            "strategy": "remotive_api",
+            "name": "Remotive",
+            "url": "https://remotive.com",
+            "board_blacklist": [],
+        }
+    )
     assert [j["title"] for j in jobs] == ["Head of Product"]
 
 
@@ -243,13 +258,20 @@ def test_remotive_real_roles_survive_neutral_gate(monkeypatch):
     ]
     fake = FakeRequests(lambda url, p: FakeResponse(json_data=_remotive_payload(survivors)))
     monkeypatch.setattr(fetchers, "requests", fake)
-    jobs = fetch_remotive_board({
-        "strategy": "remotive_api", "name": "Remotive",
-        "url": "https://remotive.com", "board_blacklist": [],
-    })
+    jobs = fetch_remotive_board(
+        {
+            "strategy": "remotive_api",
+            "name": "Remotive",
+            "url": "https://remotive.com",
+            "board_blacklist": [],
+        }
+    )
     assert {j["title"] for j in jobs} == {
-        "Research Fellowship", "Summer Internship", "Volunteer Coordinator",
-        "Data Science Bootcamp Instructor", "Software Engineer",
+        "Research Fellowship",
+        "Summer Internship",
+        "Volunteer Coordinator",
+        "Data Science Bootcamp Instructor",
+        "Software Engineer",
     }
 
 
@@ -290,17 +312,20 @@ def test_wwr_parses_company_role_and_blacklists(monkeypatch):
     fake = FakeRequests(lambda url, p: FakeResponse(content=WWR_RSS.encode()))
     monkeypatch.setattr(fetchers, "requests", fake)
 
-    jobs = fetch_wwr_board({
-        "strategy": "wwr_rss", "name": "We Work Remotely",
-        "url": "https://weworkremotely.com",
-        "default_categories": ["product"],
-        "board_blacklist": [],
-    })
+    jobs = fetch_wwr_board(
+        {
+            "strategy": "wwr_rss",
+            "name": "We Work Remotely",
+            "url": "https://weworkremotely.com",
+            "default_categories": ["product"],
+            "board_blacklist": [],
+        }
+    )
     # "Talent Pool" is a non-job pipeline entry (universal junk); only the PM
     # survives. A real role of any discipline/format would NOT be dropped here.
     assert len(jobs) == 1
     j = jobs[0]
-    assert j["org_override"] == "Nearcut"            # "Company: Role" split
+    assert j["org_override"] == "Nearcut"  # "Company: Role" split
     assert j["title"] == "Product Manager"
     assert j["url"] == "https://weworkremotely.com/remote-jobs/nearcut-product-manager"
     assert j["location"] == "Remote, Anywhere in the World"
@@ -313,12 +338,15 @@ def test_wwr_categories_env_controls_feeds(monkeypatch):
     fake = FakeRequests(lambda url, p: FakeResponse(content=WWR_RSS.encode()))
     monkeypatch.setattr(fetchers, "requests", fake)
 
-    fetch_wwr_board({
-        "strategy": "wwr_rss", "name": "We Work Remotely",
-        "url": "https://weworkremotely.com",
-        "default_categories": ["product", "management-and-finance"],
-        "board_blacklist": [],
-    })
+    fetch_wwr_board(
+        {
+            "strategy": "wwr_rss",
+            "name": "We Work Remotely",
+            "url": "https://weworkremotely.com",
+            "default_categories": ["product", "management-and-finance"],
+            "board_blacklist": [],
+        }
+    )
     assert len(fake.calls) == 1
     assert "remote-marketing-jobs.rss" in fake.calls[0]["url"]
 
@@ -340,9 +368,9 @@ HN_ITEM = {
         {
             "id": 1001,
             "text": "Acme Robotics | Head of Operations | Remote (EU) | Full-time"
-                    "<p>We build warehouse robots. You will run operations across"
-                    " three countries and own the supply chain end to end.</p>"
-                    "<p>Location: Remote within EU timezones</p>",
+            "<p>We build warehouse robots. You will run operations across"
+            " three countries and own the supply chain end to end.</p>"
+            "<p>Location: Remote within EU timezones</p>",
             "children": [
                 {"id": 9999, "text": "Reply: is this still open?"},  # nested -> ignored
             ],
@@ -350,7 +378,7 @@ HN_ITEM = {
         {
             "id": 1002,
             "text": "BetaCorp — Product Lead — Berlin onsite"
-                    "<p>Join our product team in Berlin.</p>",
+            "<p>Join our product team in Berlin.</p>",
             "children": [],
         },
         {
@@ -380,16 +408,19 @@ def test_hn_parses_top_level_comments_only(monkeypatch):
     fake = FakeRequests(_hn_router)
     monkeypatch.setattr(fetchers, "requests", fake)
 
-    jobs = fetch_hn_whoishiring_board({
-        "strategy": "hn_whoishiring", "name": "HN Who is hiring",
-        "url": "https://news.ycombinator.com/submitted?id=whoishiring",
-        "board_blacklist": [],
-    })
+    jobs = fetch_hn_whoishiring_board(
+        {
+            "strategy": "hn_whoishiring",
+            "name": "HN Who is hiring",
+            "url": "https://news.ycombinator.com/submitted?id=whoishiring",
+            "board_blacklist": [],
+        }
+    )
 
     orgs = {j["org_override"] for j in jobs}
-    assert "Acme Robotics" in orgs           # pipe-separated
-    assert "BetaCorp" in orgs                # em-dash-separated
-    assert "HelpCo" not in orgs              # universal-junk title (talent pool)
+    assert "Acme Robotics" in orgs  # pipe-separated
+    assert "BetaCorp" in orgs  # em-dash-separated
+    assert "HelpCo" not in orgs  # universal-junk title (talent pool)
     # Nested reply (id 9999) must NOT appear — top-level only.
     assert all(j["external_id"] != "9999" for j in jobs)
 
@@ -401,9 +432,9 @@ def test_hn_parses_top_level_comments_only(monkeypatch):
 
 
 def test_hn_comment_without_separator_keeps_board_pseudo_org():
-    parsed = _parse_hn_comment({
-        "id": 7, "text": "We are a stealth startup hiring a generalist operator."
-    })
+    parsed = _parse_hn_comment(
+        {"id": 7, "text": "We are a stealth startup hiring a generalist operator."}
+    )
     assert parsed is not None
     assert parsed["org_override"] == ""  # filled with [via ...] by the fetcher
     assert parsed["title"].startswith("We are a stealth startup")
@@ -424,6 +455,7 @@ def test_html_to_multiline_keeps_structure():
 # ---------------------------------------------------------------------------
 # JOB_BOARDS env selects the new boards; default stays empty
 # ---------------------------------------------------------------------------
+
 
 def test_new_boards_registered_and_opt_in(monkeypatch):
     import config as cfg
@@ -460,6 +492,7 @@ def test_new_boards_registered_and_opt_in(monkeypatch):
 # Idealist (Algolia POST) / Fast Forward (Getro POST) / LinkedIn (guest GET)
 # ---------------------------------------------------------------------------
 
+
 class _Resp:
     """Minimal response exposing .json(), .text, .content, .status_code."""
 
@@ -495,15 +528,20 @@ class _FakeHTTP:
 
 def test_fetch_idealist_board(monkeypatch):
     hit = {
-        "name": "Head of Operations", "orgName": "Global Impact Fund",
+        "name": "Head of Operations",
+        "orgName": "Global Impact Fund",
         "objectID": "abc123",
         "url": {"en": "/en/nonprofit-job/abc123-head-of-operations"},
         "orgUrl": {"en": "/en/nonprofit/global-impact-fund"},
-        "locationType": "REMOTE", "remoteZone": "WORLD",
-        "functions": ["OPERATIONS"], "keywords": ["operations", "strategy"],
+        "locationType": "REMOTE",
+        "remoteZone": "WORLD",
+        "functions": ["OPERATIONS"],
+        "keywords": ["operations", "strategy"],
         "description": "Lead operations for a global grantmaker.",
-        "salaryMinimum": 90000, "salaryMaximum": 110000,
-        "salaryCurrency": "USD", "salaryPeriod": "YEAR",
+        "salaryMinimum": 90000,
+        "salaryMaximum": 110000,
+        "salaryCurrency": "USD",
+        "salaryPeriod": "YEAR",
         "professionalLevel": "DIRECTOR",
     }
 
@@ -513,7 +551,8 @@ def test_fetch_idealist_board(monkeypatch):
 
     monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
     out = fetchers.fetch_idealist_board(
-        {"name": "Idealist", "url": "https://www.idealist.org/en/jobs"})
+        {"name": "Idealist", "url": "https://www.idealist.org/en/jobs"}
+    )
     assert len(out) == 1
     job = out[0]
     assert job["title"] == "Head of Operations"
@@ -526,13 +565,18 @@ def test_fetch_idealist_board(monkeypatch):
 
 def test_fetch_fastforward_board(monkeypatch):
     rec = {
-        "id": 555, "slug": "head-of-programmes", "title": "Head of Programmes",
+        "id": 555,
+        "slug": "head-of-programmes",
+        "title": "Head of Programmes",
         "organization": {"name": "Noora Health", "slug": "noora-health"},
-        "locations": ["London, United Kingdom"], "work_mode": "hybrid",
-        "has_description": True, "compensation_public": True,
+        "locations": ["London, United Kingdom"],
+        "work_mode": "hybrid",
+        "has_description": True,
+        "compensation_public": True,
         "compensation_amount_min_cents": 7000000,
         "compensation_amount_max_cents": 9000000,
-        "compensation_currency": "GBP", "compensation_period": "year",
+        "compensation_currency": "GBP",
+        "compensation_period": "year",
     }
 
     def router(verb, url, json=None, params=None):
@@ -542,8 +586,8 @@ def test_fetch_fastforward_board(monkeypatch):
 
     monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
     out = fetchers.fetch_fastforward_board(
-        {"name": "Fast Forward", "url": "https://jobs.ffwd.org/jobs",
-         "fetch_descriptions": False})
+        {"name": "Fast Forward", "url": "https://jobs.ffwd.org/jobs", "fetch_descriptions": False}
+    )
     assert len(out) == 1
     job = out[0]
     assert job["title"] == "Head of Programmes"
@@ -578,11 +622,16 @@ def test_fetch_linkedin_board(monkeypatch):
     monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
     monkeypatch.setattr(fetchers.time, "sleep", lambda *a, **k: None)
 
-    out = fetchers.fetch_linkedin_board({
-        "name": "LinkedIn", "url": "https://www.linkedin.com/jobs",
-        "queries": [{"keywords": "Chief of Staff", "location": "London"}],
-        "pages": 1, "request_delay": 0, "fetch_detail": False,
-    })
+    out = fetchers.fetch_linkedin_board(
+        {
+            "name": "LinkedIn",
+            "url": "https://www.linkedin.com/jobs",
+            "queries": [{"keywords": "Chief of Staff", "location": "London"}],
+            "pages": 1,
+            "request_delay": 0,
+            "fetch_detail": False,
+        }
+    )
     assert len(out) == 1
     job = out[0]
     assert job["title"] == "Chief of Staff"
@@ -596,19 +645,21 @@ def test_fetch_linkedin_board(monkeypatch):
 # Quality gate on the merge path (board jobs included)
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def sqlite_dal(tmp_path, monkeypatch):
     db_file = tmp_path / "jobsearch.db"
     monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
     monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
-    for mod in ("database_supabase", "config", "company_registry",
-                "db_conn", "db_backend"):
+    for mod in ("database_supabase", "config", "company_registry", "db_conn", "db_backend"):
         sys.modules.pop(mod, None)
     import db_backend
+
     importlib.reload(db_backend)
     assert db_backend.IS_SQLITE
     import database_supabase as db
+
     yield db
     db.close_conn()
 
@@ -656,14 +707,13 @@ def test_board_merge_rejects_quality_gate_junk(sqlite_dal):
         "external_id": "junk-2",
         "snippet": "",
         "full_description": "Support our mission! Donate to a fund today and help us"
-                            " grow. Every contribution counts towards the campaign.",
+        " grow. Every contribution counts towards the campaign.",
         "compensation": "",
         "org_override": "Widget e.V.",
         "org_url": "https://www.arbeitnow.com",
     }
 
-    new_count = db.save_board_vacancies(
-        board_cfg, [good, error_page, donation_widget])
+    new_count = db.save_board_vacancies(board_cfg, [good, error_page, donation_widget])
     db.get_conn().commit()
 
     vacs = db.load_vacancies(include_candidate_companies=True)
@@ -674,8 +724,7 @@ def test_board_merge_rejects_quality_gate_junk(sqlite_dal):
     assert new_count == 2
 
     # Error-page text blanked by the gate — never stored as a description.
-    assert "404 not found" not in (
-        by_title["Head of Community"].get("full_description") or "")
+    assert "404 not found" not in (by_title["Head of Community"].get("full_description") or "")
 
     # The good one is intact. In simple mode (SQLite) a board-discovered org
     # lands ACTIVE — there is no dashboard review step, so the candidate gate

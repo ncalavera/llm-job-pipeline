@@ -20,16 +20,24 @@ def env(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
 
-    for mod in ("audit_companies", "database_supabase", "config",
-                "company_registry", "db_conn", "db_backend"):
+    for mod in (
+        "audit_companies",
+        "database_supabase",
+        "config",
+        "company_registry",
+        "db_conn",
+        "db_backend",
+    ):
         sys.modules.pop(mod, None)
 
     import db_backend
+
     importlib.reload(db_backend)
     assert db_backend.IS_SQLITE, "test must run on the SQLite backend"
 
     import database_supabase as db
     import audit_companies as audit
+
     yield db, audit
     db.close_conn()
 
@@ -47,8 +55,7 @@ def _job(title):
 def _set_stored_count(db, name, value):
     conn = db.get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE company SET vacancy_count = %s WHERE canonical_name = %s",
-                (value, name))
+    cur.execute("UPDATE company SET vacancy_count = %s WHERE canonical_name = %s", (value, name))
     conn.commit()
     cur.close()
 
@@ -80,9 +87,9 @@ def test_stale_count_corrected_and_correct_untouched(env):
     drift = audit.reconcile_vacancy_counts()
     names = {d["name"] for d in drift}
 
-    assert "Stale Co" in names           # 4 → 0
-    assert "Null Co" in names            # NULL → 2
-    assert "Correct Co" not in names     # 1 == 1, no write
+    assert "Stale Co" in names  # 4 → 0
+    assert "Null Co" in names  # NULL → 2
+    assert "Correct Co" not in names  # 1 == 1, no write
 
     stale = next(d for d in drift if d["name"] == "Stale Co")
     assert stale["stored"] == 4 and stale["real"] == 0

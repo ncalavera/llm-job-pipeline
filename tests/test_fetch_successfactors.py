@@ -11,7 +11,6 @@ saved fixture is that real HTML fragment (not JSON).
 import os
 import re
 
-import pytest
 
 import fetchers
 from fetchers import fetch_successfactors, _parse_successfactors_tiles, _sf_base_url
@@ -60,8 +59,11 @@ class FakeRequests:
     def __init__(self, pages: dict, *, bootstrap=None, raise_on=None):
         # pages: {startrow_int: html}; missing startrow → empty shell.
         self.pages = pages
-        self.bootstrap = bootstrap if bootstrap is not None else FakeResponse(
-            text="<html>search</html>", cookies={"JSESSIONID": "abc"})
+        self.bootstrap = (
+            bootstrap
+            if bootstrap is not None
+            else FakeResponse(text="<html>search</html>", cookies={"JSESSIONID": "abc"})
+        )
         self.raise_on = raise_on or (lambda url: False)
         self.calls = []
 
@@ -80,17 +82,23 @@ class FakeRequests:
 # base-url resolution
 # ---------------------------------------------------------------------------
 
+
 class TestSfBaseUrl:
     def test_from_explicit_url(self):
         assert _sf_base_url({"url": "https://jobs.ilo.org/"}) == "https://jobs.ilo.org"
 
     def test_from_ats_slug_default_host(self):
-        assert _sf_base_url({"ats_slug": "BertelsmannStiftung"}) == \
-            "https://jobsearch.createyourowncareer.com/BertelsmannStiftung"
+        assert (
+            _sf_base_url({"ats_slug": "BertelsmannStiftung"})
+            == "https://jobsearch.createyourowncareer.com/BertelsmannStiftung"
+        )
 
     def test_strips_search_suffix_and_query(self):
         got = _sf_base_url(
-            {"url": "https://jobsearch.createyourowncareer.com/BertelsmannStiftung/search/?locale=en_GB"})
+            {
+                "url": "https://jobsearch.createyourowncareer.com/BertelsmannStiftung/search/?locale=en_GB"
+            }
+        )
         assert got == "https://jobsearch.createyourowncareer.com/BertelsmannStiftung"
 
     def test_empty_config_returns_blank(self):
@@ -101,10 +109,12 @@ class TestSfBaseUrl:
 # tile parsing (pure)
 # ---------------------------------------------------------------------------
 
+
 class TestParseTiles:
     def test_parses_real_fixture_three_jobs(self):
         jobs = _parse_successfactors_tiles(
-            TILES_HTML, "https://jobsearch.createyourowncareer.com/RobertBoschStiftung", "RBS")
+            TILES_HTML, "https://jobsearch.createyourowncareer.com/RobertBoschStiftung", "RBS"
+        )
         assert len(jobs) == 3
         titles = {j["title"] for j in jobs}
         assert "Test Stepstone II" in titles
@@ -130,6 +140,7 @@ class TestParseTiles:
 # fetch_successfactors (end-to-end with mocked HTTP)
 # ---------------------------------------------------------------------------
 
+
 class TestFetchSuccessfactors:
     def test_happy_path_parses_fixture(self, monkeypatch):
         fake = FakeRequests({0: TILES_HTML})
@@ -148,8 +159,8 @@ class TestFetchSuccessfactors:
         monkeypatch.setattr(fetchers, "requests", fake)
         jobs = fetch_successfactors("Ex", {"url": "https://jobs.example.org/"})
         ids = [j["external_id"] for j in jobs]
-        assert ids == ["1", "2", "3"]           # all pages, in order
-        assert len(ids) == len(set(ids))        # no duplicates
+        assert ids == ["1", "2", "3"]  # all pages, in order
+        assert len(ids) == len(set(ids))  # no duplicates
         # startrow advanced 0 → 25 → 50 (50 empty triggers the stop).
         tile_calls = [u for u in fake.calls if "tile-search-results" in u]
         assert any("startrow=0" in u for u in tile_calls)
@@ -169,8 +180,7 @@ class TestFetchSuccessfactors:
         assert fetch_successfactors("ILO", {"url": "https://jobs.ilo.org/"}) == []
 
     def test_404_on_tiles_returns_empty_without_crash(self, monkeypatch):
-        fake = FakeRequests(
-            {}, raise_on=lambda url: "tile-search-results" in url)
+        fake = FakeRequests({}, raise_on=lambda url: "tile-search-results" in url)
         monkeypatch.setattr(fetchers, "requests", fake)
         assert fetch_successfactors("ILO", {"url": "https://jobs.ilo.org/"}) == []
 

@@ -23,7 +23,7 @@ REPO = Path(__file__).resolve().parent.parent
 
 # Old commands that must NOT appear as slash-commands anymore.
 STALE_NAMES = [
-    "jobs",        # the bare daily command
+    "jobs",  # the bare daily command
     "jobs-fetch",
     "jobs-filter",
     "jobs-score",
@@ -95,14 +95,23 @@ def test_no_stale_jobs_slash_command():
 def test_patterns_match_and_exclude_correctly():
     for name in STALE_NAMES:
         pat = PATTERNS[name]
-        assert pat.search(f"run /{name} now"), name      # bare → flagged
-        assert pat.search(f"`/{name}`"), name             # backticks → flagged
-        assert pat.search(f"**/{name}**"), name           # markdown bold → flagged
-        assert pat.search(f'"/{name}"'), name             # quoted → flagged
+        assert pat.search(f"run /{name} now"), name  # bare → flagged
+        assert pat.search(f"`/{name}`"), name  # backticks → flagged
+        assert pat.search(f"**/{name}**"), name  # markdown bold → flagged
+        assert pat.search(f'"/{name}"'), name  # quoted → flagged
     # survivors, URLs, and path prose must NOT match any stale pattern
-    for safe in ("/jobs-new", "/jobs-review", "/jobs-add", "/jobs-profile",
-                 "/jobs-digest", "/jobs-update", "jobs.lever.co",
-                 "vacancies/jobs-archive/x.json", "a/jobs/b",
-                 'boards/${SLUG_GUESS}/jobs"', "accounts/x/jobs",
-                 "`jobs`"):  # README deprecation table uses slash-less old names
+    for safe in (
+        "/jobs-new",
+        "/jobs-review",
+        "/jobs-add",
+        "/jobs-profile",
+        "/jobs-digest",
+        "/jobs-update",
+        "jobs.lever.co",
+        "vacancies/jobs-archive/x.json",
+        "a/jobs/b",
+        'boards/${SLUG_GUESS}/jobs"',
+        "accounts/x/jobs",
+        "`jobs`",
+    ):  # README deprecation table uses slash-less old names
         assert not any(p.search(safe) for p in PATTERNS.values()), safe

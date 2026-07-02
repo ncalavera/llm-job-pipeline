@@ -20,7 +20,6 @@ Usage:
 
 import argparse
 import json
-import os
 import re
 import sys
 import time
@@ -28,28 +27,38 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
+
 def build_parser() -> argparse.ArgumentParser:
     """Construct the CLI parser. Defined before the heavy project imports so
     ``--help`` / ``-h`` prints usage without connecting to the database or
     loading the user profile (those happen only when a real command runs)."""
     parser = argparse.ArgumentParser(description="Discover ATS types on career pages")
-    parser.add_argument("--html-scan", action="store_true",
-                        help="Scrape HTML to detect embedded ATS (more thorough than map)")
-    parser.add_argument("--all-tiers", action="store_true",
-                        help="Include all tiers (default: S+A only)")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Show targets without API calls")
-    parser.add_argument("--company", type=str,
-                        help="Single company to check")
-    parser.add_argument("--unsourced", action="store_true",
-                        help="Scan active companies without fetch strategy (need ATS detection)")
-    parser.add_argument("--apply", action="store_true",
-                        help="Apply discovered ATS strategies to DB (default: report only)")
+    parser.add_argument(
+        "--html-scan",
+        action="store_true",
+        help="Scrape HTML to detect embedded ATS (more thorough than map)",
+    )
+    parser.add_argument(
+        "--all-tiers", action="store_true", help="Include all tiers (default: S+A only)"
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Show targets without API calls")
+    parser.add_argument("--company", type=str, help="Single company to check")
+    parser.add_argument(
+        "--unsourced",
+        action="store_true",
+        help="Scan active companies without fetch strategy (need ATS detection)",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply discovered ATS strategies to DB (default: report only)",
+    )
     return parser
 
 
 # Print help and exit BEFORE importing anything that touches the DB or profile.
 from cli_help import wants_help
+
 if __name__ == "__main__" and wants_help():
     build_parser().parse_args()
 
@@ -68,16 +77,36 @@ MAPS_DIR = PROJECT_ROOT / ".firecrawl" / "maps"
 
 # Careers-related URL path keywords for filtering map results
 CAREERS_KEYWORDS = {
-    "careers", "jobs", "openings", "positions", "vacancies",
-    "work-with-us", "apply", "hiring", "opportunities",
+    "careers",
+    "jobs",
+    "openings",
+    "positions",
+    "vacancies",
+    "work-with-us",
+    "apply",
+    "hiring",
+    "opportunities",
 }
 
 # ATS strategies that are considered "working" and should never be downgraded
 WORKING_ATS_STRATEGIES = {
-    "greenhouse", "lever", "ashby", "workable", "recruitee",
-    "teamtailor_rss", "workday_api", "bamboohr", "smartrecruiters",
-    "occupop", "personio", "applied", "pinpoint", "breezy", "jazzhr",
-    "reliefweb_api", "rss",
+    "greenhouse",
+    "lever",
+    "ashby",
+    "workable",
+    "recruitee",
+    "teamtailor_rss",
+    "workday_api",
+    "bamboohr",
+    "smartrecruiters",
+    "occupop",
+    "personio",
+    "applied",
+    "pinpoint",
+    "breezy",
+    "jazzhr",
+    "reliefweb_api",
+    "rss",
 }
 
 # ---------------------------------------------------------------------------
@@ -124,11 +153,15 @@ HTML_ONLY_PATTERNS = [
     # Greenhouse embed div
     (r'id=["\']grnhse_app["\']', "greenhouse", None),
     # Greenhouse embed script
-    (r'src=["\'][^"\']*boards\.greenhouse\.io/embed/job_board[?/].*?([a-z0-9_-]+)', "greenhouse", 1),
+    (
+        r'src=["\'][^"\']*boards\.greenhouse\.io/embed/job_board[?/].*?([a-z0-9_-]+)',
+        "greenhouse",
+        1,
+    ),
     # Lever embed
     (r'id=["\']lever-jobs-container["\']', "lever", None),
     # Workable embed widget
-    (r'whr\(document\)', "workable", None),
+    (r"whr\(document\)", "workable", None),
     (r'src=["\'][^"\']*workable\.com/.*?([a-z0-9_-]+)', "workable", 1),
     # BambooHR embed
     (r'src=["\'][^"\']*bamboohr\.com/(?:js/)?jobs', "bamboohr", None),
@@ -150,11 +183,13 @@ def detect_ats_in_urls(urls: list[str]) -> list[dict]:
                 key = (ats_name, slug)
                 if key not in seen:
                     seen.add(key)
-                    results.append({
-                        "ats": ats_name,
-                        "slug": slug,
-                        "url": url,
-                    })
+                    results.append(
+                        {
+                            "ats": ats_name,
+                            "slug": slug,
+                            "url": url,
+                        }
+                    )
     return results
 
 
@@ -176,16 +211,22 @@ def detect_ats_in_html(html: str) -> list[dict]:
     for pattern, ats_name, slug_group in HTML_ONLY_PATTERNS:
         m = re.search(pattern, html, re.IGNORECASE)
         if m:
-            slug = m.group(slug_group) if slug_group and m.lastindex and m.lastindex >= slug_group else ""
+            slug = (
+                m.group(slug_group)
+                if slug_group and m.lastindex and m.lastindex >= slug_group
+                else ""
+            )
             key = (ats_name, slug or "_embed_")
             if key not in seen:
                 seen.add(key)
-                results.append({
-                    "ats": ats_name,
-                    "slug": slug,
-                    "url": "",
-                    "source": "html_embed",
-                })
+                results.append(
+                    {
+                        "ats": ats_name,
+                        "slug": slug,
+                        "url": "",
+                        "source": "html_embed",
+                    }
+                )
 
     return results
 
@@ -222,6 +263,7 @@ def _load_enrichment_tiers() -> dict[str, str]:
 def _load_unsourced() -> list[tuple]:
     """Load active companies from Supabase without fetch_strategy (need ATS detection)."""
     from db_conn import get_conn
+
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
@@ -315,10 +357,7 @@ def _save_map_cache(company_name: str, website: str, all_urls: list[str]) -> Non
     slug = company_name.lower().replace(" ", "_")
     path = MAPS_DIR / f"{slug}.json"
 
-    careers_urls = [
-        u for u in all_urls
-        if any(kw in u.lower() for kw in CAREERS_KEYWORDS)
-    ]
+    careers_urls = [u for u in all_urls if any(kw in u.lower() for kw in CAREERS_KEYWORDS)]
 
     cache = {
         "company": company_name,
@@ -344,9 +383,9 @@ def _apply_results(scan_results: list[dict], dry_run: bool = False) -> None:
     cur = conn.cursor()
     changes = []
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {'DRY RUN — ' if dry_run else ''}APPLYING {len(upgradeable)} UPGRADES")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     for result in upgradeable:
         company = result["company"]
@@ -387,7 +426,9 @@ def _apply_results(scan_results: list[dict], dry_run: bool = False) -> None:
             discovered_domain = urlparse(discovered_url).netloc.lower().replace("www.", "")
             if current_website:
                 website_domain = urlparse(current_website).netloc.lower().replace("www.", "")
-                if discovered_domain == website_domain or discovered_domain.endswith("." + website_domain):
+                if discovered_domain == website_domain or discovered_domain.endswith(
+                    "." + website_domain
+                ):
                     new_careers_url = discovered_url
                 else:
                     # Different domain — still set careers_url for ATS URLs (e.g., greenhouse.io)
@@ -446,17 +487,19 @@ def _apply_results(scan_results: list[dict], dry_run: bool = False) -> None:
             json.dump(existing_log, f, indent=2, ensure_ascii=False)
         print(f"  Change log: {APPLY_LOG_PATH}")
     elif dry_run:
-        print(f"\n  Dry run complete — no changes applied.")
+        print("\n  Dry run complete — no changes applied.")
 
     cur.close()
 
 
-def run_html_scan(targets: list[tuple], dry_run: bool = False, apply: bool = False, apply_dry_run: bool = False) -> None:
+def run_html_scan(
+    targets: list[tuple], dry_run: bool = False, apply: bool = False, apply_dry_run: bool = False
+) -> None:
     """Scrape career page HTML and detect embedded ATS widgets."""
     tier_label = ", ".join(sorted(set(t[1] for t in targets)))
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  ATS HTML SCAN — {len(targets)} companies (tiers: {tier_label})")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     if dry_run:
         for name, tier, strategy, url in targets:
@@ -473,7 +516,7 @@ def run_html_scan(targets: list[tuple], dry_run: bool = False, apply: bool = Fal
     scan_results = []
 
     for i, (name, tier, strategy, url) in enumerate(targets):
-        print(f"\n[{i+1}/{len(targets)}] {name} (tier {tier}, {strategy})")
+        print(f"\n[{i + 1}/{len(targets)}] {name} (tier {tier}, {strategy})")
         print(f"  URL: {url}")
 
         # Step 1: Check URL directly for ATS pattern
@@ -565,7 +608,7 @@ def run_html_scan(targets: list[tuple], dry_run: bool = False, apply: bool = Fal
                         scan_results.append(result)
                         existing[name] = result
             else:
-                print(f"  ⚠ No HTML returned")
+                print("  ⚠ No HTML returned")
                 result = {
                     "company": name,
                     "tier": tier,
@@ -608,12 +651,14 @@ def run_html_scan(targets: list[tuple], dry_run: bool = False, apply: bool = Fal
         _apply_results(scan_results, dry_run=apply_dry_run)
 
 
-def run_map_scan(targets: list[tuple], dry_run: bool = False, apply: bool = False, apply_dry_run: bool = False) -> None:
+def run_map_scan(
+    targets: list[tuple], dry_run: bool = False, apply: bool = False, apply_dry_run: bool = False
+) -> None:
     """Original map()-based scan (legacy mode)."""
     tier_label = ", ".join(sorted(set(t[1] for t in targets)))
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  ATS DISCOVERY (map) — {len(targets)} companies (tiers: {tier_label})")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     if dry_run:
         for name, tier, strategy, url in targets:
@@ -630,15 +675,21 @@ def run_map_scan(targets: list[tuple], dry_run: bool = False, apply: bool = Fals
     existing = _load_existing_results()
 
     for i, (name, tier, strategy, url) in enumerate(targets):
-        print(f"\n[{i+1}/{len(targets)}] {name} (tier {tier})")
+        print(f"\n[{i + 1}/{len(targets)}] {name} (tier {tier})")
         print(f"  URL: {url}")
 
         direct_hits = detect_ats_in_urls([url])
         if direct_hits:
             hit = direct_hits[0]
             print(f"  ✓ Direct URL match: {hit['ats']} (slug: {hit['slug']})")
-            result = {"company": name, "tier": tier, **hit, "scan_mode": "direct",
-                       "scan_date": datetime.now().isoformat(timespec="seconds"), "verdict": "upgrade"}
+            result = {
+                "company": name,
+                "tier": tier,
+                **hit,
+                "scan_mode": "direct",
+                "scan_date": datetime.now().isoformat(timespec="seconds"),
+                "verdict": "upgrade",
+            }
             scan_results.append(result)
             existing[name] = result
             continue
@@ -646,9 +697,16 @@ def run_map_scan(targets: list[tuple], dry_run: bool = False, apply: bool = Fals
         try:
             parsed = urlparse(url)
             root = f"{parsed.scheme}://{parsed.netloc}"
-            map_result = client.map(root, search="careers jobs apply openings",
-                                     limit=50, include_subdomains=True)
-            links = map_result.links if hasattr(map_result, 'links') else map_result if isinstance(map_result, list) else []
+            map_result = client.map(
+                root, search="careers jobs apply openings", limit=50, include_subdomains=True
+            )
+            links = (
+                map_result.links
+                if hasattr(map_result, "links")
+                else map_result
+                if isinstance(map_result, list)
+                else []
+            )
             link_urls = []
             for link in links:
                 if isinstance(link, str):
@@ -667,20 +725,42 @@ def run_map_scan(targets: list[tuple], dry_run: bool = False, apply: bool = Fals
             if hits:
                 for h in hits:
                     print(f"  ✓ Found: {h['ats']} (slug: {h['slug']}) — {h['url']}")
-                result = {"company": name, "tier": tier, **hits[0], "scan_mode": "map",
-                           "scan_date": datetime.now().isoformat(timespec="seconds"), "verdict": "upgrade"}
+                result = {
+                    "company": name,
+                    "tier": tier,
+                    **hits[0],
+                    "scan_mode": "map",
+                    "scan_date": datetime.now().isoformat(timespec="seconds"),
+                    "verdict": "upgrade",
+                }
             else:
-                print(f"  ✗ No ATS detected")
-                result = {"company": name, "tier": tier, "ats": "none", "slug": "", "url": url,
-                           "scan_mode": "map", "scan_date": datetime.now().isoformat(timespec="seconds"), "verdict": "keep"}
+                print("  ✗ No ATS detected")
+                result = {
+                    "company": name,
+                    "tier": tier,
+                    "ats": "none",
+                    "slug": "",
+                    "url": url,
+                    "scan_mode": "map",
+                    "scan_date": datetime.now().isoformat(timespec="seconds"),
+                    "verdict": "keep",
+                }
             scan_results.append(result)
             existing[name] = result
 
         except Exception as e:
             print(f"  ⚠ Error: {str(e)[:100]}")
-            result = {"company": name, "tier": tier, "ats": "error", "slug": "", "url": url,
-                       "scan_mode": "map", "scan_date": datetime.now().isoformat(timespec="seconds"),
-                       "verdict": "error", "error": str(e)[:200]}
+            result = {
+                "company": name,
+                "tier": tier,
+                "ats": "error",
+                "slug": "",
+                "url": url,
+                "scan_mode": "map",
+                "scan_date": datetime.now().isoformat(timespec="seconds"),
+                "verdict": "error",
+                "error": str(e)[:200],
+            }
             scan_results.append(result)
             existing[name] = result
 
@@ -696,9 +776,9 @@ def run_map_scan(targets: list[tuple], dry_run: bool = False, apply: bool = Fals
 
 def _print_summary(scan_results: list[dict]) -> None:
     """Print scan summary."""
-    print(f"\n{'='*60}")
-    print(f"  DISCOVERY RESULTS")
-    print(f"{'='*60}\n")
+    print(f"\n{'=' * 60}")
+    print("  DISCOVERY RESULTS")
+    print(f"{'=' * 60}\n")
 
     upgradeable = [r for r in scan_results if r.get("verdict") == "upgrade"]
     keep = [r for r in scan_results if r.get("verdict") == "keep"]
@@ -707,7 +787,9 @@ def _print_summary(scan_results: list[dict]) -> None:
     if upgradeable:
         print(f"✓ UPGRADEABLE ({len(upgradeable)}):")
         for r in upgradeable:
-            print(f"  {r.get('tier', '?')} | {r['company']:30} → {r['ats']} (slug: {r.get('slug', '')})")
+            print(
+                f"  {r.get('tier', '?')} | {r['company']:30} → {r['ats']} (slug: {r.get('slug', '')})"
+            )
 
     if keep:
         print(f"\n✗ NO ATS FOUND ({len(keep)}) — keep current strategy:")
@@ -732,11 +814,9 @@ def main():
     scan_dry_run = args.dry_run and not args.apply
 
     if args.html_scan:
-        run_html_scan(targets, dry_run=scan_dry_run, apply=args.apply,
-                      apply_dry_run=args.dry_run)
+        run_html_scan(targets, dry_run=scan_dry_run, apply=args.apply, apply_dry_run=args.dry_run)
     else:
-        run_map_scan(targets, dry_run=scan_dry_run, apply=args.apply,
-                     apply_dry_run=args.dry_run)
+        run_map_scan(targets, dry_run=scan_dry_run, apply=args.apply, apply_dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

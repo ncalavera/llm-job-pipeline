@@ -2,13 +2,12 @@
 
 import json
 import re
-from datetime import date, timezone, timedelta
-from pathlib import Path
+from datetime import date
 from zoneinfo import ZoneInfo
 
 from config import COMPANIES, PROJECT_ROOT, APPLYABLE_SCORE, resolve_canonical_name
 from company_registry import PARSING_ARTIFACTS
-from database_supabase import _parse_comp_value, load_vacancies, load_all_enrichment
+from database_supabase import load_vacancies, load_all_enrichment
 from db_conn import get_conn
 
 # ---------------------------------------------------------------------------
@@ -48,7 +47,11 @@ def _deadline_soon_label(deadline_iso: str) -> str:
 # live role to apply to). The deadline-in-the-past check below is an additional
 # guard for live statuses.
 _NON_APPLYABLE_STATUSES = {
-    "archived", "passed", "expiring", "applied", "skipped",
+    "archived",
+    "passed",
+    "expiring",
+    "applied",
+    "skipped",
 }
 
 
@@ -84,13 +87,19 @@ def _is_applyable_vacancy(v: dict) -> bool:
 
 # Active-but-undecided statuses an SLA-tracked role can stall in.
 _SLA_ACTIVE_STATUSES = (
-    "unseen", "liked", "expiring", "to_research", "to_network", "to_apply",
+    "unseen",
+    "liked",
+    "expiring",
+    "to_research",
+    "to_network",
+    "to_apply",
 )
 
 
 def _as_date(val):
     """Best-effort parse a date/timestamp (Postgres datetime or SQLite text)."""
     from datetime import datetime as _dt
+
     if not val:
         return None
     if isinstance(val, _dt):
@@ -117,6 +126,7 @@ def compute_latency_metrics(conn=None) -> dict:
     """
     from config import SLA_SCORE, SLA_DAYS
     from db_backend import RealDictCursor
+
     conn = conn or get_conn()
     today = date.today()
 
@@ -136,14 +146,16 @@ def compute_latency_metrics(conn=None) -> dict:
             continue
         age = (today - ref).days
         if age >= SLA_DAYS:
-            stuck.append({
-                "id": str(r["id"]),
-                "org": r["org"],
-                "title": r["title"],
-                "llm_score": r["llm_score"],
-                "status": r["status"],
-                "days_stuck": age,
-            })
+            stuck.append(
+                {
+                    "id": str(r["id"]),
+                    "org": r["org"],
+                    "title": r["title"],
+                    "llm_score": r["llm_score"],
+                    "status": r["status"],
+                    "days_stuck": age,
+                }
+            )
     stuck.sort(key=lambda s: s["days_stuck"], reverse=True)
 
     cur.execute(
@@ -176,7 +188,8 @@ def _count_unscored(all_vacs: dict) -> int:
     "N fetched, none scored yet" hint.
     """
     return sum(
-        1 for v in all_vacs.values()
+        1
+        for v in all_vacs.values()
         if (v.get("llm_score") is None or v.get("llm_score", -1) < 0)
         and (v.get("status") or "unseen") == "unseen"
     )
@@ -185,6 +198,7 @@ def _count_unscored(all_vacs: dict) -> int:
 # ---------------------------------------------------------------------------
 # Triage data preparation
 # ---------------------------------------------------------------------------
+
 
 def prepare_triage_data() -> list[dict]:
     """Load triage reviews from triage.json for dashboard Pipeline tab.
@@ -227,16 +241,16 @@ def prepare_triage_data() -> list[dict]:
 
 # Color palette for org badges — synced with paper-white --bg: #FAF9F7
 _ORG_PALETTE = [
-    ("#F26B3A", "#FFF5F0"),   # coral (--coral)
-    ("#10B981", "#ECFDF5"),   # emerald (--emerald)
-    ("#8B5CF6", "#F5F3FF"),   # lavender (--lavender)
-    ("#E5A000", "#FFFBEB"),   # amber (--amber)
-    ("#C2522A", "#FEF2F2"),   # terracotta
-    ("#0284C7", "#F0F9FF"),   # sky
-    ("#DB2777", "#FDF2F8"),   # rose
-    ("#34D399", "#ECFDF8"),   # mint (--mint)
-    ("#8B7355", "#F5F2EE"),   # earth
-    ("#7B68AE", "#F0ECF8"),   # violet
+    ("#F26B3A", "#FFF5F0"),  # coral (--coral)
+    ("#10B981", "#ECFDF5"),  # emerald (--emerald)
+    ("#8B5CF6", "#F5F3FF"),  # lavender (--lavender)
+    ("#E5A000", "#FFFBEB"),  # amber (--amber)
+    ("#C2522A", "#FEF2F2"),  # terracotta
+    ("#0284C7", "#F0F9FF"),  # sky
+    ("#DB2777", "#FDF2F8"),  # rose
+    ("#34D399", "#ECFDF8"),  # mint (--mint)
+    ("#8B7355", "#F5F2EE"),  # earth
+    ("#7B68AE", "#F0ECF8"),  # violet
 ]
 
 
@@ -253,15 +267,28 @@ def _build_group(v: dict, org_colors: dict, company_hq: dict) -> dict:
     # Locations v2: {work_mode, region, country, city, compensation, url}
     locs = v.get("locations", [])
     if not locs:
-        locs = [{"work_mode": None, "region": None, "country": None,
-                 "city": None, "compensation": v.get("compensation", ""),
-                 "url": ""}]
+        locs = [
+            {
+                "work_mode": None,
+                "region": None,
+                "country": None,
+                "city": None,
+                "compensation": v.get("compensation", ""),
+                "url": "",
+            }
+        ]
 
     # Sort by city/country for stable ordering
-    locs.sort(key=lambda l: (l.get("city") or l.get("country") or ""))
+    locs.sort(key=lambda l: l.get("city") or l.get("country") or "")
 
-    region_priority = {"europe": 0, "americas": 1, "remote": 2,
-                       "asia": 3, "africa": 4, "oceania": 5}
+    region_priority = {
+        "europe": 0,
+        "americas": 1,
+        "remote": 2,
+        "asia": 3,
+        "africa": 4,
+        "oceania": 5,
+    }
     regions = [l.get("region") or "other" for l in locs]
     best_region = min(regions, key=lambda r: region_priority.get(r, 9))
 
@@ -271,7 +298,11 @@ def _build_group(v: dict, org_colors: dict, company_hq: dict) -> dict:
     if not org_url:
         org_url = COMPANIES.get(v["org"], {}).get("careers_url", "")
 
-    llm_score = v.get("llm_score") if v.get("llm_score") is not None and v.get("llm_score", -1) >= 0 else None
+    llm_score = (
+        v.get("llm_score")
+        if v.get("llm_score") is not None and v.get("llm_score", -1) >= 0
+        else None
+    )
 
     # Build locations list for frontend (v2 structure)
     # Two concerns: PLACE (city/country) and WORK MODE (remote/hybrid/onsite)
@@ -315,14 +346,16 @@ def _build_group(v: dict, org_colors: dict, company_hq: dict) -> dict:
         else:
             loc_display = ""
 
-        entry_locations.append({
-            "location": loc_display,
-            "url": m.get("url") or "",
-            "work_mode": wm or "",
-            "region": m.get("region") or "",
-            "city": m.get("city") or "",
-            "country": m.get("country") or "",
-        })
+        entry_locations.append(
+            {
+                "location": loc_display,
+                "url": m.get("url") or "",
+                "work_mode": wm or "",
+                "region": m.get("region") or "",
+                "city": m.get("city") or "",
+                "country": m.get("country") or "",
+            }
+        )
 
     return {
         "id": v["id"],
@@ -352,6 +385,7 @@ def _company_hq_map():
     """Map canonical_name → HQ location for all companies."""
     from db_conn import get_conn
     from db_backend import RealDictCursor
+
     _conn = get_conn()
     _cur = _conn.cursor(cursor_factory=RealDictCursor)
     _cur.execute("SELECT canonical_name, about->>'hq_location' as hq FROM company")
@@ -380,8 +414,11 @@ def prepare_report_data(db: dict = None) -> dict:
     today = date.today().isoformat()
     all_vacs = load_vacancies(include_candidate_companies=True, status_exclude=["archived"])
     # Exclude unscored vacancies from dashboard — they appear after /score
-    vacancies = [v for v in all_vacs.values()
-                 if v.get("llm_score") is not None and v.get("llm_score", -1) >= 0]
+    vacancies = [
+        v
+        for v in all_vacs.values()
+        if v.get("llm_score") is not None and v.get("llm_score", -1) >= 0
+    ]
     # Fetched-but-not-yet-scored vacancies. Used by the dashboard to show a
     # "run scoring next" empty state instead of a blank, unexplained screen.
     total_in_db = len(all_vacs)
@@ -414,6 +451,7 @@ def prepare_report_data(db: dict = None) -> dict:
             g["org"],
             g["title"],
         )
+
     groups.sort(key=sort_key)
 
     return {
@@ -442,7 +480,6 @@ _EXEC_SUMMARY_RE = re.compile(
 )
 
 
-
 def _load_company_lookup() -> dict[str, dict]:
     """Load company data from Supabase keyed by canonical name."""
     conn = get_conn()
@@ -454,9 +491,20 @@ def _load_company_lookup() -> dict[str, dict]:
         FROM company
     """)
     lookup = {}
-    for (cid, name, category, product, website, careers_url,
-         offices, exp_match, pers_interest,
-         user_comments, status, status_reason) in cur.fetchall():
+    for (
+        cid,
+        name,
+        category,
+        product,
+        website,
+        careers_url,
+        offices,
+        exp_match,
+        pers_interest,
+        user_comments,
+        status,
+        status_reason,
+    ) in cur.fetchall():
         db_status = (status or "").lower()
         review_map = {"active": "approved", "candidate": "pending", "inactive": "rejected"}
         lookup[name] = {
@@ -476,7 +524,6 @@ def _load_company_lookup() -> dict[str, dict]:
         }
     cur.close()
     return lookup
-
 
 
 def _parse_float(val) -> float | None:
@@ -528,7 +575,6 @@ def _load_enrichment() -> dict[str, dict]:
             "mission_fit": data.get("mission_fit", {}),
         }
     return result
-
 
 
 from database_supabase import calculate_company_tier  # noqa: E402
@@ -654,7 +700,9 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
     # --- Orphan detection: configured companies with 0 vacancies ---
     for name, cfg in COMPANIES.items():
         if cfg.get("strategy") != "manual_check" and name not in org_stats:
-            print(f"  ⚠ Orphan: {name} (strategy={cfg.get('strategy')}) — 0 vacancies after aggregation")
+            print(
+                f"  ⚠ Orphan: {name} (strategy={cfg.get('strategy')}) — 0 vacancies after aggregation"
+            )
 
     # --- Build company records ---
     companies = []
@@ -705,73 +753,77 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
                 "deadline_label": _deadline_soon_label(stats.get("_hot_deadline", "")),
             }
 
-        companies.append({
-            "name": display_name,
-            "company_id": csv_row.get("company_id", ""),
-            "slug": slug,
-            "category": csv_row.get("category", ""),
-            "product": csv_row.get("description", ""),
-            "website": csv_row.get("website", ""),
-            "careers_url": careers_url,
-            "offices": about.get("hq_location", "") or csv_row.get("offices", ""),
-            "strategy": cfg.get("strategy", ""),
-            "status": csv_row.get("status", ""),
-            "review_status": csv_row.get("review_status", "pending"),
-            "status_reason": csv_row.get("status_reason", ""),
-            "experience_match": csv_row.get("experience_match"),
-            "personal_interest": csv_row.get("personal_interest"),
-            "notes": csv_row.get("notes", ""),
-            "has_deep_analysis": has_deep,
-            "executive_summary": exec_summary,
-            "md_content": md_content,
-            "org_color": org_colors.get(display_name, list(_ORG_PALETTE[0])),
-            "is_monitored": is_monitored,
-            "is_researched": is_researched,
-            "needs_source": bool(cfg.get("strategy")) and cfg.get("strategy") != "manual_check" and vacancy_count == 0,
-            "is_archived": csv_row.get("status", "") == "inactive",
-            "is_manual_check": cfg.get("strategy") == "manual_check",
-            "vacancy_count": vacancy_count,
-            "applyable_count": stats.get("applyable_count", 0),
-            "scored_count": scored_count,
-            "avg_llm_score": avg_score,
-            "max_llm_score": max_score,
-            "region_breakdown": stats.get("regions", {"europe": 0, "us": 0, "remote": 0, "other": 0}),
-            "has_compensation": stats.get("has_compensation", 0),
-            "first_seen": stats.get("first_seen", ""),
-            "last_seen": stats.get("last_seen", ""),
-            "last_fetched": sources.get(canonical, {}).get("last_fetched", ""),
-            "fetch_status": sources.get(canonical, {}).get("fetch_status", ""),
-            "vacancy_ids": stats.get("vacancy_ids", []),
-            "hot_vacancy": hot_vacancy,
-            # --- Enrichment fields ---
-            "is_enriched": is_enriched,
-            "description": about.get("description", ""),
-            "founded_year": about.get("founded_year", ""),
-            "employee_count": about.get("employee_count", ""),
-            "funding_status": about.get("funding_status", ""),
-            "hq_location": about.get("hq_location", ""),
-            "sector": about.get("sector", ""),
-            "logo_url": about.get("logo_url", ""),
-            "alignment_score": mission.get("alignment_score"),
-            "alignment_label": mission.get("alignment_label", ""),
-            "fit_dimensions": mission.get("dimensions", {}),
-            "fit_evidence": mission.get("evidence_anchors", []),
-            "fit_strengths": mission.get("strengths", []),
-            "fit_risks": mission.get("risks", []),
-            "fit_approach": mission.get("approach", ""),
-            "experience_reasoning": mission.get("experience_match_reasoning", ""),
-            "mission_verdict": mission.get("mission_verdict", ""),
-            "mpa_prestige": _custom_boost(mission),
-            "glassdoor_rating": social.get("glassdoor_rating"),
-            "linkedin_employees": social.get("linkedin_employees", ""),
-            "recent_news": social.get("recent_news", []),
-        })
+        companies.append(
+            {
+                "name": display_name,
+                "company_id": csv_row.get("company_id", ""),
+                "slug": slug,
+                "category": csv_row.get("category", ""),
+                "product": csv_row.get("description", ""),
+                "website": csv_row.get("website", ""),
+                "careers_url": careers_url,
+                "offices": about.get("hq_location", "") or csv_row.get("offices", ""),
+                "strategy": cfg.get("strategy", ""),
+                "status": csv_row.get("status", ""),
+                "review_status": csv_row.get("review_status", "pending"),
+                "status_reason": csv_row.get("status_reason", ""),
+                "experience_match": csv_row.get("experience_match"),
+                "personal_interest": csv_row.get("personal_interest"),
+                "notes": csv_row.get("notes", ""),
+                "has_deep_analysis": has_deep,
+                "executive_summary": exec_summary,
+                "md_content": md_content,
+                "org_color": org_colors.get(display_name, list(_ORG_PALETTE[0])),
+                "is_monitored": is_monitored,
+                "is_researched": is_researched,
+                "needs_source": bool(cfg.get("strategy"))
+                and cfg.get("strategy") != "manual_check"
+                and vacancy_count == 0,
+                "is_archived": csv_row.get("status", "") == "inactive",
+                "is_manual_check": cfg.get("strategy") == "manual_check",
+                "vacancy_count": vacancy_count,
+                "applyable_count": stats.get("applyable_count", 0),
+                "scored_count": scored_count,
+                "avg_llm_score": avg_score,
+                "max_llm_score": max_score,
+                "region_breakdown": stats.get(
+                    "regions", {"europe": 0, "us": 0, "remote": 0, "other": 0}
+                ),
+                "has_compensation": stats.get("has_compensation", 0),
+                "first_seen": stats.get("first_seen", ""),
+                "last_seen": stats.get("last_seen", ""),
+                "last_fetched": sources.get(canonical, {}).get("last_fetched", ""),
+                "fetch_status": sources.get(canonical, {}).get("fetch_status", ""),
+                "vacancy_ids": stats.get("vacancy_ids", []),
+                "hot_vacancy": hot_vacancy,
+                # --- Enrichment fields ---
+                "is_enriched": is_enriched,
+                "description": about.get("description", ""),
+                "founded_year": about.get("founded_year", ""),
+                "employee_count": about.get("employee_count", ""),
+                "funding_status": about.get("funding_status", ""),
+                "hq_location": about.get("hq_location", ""),
+                "sector": about.get("sector", ""),
+                "logo_url": about.get("logo_url", ""),
+                "alignment_score": mission.get("alignment_score"),
+                "alignment_label": mission.get("alignment_label", ""),
+                "fit_dimensions": mission.get("dimensions", {}),
+                "fit_evidence": mission.get("evidence_anchors", []),
+                "fit_strengths": mission.get("strengths", []),
+                "fit_risks": mission.get("risks", []),
+                "fit_approach": mission.get("approach", ""),
+                "experience_reasoning": mission.get("experience_match_reasoning", ""),
+                "mission_verdict": mission.get("mission_verdict", ""),
+                "mpa_prestige": _custom_boost(mission),
+                "glassdoor_rating": social.get("glassdoor_rating"),
+                "linkedin_employees": social.get("linkedin_employees", ""),
+                "recent_news": social.get("recent_news", []),
+            }
+        )
 
         # Calculate composite tier from enrichment scores
         c = companies[-1]
-        tier_letter, composite = calculate_company_tier(
-            c["alignment_score"], c["mpa_prestige"]
-        )
+        tier_letter, composite = calculate_company_tier(c["alignment_score"], c["mpa_prestige"])
         c["calculated_tier"] = tier_letter
         c["composite_score"] = composite
 

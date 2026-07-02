@@ -25,16 +25,18 @@ def _now() -> str:
 
 def begin(stage: str, total: int) -> None:
     """Start a stage with a known number of work units (sources, vacancies …)."""
-    _write({
-        "stage": stage,
-        "total": total,
-        "done": 0,
-        "current": None,
-        "started_at": _now(),
-        "updated_at": _now(),
-        "finished": False,
-        "extra": {},
-    })
+    _write(
+        {
+            "stage": stage,
+            "total": total,
+            "done": 0,
+            "current": None,
+            "started_at": _now(),
+            "updated_at": _now(),
+            "finished": False,
+            "extra": {},
+        }
+    )
 
 
 def step(current, done: int, **extra) -> None:

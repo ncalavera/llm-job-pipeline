@@ -8,7 +8,6 @@ the same shape with an empty ``jobRequisitions`` array.
 import json
 import os
 
-import pytest
 
 import fetchers
 from fetchers import fetch_adp_json, _adp_location, _adp_job_url, _adp_snippet, _adp_cid
@@ -58,6 +57,7 @@ class FakeRequests:
 # helpers (pure)
 # ---------------------------------------------------------------------------
 
+
 class TestAdpHelpers:
     def test_cid_from_ats_slug(self):
         assert _adp_cid({"ats_slug": CID}) == CID
@@ -86,15 +86,20 @@ class TestAdpHelpers:
         assert url == portal + "&jobId=item1"
 
     def test_snippet_includes_location_and_pay(self):
-        snip = _adp_snippet("New York, NY, US",
-                            {"minimumRate": {"amountValue": 475000.0, "currencyCode": "USD"},
-                             "maximumRate": {"amountValue": 525000.0}})
+        snip = _adp_snippet(
+            "New York, NY, US",
+            {
+                "minimumRate": {"amountValue": 475000.0, "currencyCode": "USD"},
+                "maximumRate": {"amountValue": 525000.0},
+            },
+        )
         assert "New York" in snip and "475,000" in snip and "525,000" in snip
 
 
 # ---------------------------------------------------------------------------
 # fetch_adp_json (end-to-end with mocked HTTP)
 # ---------------------------------------------------------------------------
+
 
 class TestFetchAdpJson:
     def test_happy_path_parses_requisitions(self, monkeypatch):

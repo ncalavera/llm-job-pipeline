@@ -54,7 +54,6 @@ def test_no_escaped_cyrillic_in_dashboard():
         for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
             if ESCAPED_CYRILLIC.search(line):
                 hits.append(f"{p.relative_to(REPO)}:{i}: {line.strip()[:120]}")
-    assert not hits, (
-        "Escaped Cyrillic (\\u04XX) leaked into the English dashboard:\n"
-        + "\n".join(hits)
+    assert not hits, "Escaped Cyrillic (\\u04XX) leaked into the English dashboard:\n" + "\n".join(
+        hits
     )

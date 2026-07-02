@@ -5,6 +5,7 @@ Without config/user_profile.md the loader silently used the bundled EXAMPLE
 never know. The loader must print a prominent stderr warning on that fallback —
 without hard-crashing, and without warning when a real profile is used.
 """
+
 import sys
 from pathlib import Path
 
@@ -20,7 +21,7 @@ import prompts  # noqa: E402
 def test_example_fallback_warns(monkeypatch, tmp_path, capsys):
     """No env override + no real profile + example present → stderr warning."""
     monkeypatch.delenv("USER_PROFILE_PATH", raising=False)
-    missing = tmp_path / "user_profile.md"           # does NOT exist
+    missing = tmp_path / "user_profile.md"  # does NOT exist
     example = tmp_path / "user_profile.example.md"
     example.write_text("## USER_PROFILE\n\nExample person.\n", encoding="utf-8")
     monkeypatch.setattr(prompts, "DEFAULT_PROFILE_PATH", missing)
@@ -74,6 +75,7 @@ def test_cache_invalidates_on_edit(monkeypatch, tmp_path):
     """Editing the profile (new mtime) must be picked up on the next load, not
     served stale from the parse cache (matters for long-lived processes)."""
     import os
+
     prompts.clear_profile_cache()
     profile = tmp_path / "p.md"
     profile.write_text("## TARGET_ROLES\n\nEngineer\n", encoding="utf-8")

@@ -35,8 +35,8 @@ _COOKIE_BANNER_RE = re.compile(
 # Weak markers used only to extend an already-detected banner (consent-manager
 # vendor lists repeat "cookie"/"consent" every few hundred chars).
 _COOKIE_WORD_RE = re.compile(r"\bcookies?\b|\bconsent\b|\bgdpr\b", re.IGNORECASE)
-COOKIE_HEAD_WINDOW = 1500   # banner must START this close to the top
-COOKIE_CHAIN_GAP = 700      # max gap between cookie words inside one banner
+COOKIE_HEAD_WINDOW = 1500  # banner must START this close to the top
+COOKIE_CHAIN_GAP = 700  # max gap between cookie words inside one banner
 COOKIE_MIN_REMAINDER = 500  # less real content than this after the banner → cookie wall
 COOKIE_SCORE_POLLUTION = 1000  # banner ≥ this ate the LLM scoring window → rescore
 
@@ -111,8 +111,8 @@ _ERROR_PAGE_RE = re.compile(
     r"this opportunity (?:is no longer available|has (?:closed|expired)))\b",
     re.IGNORECASE,
 )
-ERROR_HEAD_WINDOW = 600     # error copy must appear this close to the top
-ERROR_MAX_LEN = 1200        # a real JD with a "no longer available" footer is longer
+ERROR_HEAD_WINDOW = 600  # error copy must appear this close to the top
+ERROR_MAX_LEN = 1200  # a real JD with a "no longer available" footer is longer
 
 
 def is_error_page(text: str) -> bool:
@@ -144,8 +144,8 @@ _NAV_TOKEN_RE = re.compile(
     r"subscribe|newsletter|follow us)\b",
     re.IGNORECASE,
 )
-NAV_MAX_LEN = 600           # nav shells are short
-NAV_TOKEN_THRESHOLD = 6     # this many nav tokens in a short blob → it's chrome
+NAV_MAX_LEN = 600  # nav shells are short
+NAV_TOKEN_THRESHOLD = 6  # this many nav tokens in a short blob → it's chrome
 
 
 def is_navigation_junk(text: str) -> bool:

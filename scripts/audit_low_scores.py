@@ -49,12 +49,12 @@ Return ONLY JSON:
 def _audit_system_prompt() -> str:
     """The candidate fit rubric, framed as a false-negative auditor."""
     from prompts import VACANCY_SCORING_PROMPT
+
     return (
         "You are an independent QA auditor for a career-fit scorer. Using the "
         "same candidate profile and rubric below, decide whether a role that was "
         "scored LOW was in fact a false negative (a genuine fit wrongly buried). "
-        "Default to wrongly_buried=false unless the mismatch is clear.\n\n"
-        + VACANCY_SCORING_PROMPT
+        "Default to wrongly_buried=false unless the mismatch is clear.\n\n" + VACANCY_SCORING_PROMPT
     )
 
 
@@ -77,6 +77,7 @@ def select_low_scored(conn, sample_size):
     scorer false-negative worth re-auditing. Most-recent first.
     """
     from db_backend import RealDictCursor
+
     cur = conn.cursor(cursor_factory=RealDictCursor)
     cur.execute(
         "SELECT COUNT(*) AS n FROM vacancy "
@@ -99,8 +100,7 @@ def select_low_scored(conn, sample_size):
 
 
 def build_audit_payload(row):
-    description = (row.get("full_description") or row.get("snippet")
-                  or "No description available")
+    description = row.get("full_description") or row.get("snippet") or "No description available"
     if len(description) > 8000:
         description = description[:8000] + "\n\n[Description truncated]"
     user_msg = AUDIT_USER_TEMPLATE.format(
@@ -123,11 +123,11 @@ def build_audit_payload(row):
 
 def cmd_prepare(args):
     from db_conn import get_conn
+
     rows, total = select_low_scored(get_conn(), args.sample)
     # Honest sampling note → stderr so it doesn't pollute the JSON payload.
     print(
-        f"Audit: sampling {len(rows)} of {total} undecided roles scored "
-        f"< {LOW_SCORE_THRESHOLD}.",
+        f"Audit: sampling {len(rows)} of {total} undecided roles scored < {LOW_SCORE_THRESHOLD}.",
         file=sys.stderr,
     )
     if not rows:
@@ -143,8 +143,7 @@ def render_report(verdicts, sampled=None, total=None):
     flagged.sort(key=lambda v: v.get("suggested_score", 0), reverse=True)
     lines = ["# Low-score audit — suspected false negatives", ""]
     if sampled is not None and total is not None:
-        lines.append(f"Sampled **{sampled}** of **{total}** roles scored "
-                     f"< {LOW_SCORE_THRESHOLD}.")
+        lines.append(f"Sampled **{sampled}** of **{total}** roles scored < {LOW_SCORE_THRESHOLD}.")
     else:
         lines.append(f"Reviewed **{len(verdicts)}** roles.")
     lines.append(f"Flagged as wrongly buried: **{len(flagged)}**.")
@@ -172,11 +171,15 @@ def cmd_report(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sample", type=int, default=DEFAULT_SAMPLE,
-                        help=f"how many recent <{LOW_SCORE_THRESHOLD} roles to "
-                             f"audit (default {DEFAULT_SAMPLE})")
-    parser.add_argument("--report", action="store_true",
-                        help="read scored audit verdicts from stdin, print report")
+    parser.add_argument(
+        "--sample",
+        type=int,
+        default=DEFAULT_SAMPLE,
+        help=f"how many recent <{LOW_SCORE_THRESHOLD} roles to audit (default {DEFAULT_SAMPLE})",
+    )
+    parser.add_argument(
+        "--report", action="store_true", help="read scored audit verdicts from stdin, print report"
+    )
     args = parser.parse_args()
     if args.report:
         cmd_report(args)

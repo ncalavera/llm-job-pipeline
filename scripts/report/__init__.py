@@ -8,7 +8,12 @@ git on every run). This module only regenerates ``public/data.js``.
 import json
 import os
 
-from .data_prep import prepare_report_data, prepare_company_data, prepare_triage_data, prepare_archived_data
+from .data_prep import (
+    prepare_report_data,
+    prepare_company_data,
+    prepare_triage_data,
+    prepare_archived_data,
+)
 
 from config import PUBLIC_DIR, resolve_canonical_name
 
@@ -28,6 +33,7 @@ def _resolve_dashboard_style() -> str:
 
     try:
         import settings
+
         cfg = settings.dashboard()
         style = str(cfg.get("style", "illustrated")).strip().lower()
         if style in _DASHBOARD_STYLES:
@@ -43,12 +49,14 @@ def _resolve_language() -> str:
     Falls back to ``en`` when unset or not bundled.
     """
     import i18n
+
     available = set(i18n.available_languages())
     env = (os.environ.get("DASHBOARD_LANGUAGE") or "").strip().lower()
     if env in available:
         return env
     try:
         import settings
+
         lang = str(settings.dashboard().get("language", "en")).strip().lower()
         if lang in available:
             return lang
@@ -68,6 +76,7 @@ def _resolve_pack() -> str:
         return env
     try:
         import settings
+
         return str(settings.dashboard().get("illustration_pack", "default")).strip() or "default"
     except Exception:
         return "default"
@@ -86,6 +95,7 @@ def _resolve_show_mpa() -> bool:
         return False
     try:
         import settings
+
         return bool(settings.dashboard().get("show_mpa_column", False))
     except Exception:
         return False
@@ -119,8 +129,12 @@ def generate_dashboard(db: dict = None) -> None:
     monitored = [c for c in csv_companies if c.get("strategy")]
     has_about = sum(1 for c in csv_companies if c.get("description"))
     has_mission = sum(1 for c in csv_companies if c.get("alignment_score") is not None)
-    has_both = sum(1 for c in csv_companies if c.get("description") and c.get("alignment_score") is not None)
-    has_neither = sum(1 for c in csv_companies if not c.get("description") and c.get("alignment_score") is None)
+    has_both = sum(
+        1 for c in csv_companies if c.get("description") and c.get("alignment_score") is not None
+    )
+    has_neither = sum(
+        1 for c in csv_companies if not c.get("description") and c.get("alignment_score") is None
+    )
     # --- Monitoring strategy breakdown ---
     auto_fetch = sum(1 for c in monitored if c.get("strategy") and c["strategy"] != "manual_check")
     manual_check = sum(1 for c in monitored if c.get("strategy") == "manual_check")
@@ -130,8 +144,15 @@ def generate_dashboard(db: dict = None) -> None:
         s = c.get("strategy", "")
         if s:
             # Group ATS strategies by type
-            if s in ("greenhouse", "lever", "ashby", "workable", "recruitee",
-                      "teamtailor_rss", "bamboohr"):
+            if s in (
+                "greenhouse",
+                "lever",
+                "ashby",
+                "workable",
+                "recruitee",
+                "teamtailor_rss",
+                "bamboohr",
+            ):
                 key = "ats_api"
             elif s in ("workday_api", "amazon_jobs", "unops_widget"):
                 key = "custom_api"
@@ -157,6 +178,7 @@ def generate_dashboard(db: dict = None) -> None:
 
     # --- Latency / SLA health metrics for the "Сегодня" tab ---
     from .data_prep import compute_latency_metrics
+
     latency_metrics = compute_latency_metrics()
 
     # --- Build triage data for Triage tab ---
@@ -173,11 +195,13 @@ def generate_dashboard(db: dict = None) -> None:
     # --- Resolve presentation knobs (env overrides config) ---
     import i18n
     from .packs import pack_images
+
     language = _resolve_language()
     pack = _resolve_pack()
 
     # --- Build VACANCY_DATA payload for JS ---
     from datetime import datetime
+
     vacancy_data = {
         "config": {
             "last_updated": datetime.now().isoformat(timespec="seconds"),
@@ -188,9 +212,7 @@ def generate_dashboard(db: dict = None) -> None:
             # All language maps so the dashboard can switch RU/EN client-side
             # without a rebuild. "i18n" stays the server-chosen default for the
             # first render and as a fallback when "i18n_all" is absent.
-            "i18n_all": {
-                lang: i18n.strings(lang) for lang in i18n.available_languages()
-            },
+            "i18n_all": {lang: i18n.strings(lang) for lang in i18n.available_languages()},
             "pack": pack,
             "pack_images": pack_images(pack),
             "show_mpa_column": _resolve_show_mpa(),
@@ -230,6 +252,7 @@ def _upsert_dashboard_snapshot(vacancy_data: dict, conn) -> None:
     the caller); the fetch and score paths already do.
     """
     from db_backend import Json
+
     cur = conn.cursor()
     # Snapshot the current payload as 'previous' (no-op on the very first run).
     cur.execute(
@@ -256,6 +279,7 @@ def _persist_dashboard(vacancy_data: dict) -> None:
     dashboard_snapshot row, and NO data.js.
     """
     import db_backend
+
     if db_backend.IS_SQLITE:
         _write_data_js(vacancy_data)
     else:

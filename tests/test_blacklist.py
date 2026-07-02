@@ -12,19 +12,20 @@ prove that contract: with an empty profile a discipline title survives; with the
 keyword listed it is dropped.
 """
 
-import pytest
 import filters
 
 
 def _is_blacklisted(title, description=""):
     """Old DAL semantics: title-words-or-substr OR description-kill-phrase."""
-    return (filters.title_words_blacklisted(title)
-            or filters.description_words_blacklisted(description))
+    return filters.title_words_blacklisted(title) or filters.description_words_blacklisted(
+        description
+    )
 
 
 # ---------------------------------------------------------------------------
 # UJ01-06: Universal junk — dropped for EVERYONE, no discipline involved
 # ---------------------------------------------------------------------------
+
 
 class TestUniversalJunk:
     def test_UJ01_expression_of_interest_blacklisted(self):
@@ -51,6 +52,7 @@ class TestUniversalJunk:
 # them. They ship neutral; only the profile can opt to drop them.
 # ---------------------------------------------------------------------------
 
+
 class TestFormatRolesNotJunk:
     def test_volunteer_coordinator_not_junk(self):
         assert _is_blacklisted("Volunteer Coordinator") is False
@@ -69,6 +71,7 @@ class TestFormatRolesNotJunk:
 # ND01-06: Disciplines are NOT dropped by default (the public template ships
 # an EMPTY exclude_title_keywords — nobody's career taste is imposed)
 # ---------------------------------------------------------------------------
+
 
 class TestDisciplinesNotBlacklistedByDefault:
     def test_ND01_software_engineer_not_blacklisted(self):
@@ -94,6 +97,7 @@ class TestDisciplinesNotBlacklistedByDefault:
 # NF01-04: No false positives on ordinary target roles
 # ---------------------------------------------------------------------------
 
+
 class TestNegativeNoFalsePositives:
     def test_NF01_head_of_operations_not_blacklisted(self):
         assert _is_blacklisted("Head of Operations") is False
@@ -113,6 +117,7 @@ class TestNegativeNoFalsePositives:
 # These ARE universal (a posting that won't sponsor / requires US citizenship
 # is useless to most international searchers) and stay hardcoded.
 # ---------------------------------------------------------------------------
+
 
 class TestDescriptionLevelBlacklist:
     def test_BL21_visa_sponsorship_in_description_blacklists(self):

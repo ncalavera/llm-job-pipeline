@@ -1,6 +1,6 @@
 """Shared fixtures for the llm-job-pipeline test suite."""
+
 import os
-import sys
 import tempfile
 
 import pytest
@@ -45,7 +45,8 @@ os.environ.setdefault(
 # ---------------------------------------------------------------------------
 os.environ["USER_PROFILE_PATH"] = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "config", "user_profile.example.md",
+    "config",
+    "user_profile.example.md",
 )
 
 

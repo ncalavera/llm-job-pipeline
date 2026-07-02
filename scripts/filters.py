@@ -46,9 +46,9 @@ DESCRIPTION_BLACKLIST_PHRASES = GLOBAL_BLACKLIST_DESC_SUBSTR
 # "developer" matches "developers", "fellow" → "fellows", "internship" →
 # "internships" without listing every plural by hand.
 _TITLE_BLACKLIST_PATTERN = re.compile(
-    r'\b(?:' + '|'.join(
-        re.escape(kw) for kw in sorted(TITLE_BLACKLIST_WORDS, key=len, reverse=True)
-    ) + r')(?:es|s)?\b',
+    r"\b(?:"
+    + "|".join(re.escape(kw) for kw in sorted(TITLE_BLACKLIST_WORDS, key=len, reverse=True))
+    + r")(?:es|s)?\b",
     re.IGNORECASE,
 )
 
@@ -79,17 +79,26 @@ def description_words_blacklisted(desc: str) -> bool:
 # Content-junk detection (non-vacancy pages)
 # ---------------------------------------------------------------------------
 
+
 def is_content_junk(desc: str) -> str | None:
     """Detect non-vacancy content. Returns a reason string or None."""
     if not desc:
         return None
     d = desc[:500].lower()
-    if 'recaptcha' in d and len(desc) < 300:
+    if "recaptcha" in d and len(desc) < 300:
         return "recaptcha_only"
-    if any(p in d for p in ['every.org', 'donate to a fund', 'make a donation']):
+    if any(p in d for p in ["every.org", "donate to a fund", "make a donation"]):
         return "donation_widget"
-    if any(p in d for p in ['404 not found', 'page not found', 'error 404',
-                            'access denied', 'cannot be displayed']):
+    if any(
+        p in d
+        for p in [
+            "404 not found",
+            "page not found",
+            "error 404",
+            "access denied",
+            "cannot be displayed",
+        ]
+    ):
         return "error_page"
     if len(desc.strip()) < 50:
         return "navigation_snippet"
@@ -110,6 +119,7 @@ def has_enough_content(job: dict, min_chars: int = 50) -> bool:
 # ---------------------------------------------------------------------------
 # Quality-axis classifier
 # ---------------------------------------------------------------------------
+
 
 def classify_vacancy(vacancy: dict) -> str:
     """Classify a vacancy on the quality axis. Returns one reason string.
@@ -145,6 +155,7 @@ def classify_vacancy(vacancy: dict) -> str:
 # Time / neighbour gate predicate (pure; the SET is chosen by the caller)
 # ---------------------------------------------------------------------------
 
+
 def is_recently_archived(archived_hashes: set[str], dedup_hash: str) -> bool:
     """True when dedup_hash is in the supplied archived-hash set.
 
@@ -159,9 +170,16 @@ def is_recently_archived(archived_hashes: set[str], dedup_hash: str) -> bool:
 # ---------------------------------------------------------------------------
 
 _FUZZY_THRESHOLD: float = 0.85
-_PROTECTED_STATUSES: frozenset[str] = frozenset({
-    "liked", "to_apply", "to_research", "to_network", "applied", "archived",
-})
+_PROTECTED_STATUSES: frozenset[str] = frozenset(
+    {
+        "liked",
+        "to_apply",
+        "to_research",
+        "to_network",
+        "applied",
+        "archived",
+    }
+)
 
 
 def _strip_punct(title: str) -> str:
@@ -244,22 +262,23 @@ def find_duplicates(vacancies: dict) -> list[dict]:
                 # Exact normalized match
                 if n_i == n_j:
                     seen_pairs.add(pair_key)
-                    winner, loser = _pick_winner(
-                        {**v_i, "id": id_i}, {**v_j, "id": id_j}
+                    winner, loser = _pick_winner({**v_i, "id": id_i}, {**v_j, "id": id_j})
+                    pairs.append(
+                        {
+                            "id_a": id_i,
+                            "id_b": id_j,
+                            "org": canonical_org,
+                            "title_a": v_i.get("title", ""),
+                            "title_b": v_j.get("title", ""),
+                            "norm_title": n_i,
+                            "similarity": 1.0,
+                            "match_type": "normalized_exact",
+                            "source_a": v_i.get("source", ""),
+                            "source_b": v_j.get("source", ""),
+                            "desc_len_a": len(v_i.get("full_description") or ""),
+                            "desc_len_b": len(v_j.get("full_description") or ""),
+                        }
                     )
-                    pairs.append({
-                        "id_a": id_i, "id_b": id_j,
-                        "org": canonical_org,
-                        "title_a": v_i.get("title", ""),
-                        "title_b": v_j.get("title", ""),
-                        "norm_title": n_i,
-                        "similarity": 1.0,
-                        "match_type": "normalized_exact",
-                        "source_a": v_i.get("source", ""),
-                        "source_b": v_j.get("source", ""),
-                        "desc_len_a": len(v_i.get("full_description") or ""),
-                        "desc_len_b": len(v_j.get("full_description") or ""),
-                    })
                     continue
 
                 # Fuzzy match
@@ -267,18 +286,21 @@ def find_duplicates(vacancies: dict) -> list[dict]:
                 ratio = matcher.ratio()
                 if ratio >= _FUZZY_THRESHOLD:
                     seen_pairs.add(pair_key)
-                    pairs.append({
-                        "id_a": id_i, "id_b": id_j,
-                        "org": canonical_org,
-                        "title_a": v_i.get("title", ""),
-                        "title_b": v_j.get("title", ""),
-                        "norm_title": f"{n_i} / {n_j}",
-                        "similarity": round(ratio, 4),
-                        "match_type": "fuzzy",
-                        "source_a": v_i.get("source", ""),
-                        "source_b": v_j.get("source", ""),
-                        "desc_len_a": len(v_i.get("full_description") or ""),
-                        "desc_len_b": len(v_j.get("full_description") or ""),
-                    })
+                    pairs.append(
+                        {
+                            "id_a": id_i,
+                            "id_b": id_j,
+                            "org": canonical_org,
+                            "title_a": v_i.get("title", ""),
+                            "title_b": v_j.get("title", ""),
+                            "norm_title": f"{n_i} / {n_j}",
+                            "similarity": round(ratio, 4),
+                            "match_type": "fuzzy",
+                            "source_a": v_i.get("source", ""),
+                            "source_b": v_j.get("source", ""),
+                            "desc_len_a": len(v_i.get("full_description") or ""),
+                            "desc_len_b": len(v_j.get("full_description") or ""),
+                        }
+                    )
 
     return pairs

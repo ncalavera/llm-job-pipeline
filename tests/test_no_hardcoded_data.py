@@ -132,6 +132,7 @@ def _run_private_check(name: str, files, label: str):
 # 1. Owner identity  (PRIVATE — patterns loaded from the optional local file)
 # ---------------------------------------------------------------------------
 
+
 def test_no_owner_identity():
     _run_private_check("owner_identity", _text_files(), "Owner identity")
 
@@ -139,6 +140,7 @@ def test_no_owner_identity():
 # ---------------------------------------------------------------------------
 # 2. Owner-specific organisations  (PRIVATE — optional local file)
 # ---------------------------------------------------------------------------
+
 
 def test_no_owner_orgs():
     # Scan code, tests, the public dashboard HTML and .claude command docs.
@@ -227,19 +229,36 @@ def test_no_hardcoded_board_blacklist():
 #    career-stage / sector words.
 # ---------------------------------------------------------------------------
 
+
 def _shipped_junk_words() -> list[str]:
     import sys
+
     if str(SCRIPTS) not in sys.path:
         sys.path.insert(0, str(SCRIPTS))
     import settings
+
     j = settings.junk()
     return [w.lower() for w in (j["words"] + j["substr"])]
 
 
 FLAVORED_NOT_JUNK = [
-    "bootcamp", "fellowship", "internship", "intern", "graduate", "volunteer",
-    "course", "summer school", "training on", "junior", "senior", "engineer",
-    "developer", "nurse", "sales", "funding", "grant",
+    "bootcamp",
+    "fellowship",
+    "internship",
+    "intern",
+    "graduate",
+    "volunteer",
+    "course",
+    "summer school",
+    "training on",
+    "junior",
+    "senior",
+    "engineer",
+    "developer",
+    "nurse",
+    "sales",
+    "funding",
+    "grant",
 ]
 
 
@@ -257,10 +276,12 @@ def test_universal_junk_is_sourced_from_toml():
     """config.UNIVERSAL_JUNK must equal the TOML data, proving it is not a
     hardcoded literal in config.py."""
     import sys
+
     if str(SCRIPTS) not in sys.path:
         sys.path.insert(0, str(SCRIPTS))
     import config
     import settings
+
     assert config.UNIVERSAL_JUNK == settings.junk()["words"]
     assert config.UNIVERSAL_JUNK_SUBSTR == settings.junk()["substr"]
 
@@ -286,9 +307,21 @@ def test_universal_junk_is_sourced_from_toml():
 # branch literal. We therefore include the country proper nouns that have no
 # business being in code at all, PLUS the legacy geo category fragments.
 _GEO_PROPER_NOUNS = (
-    "usa", "cis", "united_states", "us_only", "row_only",
-    "canada", "russia", "georgia", "armenia", "turkey", "nigeria",
-    "tbilisi", "istanbul", "lagos", "moscow",
+    "usa",
+    "cis",
+    "united_states",
+    "us_only",
+    "row_only",
+    "canada",
+    "russia",
+    "georgia",
+    "armenia",
+    "turkey",
+    "nigeria",
+    "tbilisi",
+    "istanbul",
+    "lagos",
+    "moscow",
 )
 
 # (a) def names containing a geo proper noun.
@@ -309,7 +342,9 @@ _CATEGORY_GEO = re.compile(
 #     SET/var (e.g. `country in _COUNTRY_MAP[key]`) is data-driven and allowed.
 _IF_GEO_LITERAL = re.compile(
     r"""\b(?:if|elif)\b.*(?:==|!=|\bin\b)\s*\(?\s*["']"""
-    + r"(?:" + "|".join(_GEO_PROPER_NOUNS) + r")"
+    + r"(?:"
+    + "|".join(_GEO_PROPER_NOUNS)
+    + r")"
     + r"""["']""",
     re.IGNORECASE,
 )
@@ -354,8 +389,7 @@ def test_no_geo_proper_noun_in_branch_literals():
             hits.append(f"{p.relative_to(REPO)}:{i}: {line.strip()[:120]}")
     assert not hits, (
         "An if/elif branches on a country/region proper-noun literal — "
-        "geography must be a data-table lookup, not a per-place branch:\n"
-        + "\n".join(hits)
+        "geography must be a data-table lookup, not a per-place branch:\n" + "\n".join(hits)
     )
 
 
