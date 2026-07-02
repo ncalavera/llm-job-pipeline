@@ -118,3 +118,25 @@ CREATE TABLE IF NOT EXISTS archived_hash (
 );
 
 CREATE INDEX IF NOT EXISTS idx_archived_hash_at ON archived_hash (archived_at);
+
+-- ---------------------------------------------------------------------------
+-- company_evidence — raw primary-source text collected per company, one row
+-- per (company, source). Feeds WANT-scoring (score_companies reads it before
+-- falling back to the legacy scrape cache). Mirror of migration 0007 (the
+-- SQLite dialect file -- the Postgres counterpart is 0006; they diverged
+-- because 0006 was already recorded as n/a on existing SQLite databases by
+-- the time this table shipped for SQLite).
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS company_evidence (
+    id          TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    company_id  TEXT NOT NULL REFERENCES company(id) ON DELETE CASCADE,
+    source      TEXT NOT NULL,
+    url         TEXT,
+    content     TEXT,
+    meta        TEXT,                         -- JSON object
+    fetched_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_company_evidence_company_source
+    ON company_evidence (company_id, source);

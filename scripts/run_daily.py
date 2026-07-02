@@ -67,16 +67,14 @@ GONE_ARCHIVE_MIN_COUNT = 3
 # The canonical stage order. This list — not the runbook, not the maintainer's
 # memory — is the single source of truth for what happens when.
 #
-# Two positions are reserved insertion points for follow-up work and currently
-# no-op (they only print a one-line note):
+# One position is still a reserved insertion point and currently no-op (it only
+# prints a one-line note):
 #   * learning_review  — a future verdict-driven feedback loop that offers
 #                        filter/scoring corrections at the START of a run
 #                        (skippable, rolls over — STRATEGY guardrail 8).
-#   * company_scoring  — a future step will extend this gate to collect +
-#                        auto-enrich new companies, WANT-score them, and show the
-#                        best role as evidence at an in-chat approval gate. Today
-#                        the gate just WANT-scores candidates; they land in
-#                        Pending for review.
+# company_scoring now runs the full candidate chain: drop junk → find a
+# missing website → collect primary-source evidence → WANT-score. Scored
+# candidates land in Pending for review.
 STAGE_ORDER = [
     "validate_profile",  # AUTO  — abort early on a missing/placeholder profile
     "preflight",  # AUTO  — DB-outage hard-stop, first-run + resume detect
@@ -230,6 +228,37 @@ def _candidates_to_score() -> int:
     )
 
 
+def _ghost_candidate_count() -> int:
+    """Candidates a board discovered with NO website yet — unscorable until a
+    site is found. These are the 'candidate without a site' rows the enrichment
+    chain backfills so they don't hang unscored forever."""
+    return _scalar(
+        "SELECT count(*) FROM company "
+        "WHERE status = 'candidate' AND alignment_score IS NULL "
+        "AND (website IS NULL OR website = '')"
+    )
+
+
+def _candidate_names_to_score(limit: int) -> list[str]:
+    """Canonical names of the candidates the scorer will pick this run.
+
+    Mirrors score_companies._load_companies' selection (candidate, no score, has
+    website, ordered by name) so evidence is collected for EXACTLY the companies
+    that go to scoring — no more (STRATEGY guardrail 3: evidence is not free)."""
+    from db_conn import get_conn
+
+    cur = get_conn().cursor()
+    cur.execute(
+        "SELECT canonical_name FROM company "
+        "WHERE status = 'candidate' AND alignment_score IS NULL "
+        "AND website IS NOT NULL AND website != '' "
+        "ORDER BY canonical_name"
+    )
+    names = [r[0] for r in cur.fetchall()]
+    cur.close()
+    return names[:limit] if limit else names
+
+
 def _unscored_unseen() -> int:
     return _scalar("SELECT count(*) FROM vacancy WHERE status = 'unseen' AND llm_score IS NULL")
 
@@ -289,6 +318,73 @@ def _run_capture(cmd: list[str], opts: Opts) -> subprocess.CompletedProcess:
 
 def _py(script: str) -> list[str]:
     return [sys.executable, str(SCRIPTS_DIR / script)]
+
+
+# ---------------------------------------------------------------------------
+# Company enrichment chain: before WANT-scoring, a new candidate
+# company is made scorable — structural junk is dropped, a missing website is
+# found, and primary-source evidence is collected. This is the deterministic
+# prep the scoring GATE depends on; it runs inside company_scoring, never as a
+# side path (STRATEGY guardrail 5).
+# ---------------------------------------------------------------------------
+
+
+def _prefilter_junk_companies(opts: Opts) -> None:
+    """Drop structural junk candidates (gov / university / aggregator) before we
+    spend Firecrawl credits enriching them. Best-effort: a failure here must not
+    block scoring, so its exit code is advisory only."""
+    rc = _run(_py("filter_companies.py") + ["--apply"], opts)
+    if rc != 0:
+        print("  ⚠  company junk pre-filter exited non-zero — continuing", flush=True)
+
+
+def _backfill_candidate_websites(opts: Opts) -> None:
+    """Find official websites for ghost candidates (board-discovered, no URL) so
+    they enter scoring instead of hanging unscored. Capped at the same per-run
+    safety net already used for the scoring set (``scoring_settings.max_per_run``
+    — STRATEGY guardrail 3: cost) — without it, a board dump of hundreds of
+    ghost candidates would fire one paid Firecrawl search() per ghost in a
+    single run. Best-effort: a company whose site can't be found stays
+    unscored and is reported by the stage note, not silently dropped; anything
+    past the cap simply waits for a later run (no silent caps — we say how
+    many)."""
+    ghosts = _ghost_candidate_count()
+    if ghosts == 0:
+        return
+    from scoring_settings import max_per_run
+
+    cap = max_per_run()
+    capped = min(ghosts, cap)
+    if ghosts > cap:
+        print(
+            f"  Ghost candidates without a website: {ghosts} — searching for the "
+            f"first {cap} (per-run cap); {ghosts - cap} deferred to a later run",
+            flush=True,
+        )
+    else:
+        print(f"  Ghost candidates without a website: {ghosts} — searching for URLs", flush=True)
+    rc = _run(_py("find_company_urls.py") + ["--limit", str(capped)], opts)
+    if rc != 0:
+        print("  ⚠  website backfill exited non-zero — continuing", flush=True)
+
+
+def _collect_company_evidence(names: list[str], opts: Opts) -> None:
+    """Collect primary-source evidence (company_evidence rows) for the companies
+    about to be scored. Runs BEFORE score_companies so the
+    scorer reads real primary text, not the legacy scrape cache. Only the capped
+    scoring set is passed in (STRATEGY guardrail 3: evidence is a paid path)."""
+    if not names:
+        return
+    print(f"  Collecting primary-source evidence for {len(names)} company(ies)", flush=True)
+    rc = _run(_py("collect_company_evidence.py") + ["--company", ",".join(names)], opts)
+    if rc != 0:
+        # LOUD, not silent: a failed collection means scoring will degrade to the
+        # scrape cache. score_companies also warns per-company, but say it here too.
+        print(
+            "  ⚠  evidence collection exited non-zero — WANT scores may fall back to "
+            "the scrape cache (degraded). Check the output above.",
+            flush=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -465,9 +561,9 @@ def _company_gate_text(payloads: list) -> str:
         f"  python3 scripts/score_companies.py --save < chunk.json\n\n"
         f"Scored companies land in Companies -> Pending for approval (deeper review\n"
         f"in /jobs-review companies --status candidate). Then --resume.\n\n"
-        f"[reserved insertion point] Follow-up work will collect + auto-enrich these\n"
-        f"companies earlier in the run and show each one's best role as evidence at\n"
-        f"an in-chat approve/reject gate; that logic slots in around this stage."
+        f"These payloads were built from primary-source company_evidence collected\n"
+        f"earlier this stage (websites were auto-found for board candidates that had\n"
+        f"none). Any company still missing evidence carries a loud warning above."
     )
 
 
@@ -550,7 +646,16 @@ def _h_learning_review(state, entry, opts):
 def _h_fetch(state, entry, opts):
     # -u (unbuffered) is a python flag, not a script flag — so the live card sees
     # the heartbeat immediately while fetch runs in the background.
-    cmd = [sys.executable, "-u", str(SCRIPTS_DIR / "fetch_vacancies.py"), "--no-dashboard"]
+    # --no-auto-enrich: the driver's company_scoring stage owns candidate
+    # enrichment + WANT-scoring (find site → collect evidence → score). Letting
+    # fetch also enrich inline would be a degraded parallel path (STRATEGY 5).
+    cmd = [
+        sys.executable,
+        "-u",
+        str(SCRIPTS_DIR / "fetch_vacancies.py"),
+        "--no-dashboard",
+        "--no-auto-enrich",
+    ]
     if state.get("first_run"):
         cmd.append("--no-boards")  # keep the first run fast
     rc = _run(cmd, opts)
@@ -612,35 +717,64 @@ def _h_company_scoring(state, entry, opts):
             "instructions": _company_gate_text(payloads),
         }
 
-    n = _candidates_to_score()
-    if n == 0:
-        return "advance", "no new candidate companies to score"
+    # Without Firecrawl we can neither find missing sites nor scrape/collect
+    # evidence, so there is nothing this stage can do but leave candidates for a
+    # manual pass. Count only the already-scorable (website-bearing) rows for the
+    # message; ghost candidates simply wait until a Firecrawl key is present.
     if not os.environ.get("FIRECRAWL_API_KEY"):
+        n = _candidates_to_score()
+        if n == 0:
+            return "advance", "no new candidate companies to score"
         return (
             "skip",
             f"{n} candidate companies found but FIRECRAWL_API_KEY unset — left "
             "unscored (approve manually later via /jobs-review)",
         )
-    # Deterministic prep: scrape about-pages, then build scoring payloads.
+
+    # Enrichment chain — make new candidates scorable before scoring:
+    #   1. drop structural junk so we don't pay to enrich it,
+    #   2. find websites for ghost candidates (board-discovered, no URL),
+    #   3. count what is now scorable,
+    #   4. scrape about-pages + collect primary-source evidence for that set,
+    #   5. build the WANT-scoring payloads for the gate.
+    _prefilter_junk_companies(opts)
+    _backfill_candidate_websites(opts)
+
+    n = _candidates_to_score()
+    if n == 0:
+        return "advance", "no new candidate companies to score"
+
+    names = _candidate_names_to_score(n)
     rc = _run(_py("fetch_companies.py") + ["--limit", str(n)], opts)
     if rc != 0:
         return "error", f"company scrape exited with code {rc}"
+    _collect_company_evidence(names, opts)
+
     res = _run_capture(_py("score_companies.py") + ["--local", "--limit", str(n)], opts)
     if res.returncode != 0:
         return "error", f"score_companies --local exited {res.returncode}: {res.stderr[-400:]}"
+    # score_companies --local prints its "N with company_evidence rows" line and a
+    # LOUD warning for any company with no evidence to stderr — surface both.
+    if res.stderr.strip():
+        print(res.stderr.strip(), file=sys.stderr, flush=True)
     try:
         payloads = _extract_json(res.stdout or "[]")
     except Exception:
         return "error", "score_companies --local did not emit valid JSON"
     if not payloads:
-        return "advance", "candidate companies had no scrape cache — nothing to score"
+        return "advance", "candidate companies had no evidence or scrape cache — nothing to score"
     _write_payload(CO_PAYLOAD_PATH, payloads)
     entry["target_ids"] = [str(p["id"]) for p in payloads]
+    ghosts_left = _ghost_candidate_count()
+    note_suffix = (
+        f"; {ghosts_left} candidate(s) still lack a findable website" if ghosts_left else ""
+    )
     return "gate", {
         "action": "score_companies",
         "count": len(payloads),
         "payload_path": str(CO_PAYLOAD_PATH),
-        "instructions": _company_gate_text(payloads),
+        "instructions": _company_gate_text(payloads)
+        + (f"\n\n[note]{note_suffix}" if note_suffix else ""),
     }
 
 

@@ -655,8 +655,12 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
-    # Direct ATS path: exclude 'gone_from_source' tombstones so the company's
-    # own re-listing resurrects the role. Loaded once (not per row).
+    # Direct ATS path: exclude ONLY 'gone_from_source' tombstones so the
+    # company's own re-listing resurrects a role the source had merely dropped.
+    # Every OTHER tombstone reason — crucially 'score_below_threshold' — STAYS in
+    # the set, so a role we buried for a low score is NOT re-imported / re-scored /
+    # re-archived each run when the ATS still lists it. Loaded
+    # once (not per row).
     archived_hashes = get_archived_hashes(include_gone=False)
 
     skipped_archived = 0
