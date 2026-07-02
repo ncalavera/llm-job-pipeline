@@ -1,5 +1,5 @@
 ---
-description: The one daily command. Validates your profile, fetches new vacancies, filters junk, scores the new ones with Opus subagents, shows the top fresh matches in chat, captures your like/pass verdicts, then refreshes (and in full mode deploys) the dashboard. First run auto-onboards an empty database.
+description: The one daily command. Validates your profile, fetches new vacancies, filters junk, scores the new ones with per-vacancy subagents (model set by your plan), shows the top fresh matches in chat, captures your like/pass verdicts, then refreshes (and in full mode deploys) the dashboard. First run auto-onboards an empty database.
 ---
 
 # /jobs-new
@@ -225,6 +225,34 @@ Then say the policy back plainly ("Before scoring I'll drop jobs in regions: …
 keep remote everywhere; drop US/Canada-only: …; lower on-site outside: … by N
 points. Everything else gets scored."). Continue once they confirm.
 
+### 2e. Pick the scoring model for your plan
+
+The model tier is the main cost dial. Scoring is one LLM request per vacancy and
+runs inside the user's coding-agent plan, so match the model to their plan. Ask
+once:
+
+```
+Which coding-agent plan will you score on? This sets the scoring model
+(you can change it later in one line — `## VOLUME` → `scoring_model`).
+  1. Budget (~$20/month) → Sonnet (recommended default)
+  2. Larger (~$100-200/month) → Opus (sharper, heavier on plan usage)
+```
+
+Map the answer to `scoring_model` (`sonnet` for 1, `opus` for 2; default to
+`sonnet` if they skip). Write it into the profile's `## VOLUME` section — add the
+section if it is missing (leave `max_per_run` at the default 150 unless they ask):
+
+```
+## VOLUME
+
+scoring_model: {sonnet|opus}
+max_per_run: 150
+```
+
+Only touch `config/user_profile.md` (never the example file). Confirm the choice
+back plainly ("I'll score each vacancy with {model}; change it any time in
+`## VOLUME`.").
+
 After inserting, set the fetch scope for Step 3 to **only the just-added
 companies** (`--companies "{names}" --no-boards`) to keep the first run fast,
 then fall through into the normal pipeline (Steps 3→7).
@@ -379,26 +407,39 @@ The archive path for filter deletions is
 
 ---
 
-## Step 7: Score the new vacancies (Opus subagent per vacancy, save incrementally)
+## Step 7: Score the new vacancies (configured-model subagent per vacancy, save incrementally)
 
 Score the unscored vacancies. **Pure-fit scoring:** the prompt evaluates role fit
 only — skills, seniority, domain, responsibilities. Geography and visa are NOT in
 the score; they were handled in Step 6. A great role in the wrong location still
 scores high so you can decide with full information.
 
+**Pick the scoring model from the profile.** The model tier is the main cost dial
+(cheaper Sonnet on a budget plan, Opus on a bigger one) and lives in the
+`## VOLUME` section of the profile. Read it, and use it as the subagent `model`
+for every scoring subagent below:
+
+```bash
+python3 -c "import sys;sys.path.insert(0,'scripts');from scoring_settings import scoring_model;print(scoring_model())"
+```
+
 **Data-quality audit first:** count vacancies with full description / snippet only
 / no description. If blind vacancies exceed 20% of candidates, show a strong
 warning and require explicit confirmation before proceeding; at ≤20%, info-level
 warning and continue.
 
-Load the vacancies to score (the script prints a JSON array to stdout). Keep the
-batch bounded (e.g. the newest 20-30) so a daily run stays fast:
+Load the vacancies to score (the script prints a JSON array to stdout). Without
+`--limit` the script applies the profile's per-run cap (`[## VOLUME] max_per_run`,
+default 150) as a spike-day safety net and prints a `Scoring X of Y new
+vacancies` line on stderr — surface that count to the user. Pass `--limit N` only
+to override the cap explicitly:
 
 ```bash
-python3 scripts/score_vacancies.py --local --limit N 2>&1
+python3 scripts/score_vacancies.py --local 2>&1
 ```
 
-For **each** vacancy, launch a **separate** subagent with `model: "opus"`:
+For **each** vacancy, launch a **separate** subagent with the model you read above
+(`model: "<scoring_model>"`, e.g. `"sonnet"` or `"opus"`):
 - System prompt: `VACANCY_SCORING_PROMPT` (from `scripts/prompts/vacancy-scoring.md`).
 - User message: `VACANCY_SCORING_USER_TEMPLATE` with substitution.
 - Subagent returns JSON: `score`, `reasoning`, `tags`, `hard_requirements`,
@@ -411,9 +452,9 @@ the `--local` output (the real DB UUIDs), not the top-level `id`.
 **Concurrency:** run at most **5 subagents at a time** (rolling). Launch a wave of
 5, await them, then launch the next 5 — never fan out all N at once. The cleanest
 way is a Workflow that loops `parallel()` over groups of 5, one role per `agent()`
-call with `model: "opus"`; the per-role work units come from
-`score_vacancies.py --local` (one JSON object per vacancy, each carrying its own
-`system_prompt` + `user_msg`).
+call with the configured `model` (the `scoring_model` you read above); the
+per-role work units come from `score_vacancies.py --local` (one JSON object per
+vacancy, each carrying its own `system_prompt` + `user_msg`).
 
 **Show the live card here too.** Scoring fans out over minutes; drive the same
 heartbeat yourself. Once, after loading the batch of `N`:

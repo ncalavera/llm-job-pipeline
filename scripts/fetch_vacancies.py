@@ -84,9 +84,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Auto-run filter + score after fetch (if new vacancies found)",
     )
-    parser.add_argument(
-        "--auto-score-limit", type=int, default=50, help="Max vacancies to auto-score (default: 50)"
-    )
     return parser
 
 

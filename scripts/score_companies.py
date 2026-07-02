@@ -499,17 +499,32 @@ def _extract_enrichment(result: dict) -> dict | None:
 
 def cmd_local(args):
     """Output JSON to stdout for subagent scoring."""
+    from scoring_settings import max_per_run
+
     _real_stdout = sys.stdout
     sys.stdout = sys.stderr
 
-    companies = _load_companies(company_filter=args.company, limit=args.limit)
+    # An explicit --limit wins; otherwise the per-run spike-day cap applies so a
+    # burst of new candidate companies can't silently burn the plan. Load the
+    # full candidate list first (cheap metadata rows) so we can report X of Y.
+    all_companies = _load_companies(company_filter=args.company, limit=None)
+    cap = args.limit if args.limit is not None else max_per_run()
+    available = len(all_companies)
+    companies = all_companies[:cap]
+    if len(companies) < available and args.limit is None:
+        deferred = available - len(companies)
+        print(
+            f"  Per-run cap reached ({cap}): {deferred} more candidate companies will be "
+            f"offered next run. Raise '[## VOLUME] max_per_run' or pass --limit to score more.",
+            file=sys.stderr,
+        )
     scrape_cache = _load_scrape_cache()
     evidence_map = _load_company_evidence_map([c["id"] for c in companies])
     system_prompt = _get_system_prompt()
 
     evidence_companies = sum(1 for c in companies if str(c["id"]) in evidence_map)
     print(
-        f"Loaded {len(companies)} candidates, {len(scrape_cache)} in scrape cache, "
+        f"Loaded {len(companies)} of {available} candidates, {len(scrape_cache)} in scrape cache, "
         f"{evidence_companies} with company_evidence rows",
         file=sys.stderr,
     )

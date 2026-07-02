@@ -379,8 +379,8 @@ def _seed_entry_for_classify(db, entry):
 def _run_score_dedup(tmp_path, monkeypatch):
     """Seed all fixtures, run _load_and_dedup, return (stats, roles_keys).
 
-    Snapshot = score stats {blacklisted, blind, total, candidates} plus the set
-    of stable_keys that survived into `roles`.
+    Snapshot = score stats {blacklisted, blind, total, candidates,
+    roles_available} plus the set of stable_keys that survived into `roles`.
     """
     db = _fresh_db(tmp_path, monkeypatch, "score.db")
     try:
@@ -440,7 +440,13 @@ GOLDEN_CLASSIFY = {
     ("Pied Piper", "Talent Pool — General Application"): "ABSENT",
 }
 
-GOLDEN_SCORE_STATS = {"blacklisted": 2, "blind": 2, "total": 9, "candidates": 0}
+GOLDEN_SCORE_STATS = {
+    "blacklisted": 2,
+    "blind": 2,
+    "total": 9,
+    "candidates": 0,
+    "roles_available": 5,
+}
 
 GOLDEN_SCORE_ROLES = {
     ("Aurora Labs", "Backend Engineer"),
