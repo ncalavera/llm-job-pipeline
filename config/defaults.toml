@@ -43,6 +43,31 @@ illustration_pack = "default"
 show_mpa_column = false
 
 # ===========================================================================
+# Scoring cost/quality — the one dial trading input tokens against evidence.
+# ===========================================================================
+[scoring]
+# Max chars of company_evidence text handed to the WANT scorer per company,
+# summed across ALL primary sources (source labels included). The single
+# cost/quality lever for company scoring: the company-scoring system prompt is
+# fixed (~22k chars), so the evidence text is what actually varies the per-call
+# input size. When the combined evidence exceeds this cap the assembler trims
+# each source proportionally by its share and KEEPS EACH SOURCE'S HEAD — where
+# the material anchors (funding, HQ, remote policy, leadership, scale of money
+# moved) almost always sit — so a lower cap drops repetitive tails (job-listing
+# boilerplate, footer nav) first and rarely moves the score.
+#
+# Tradeoff: higher = more of each source's tail reaches the model (marginally
+# more context, more tokens/$ per call); lower = fewer tokens per call, cheaper
+# and more predictable on a fixed monthly plan. 25000 keeps the substantive head
+# of every source (≈2.5× the legacy 10k per-source cut) while keeping each
+# scoring call well under the plan's cost envelope. Raise it if you see scores
+# missing facts that live deep in a long source; lower it to cut cost further.
+# Values below ~1000 are treated as misconfiguration and reset to default:
+# below that floor the assembler has room for little more than the
+# "### SOURCE:" labels, so the company would be silently scored on no content.
+company_evidence_char_cap = 25000
+
+# ===========================================================================
 # Numeric thresholds — scoring, tiers, auto-archive, auto-review.
 # ===========================================================================
 [thresholds]

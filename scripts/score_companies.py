@@ -153,8 +153,15 @@ STRATEGY_PATH = _MAIN_ROOT / "strategy.md"
 # contradicted), so it is never shown to the scorer. Sources not in this list are
 # filtered out.
 _EVIDENCE_SOURCE_ORDER = ["website", "careers", "manual_url", "exa", "exa_offices", "deep_research"]
-# Generous total char cap for multi-source content (replaces old 10k per-source cut)
-_EVIDENCE_TOTAL_CAP = 120_000
+# Total char cap for multi-source evidence, read from config/defaults.toml
+# ([scoring] company_evidence_char_cap). This is the one cost/quality dial for
+# company scoring: the system prompt is fixed, so the evidence text is what moves
+# the per-call input size. Assembly trims each source proportionally but keeps
+# every source's HEAD, so a lower cap drops repetitive tails first. See the TOML
+# comment for the tradeoff. Falls back to a neutral default if the key is absent.
+from settings import scoring as _scoring_settings  # noqa: E402
+
+_EVIDENCE_TOTAL_CAP = _scoring_settings()["company_evidence_char_cap"]
 
 
 def _load_strategy_context() -> str:
@@ -335,6 +342,18 @@ def _build_user_msg(
 # ---------------------------------------------------------------------------
 
 
+# Prompt caching note (why the identical system prompt is re-sent per company and
+# not cached to cut cost): the default scoring backend runs ONE local subagent per
+# company (see .claude/commands/jobs-new.md), so each company is a separate agent
+# invocation whose API `system` field and `cache_control` breakpoints are owned by
+# the runner, not this repo — there is no seam here to mark this prompt cacheable.
+# Even the --api backend below would gain little: prompt caching is a prefix match
+# that only pays off on SEQUENTIAL reuse within the 5-min TTL, but companies are
+# scored in small PARALLEL waves where every request in a wave writes-but-misses
+# (a cache entry is only readable once the first response has begun streaming), and
+# after the evidence-cap trim the fixed system prefix is a minority of each call's
+# tokens anyway. So the real cost lever is fewer input tokens (slimmer prompt +
+# evidence cap), which this module does; caching is intentionally not wired.
 def _get_system_prompt() -> str:
     """Build system prompt with strategy context."""
     strategy = _load_strategy_context()
