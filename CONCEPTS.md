@@ -22,6 +22,25 @@ A stored vacancy status for a high-scoring role that disappeared from its source
 ### Stale
 A source-freshness signal: the vacancy's source has not re-confirmed the role for longer than the stale window. Staleness suggests the role is likely closed, but it is weaker evidence than a passed deadline — a source also goes stale when a fetcher misses a role that is still live.
 
+## Storage & migrations
+
+### Full mode
+The canonical way to run the pipeline: a hosted Postgres database is the source of truth, and the hosted dashboard and messaging digest are available. Product behavior must never branch on which mode is active — mode differences are limited to infrastructure.
+
+### Simple mode
+The zero-signup demo path: a local SQLite database that auto-creates on first use. Parity with full mode is a tested promise, not an aspiration — remaining differences are documented explicitly, and a crash on this path counts as a real bug, not a demo limitation.
+
+### Dialect pair
+A single logical schema migration shipped as two files, one per SQL dialect, sharing a version number. Not every version has both halves — a version may legitimately exist for only one dialect.
+
+Behavioral rule: when a version exists for only one dialect, each database of the other dialect permanently records that version in its migration ledger as an applied no-op. A version number that has shipped for either dialect may therefore never be reused to add the missing counterpart later — upgraded databases would skip it forever. The counterpart takes the next number free in both dialect trees, even though the pair then diverges cosmetically.
+
+### Migration ledger
+The per-database record of which migration versions are resolved for that database — either genuinely applied, or marked not-applicable because the version belongs to the other dialect. Resolution is permanent: the runner never revisits a recorded version, which is what makes ledger state (not just schema state) part of the upgrade contract.
+
+### Tombstone
+A record that keeps a deliberately removed vacancy from coming back. Written when a vacancy is archived for scoring below threshold or for disappearing from its source; on re-encounter, the save layer sees the tombstone and skips the row instead of resurrecting, re-scoring, and re-archiving it. A renamed variant of a buried role inherits the block, so retitling does not resurrect it. Distinct from Expiring: an expiring role is protected and awaits a decision; a tombstoned role has been decided against or dropped.
+
 ## Flagged ambiguities
 
 - "Expiring" had been used for both the stored protected status and for liked roles past their deadline (one Triage column mixed both) — these are distinct concepts; the derived display state is now called Expired.
