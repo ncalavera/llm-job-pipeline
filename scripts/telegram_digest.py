@@ -58,7 +58,26 @@ SUMMARY_MAX_CHARS = _DIGEST["summary_max_chars"]  # guard the Telegram message l
 MESSAGE_MAX_CHARS = _DIGEST["message_max_chars"]
 CALLBACK_PREFIX = "v"
 ACTION_TO_STATUS = {"l": "liked", "p": "passed", "a": "applied"}
-STATUS_LABEL = {"liked": "👍 Liked", "passed": "👎 Passed", "applied": "✅ Уже подал"}
+
+# Product language: the digest speaks the ONE language chosen in the
+# profile's ## OUTPUT_LANGUAGE. Every user-facing string routes through _t(),
+# which reads the resolved language and the bundled tables in scripts/i18n.py.
+# product_language lives next to this script; a catastrophic import failure
+# degrades to the raw key rather than crashing the digest.
+try:
+    import product_language as _pl
+
+    def _t(key, **fmt):
+        return _pl.t(key, **fmt)
+except Exception:  # pragma: no cover — same dir, effectively always importable
+
+    def _t(key, **fmt):
+        return key
+
+
+def _status_label(status):
+    """Localized button/label text for a recorded status (liked/passed/applied)."""
+    return _t(f"digest_status_{status}")
 
 SELECT_FRESH_SQL = """
 SELECT v.id, v.title, c.canonical_name AS org, v.llm_score, v.llm_summary,
@@ -216,7 +235,7 @@ def vacancy_location(row):
             row["compensation"] = comp
         if parts:
             break  # the first location is enough for the digest
-    return parts[0] if parts else "location not specified"
+    return parts[0] if parts else _t("digest_loc_unspecified")
 
 
 def deadline_soon_label(deadline_val):
@@ -234,7 +253,7 @@ def deadline_soon_label(deadline_val):
             return ""
     days_left = (dl - _dt.date.today()).days
     if 0 <= days_left <= DEADLINE_SOON_DAYS:
-        return f"deadline {dl.day:02d}.{dl.month:02d}"
+        return _t("digest_deadline", date=f"{dl.day:02d}.{dl.month:02d}")
     return ""
 
 
@@ -273,7 +292,7 @@ def build_message(row, index=None):
     url = vacancy_url(row)
     if url:
         lines.append("")
-        lines.append(f'<a href="{html.escape(url, quote=True)}">Open vacancy →</a>')
+        lines.append(f'<a href="{html.escape(url, quote=True)}">{_t("digest_open")}</a>')
     text = "\n".join(lines)
     if len(text) > MESSAGE_MAX_CHARS:
         # trim only the summary — the link and the title must survive
@@ -289,8 +308,8 @@ def build_candidate_hot_message(rows):
     """HTML section "unreviewed companies with score N+" — link lines, no
     buttons. Each line: company — vacancy (score), [⏰ deadline], link."""
     lines = [
-        f"🔥 <b>Unreviewed companies with score {HOT_VACANCY_SCORE}+</b>",
-        "These companies aren't reviewed yet — take a look before the deadline passes.",
+        _t("digest_hot_header", score=HOT_VACANCY_SCORE),
+        _t("digest_hot_sub"),
         "",
     ]
     for row in rows:
@@ -306,7 +325,7 @@ def build_candidate_hot_message(rows):
         line = " · ".join(bits)
         url = vacancy_url(row)
         if url:
-            line += f' — <a href="{html.escape(url, quote=True)}">open →</a>'
+            line += f' — <a href="{html.escape(url, quote=True)}">{_t("digest_open_short")}</a>'
         lines.append(line)
     return "\n".join(lines)
 
@@ -318,7 +337,7 @@ def _deadline_or_last_seen_line(row):
         return f"⏳ {html.escape(dl)}"
     ls = row.get("last_seen")
     if ls:
-        return f"👁 последний раз виден {html.escape(str(ls)[:10])}"
+        return _t("digest_last_seen", date=html.escape(str(ls)[:10]))
     return ""
 
 
@@ -327,7 +346,7 @@ def build_expiring_message(row):
     org = html.escape(row.get("org") or "")
     title = html.escape(row.get("title") or "")
     lines = [
-        "⚠️ <b>Вот-вот пропадёт — реши сегодня</b>",
+        _t("digest_expiring_header"),
         f"<b>{org} — {title}</b>",
     ]
     meta = [f"📍 {html.escape(vacancy_location(row))}"]
@@ -346,7 +365,7 @@ def build_expiring_message(row):
     url = vacancy_url(row)
     if url:
         lines.append("")
-        lines.append(f'<a href="{html.escape(url, quote=True)}">Open vacancy →</a>')
+        lines.append(f'<a href="{html.escape(url, quote=True)}">{_t("digest_open")}</a>')
     text = "\n".join(lines)
     if len(text) > MESSAGE_MAX_CHARS:
         overflow = len(text) - MESSAGE_MAX_CHARS
@@ -363,9 +382,9 @@ def build_expiring_keyboard(vac_id):
     return {
         "inline_keyboard": [
             [
-                {"text": "👍 Liked", "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:l"},
-                {"text": "👎 Passed", "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:p"},
-                {"text": "✅ Уже подал", "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:a"},
+                {"text": _status_label("liked"), "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:l"},
+                {"text": _status_label("passed"), "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:p"},
+                {"text": _status_label("applied"), "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:a"},
             ]
         ]
     }
@@ -373,8 +392,8 @@ def build_expiring_keyboard(vac_id):
 
 def build_keyboard(vac_id, chosen=None):
     """👍/👎 buttons; the chosen one gets a ✅ (tapping again flips the choice)."""
-    like = "👍 Liked"
-    pas = "👎 Passed"
+    like = _status_label("liked")
+    pas = _status_label("passed")
     if chosen == "liked":
         like = "✅ " + like
     elif chosen == "passed":
@@ -548,7 +567,7 @@ def cmd_send(args):
                 "sendMessage",
                 {
                     "chat_id": chat_id,
-                    "text": "🗞 No fresh vacancies for the digest today.",
+                    "text": _t("digest_nothing"),
                 },
             )
         print("No candidates — sent a 'nothing today' notice.", flush=True)
@@ -590,7 +609,7 @@ def cmd_send(args):
         "sendMessage",
         {
             "chat_id": chat_id,
-            "text": f"🗞 <b>Vacancy digest</b> — {len(rows)} fresh. Tap 👍 or 👎 under each.",
+            "text": _t("digest_header", n=len(rows)),
             "parse_mode": "HTML",
         },
     )
@@ -663,7 +682,7 @@ def handle_callback(conn, token, cb, allowed_user=None):
     # 1. Kill the spinner immediately — the ack expires in ~15 seconds.
     ack = {"callback_query_id": cb["id"]}
     if parsed:
-        ack["text"] = f"Recorded: {STATUS_LABEL[parsed[1]]}"
+        ack["text"] = _t("digest_recorded", label=_status_label(parsed[1]))
     try:
         tg_call(token, "answerCallbackQuery", ack)
     except RuntimeError as e:
@@ -684,7 +703,7 @@ def handle_callback(conn, token, cb, allowed_user=None):
                 "sendMessage",
                 {
                     "chat_id": msg["chat"]["id"],
-                    "text": "⚠️ Couldn't save your choice, please tap again.",
+                    "text": _t("digest_save_error"),
                 },
             )
         return

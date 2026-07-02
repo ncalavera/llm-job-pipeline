@@ -1278,28 +1278,32 @@ def _print_summary(state: dict) -> None:
 
     publish_note = _stage(state, "publish").get("note", "")
 
+    from product_language import t
+
     bar = "=" * 70
     print(f"\n{bar}")
-    print("  ✓ /jobs-new complete")
+    print("  " + t("summary_done"))
     print(bar)
     if new is not None:
-        print(f"  • {new} new vacancies saved this run")
+        print("  • " + t("summary_new_vac", n=new))
     print(
-        f"  • {active} active companies, {candidates} candidate ({cand_scored} scored, in Pending)"
+        "  • " + t("summary_companies", active=active, candidates=candidates, scored=cand_scored)
     )
-    print(f"  • {scored_unseen} scored matches await your verdict; {liked} liked so far")
-    print(f"  • publish: {publish_note}")
-    print("  • deeper review of liked roles: /jobs-review")
+    print("  • " + t("summary_verdicts", scored_unseen=scored_unseen, liked=liked))
+    print("  • " + t("summary_publish", note=publish_note))
+    print("  • " + t("summary_review_hint"))
     print(bar, flush=True)
 
 
 def _boards_summary(opts: Opts) -> str:
     """Human phrasing of the boards feeding THIS run (from the resolved set)."""
+    from product_language import t
+
     boards = opts.job_boards
     if not boards:
-        return "none (tracked companies only)"
+        return t("boards_summary_none")
     if boards == "all":
-        return "all defined boards"
+        return t("boards_summary_all")
     return boards
 
 
@@ -1315,13 +1319,14 @@ def _overload_advice() -> str | None:
         return None
     if backlog < OVERLOAD_BACKLOG:
         return None
+    from product_language import t
+
     return (
-        f"  ⚠  Review backlog: {backlog} scored roles still await a verdict "
-        f"(≥ {OVERLOAD_BACKLOG}). New roles are arriving faster than you review them.\n"
-        "     Consider dialing volume DOWN (suggestion only — nothing changes unless you do it):\n"
-        "       • fewer boards          →  python3 scripts/sources.py disable-board <id>\n"
-        "       • lower the daily limit  →  [volume] daily_scoring_limit in config/defaults.toml\n"
-        "       • stricter hard filters  →  ## HARD_FILTERS in config/user_profile.md"
+        "  " + t("overload_head", backlog=backlog, threshold=OVERLOAD_BACKLOG) + "\n"
+        "     " + t("overload_hint") + "\n"
+        "       " + t("overload_lever_boards") + "\n"
+        "       " + t("overload_lever_limit") + "\n"
+        "       " + t("overload_lever_filters")
     )
 
 
@@ -1333,6 +1338,7 @@ def _print_run_banner(opts: Opts) -> None:
     counts degrade to "?" instead of raising (STRATEGY goal 1)."""
     try:
         import settings
+        from product_language import t
         from scoring_settings import max_per_run
 
         vol = settings.volume()
@@ -1343,14 +1349,11 @@ def _print_run_banner(opts: Opts) -> None:
 
         bar = "=" * 70
         print(f"\n{bar}")
-        print("  /jobs-new — today's volume")
+        print("  " + t("banner_title"))
         print(bar)
-        print(f"  Active companies tracked: {active}  (per-run fetch cap: {vol['max_active_companies']})")
-        print(f"  Job boards this run:      {_boards_summary(opts)}")
-        print(
-            f"  Scoring limit:            {max_per_run()} roles/run   "
-            f"Digest size: {vol['digest_size']}"
-        )
+        print("  " + t("banner_active", n=active, cap=vol["max_active_companies"]))
+        print("  " + t("banner_boards", boards=_boards_summary(opts)))
+        print("  " + t("banner_scoring", limit=max_per_run(), digest=vol["digest_size"]))
         advice = _overload_advice()
         if advice:
             print(advice)

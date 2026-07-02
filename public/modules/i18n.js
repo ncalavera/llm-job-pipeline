@@ -21,7 +21,20 @@ export function availableLanguages() {
   return ALL ? Object.keys(ALL) : [(config && config.language) || "en"];
 }
 
-/** The active UI language: user's saved choice, else the server default. */
+/**
+ * Pure resolver for the active UI language. Order:
+ *   1. an explicit user toggle saved in localStorage (only if we bundle it),
+ *   2. else the server-baked default `config.language` — which the generator
+ *      sets from the profile's product language (## OUTPUT_LANGUAGE),
+ *   3. else "en".
+ * Kept side-effect-free so it unit-tests without DOM/localStorage.
+ */
+export function pickLanguage(saved, configLang, all) {
+  if (saved && all && all[saved]) return saved;
+  return configLang || "en";
+}
+
+/** The active UI language: user's saved toggle, else the profile-baked default. */
 export function getLanguage() {
   var saved = null;
   try {
@@ -29,8 +42,7 @@ export function getLanguage() {
   } catch (e) {
     saved = null;
   }
-  if (saved && ALL && ALL[saved]) return saved;
-  return (config && config.language) || "en";
+  return pickLanguage(saved, config && config.language, ALL);
 }
 
 /** Persist a language choice and reload so every view re-renders in it. */

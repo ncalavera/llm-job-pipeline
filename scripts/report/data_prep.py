@@ -1026,6 +1026,19 @@ def prepare_settings_payload() -> dict:
     def _row(key, value, source):
         return {"key": key, "value": value, "source": source}
 
+    # Product language — the ONE choice that switches the whole product
+    # (agent replies, run reports, digest, dashboard default). Displayed here with
+    # the single place to change it, so a stranger sees where the language lives.
+    import product_language
+
+    product_rows = [
+        _row(
+            "set_product_language",
+            _safe(product_language.language_label, "English"),
+            "config/user_profile.md → ## OUTPUT_LANGUAGE (change via /jobs-profile)",
+        ),
+    ]
+
     volume_rows = [
         _row(
             "set_max_active_companies",
@@ -1081,6 +1094,7 @@ def prepare_settings_payload() -> dict:
 
     return {
         "groups": [
+            {"key": "settings_grp_product", "rows": product_rows},
             {"key": "settings_grp_volume", "rows": volume_rows},
             {"key": "settings_grp_scoring", "rows": scoring_rows},
             {"key": "settings_grp_thresholds", "rows": threshold_rows},
