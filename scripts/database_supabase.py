@@ -14,8 +14,6 @@ from dateutil import parser as dateutil_parser
 
 from company_registry import (
     COMPANIES,
-    _ALL_KNOWN_NAMES,
-    _ALL_KNOWN_NAMES as _ALL_CSV_NAMES,
     resolve_canonical_name,
 )
 import settings
@@ -32,7 +30,7 @@ from geo import country_banned, is_remote_mode
 
 # Json / RealDictCursor come from db_backend so they work under both the
 # Supabase (psycopg2) and the local SQLite backend without importing psycopg2.
-from db_backend import IS_SQLITE, Json, RealDictCursor
+from db_backend import Json, RealDictCursor
 from db_conn import get_conn, close_conn
 import filters
 
@@ -281,21 +279,39 @@ def resolve_company_id(org_name: str):
     return None
 
 
-#: In simple mode (SQLite) the board/ATS auto-discovery path creates companies
-#: ACTIVE, not 'candidate' — there is no dashboard review step to approve them,
-#: so the candidate gate would blackhole every board company (filter/score/
-#: dashboard only count active ones → "Ready to score: 0", empty dashboard). Full
-#: mode (Supabase) keeps the candidate→review gate. See save_vacancies / the
-#: board ingestion path.
-AUTO_DISCOVERED_STATUS = "active" if IS_SQLITE else "candidate"
+def _auto_discovery_status() -> str:
+    """Status assigned to a brand-new, auto-discovered company.
+
+    Same rule on BOTH backends (STRATEGY guardrail 2: product behaviour never
+    branches on IS_SQLITE) — the board/ATS auto-discovery path in
+    ``save_vacancies`` / ``save_board_vacancies`` calls this, including for a
+    name already known to the static registry: nothing skips the review gate
+    just because the name looks familiar.
+
+    Configured by ``config/defaults.toml`` ``[thresholds] auto_discovery_status``
+    (env ``AUTO_DISCOVERY_STATUS`` overrides). The default "candidate" sends
+    every auto-discovered company through the ``company_scoring`` driver stage
+    (drop junk → find a site → collect evidence → WANT-score) before it can
+    activate — activation needs either an explicit approve in ``/jobs-review``
+    or, if opted in, ``auto_review_candidates()`` crossing the approve
+    threshold (STRATEGY guardrail 8: nothing activates without an explicit
+    yes). Only "active" is honoured as an explicit opt-out; any other value
+    (including a typo) falls back to the safe default.
+    """
+    import os
+
+    raw = os.environ.get("AUTO_DISCOVERY_STATUS")
+    if raw is None:
+        raw = settings.thresholds()["auto_discovery_status"]
+    return "active" if str(raw).strip().lower() == "active" else "candidate"
 
 
 def ensure_company(org_name: str, status: str = "candidate"):
     """Find or create a company. Returns UUID.
 
-    ``status`` is honoured verbatim — callers that want a candidate get one. The
-    board/ATS auto-discovery path passes ``AUTO_DISCOVERED_STATUS`` so it lands
-    active in simple mode (see save_vacancies).
+    ``status`` is honoured verbatim — callers that want a candidate get one.
+    The board/ATS auto-discovery path passes ``_auto_discovery_status()`` so
+    the same, configurable status lands on both backends (see save_vacancies).
     """
     cid = resolve_company_id(org_name)
     if cid is not None:
@@ -649,7 +665,7 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     org_name = resolve_canonical_name(org_name)
     company_id = resolve_company_id(org_name)
     if company_id is None:
-        company_id = ensure_company(org_name, status=AUTO_DISCOVERED_STATUS)
+        company_id = ensure_company(org_name, status=_auto_discovery_status())
     today = date.today().isoformat()
     new_count = 0
     conn = get_conn()
@@ -795,7 +811,8 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
 def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
     """Save job board results into the DB. Returns count of new vacancies.
 
-    Unknown orgs → ensure_company(status='candidate'). Skips inactive companies.
+    Unknown orgs → ensure_company(status=_auto_discovery_status()), "candidate"
+    by default (see that function). Skips inactive companies.
     """
     today = date.today().isoformat()
     tier = board_cfg.get("tier", "C")
@@ -843,13 +860,16 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
         raw_org = job.get("org_override") or board_cfg["name"]
         org = resolve_canonical_name(raw_org)
 
-        # Resolve or create company
+        # Resolve or create company. Every unresolved org lands at the SAME
+        # configurable status — including a name already known to the static
+        # registry and a '[via BoardName]' aggregator placeholder. A "known
+        # name" is not a fast lane around the review gate (STRATEGY guardrail
+        # 2); junk placeholders get pruned as candidates by
+        # filter_companies.py's aggregator check instead. See
+        # _auto_discovery_status().
         company_id = resolve_company_id(org)
         if company_id is None:
-            if org not in _ALL_KNOWN_NAMES and not org.startswith("[via "):
-                company_id = ensure_company(org, status=AUTO_DISCOVERED_STATUS)
-            else:
-                company_id = ensure_company(org, status="active")
+            company_id = ensure_company(org, status=_auto_discovery_status())
 
         # Skip inactive companies (log the loss for visibility)
         cur.execute("SELECT status FROM company WHERE id = %s", (company_id,))
