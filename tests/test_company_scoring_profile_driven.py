@@ -106,7 +106,6 @@ _FORBIDDEN_ANCHORS = [
     "malengo",
     "coefficient",
     "google.org",
-    "fundraiseup",
     "global fund",
     "open phil",
     "rockefeller",
