@@ -59,16 +59,16 @@ def bootstrap_sqlite(monkeypatch, tmp_path):
     frozen baseline), then the one migration SQLite genuinely still needs on
     top of that baseline -- the board table (0002).
 
-    Deliberately NOT routed through migrate.py's ledger-driven replay: doing
-    that against a truly fresh DB currently crashes, because migrations 0003
-    and 0005 try to ADD columns (us_eligibility, expiring_alerted_at) that
-    sql/schema.sqlite.sql already declares, and SQLite has no
-    ``ADD COLUMN IF NOT EXISTS`` to make that idempotent the way Postgres's
-    guarded siblings are. That crash is itself a real, tracked divergence --
-    see test_migrations_parity.py::
-    test_migrate_py_converges_a_never_migrated_sqlite_db (xfail). This helper
-    exists so every OTHER parity test gets a working schema without being
-    collateral damage of that bug.
+    Deliberately NOT routed through migrate.py's ledger-driven replay: that
+    path now works (migrate.py's SQLite runner tolerates the duplicate-column
+    overlap between sql/schema.sqlite.sql and migrations 0003/0005), but it
+    also runs a pre-migration backup via the SQLite online-backup API on
+    every call. This helper is the cheap path used by every OTHER parity
+    test: a bare connection (auto-applies the frozen baseline) plus the one
+    migration SQLite still needs on top (the board table, 0002) -- no
+    backup, no full ledger replay. See raw_migrate_fresh_sqlite() below and
+    test_migrations_parity.py::test_migrate_py_converges_a_never_migrated_sqlite_db
+    for the real, unguarded migrate.py path.
     """
     db_file = tmp_path / "jobsearch.db"
     monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
