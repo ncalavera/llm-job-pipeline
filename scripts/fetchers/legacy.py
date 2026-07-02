@@ -10,16 +10,10 @@ import urllib.parse
 import urllib.request
 from collections import Counter
 
-try:
-    import requests
-except ImportError:
-    import sys
-
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "requests", "-q"])
-    import requests
-
+import fetchers as _pkg
 import settings
-from config import FIRECRAWL_CACHE, GLOBAL_BLACKLIST, GLOBAL_BLACKLIST_SUBSTR, get_firecrawl_client
+from fetchers.http import _LOCAL_UA
+from config import FIRECRAWL_CACHE, GLOBAL_BLACKLIST, GLOBAL_BLACKLIST_SUBSTR
 
 GENERIC_PIPELINE_TITLE_PATTERNS = [
     r"\bexpression of interest\b",
@@ -53,7 +47,7 @@ def fetch_greenhouse(org_name: str, slug: str, *, eu: bool = False) -> list[dict
     url = f"https://{host}/v1/boards/{slug}/jobs?content=true"
     print(f"  [{org_name}] Greenhouse API: {url}")
     try:
-        resp = requests.get(url, timeout=15)
+        resp = _pkg.requests.get(url, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         jobs = []
@@ -223,7 +217,7 @@ def fetch_lever(org_name: str, slug: str) -> list[dict]:
     url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
     print(f"  [{org_name}] Lever API: {url}")
     try:
-        resp = requests.get(url, timeout=15)
+        resp = _pkg.requests.get(url, timeout=15)
         resp.raise_for_status()
         data = resp.json()  # Lever returns a flat JSON array
         jobs = []
@@ -264,7 +258,7 @@ def fetch_ashby(org_name: str, slug: str) -> list[dict]:
     url = f"https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true"
     print(f"  [{org_name}] Ashby API: {url}")
     try:
-        resp = requests.get(url, timeout=15)
+        resp = _pkg.requests.get(url, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         jobs = []
@@ -313,7 +307,7 @@ def fetch_workable(org_name: str, slug: str) -> list[dict]:
     url = f"https://apply.workable.com/api/v1/widget/accounts/{slug}"
     print(f"  [{org_name}] Workable API: {url}")
     try:
-        resp = requests.get(url, timeout=15)
+        resp = _pkg.requests.get(url, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         jobs = []
@@ -357,7 +351,7 @@ def fetch_recruitee(org_name: str, slug: str) -> list[dict]:
     url = f"https://{slug}.recruitee.com/api/offers/"
     print(f"  [{org_name}] Recruitee API: {url}")
     try:
-        resp = requests.get(url, timeout=15)
+        resp = _pkg.requests.get(url, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         jobs = []
@@ -425,7 +419,7 @@ def fetch_teamtailor_rss(org_name: str, slug: str) -> list[dict]:
     url = f"https://{slug}.teamtailor.com/jobs.rss"
     print(f"  [{org_name}] Teamtailor RSS: {url}")
     try:
-        resp = requests.get(url, timeout=15)
+        resp = _pkg.requests.get(url, timeout=15)
         resp.raise_for_status()
 
         root = ET.fromstring(resp.text)
@@ -515,7 +509,7 @@ def fetch_bamboohr(org_name: str, slug: str) -> list[dict]:
     list_url = f"https://{slug}.bamboohr.com/careers/list"
     print(f"  [{org_name}] BambooHR API: {list_url}")
     try:
-        resp = requests.get(
+        resp = _pkg.requests.get(
             list_url, headers={"Accept": "application/json"}, timeout=15, allow_redirects=False
         )
         if resp.status_code in (301, 302, 303, 307, 308):
@@ -556,7 +550,7 @@ def fetch_bamboohr(org_name: str, slug: str) -> list[dict]:
             if job_id:
                 try:
                     detail_url = f"https://{slug}.bamboohr.com/careers/{job_id}/detail"
-                    dr = requests.get(
+                    dr = _pkg.requests.get(
                         detail_url, headers={"Accept": "application/json"}, timeout=15
                     )
                     dr.raise_for_status()
@@ -688,7 +682,7 @@ def fetch_successfactors(org_name: str, config: dict) -> list[dict]:
     # (16-byte doctype) when careerSite cookies are absent.
     cookies = None
     try:
-        boot = requests.get(search_url, headers={"User-Agent": _LOCAL_UA}, timeout=20)
+        boot = _pkg.requests.get(search_url, headers={"User-Agent": _LOCAL_UA}, timeout=20)
         cookies = boot.cookies
     except Exception as e:
         print(f"  [{org_name}] SuccessFactors bootstrap failed ({e}); trying tiles anyway")
@@ -706,7 +700,7 @@ def fetch_successfactors(org_name: str, config: dict) -> list[dict]:
     for _ in range(20):  # hard page cap
         page_url = f"{tile_url}?q=&startrow={startrow}"
         try:
-            resp = requests.get(page_url, headers=headers, cookies=cookies, timeout=20)
+            resp = _pkg.requests.get(page_url, headers=headers, cookies=cookies, timeout=20)
             resp.raise_for_status()
             text = resp.text
         except Exception as e:
@@ -809,7 +803,7 @@ def fetch_adp_json(org_name: str, config: dict) -> list[dict]:
     )
     print(f"  [{org_name}] ADP Workforce Now: {url}")
     try:
-        resp = requests.get(
+        resp = _pkg.requests.get(
             url, headers={"Accept": "application/json", "User-Agent": _LOCAL_UA}, timeout=20
         )
         resp.raise_for_status()
@@ -991,24 +985,18 @@ FIRECRAWL_JOBS_SCHEMA = {
     "required": ["jobs"],
 }
 
-# Change tracking status cache (org_name → changeStatus string)
-_last_firecrawl_change_status: dict[str, str] = {}
-
-# Per-run scrape outcome cache (org_name → fetch_status override, e.g. "js_required")
-_last_scrape_status: dict[str, str] = {}
-
-# Firecrawl credit balance, checked once per run. None = not yet checked.
-_firecrawl_credits_remaining: "int | None" = None
+# Per-run state (change statuses, scrape statuses, credit balance)
+# lives on the fetchers package namespace — see fetchers/__init__.py.
 
 
 def get_firecrawl_change_statuses() -> dict[str, str]:
     """Return the change tracking statuses from the last fetch run."""
-    return dict(_last_firecrawl_change_status)
+    return dict(_pkg._last_firecrawl_change_status)
 
 
 def get_scrape_statuses() -> dict[str, str]:
     """Return fetch_status overrides set by the scraper (e.g. js_required)."""
-    return dict(_last_scrape_status)
+    return dict(_pkg._last_scrape_status)
 
 
 def _firecrawl_credits_available() -> bool:
@@ -1019,32 +1007,31 @@ def _firecrawl_credits_available() -> bool:
     On any error (no key, network), assumes credits available and lets the
     normal Firecrawl path surface the real error.
     """
-    global _firecrawl_credits_remaining
-    if _firecrawl_credits_remaining is not None:
-        return _firecrawl_credits_remaining > 0
+    if _pkg._firecrawl_credits_remaining is not None:
+        return _pkg._firecrawl_credits_remaining > 0
 
     import os
 
     key = os.environ.get("FIRECRAWL_API_KEY", "")
     if not key:
         # No key: can't check, but Firecrawl client likely unusable anyway.
-        _firecrawl_credits_remaining = -1  # unknown → treat as "try anyway"
+        _pkg._firecrawl_credits_remaining = -1  # unknown → treat as "try anyway"
         return True
     try:
-        resp = requests.get(
+        resp = _pkg.requests.get(
             "https://api.firecrawl.dev/v2/team/credit-usage",
             headers={"Authorization": f"Bearer {key}"},
             timeout=15,
         )
         data = resp.json().get("data", {}) if resp.ok else {}
         remaining = int(data.get("remainingCredits", -1))
-        _firecrawl_credits_remaining = remaining
+        _pkg._firecrawl_credits_remaining = remaining
         if remaining == 0:
             print("  Firecrawl credits exhausted — using local scraper")
         return remaining != 0  # >0 → use Firecrawl; -1 (unknown) → try anyway
     except Exception as e:
         print(f"  Firecrawl credit check failed ({e}); will attempt Firecrawl")
-        _firecrawl_credits_remaining = -1
+        _pkg._firecrawl_credits_remaining = -1
         return True
 
 
@@ -1066,12 +1053,7 @@ def _is_quota_error(exc: Exception) -> bool:
     return any(m in msg for m in _QUOTA_ERROR_MARKERS)
 
 
-# Browser-like User-Agent so sites don't serve a bot/blank page.
-_LOCAL_UA = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
+# Browser-like User-Agent lives in fetchers.http (shared skeleton).
 
 
 def _html_to_markdown(html: str) -> str:
@@ -1122,7 +1104,7 @@ def _fetch_pageup_xhr(org_name: str, url: str, *, url_filter: str = "") -> list[
             if attempt:
                 time.sleep(60 * attempt)
             try:
-                resp = requests.get(req_url, headers=h, timeout=20)
+                resp = _pkg.requests.get(req_url, headers=h, timeout=20)
                 if resp.status_code == 200 and resp.text:
                     return resp.text
                 print(
@@ -1182,7 +1164,7 @@ def _fetch_pageup_xhr(org_name: str, url: str, *, url_filter: str = "") -> list[
             break
         time.sleep(10)
     if not jobs:
-        _last_scrape_status[org_name] = "js_required"
+        _pkg._last_scrape_status[org_name] = "js_required"
         return []
     _cache_markdown(org_name, "\n".join(all_md), source="pageup")
     print(f"  [{org_name}] PageUp parsed {len(jobs)} vacancies")
@@ -1210,12 +1192,12 @@ def _fetch_wagtail_jobs_api(org_name: str, url: str) -> list[dict]:
 
     print(f"  [{org_name}] Wagtail jobs API: {url}")
     try:
-        resp = requests.get(url, headers={"User-Agent": _LOCAL_UA}, timeout=20)
+        resp = _pkg.requests.get(url, headers={"User-Agent": _LOCAL_UA}, timeout=20)
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
         print(f"  [{org_name}] Wagtail API error: {e}")
-        _last_scrape_status[org_name] = "js_required"
+        _pkg._last_scrape_status[org_name] = "js_required"
         return []
 
     jobs = []
@@ -1256,7 +1238,7 @@ def _fetch_wagtail_jobs_api(org_name: str, url: str) -> list[dict]:
     for job in jobs:
         time.sleep(2)
         try:
-            resp = requests.get(job["url"], headers={"User-Agent": _LOCAL_UA}, timeout=20)
+            resp = _pkg.requests.get(job["url"], headers={"User-Agent": _LOCAL_UA}, timeout=20)
             if resp.status_code == 200 and len(resp.text) > 2000:
                 job["full_description"] = _html_to_markdown(resp.text)
         except Exception as e:
@@ -1279,7 +1261,7 @@ def _fetch_local_scrape(org_name: str, url: str, *, url_filter: str = "") -> lis
         return _fetch_wagtail_jobs_api(org_name, url)
     print(f"  [{org_name}] Local scrape (no Firecrawl credits): {url}")
     try:
-        resp = requests.get(
+        resp = _pkg.requests.get(
             url,
             headers={
                 "User-Agent": _LOCAL_UA,
@@ -1304,14 +1286,14 @@ def _fetch_local_scrape(org_name: str, url: str, *, url_filter: str = "") -> lis
             f"  [{org_name}] Page looks JS-rendered "
             f"(text={text_len} chars, links={has_links}) → js_required"
         )
-        _last_scrape_status[org_name] = "js_required"
+        _pkg._last_scrape_status[org_name] = "js_required"
         return []
 
     jobs = parse_markdown_jobs(markdown, org_name, url_filter=url_filter)
     print(f"  [{org_name}] Local scraper parsed {len(jobs)} vacancies")
     if not jobs:
         # HTML had links but parser found no job-like rows: likely JS-gated list.
-        _last_scrape_status[org_name] = "js_required"
+        _pkg._last_scrape_status[org_name] = "js_required"
     return jobs
 
 
@@ -1395,7 +1377,7 @@ def fetch_amazon_jobs(org_name: str, config: dict) -> list[dict]:
                 "invalid_location": "false",
             }
             try:
-                resp = requests.get(api_url, params=params, timeout=15)
+                resp = _pkg.requests.get(api_url, params=params, timeout=15)
                 resp.raise_for_status()
                 data = resp.json()
             except Exception as e:
@@ -1459,7 +1441,7 @@ def fetch_apple_jobs(org_name: str, config: dict) -> list[dict]:
     query = config.get("query", "social impact nonprofit")
     print(f"  [{org_name}] Apple Jobs API: query={query!r}")
 
-    session = requests.Session()
+    session = _pkg.requests.Session()
     session.headers.update({"User-Agent": "Mozilla/5.0"})
 
     # Step 1: Get CSRF token
@@ -1565,7 +1547,7 @@ def fetch_firecrawl_scrape(
     # X-Requested-With — Firecrawl's plain render gets the unfiltered board,
     # so route these straight to the local PageUp scraper.
     if "optionsFacetsDD" in url or "/filter/?" in url:
-        return _fetch_local_scrape(org_name, url, url_filter=url_filter)
+        return _pkg._fetch_local_scrape(org_name, url, url_filter=url_filter)
 
     # Quota guard: if credits are exhausted, skip Firecrawl entirely (saves
     # ~60s of latency per company) and go straight to the local scraper.
@@ -1573,15 +1555,15 @@ def fetch_firecrawl_scrape(
     # rather than an ambiguous no_data — the local fallback may override this
     # with 'js_required' or clear it by returning rows.
     if not _firecrawl_credits_available():
-        _last_scrape_status[org_name] = "credit_exhausted"
-        return _fetch_local_scrape(org_name, url, url_filter=url_filter)
+        _pkg._last_scrape_status[org_name] = "credit_exhausted"
+        return _pkg._fetch_local_scrape(org_name, url, url_filter=url_filter)
 
     print(f"  [{org_name}] Firecrawl scrape: {url}")
 
-    client = get_firecrawl_client()
+    client = _pkg.get_firecrawl_client()
     if client is None:
         print(f"  [{org_name}] SDK not available, falling back to local scraper")
-        return _fetch_local_scrape(org_name, url, url_filter=url_filter)
+        return _pkg._fetch_local_scrape(org_name, url, url_filter=url_filter)
 
     # Build formats list
     formats = ["markdown", "changeTracking"]
@@ -1600,13 +1582,12 @@ def fetch_firecrawl_scrape(
         print(f"  [{org_name}] SDK error: {e}")
         if _is_quota_error(e):
             # Mark credits exhausted for the rest of the run, then go local.
-            global _firecrawl_credits_remaining
-            _firecrawl_credits_remaining = 0
-            _last_scrape_status[org_name] = "credit_exhausted"  # U9 reason code
+            _pkg._firecrawl_credits_remaining = 0
+            _pkg._last_scrape_status[org_name] = "credit_exhausted"  # U9 reason code
             print(f"  [{org_name}] Quota/rate-limit error — switching to local scraper")
         else:
             print(f"  [{org_name}] Falling back to local scraper")
-        return _fetch_local_scrape(org_name, url, url_filter=url_filter)
+        return _pkg._fetch_local_scrape(org_name, url, url_filter=url_filter)
 
     # --- Handle change tracking if present ---
     change_tracking = getattr(result, "changeTracking", None)
@@ -1616,7 +1597,7 @@ def fetch_firecrawl_scrape(
         status = getattr(change_tracking, "changeStatus", None)
         if status is None:
             status = getattr(change_tracking, "change_status", None)
-        _last_firecrawl_change_status[org_name] = status or "unknown"
+        _pkg._last_firecrawl_change_status[org_name] = status or "unknown"
         if status == "same":
             print(f"  [{org_name}] Page unchanged since last scrape — skipping")
             return []
@@ -1646,7 +1627,7 @@ def fetch_firecrawl_scrape(
         return jobs
 
     print(f"  [{org_name}] No content returned from SDK — trying local scraper")
-    return _fetch_local_scrape(org_name, url, url_filter=url_filter)
+    return _pkg._fetch_local_scrape(org_name, url, url_filter=url_filter)
 
 
 def _enrich_blind_jobs(jobs: list[dict], org_name: str) -> list[dict]:
@@ -1655,7 +1636,7 @@ def _enrich_blind_jobs(jobs: list[dict], org_name: str) -> list[dict]:
     Modifies jobs in-place, adding full_description from scraped page content.
     Skips blacklisted titles to avoid wasting Firecrawl credits.
     """
-    client = get_firecrawl_client()
+    client = _pkg.get_firecrawl_client()
     if not client:
         return jobs
 
@@ -1797,7 +1778,7 @@ def fetch_unops_widget(
     """Fetch UNOPS open positions from the official careers widget endpoint."""
     print(f"  [{org_name}] UNOPS widget: {url}")
     try:
-        resp = requests.get(url, timeout=20)
+        resp = _pkg.requests.get(url, timeout=20)
         resp.raise_for_status()
         html = resp.text
     except Exception as e:
@@ -1934,7 +1915,7 @@ def _unops_deadline_expired(date_str: str) -> bool:
 def _fetch_unops_job_detail(url: str) -> str:
     """Fetch a UNOPS job detail page and return clean description text."""
     try:
-        resp = requests.get(url, timeout=20)
+        resp = _pkg.requests.get(url, timeout=20)
         resp.raise_for_status()
         # Gone jobs 302-redirect to /careersmarketplace/Error — without this
         # guard the error page text would be saved as a full_description.
@@ -2391,7 +2372,7 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
             }
         )
         try:
-            resp = requests.post(url, data=payload, headers=headers, timeout=15)
+            resp = _pkg.requests.post(url, data=payload, headers=headers, timeout=15)
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
@@ -2664,7 +2645,7 @@ def fetch_reliefweb_board(board_cfg: dict) -> list[dict]:
     for offset in [0, 20]:
         url = f"{base}?limit=20&offset={offset}"
         try:
-            resp = requests.get(url, timeout=20)
+            resp = _pkg.requests.get(url, timeout=20)
             resp.raise_for_status()
             root = ET.fromstring(resp.content)
             items = root.findall(".//item")
@@ -2784,7 +2765,7 @@ def fetch_impactpool_board(board_cfg: dict) -> list[dict]:
     for page in range(1, max_pages + 1):
         url = f"{base_url}?page={page}"
         try:
-            resp = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+            resp = _pkg.requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
             resp.raise_for_status()
         except Exception as exc:
             print(f"  [{board_name}] page {page} ERROR: {exc}")
@@ -2887,7 +2868,7 @@ def _fetch_datadotorg_detail(url: str, BeautifulSoup) -> dict:
     """
     out: dict = {}
     try:
-        resp = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+        resp = _pkg.requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
         resp.raise_for_status()
     except Exception:
         return out
@@ -2972,7 +2953,7 @@ def fetch_datadotorg_board(board_cfg: dict) -> list[dict]:
     page = 1
     while len(listing) < max_jobs:
         try:
-            resp = requests.get(
+            resp = _pkg.requests.get(
                 api,
                 params={
                     "per_page": 100,
@@ -3085,7 +3066,7 @@ def fetch_arbeitnow_board(board_cfg: dict) -> list[dict]:
     raw: list[dict] = []
     for page in range(1, pages + 1):
         try:
-            resp = requests.get(base, params={"page": page}, timeout=20)
+            resp = _pkg.requests.get(base, params={"page": page}, timeout=20)
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
@@ -3180,7 +3161,7 @@ def fetch_remotive_board(board_cfg: dict) -> list[dict]:
     for cat in categories:
         params = {"category": cat} if cat else {}
         try:
-            resp = requests.get(base, params=params, timeout=20)
+            resp = _pkg.requests.get(base, params=params, timeout=20)
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
@@ -3277,7 +3258,7 @@ def fetch_wwr_board(board_cfg: dict) -> list[dict]:
     for cat in categories:
         url = f"https://weworkremotely.com/categories/remote-{cat}-jobs.rss"
         try:
-            resp = requests.get(url, headers=headers, timeout=20)
+            resp = _pkg.requests.get(url, headers=headers, timeout=20)
             resp.raise_for_status()
             root = ET.fromstring(resp.content)
             raw_items.extend(root.findall(".//item"))
@@ -3425,7 +3406,7 @@ def fetch_hn_whoishiring_board(board_cfg: dict) -> list[dict]:
     search_url = "https://hn.algolia.com/api/v1/search_by_date"
 
     try:
-        resp = requests.get(
+        resp = _pkg.requests.get(
             search_url,
             params={
                 "query": '"who is hiring"',
@@ -3452,7 +3433,7 @@ def fetch_hn_whoishiring_board(board_cfg: dict) -> list[dict]:
     print(f"  [{board_name}] Thread: {story.get('title')} (id={story_id})")
 
     try:
-        resp = requests.get(f"https://hn.algolia.com/api/v1/items/{story_id}", timeout=30)
+        resp = _pkg.requests.get(f"https://hn.algolia.com/api/v1/items/{story_id}", timeout=30)
         resp.raise_for_status()
         children = resp.json().get("children") or []
     except Exception as e:
@@ -3537,7 +3518,7 @@ def fetch_idealist_board(board_cfg: dict) -> list[dict]:
             ]
         )
         try:
-            resp = requests.post(
+            resp = _pkg.requests.post(
                 algolia_url,
                 data=json.dumps({"params": params_str}),
                 headers=headers,
@@ -3687,7 +3668,7 @@ def fetch_fastforward_board(board_cfg: dict) -> list[dict]:
     for page in range(max_pages):
         payload = {"hits_per_page": 100, "page": page, "filters": "", "query": ""}
         try:
-            resp = requests.post(search_url, json=payload, headers=headers, timeout=20)
+            resp = _pkg.requests.post(search_url, json=payload, headers=headers, timeout=20)
             resp.raise_for_status()
             data = resp.json()
         except Exception as exc:
@@ -3740,7 +3721,7 @@ def fetch_fastforward_board(board_cfg: dict) -> list[dict]:
         snippet = full_description = ""
         if fetch_desc and j.get("has_description") and slug:
             try:
-                dresp = requests.get(
+                dresp = _pkg.requests.get(
                     detail_tpl.format(slug=slug),
                     headers={"Accept": "application/json", "User-Agent": _GETRO_UA},
                     timeout=15,
@@ -3851,7 +3832,7 @@ def fetch_linkedin_board(board_cfg: dict) -> list[dict]:
     def _get(url, params=None):
         for attempt in range(3):
             try:
-                resp = requests.get(url, params=params, headers=headers, timeout=20)
+                resp = _pkg.requests.get(url, params=params, headers=headers, timeout=20)
             except Exception as e:
                 print(f"  [{board_name}] request error: {e}")
                 return None
