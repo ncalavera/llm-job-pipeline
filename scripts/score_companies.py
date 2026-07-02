@@ -148,8 +148,10 @@ STRATEGY_PATH = _MAIN_ROOT / "strategy.md"
 
 # Source priority for company_evidence assembly (lowest index = shown first)
 # Allowlist AND display order. Perplexity is deliberately excluded — it returns
-# generated prose that invents facts (GiveWell "3 hours of Pacific" fabrication),
-# so it is never shown to the scorer. Sources not in this list are filtered out.
+# generated prose that invents facts (a real incident: it fabricated a "3 hours
+# of Pacific" remote-work restriction the company's real careers page
+# contradicted), so it is never shown to the scorer. Sources not in this list are
+# filtered out.
 _EVIDENCE_SOURCE_ORDER = ["website", "careers", "manual_url", "exa", "exa_offices", "deep_research"]
 # Generous total char cap for multi-source content (replaces old 10k per-source cut)
 _EVIDENCE_TOTAL_CAP = 120_000
