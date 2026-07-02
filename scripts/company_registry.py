@@ -24,6 +24,7 @@ _STRATEGY_REQUIRES_SLUG = {
     "recruitee",
     "teamtailor_rss",
     "bamboohr",
+    "smartrecruiters",
 }
 _STRATEGY_REQUIRES_URL = {"firecrawl_scrape", "unops_widget"}
 

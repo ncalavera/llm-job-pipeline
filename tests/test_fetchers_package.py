@@ -166,6 +166,7 @@ _COMPANY_STRATEGIES = {
     "apple_jobs",
     "successfactors",
     "adp_json",
+    "smartrecruiters",
 }
 
 _BOARD_STRATEGIES = {

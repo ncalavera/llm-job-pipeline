@@ -436,7 +436,9 @@ def _fetch_one_company(org_name, config, tier, strategy, fetch_stats) -> int:
         elif strategy == "recruitee":
             jobs = fetch_recruitee(org_name, config["slug"])
         elif strategy == "teamtailor_rss":
-            jobs = fetch_teamtailor_rss(org_name, config["slug"])
+            jobs = fetch_teamtailor_rss(
+                org_name, config["slug"], careers_url=config.get("careers_url", "")
+            )
         elif strategy == "bamboohr":
             jobs = fetch_bamboohr(org_name, config["slug"])
         elif strategy == "amazon_jobs":
@@ -449,6 +451,13 @@ def _fetch_one_company(org_name, config, tier, strategy, fetch_stats) -> int:
             # Registry dispatch: any strategy registered by a fetchers/ats/*
             # module (new one-file adapters) without touching this chain.
             jobs = COMPANY_FETCHERS[strategy](org_name, config)
+        else:
+            # No explicit branch AND nothing registered for this strategy.
+            # Leaving jobs=[] here would report a successful zero fetch —
+            # the exact silent-empty class that hid smartrecruiters for
+            # weeks. Record it as an error so the run surfaces the gap.
+            fetch_status = f"error: no fetcher registered for strategy '{strategy}'"
+            print(f"  [{org_name}] {fetch_status}")
     except Exception as exc:
         print(f"  [{org_name}] Fetch error: {exc}")
         fetch_status = f"error: {exc}"
@@ -663,6 +672,7 @@ def main():
                 "workday_api",
                 "successfactors",
                 "adp_json",
+                "smartrecruiters",
             ):
                 print(f"  [{org_name}] Skipped (--free-only mode)")
                 continue

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:tt="https://teamtailor.com/locations">
+  <channel>
+    <title>Chatham House</title>
+    <description>Our jobs</description>
+    <link>https://careers.chathamhouse.org/jobs</link>
+    <item>
+      <title>Senior Research Fellow – International Security</title>
+      <link>https://careers.chathamhouse.org/jobs/senior-research-fellow-international-security</link>
+      <description>&lt;p&gt;Chatham House, the Royal Institute of International Affairs, is seeking a recognised expert in international security to join our Global Governance and Security Centre.&lt;/p&gt;</description>
+      <category>Research</category>
+      <tt:locations>
+        <tt:location>
+          <tt:city>London</tt:city>
+          <tt:country>United Kingdom</tt:country>
+        </tt:location>
+      </tt:locations>
+    </item>
+    <item>
+      <title>Membership Events Coordinator</title>
+      <link>https://careers.chathamhouse.org/jobs/membership-events-coordinator</link>
+      <description>&lt;p&gt;We are looking for a Membership Events Coordinator to support our programme of member briefings and convenings.&lt;/p&gt;</description>
+      <category>Membership</category>
+      <tt:locations>
+        <tt:location>
+          <tt:city>London</tt:city>
+          <tt:country>United Kingdom</tt:country>
+        </tt:location>
+      </tt:locations>
+      <remoteStatus>hybrid</remoteStatus>
+    </item>
+  </channel>
+</rss>
