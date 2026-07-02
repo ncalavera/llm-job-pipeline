@@ -4,6 +4,13 @@ description: Send a daily Telegram digest of top unseen vacancies and poll butto
 
 # /jobs-digest
 
+> **Optional, engineer-only setup (full mode).** The digest is a convenience for
+> people comfortable with a bit of server plumbing: it needs a Telegram bot token
+> from [@BotFather](https://t.me/BotFather), a Supabase (`SUPABASE_DB_URL`)
+> backend, and — to actually arrive *daily* — something to run the `send`/`poll`
+> commands on a schedule (e.g. your own cron). Simple mode has no digest. Skip
+> this entirely if you just want the dashboard; nothing else depends on it.
+
 Sends the top unseen vacancies to a Telegram chat with inline Like/Pass buttons, then polls button presses back into `vacancy.status`.
 
 ## Prerequisites

@@ -130,9 +130,11 @@ Then triage from the terminal:
 
 ### Optional: job boards
 
-Besides your tracked companies, six free job boards are built in — all
-**off by default** (they are niche and noisy outside their sectors). Enable the
-ones that match your search with the `JOB_BOARDS` env var:
+Besides your tracked companies, a set of free job boards is built in — all
+**off by default** (they are niche and noisy outside their sectors). The full
+list with per-board audience is
+[docs/job-boards-catalogue.md](docs/job-boards-catalogue.md); a few common
+starters:
 
 | Board | Fits | Extra env |
 | --- | --- | --- |
@@ -142,6 +144,9 @@ ones that match your search with the `JOB_BOARDS` env var:
 | `remotive` | remote-first roles | `REMOTIVE_CATEGORIES=product,marketing` |
 | `weworkremotely` | remote product / business roles | `WWR_CATEGORIES=product,marketing` |
 | `hn_whoishiring` | startups (monthly HN thread) | — |
+
+Enable one so it persists (`python3 scripts/sources.py enable-board <id>`), or
+turn some on for a single run with the `JOB_BOARDS` env var:
 
 ```bash
 JOB_BOARDS=arbeitnow,remotive python3 scripts/fetch_vacancies.py

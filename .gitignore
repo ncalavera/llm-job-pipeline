@@ -19,12 +19,15 @@ private/
 evals/
 
 # Internal dev docs — keep out of the public Pages repo. docs/ also serves the
-# GitHub Pages landing, so allow-list only the public assets back in below.
+# GitHub Pages landing, so allow-list only the public assets + the committed
+# reference docs back in below.
 docs/*
 !docs/index.html
 !docs/favicon.svg
 !docs/assets/
 !docs/assets/**
+!docs/ARCHITECTURE.md
+!docs/job-boards-catalogue.md
 
 # Local illustration packs — personal art for a non-default DASHBOARD_PACK.
 # The committed "default" pack lives directly under public/images/. Any pack
