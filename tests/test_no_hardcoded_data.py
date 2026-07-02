@@ -628,3 +628,41 @@ def test_private_artifact_zone_is_gitignored():
     # The case bank and application artifacts live INSIDE the private zone.
     assert config.CASE_BANK_DIR.parent == config.PRIVATE_DIR
     assert config.APPLICATION_ARTIFACTS_DIR.parent == config.PRIVATE_DIR
+
+
+# ---------------------------------------------------------------------------
+# 11. The shipped example profile + onboarding questionnaire stay FIELD-NEUTRAL.
+#
+# config/user_profile.example.md is copied and edited IN PLACE; docs/index.html
+# is the questionnaire that generates it. Neither may ship one person's sector
+# persona, or a newcomer who edits only the obvious inherits a field — and its
+# exclusions — they never chose (STRATEGY guardrail 1). This guards the exact
+# persona tokens that used to leak; none is something a field-neutral
+# placeholder legitimately needs (contrast: "climate"/"fintech" as one item in a
+# multi-sector list of *examples* is fine and stays).
+# ---------------------------------------------------------------------------
+
+EXAMPLE_PROFILE = CONFIG / "user_profile.example.md"
+
+PERSONA_TOKENS = re.compile(
+    r"Example Foundation|Example Startup|Example NGO"
+    r"|grantmaking|counter-terror|peacekeeping|cap at 35",
+    re.IGNORECASE,
+)
+
+
+def test_example_profile_and_questionnaire_are_field_neutral():
+    files = [f for f in (EXAMPLE_PROFILE, DOCS_INDEX) if f.exists()]
+    hits = _scan(files, PERSONA_TOKENS)
+    assert not hits, (
+        "A sector persona token leaked into the shipped example profile or the "
+        "onboarding questionnaire — a newcomer who edits in place must never "
+        "inherit a field they did not choose:\n" + "\n".join(hits)
+    )
+
+
+def test_persona_token_guard_actually_matches():
+    """The guard must fire on a known persona token, so it can't silently pass."""
+    assert PERSONA_TOKENS.search("Senior PM at Example Foundation")
+    assert PERSONA_TOKENS.search("AI safety research roles (cap at 35)")
+    assert not PERSONA_TOKENS.search("climate, fintech, developer tools")
