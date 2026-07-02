@@ -16,6 +16,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # config.py is a re-export facade: "unused" imports are its public API.
 "scripts/config.py" = ["F401"]
+# The fetchers package __init__ is a re-export facade (back-compat shim for
+# the old fetchers.py monolith): "unused" imports are its public API.
+"scripts/fetchers/__init__.py" = ["F401"]
 # Duplicate-source import (`X, X as Y`) trips ruff's F401 autofix into
 # removing a binding that is still used further down the module.
 "scripts/database_supabase.py" = ["F401"]

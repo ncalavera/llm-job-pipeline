@@ -29,6 +29,38 @@ jobs:
       - name: Tests (pytest)
         run: python3 -m pytest -q
 
+  python-parity:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Backend-parity tests (SQLite vs one-shot Postgres)
+        env:
+          PARITY_PG_URL: postgresql://postgres:postgres@localhost:5432/postgres
+        run: python3 -m pytest -q -m parity
+
   js:
     runs-on: ubuntu-latest
     steps:

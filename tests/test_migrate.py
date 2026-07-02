@@ -335,6 +335,38 @@ def test_failed_run_without_backup_still_returns_failure(mig):
     assert rc == 1
 
 
+def test_duplicate_column_guard_is_scoped_to_known_versions(mig):
+    """_Sqlite.run()'s "duplicate column name" catch-and-skip exists ONLY for
+    migrations 0003 and 0005, whose columns are already declared in the frozen
+    baseline schema (see test_migrate_py_converges_a_never_migrated_sqlite_db
+    in tests/parity/test_migrations_parity.py for that positive path). Any
+    OTHER version that raises the same SQLite error — e.g. a migration that
+    re-adds a column it already added in an earlier statement — must NOT be
+    swallowed: it has to propagate like any other OperationalError, trip the
+    restore-on-failure safety net, and never reach the ledger as applied."""
+    assert mig.m.cmd_migrate(allow_destructive=False, do_backup=False) == 0
+    before_snapshot = _logical_snapshot(mig.db_path)
+    before_versions = _applied_versions(mig.db_path)
+
+    # Two statements adding the SAME column -> the second raises "duplicate
+    # column name" on version 0001, which is outside the (0003, 0005) allowlist.
+    (mig.migrations_dir / "0001_dup.sql").write_text(
+        "ALTER TABLE company ADD COLUMN dup_flag INTEGER;\n"
+        "ALTER TABLE company ADD COLUMN dup_flag INTEGER;\n",
+        encoding="utf-8",
+    )
+
+    rc = mig.m.cmd_migrate(allow_destructive=False, do_backup=True)
+    assert rc == 1, "duplicate column outside the allowlist must fail, not be swallowed"
+
+    # Restore reverted the half-applied DDL (first ALTER did succeed before
+    # the second one raised) -- same clean-no-op guarantee as any other failure.
+    assert "dup_flag" not in _columns(mig.db_path, "company")
+    assert _applied_versions(mig.db_path) == before_versions
+    assert "0001" not in _applied_versions(mig.db_path)
+    assert _logical_snapshot(mig.db_path) == before_snapshot
+
+
 # ---------------------------------------------------------------------------
 # Multiple pending migrations apply in order
 # ---------------------------------------------------------------------------
