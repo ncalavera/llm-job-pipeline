@@ -48,7 +48,9 @@ def _build_categories() -> dict:
         "delete_junk": [("v3", _vac("Gamma Trust", "Broken Page Role"))],
         "delete_rearchived": [("v4", _vac("Delta Fund", "Old Role Again"))],
         "delete_geo": [("v5", _vac("Epsilon Org", "On-site Only Role", loc="Lagos, Nigeria"))],
-        "delete_stale_blind": [("v6", _vac("Zeta Group", "Stale Blind Role", url="https://zeta.test/1"))],
+        "delete_stale_blind": [
+            ("v6", _vac("Zeta Group", "Stale Blind Role", url="https://zeta.test/1"))
+        ],
         "reenrich_blind": [
             ("v7", _vac("Eta Labs", "Blind Role One", tier="A", url="https://eta.test/1")),
             ("v8", _vac("Theta Co", "Blind Role Two", tier="S", url="https://theta.test/2")),
