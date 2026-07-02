@@ -19,6 +19,13 @@ follow it verbatim when the user asks for that workflow:
 | Telegram digest (send / poll) | `.claude/commands/jobs-digest.md` |
 | pull latest code, apply DB migrations | `.claude/commands/jobs-update.md` |
 
+The daily loop (`jobs-new.md`) is driven by `scripts/run_daily.py` — a plain
+Python state machine that owns stage ORDER, checkpoints, the heartbeat and the
+publish gate. Any agent runs `python3 scripts/run_daily.py`, watches for exit
+code 10 (a GATE), does the printed judgment task (scoring / verdicts), then
+`--resume`s — repeating until exit 0. The agent never orders the stages; it only
+answers the gates. Exit codes: 0 done, 10 gate, 20 abort, 30 stage error.
+
 Install guides: `INSTALL-EASY.md` (simple mode, zero signups) and
 `INSTALL.md` (full mode, Supabase + Vercel).
 

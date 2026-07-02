@@ -81,6 +81,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Auto-run filter + score after fetch (if new vacancies found)",
     )
+    parser.add_argument(
+        "--no-dashboard",
+        action="store_true",
+        help=(
+            "Fetch only — do NOT regenerate the dashboard. Used by the run_daily "
+            "driver, which owns the gated publish step (see scripts/run_daily.py)."
+        ),
+    )
     return parser
 
 
@@ -125,6 +133,9 @@ from fetchers import (
     fetch_adp_json,
     get_firecrawl_change_statuses,
     get_scrape_statuses,
+    get_fetch_errors,
+    COMPANY_FETCHERS,
+    BOARD_FETCHERS,
 )
 from database_supabase import (
     get_conn,
@@ -137,6 +148,7 @@ from database_supabase import (
     update_source_tracking,
     print_reconciliation_report,
     pass_expired_vacancies,
+    is_fetch_error,
 )
 
 # Strategies whose fetch returns the company's COMPLETE current listing —
@@ -155,6 +167,27 @@ GONE_DETECTION_STRATEGIES = {
     "unops_widget",
 }
 from report import generate_dashboard
+
+# Per-run fetch telemetry the run_daily driver reads for its publish gate: a
+# truncated ATS fetch (HTTP 200, partial list) mass-archives an org's live roles,
+# so the gate blocks publishing when gone-from-source archival is a large share
+# of any single org this run. gitignored (vacancies/), pure runtime state.
+FETCH_STATS_PATH = PUBLIC_DIR.parent / "vacancies" / "fetch_stats.json"
+
+
+def _write_fetch_stats(stats: dict) -> None:
+    """Persist per-run fetch telemetry for the driver's publish gate.
+
+    Best-effort: a failed stats write must never abort the real fetch (the gate
+    treats a missing file as "no gone-archive signal", i.e. it does not block on
+    telemetry it cannot read)."""
+    try:
+        FETCH_STATS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = FETCH_STATS_PATH.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(FETCH_STATS_PATH)
+    except Exception:
+        pass
 
 
 def _load_enrichment_tiers() -> dict[str, str]:
@@ -207,13 +240,17 @@ def _save_fetch_log(source_key: str, jobs: list, fetch_status: str = "ok") -> No
         )
 
 
-def _resolve_fetch_status(fetch_status: str, has_jobs: bool, scrape_status: str | None) -> str:
+def _resolve_fetch_status(
+    fetch_status: str, has_jobs: bool, scrape_status: str | None, fetch_error: str | None = None
+) -> str:
     """Disambiguate an empty fetch into a specific reason code (U9 / WS6).
 
     A successful fetch that yielded no jobs is not automatically "broken":
 
       * scraper flagged a JS-rendered shell   -> ``js_required``   (unchanged)
       * firecrawl skipped because credits == 0 -> ``credit_exhausted``
+      * adapter recorded a failure reason      -> ``error: <reason>`` (timeout /
+        http_500 / network — see fetchers.get_fetch_errors)
       * a real, successful, empty listing      -> ``render_ok_zero``
 
     Only rewrites the generic ``ok``; an ``error:``/other status and any run
@@ -227,6 +264,8 @@ def _resolve_fetch_status(fetch_status: str, has_jobs: bool, scrape_status: str 
         return "js_required"
     if scrape_status == "credit_exhausted":
         return "credit_exhausted"
+    if fetch_error:
+        return fetch_error
     return "render_ok_zero"
 
 
@@ -382,6 +421,8 @@ def main():
 
     conn = get_conn()
     total_new = 0
+    # Per-run telemetry for the driver's publish gate (see FETCH_STATS_PATH).
+    fetch_stats = {"orgs": {}, "errors": {}, "total_new": 0}
 
     if not args.report_only:
         filtered = _filter_companies(args)
@@ -480,14 +521,21 @@ def main():
                     jobs = fetch_successfactors(org_name, config)
                 elif strategy == "adp_json":
                     jobs = fetch_adp_json(org_name, config)
+                elif strategy in COMPANY_FETCHERS:
+                    # Registry dispatch: any strategy registered by a fetchers/ats/*
+                    # module (new one-file adapters) without touching this chain.
+                    jobs = COMPANY_FETCHERS[strategy](org_name, config)
             except Exception as exc:
                 print(f"  [{org_name}] Fetch error: {exc}")
                 fetch_status = f"error: {exc}"
 
             # Honest marking: disambiguate an empty result into a reason code
-            # (js_required / credit_exhausted / render_ok_zero) — see U9.
+            # (js_required / credit_exhausted / error: <reason> / render_ok_zero).
             scrape_status = get_scrape_statuses().get(org_name)
-            fetch_status = _resolve_fetch_status(fetch_status, bool(jobs), scrape_status)
+            fetch_error = get_fetch_errors().get(org_name)
+            fetch_status = _resolve_fetch_status(
+                fetch_status, bool(jobs), scrape_status, fetch_error
+            )
 
             # Save raw fetch log
             _save_fetch_log(f"{strategy}_{org_name.lower().replace(' ', '_')}", jobs, fetch_status)
@@ -520,12 +568,27 @@ def main():
             if new_count > 0:
                 print(f"  [{org_name}] {new_count} NEW vacancies added")
 
+            if is_fetch_error(fetch_status):
+                fetch_stats["errors"][org_name] = fetch_status
+
             # Gone-from-source: a complete direct-ATS listing is ground truth.
             # An unseen vacancy missing from a successful fetch was closed.
             # 'render_ok_zero' is a successful empty listing (U9) and must still
             # trigger gone-detection — otherwise closed roles stay stale.
             if fetch_status in ("ok", "render_ok_zero") and strategy in GONE_DETECTION_STRATEGIES:
-                archive_gone_vacancies(org_name, raw_jobs)
+                gone = archive_gone_vacancies(org_name, raw_jobs)
+                # Share = vanished-from-source / (vanished + still-live-this-fetch).
+                # "Vanished" is archived PLUS protected-expiring (high-fit roles
+                # that flip to 'expiring' instead of archived, but still left the
+                # source) — otherwise a truncated fetch that happens to hit mostly
+                # protected roles would undercount and slip past the gate. A
+                # truncated fetch returns few live jobs but loses many → high
+                # share → the driver's publish gate blocks a corrupting publish.
+                protected = getattr(gone, "protected", 0)
+                fetch_stats["orgs"][org_name] = {
+                    "gone": int(gone or 0) + protected,
+                    "live": len(raw_jobs),
+                }
 
             # Commit per company so an interrupted run keeps finished orgs.
             get_conn().commit()
@@ -589,9 +652,20 @@ def main():
                         jobs = fetch_fastforward_board(board_cfg)
                     elif strategy == "linkedin_guest":
                         jobs = fetch_linkedin_board(board_cfg)
+                    elif strategy in BOARD_FETCHERS:
+                        # Registry dispatch: any strategy registered by a
+                        # fetchers/boards/* module (new one-file boards).
+                        jobs = BOARD_FETCHERS[strategy](board_cfg)
                 except Exception as exc:
                     print(f"  [{board_name}] Fetch error: {exc}")
                     board_fetch_status = f"error: {exc}"
+
+                # Honest marking: an empty board that actually FAILED keeps its
+                # recorded reason (error: timeout / http_500 / …), it does not
+                # masquerade as a healthy zero.
+                board_fetch_error = get_fetch_errors().get(board_name)
+                if board_fetch_status == "ok" and not jobs and board_fetch_error:
+                    board_fetch_status = board_fetch_error
 
                 # Save raw fetch log
                 _save_fetch_log(f"{strategy}_{board_id}", jobs, board_fetch_status)
@@ -627,6 +701,8 @@ def main():
                 )
 
         run_status.finish(new=total_new)
+        fetch_stats["total_new"] = total_new
+        _write_fetch_stats(fetch_stats)
         print(f"\n{'=' * 60}")
         print(f"  FETCH COMPLETE: {total_new} new vacancies found")
         print(f"{'=' * 60}")
@@ -662,9 +738,16 @@ def main():
     # Generate dashboard. This is report OUTPUT (public/data.js in simple mode,
     # the dashboard_snapshot row in full mode) derived from the data — never a
     # source-data write — so --report-only regenerates it too; that IS the flag.
-    print("\nGenerating dashboard...")
-    generate_dashboard()
-    print(f"  Dashboard: {PUBLIC_DIR}")
+    #
+    # --no-dashboard suppresses it: the run_daily driver fetches WITHOUT
+    # publishing, then runs the gated publish itself (--report-only) only after a
+    # clean run — so a truncated fetch can't push a corrupt snapshot live.
+    if args.no_dashboard:
+        print("\nSkipping dashboard regeneration (--no-dashboard).")
+    else:
+        print("\nGenerating dashboard...")
+        generate_dashboard()
+        print(f"  Dashboard: {PUBLIC_DIR}")
 
     from database_supabase import validate_db
 
