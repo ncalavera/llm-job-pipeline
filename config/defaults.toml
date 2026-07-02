@@ -62,6 +62,17 @@ tier_c = 0
 composite_alignment_weight = 0.70
 composite_boost_weight = 0.30
 
+# Status assigned to a brand-new, auto-discovered company -- a board or ATS
+# fetch finds an org not already in the company table, INCLUDING a name
+# already known to the static registry. Same value on both backends
+# (SQLite/Postgres) -- this is a product decision, never a derivative of
+# which database you run. "candidate" (default) routes it through the
+# company_scoring gate like every other new company: nothing activates
+# without your approval (or, if you opt that in below, auto_review_candidates
+# crossing the threshold). Only "candidate" and "active" are meaningful; any
+# other value falls back to "candidate". Env AUTO_DISCOVERY_STATUS overrides.
+auto_discovery_status = "candidate"
+
 [thresholds.auto_review]
 # Opt-in: auto-promote/reject candidate companies by alignment_score. Disabled
 # by default (a human approves companies). Env AUTO_REVIEW_CANDIDATES=1 enables;

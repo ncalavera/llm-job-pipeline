@@ -47,6 +47,23 @@ def test_thresholds_types_and_values():
     assert t["tier_s"] > t["tier_a"] > t["tier_b"] >= t["tier_c"]
     assert isinstance(t["auto_review"], dict)
     assert t["auto_review"]["enabled"] is False  # opt-in
+    # Same default on both backends -- never a derivative of IS_SQLITE.
+    assert t["auto_discovery_status"] == "candidate"
+
+
+def test_auto_discovery_status_reads_from_toml(tmp_path, monkeypatch):
+    toml_path = tmp_path / "defaults.toml"
+    toml_path.write_text(
+        textwrap.dedent(
+            """
+            [thresholds]
+            auto_discovery_status = "active"
+            """
+        ),
+        encoding="utf-8",
+    )
+    _point_at(monkeypatch, toml_path)
+    assert settings.thresholds()["auto_discovery_status"] == "active"
 
 
 def test_junk_lists_are_lists_and_neutral():

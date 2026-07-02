@@ -726,13 +726,13 @@ def test_board_merge_rejects_quality_gate_junk(sqlite_dal):
     # Error-page text blanked by the gate — never stored as a description.
     assert "404 not found" not in (by_title["Head of Community"].get("full_description") or "")
 
-    # The good one is intact. In simple mode (SQLite) a board-discovered org
-    # lands ACTIVE — there is no dashboard review step, so the candidate gate
-    # would otherwise blackhole every board company.
+    # The good one is intact. A board-discovered org lands 'candidate' — same
+    # rule on SQLite as on Postgres (STRATEGY guardrail 2) — which is why this
+    # assertion loads with include_candidate_companies=True above.
     assert "Head of Product" in by_title
     cur = db.get_conn().cursor()
     cur.execute("SELECT status FROM company WHERE canonical_name = %s", ("Acme GmbH",))
-    assert cur.fetchone()[0] == "active"
+    assert cur.fetchone()[0] == "candidate"
     cur.close()
 
 

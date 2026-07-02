@@ -30,8 +30,10 @@ upgrade from easy to hardcore later without losing anything.
 | Setup time | **~5 min, no signups** | ~15 min, mostly signups |
 | Your data leaves your machine | no | yes (lives in Supabase) |
 
-Everything else — fetching, filtering, scoring quality, the dashboard UI — is
-identical.
+Everything else — fetching, filtering, company review, scoring quality, the
+dashboard UI — is identical. A board/ATS-discovered company lands in the same
+review gate on both (config default: `candidate`, approved via `/jobs-review`
+or the same opt-in auto-approve threshold) — easy mode does not skip it.
 
 ## 1. Prerequisites
 

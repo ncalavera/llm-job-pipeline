@@ -24,9 +24,13 @@ posting.
    Vercel dashboard you can open from your phone, daily Telegram digest with
    like/pass buttons. Two free accounts, ~15 minutes. Runbook: [INSTALL.md](INSTALL.md).
 
-Fetching, filtering and scoring quality are identical in both. Simple mode
-upgrades to full at any time: set `SUPABASE_DB_URL` and the same scripts
-switch to Postgres, no code changes.
+Fetching, filtering, company review and scoring quality are identical in
+both — the same gates, the same auto-discovered-company rule, the same
+scores. The only real differences: full mode adds a hosted dashboard you can
+open from any device, a daily Telegram digest, and multi-device sync; simple
+mode keeps everything on your machine. Simple mode upgrades to full at any
+time: set `SUPABASE_DB_URL` and the same scripts switch to Postgres, no code
+changes.
 
 Easiest entry either way: fill in the
 [onboarding questionnaire](https://ncalavera.github.io/llm-job-pipeline/)
