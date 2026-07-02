@@ -27,8 +27,11 @@ to the user at the gates.
    python3 scripts/run_daily.py
    ```
 
-   Boards are opt-in (off by default): add e.g.
-   `--boards "80k_hours,impactpool,idealist,fast_forward,linkedin,datadotorg"`
+   Boards you have **enabled** (via `/jobs-add board` or
+   `python3 scripts/sources.py enable-board <id>`) fetch automatically every run
+   — nothing to pass. `--boards "a,b,c"` adds more boards for THIS run only,
+   unioned ON TOP of the persisted set; it never has to be repeated to keep an
+   enabled board on. See what's enabled with `python3 scripts/sources.py`
    (catalogue in `docs/job-boards-catalogue.md`).
 
 2. **When it stops, read WHY.** The driver exits with a code and a printed block:
@@ -184,7 +187,9 @@ local `public/data.js`. Both go through the same driver — no mode branching.
 - `--resume` — continue a gated/interrupted run.
 - `--new` — start fresh, discarding any prior run state.
 - `--status` — print the stage board.
-- `--boards "a,b,c"` — enable job boards for this run (default: none).
+- `--boards "a,b,c"` — extra job boards for THIS run, unioned ON TOP of the
+  persisted enabled set (`scripts/sources.py`). Enabled boards fetch every run
+  without this flag; use `sources.py enable-board <id>` to make one stick.
 - `--no-publish` — run every stage but never publish (use from a git worktree).
 - `--full-rescore` — explicit opt-in that LIFTS the per-run scoring cap and
   re-scores far more vacancies, with a loud warning. A normal run keeps the cap

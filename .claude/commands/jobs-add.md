@@ -8,7 +8,7 @@ Adds a source to the pipeline. The first argument selects the mode:
 
 | First arg | Mode | What it does |
 | --- | --- | --- |
-| `board` | **Board** | Enable a built-in job board for fetching (env-only, via `JOB_BOARDS`). |
+| `board` | **Board** | Enable a built-in job board for fetching (persisted; survives sessions). |
 | `vacancy` / `job` | **Single vacancy** | Hand-add ONE vacancy; it lands `unseen` and is auto-scored by `/jobs-new`. |
 | _(anything else)_ / `company` | **Company** (default) | Auto-detect a company's ATS and add it to Supabase. |
 
@@ -39,11 +39,14 @@ Do not guess silently. If there is no collision signal, route by the keyword.
 
 ## Mode B — enable a job board
 
-Boards are **built into** `config/defaults.toml [boards.*]`, loaded by
-`config._ALL_JOB_BOARDS`, and enabled per run via the `JOB_BOARDS` env var →
-`config._select_enabled_boards()`. This mode is **env-only** — there is no new
-config mechanism, no DB row, no persisted setting. You enable a board by running
-a fetch with `JOB_BOARDS=...` and telling the user to keep that env var on daily runs.
+Boards are **built into** `config/defaults.toml [boards.*]` and loaded by
+`config._ALL_JOB_BOARDS`. Enabling one **persists**: it sets the `board.enabled`
+flag in the DB (`database_supabase.set_board_enabled`, surfaced by
+`scripts/sources.py`), so the board participates in every future `/jobs-new`
+with no env var and no reminder. The `JOB_BOARDS` env var / `--boards` flag
+stays a **manual override applied ON TOP** of the persisted set for a single run
+(`run_daily.py` unions the two). You enable a board by persisting the flag and
+running one seed fetch.
 
 ### B0. Out-of-scope guard
 
@@ -80,16 +83,25 @@ Present them with their sector fit and any extra env knobs:
 Ask the user which board id(s) to enable (comma-separated). If a board they name
 is not in `_ALL_JOB_BOARDS`, fall back to the B0 out-of-scope guard.
 
-### B2. Run the first fetch
+### B2. Persist the board(s), then run a seed fetch
 
-Run a free, boards-only fetch with the chosen ids opted in:
+First **persist** each chosen id so it sticks across sessions:
+
+```bash
+python3 scripts/sources.py enable-board <id>   # once per board id
+```
+
+Then run a free, boards-only seed fetch so the roles land now (the `JOB_BOARDS`
+here is a one-off override for this immediate fetch; persistence already
+happened above):
 
 ```bash
 JOB_BOARDS=<ids> python3 -u scripts/fetch_vacancies.py --boards-only --free-only 2>&1
 ```
 
 This routes through `save_board_vacancies` → rows land `status='unseen'` → they
-will be auto-scored on the next `/jobs-new`.
+will be auto-scored on the next `/jobs-new`. The seed fetch also runs
+`sync_boards`, backfilling each board's catalog metadata (name/strategy/ttl).
 
 Show the result: total vacancies pulled per board, description coverage, any
 fetch errors.
@@ -97,19 +109,23 @@ fetch errors.
 > Remotive asks API users for very few calls (max ~4/day) and the HN thread is
 > monthly (30-day TTL) — one fetch per run is enough; do not loop it.
 
-### B3. Tell the user how to keep the board on
+### B3. Confirm it will keep running
 
-Boards are not persisted — they only fetch on runs where `JOB_BOARDS` opts them
-in. Tell the user the exact env var to keep on daily runs:
+The board is now persisted — it fetches on **every** `/jobs-new` automatically,
+no env var to remember. Tell the user:
 
 ```
-Board(s) enabled for this run: <ids>
+Board(s) enabled (persisted): <ids>
 
-To keep fetching them every day, set on your daily runs:
-   JOB_BOARDS=<ids>
+They now fetch on every /jobs-new automatically — nothing to remember.
 
-(e.g. prepend it to /jobs-new's fetch, or export it in your shell profile.)
-Unset JOB_BOARDS → boards are skipped and only your tracked companies fetch.
+See everything you have enabled (boards + companies):
+   python3 scripts/sources.py
+Stop one:
+   python3 scripts/sources.py disable-board <id>
+
+(JOB_BOARDS / --boards still works as a one-off override ON TOP of this set —
+e.g. to try a board for a single run without persisting it.)
 ```
 
 ---
