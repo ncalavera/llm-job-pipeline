@@ -125,6 +125,9 @@ from fetchers import (
     fetch_adp_json,
     get_firecrawl_change_statuses,
     get_scrape_statuses,
+    get_fetch_errors,
+    COMPANY_FETCHERS,
+    BOARD_FETCHERS,
 )
 from database_supabase import (
     get_conn,
@@ -207,13 +210,17 @@ def _save_fetch_log(source_key: str, jobs: list, fetch_status: str = "ok") -> No
         )
 
 
-def _resolve_fetch_status(fetch_status: str, has_jobs: bool, scrape_status: str | None) -> str:
+def _resolve_fetch_status(
+    fetch_status: str, has_jobs: bool, scrape_status: str | None, fetch_error: str | None = None
+) -> str:
     """Disambiguate an empty fetch into a specific reason code (U9 / WS6).
 
     A successful fetch that yielded no jobs is not automatically "broken":
 
       * scraper flagged a JS-rendered shell   -> ``js_required``   (unchanged)
       * firecrawl skipped because credits == 0 -> ``credit_exhausted``
+      * adapter recorded a failure reason      -> ``error: <reason>`` (timeout /
+        http_500 / network — see fetchers.get_fetch_errors)
       * a real, successful, empty listing      -> ``render_ok_zero``
 
     Only rewrites the generic ``ok``; an ``error:``/other status and any run
@@ -227,6 +234,8 @@ def _resolve_fetch_status(fetch_status: str, has_jobs: bool, scrape_status: str 
         return "js_required"
     if scrape_status == "credit_exhausted":
         return "credit_exhausted"
+    if fetch_error:
+        return fetch_error
     return "render_ok_zero"
 
 
@@ -480,14 +489,21 @@ def main():
                     jobs = fetch_successfactors(org_name, config)
                 elif strategy == "adp_json":
                     jobs = fetch_adp_json(org_name, config)
+                elif strategy in COMPANY_FETCHERS:
+                    # Registry dispatch: any strategy registered by a fetchers/ats/*
+                    # module (new one-file adapters) without touching this chain.
+                    jobs = COMPANY_FETCHERS[strategy](org_name, config)
             except Exception as exc:
                 print(f"  [{org_name}] Fetch error: {exc}")
                 fetch_status = f"error: {exc}"
 
             # Honest marking: disambiguate an empty result into a reason code
-            # (js_required / credit_exhausted / render_ok_zero) — see U9.
+            # (js_required / credit_exhausted / error: <reason> / render_ok_zero).
             scrape_status = get_scrape_statuses().get(org_name)
-            fetch_status = _resolve_fetch_status(fetch_status, bool(jobs), scrape_status)
+            fetch_error = get_fetch_errors().get(org_name)
+            fetch_status = _resolve_fetch_status(
+                fetch_status, bool(jobs), scrape_status, fetch_error
+            )
 
             # Save raw fetch log
             _save_fetch_log(f"{strategy}_{org_name.lower().replace(' ', '_')}", jobs, fetch_status)
@@ -589,9 +605,20 @@ def main():
                         jobs = fetch_fastforward_board(board_cfg)
                     elif strategy == "linkedin_guest":
                         jobs = fetch_linkedin_board(board_cfg)
+                    elif strategy in BOARD_FETCHERS:
+                        # Registry dispatch: any strategy registered by a
+                        # fetchers/boards/* module (new one-file boards).
+                        jobs = BOARD_FETCHERS[strategy](board_cfg)
                 except Exception as exc:
                     print(f"  [{board_name}] Fetch error: {exc}")
                     board_fetch_status = f"error: {exc}"
+
+                # Honest marking: an empty board that actually FAILED keeps its
+                # recorded reason (error: timeout / http_500 / …), it does not
+                # masquerade as a healthy zero.
+                board_fetch_error = get_fetch_errors().get(board_name)
+                if board_fetch_status == "ok" and not jobs and board_fetch_error:
+                    board_fetch_status = board_fetch_error
 
                 # Save raw fetch log
                 _save_fetch_log(f"{strategy}_{board_id}", jobs, board_fetch_status)
