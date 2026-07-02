@@ -13,6 +13,7 @@ import {
   isVacancyStale,
   isVacancyGone,
   triageColumnFor,
+  dedupeTriageEntries,
 } from "./helpers.js";
 
 const DAY = 86400000;
@@ -39,6 +40,12 @@ test("sourceAgeDays: whole-day age via floor", () => {
 test("gone: deadline in the past", () => {
   assert.equal(isVacancyExpired({ deadline: dateOnly(-1) }), true);
   assert.equal(isVacancyGone({ deadline: dateOnly(-1) }), true);
+});
+
+test("boundary: a deadline of exactly today is not expired", () => {
+  const g = { deadline: dateOnly(0) };
+  assert.equal(isVacancyExpired(g), false);
+  assert.equal(isVacancyGone(g), false);
 });
 
 test("not gone: deadline in the future, source fresh", () => {
@@ -129,4 +136,35 @@ test("routing: applied and skipped stay put even when gone", () => {
 test("routing: statuses without a column (unseen/passed) → null", () => {
   assert.equal(triageColumnFor({ _status: "unseen" }, COLS), null);
   assert.equal(triageColumnFor({ _status: "passed" }, COLS), null);
+});
+
+// --- dedupeTriageEntries ---------------------------------------------------
+
+// Regression: the same role from two boards dedupes to one card. If the stale
+// copy is inserted first and wins the STATUS_PRI tie, the survivor must still
+// inherit the FRESH copy's last_seen — otherwise a still-live role wrongly
+// lands in "Expired". Must hold in BOTH insertion orders.
+test("dedupe: a stale copy never routes a still-live role to 'expired'", () => {
+  const statusPri = { to_apply: 0 };
+  const stale = () => ({
+    org: "Acme",
+    title: "Engineer",
+    _status: "to_apply",
+    last_seen: daysAgoISO(30),
+  });
+  const fresh = () => ({
+    org: "Acme",
+    title: "Engineer",
+    _status: "to_apply",
+    last_seen: daysAgoISO(1),
+  });
+  for (const order of [
+    [stale(), fresh()],
+    [fresh(), stale()],
+  ]) {
+    const deduped = dedupeTriageEntries(order, statusPri);
+    const survivors = Array.from(deduped.values());
+    assert.equal(survivors.length, 1);
+    assert.equal(triageColumnFor(survivors[0], COLS), "to_apply");
+  }
 });

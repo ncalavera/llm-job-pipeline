@@ -853,6 +853,46 @@ export function getTriageDedupeKey(g) {
   ].join("::");
 }
 
+// When the same role reaches Triage from two boards it dedupes to a single
+// card. The survivor must reflect the FRESHEST sighting across every copy —
+// otherwise a stale duplicate can wrongly route a still-live role into the
+// "Expired" column. Returns the more recent of two last_seen values; either
+// may be null / blank / invalid.
+export function freshestLastSeen(a, b) {
+  const ta = a ? new Date(a).getTime() : NaN;
+  const tb = b ? new Date(b).getTime() : NaN;
+  if (isNaN(tb)) return a;
+  if (isNaN(ta)) return b;
+  return ta >= tb ? a : b;
+}
+
+// Reduce triage entries (each carrying _status and _review) to one per dedupe
+// key. The survivor is the entry with the lowest status priority; ties keep the
+// first-inserted. Across all duplicates the survivor inherits any _review and
+// the freshest last_seen, so a stale copy can never send a live role to the
+// "Expired" column. `statusPri` maps a status string → number (lower = higher).
+export function dedupeTriageEntries(entries, statusPri) {
+  const pri = (e) => statusPri[e._status] ?? 99;
+  const deduped = new Map();
+  entries.forEach(function (entry) {
+    const key = getTriageDedupeKey(entry);
+    const prev = deduped.get(key);
+    if (!prev) {
+      deduped.set(key, entry);
+      return;
+    }
+    if (pri(entry) < pri(prev)) {
+      if (!entry._review && prev._review) entry._review = prev._review;
+      entry.last_seen = freshestLastSeen(entry.last_seen, prev.last_seen);
+      deduped.set(key, entry);
+    } else {
+      if (!prev._review && entry._review) prev._review = entry._review;
+      prev.last_seen = freshestLastSeen(prev.last_seen, entry.last_seen);
+    }
+  });
+  return deduped;
+}
+
 // ---------------------------------------------------------------------------
 // Minimal markdown renderer
 // ---------------------------------------------------------------------------
