@@ -34,6 +34,7 @@ so every caller gets a usable language.
 from __future__ import annotations
 
 import os
+import sys
 
 DEFAULT_LANGUAGE = "en"
 
@@ -96,7 +97,19 @@ def _profile_language() -> str:
         sections = _load_user_profile()
     except Exception:
         return ""
-    return _normalize(sections.get("OUTPUT_LANGUAGE"))
+    raw = sections.get("OUTPUT_LANGUAGE")
+    code = _normalize(raw)
+    if not code and (raw or "").strip():
+        # A named-but-unbundled language ("French") or prose would otherwise
+        # degrade to English chrome with no trace (review nit on #46) — say so
+        # once, on stderr, so the mismatch is explainable without insider
+        # knowledge.
+        print(
+            f"  (product language: no bundled UI strings for {(raw or '').strip()!r} — "
+            "using English chrome; the LLM's own text fields still follow OUTPUT_LANGUAGE)",
+            file=sys.stderr,
+        )
+    return code
 
 
 def _settings_dashboard_language() -> str:

@@ -113,6 +113,26 @@ def test_legacy_toml_dashboard_language_used_when_profile_silent(tmp_path, monke
     assert pl.resolve() == "ru"
 
 
+def test_profile_beats_legacy_toml_head_to_head(tmp_path, monkeypatch):
+    """Direct precedence proof (review nit on #46): both sources set, profile wins."""
+    toml = tmp_path / "defaults.toml"
+    toml.write_text('[dashboard]\nlanguage = "ru"\n', encoding="utf-8")
+    monkeypatch.setenv("DEFAULTS_TOML_PATH", str(toml))
+    settings.clear_cache()
+    monkeypatch.setenv("USER_PROFILE_PATH", str(_profile(tmp_path, "English")))
+    prompts.clear_profile_cache()
+    assert pl.resolve() == "en"
+
+
+def test_unbundled_profile_language_degrades_loudly(tmp_path, monkeypatch, capsys):
+    """Review nit on #46: a named-but-unbundled language must say it degraded."""
+    monkeypatch.setenv("USER_PROFILE_PATH", str(_profile(tmp_path, "French")))
+    monkeypatch.delenv("PRODUCT_LANGUAGE", raising=False)
+    prompts.clear_profile_cache()
+    assert pl.resolve() == "en"
+    assert "French" in capsys.readouterr().err
+
+
 # ---------------------------------------------------------------------------
 # 2. the t() helper + label
 # ---------------------------------------------------------------------------
