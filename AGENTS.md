@@ -14,6 +14,7 @@ follow it verbatim when the user asks for that workflow:
 | --- | --- |
 | first-time setup, daily fetch + score, resume, deploy | `.claude/commands/jobs-new.md` |
 | review liked vacancies, archive low scores, terminal triage | `.claude/commands/jobs-review.md` |
+| check scoring quality against your own labels (golden set) | `.claude/commands/jobs-eval.md` |
 | add a company or job board | `.claude/commands/jobs-add.md` |
 | update scoring rules or candidate profile | `.claude/commands/jobs-profile.md` |
 | Telegram digest (send / poll) | `.claude/commands/jobs-digest.md` |
