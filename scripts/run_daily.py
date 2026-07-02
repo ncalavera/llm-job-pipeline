@@ -1075,6 +1075,11 @@ def _h_vacancy_scoring(state, entry, opts):
         p for p in payloads if any(str(m) in remaining_ids for m in p.get("member_ids", []))
     ]
     if remaining:
+        # Every call that reaches this branch is a RESUME of the escalate gate
+        # (the transition above returns its own gate without falling through
+        # here) — re-begin so the live progress card reflects what's actually
+        # still outstanding instead of a stale count left over from before.
+        run_status.begin("score", len(remaining))
         return "gate", {
             "action": "score_vacancies",
             "count": len(remaining),
