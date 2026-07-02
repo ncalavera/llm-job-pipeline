@@ -924,6 +924,75 @@ def _strip_nul_bytes(job: dict) -> None:
             job[k] = v.replace("\x00", "")
 
 
+# ---------------------------------------------------------------------------
+# Shared core for the two save paths (save_vacancies / save_board_vacancies).
+# The per-job quality gate, the location key, the new-row deadline resolution
+# and the merge summary are identical across both; the divergent bits (the
+# existing-row update policy and the INSERT column set) stay inline in each.
+# ---------------------------------------------------------------------------
+
+
+def _gate_job(job: dict) -> tuple[str, str | None, bool]:
+    """Run the shared pre-insert quality gate on a fetched job, in place.
+
+    Returns ``(title, skip_reason, boilerplate_gated)``:
+      * ``title`` — the sanitized title.
+      * ``skip_reason`` — ``None`` keeps the job; ``"junk"`` drops it AND counts
+        as skipped_junk; ``"blacklist"`` / ``"thin"`` drop it silently.
+      * ``boilerplate_gated`` — True when _gate_description blanked a cookie-wall
+        description (count skipped_boilerplate; the row is still kept).
+
+    Same order both save paths ran inline: strip NULs → _gate_description →
+    sanitize title → title blacklist → has_enough_content → is_content_junk.
+    """
+    _strip_nul_bytes(job)
+    boilerplate_gated = bool(_gate_description(job))
+    title = _sanitize_title(job.get("title", ""))
+    if filters.title_words_blacklisted(title):
+        return title, "blacklist", boilerplate_gated
+    if not filters.has_enough_content(job):
+        return title, "thin", boilerplate_gated
+    if filters.is_content_junk(job.get("full_description", "")):
+        return title, "junk", boilerplate_gated
+    return title, None, boilerplate_gated
+
+
+def _loc_key(loc: dict) -> str:
+    """Stable key for a location entry: city, else country, else work_mode."""
+    return loc.get("city") or loc.get("country") or loc.get("work_mode") or ""
+
+
+def _resolve_new_deadline(job: dict) -> str | None:
+    """Deadline for a brand-new row: fetcher-provided, else a regex fallback from
+    the description. Returns a parsed date string or None."""
+    deadline_raw = job.get("deadline") or ""
+    if not deadline_raw:
+        deadline_raw = _extract_deadline_from_description(job.get("full_description") or "")
+    return _safe_deadline(deadline_raw) if deadline_raw else None
+
+
+def _print_merge_summary(
+    label: str,
+    *,
+    skipped_archived: int,
+    skipped_boilerplate: int,
+    skipped_junk: int,
+    resurrected: int,
+) -> None:
+    """Print the per-source merge counters shared by both save paths."""
+    if skipped_archived:
+        print(f"  [{label}] skipped {skipped_archived} recently archived", flush=True)
+    if skipped_boilerplate:
+        print(
+            f"  [{label}] gate dropped {skipped_boilerplate} boilerplate descriptions",
+            flush=True,
+        )
+    if skipped_junk:
+        print(f"  [{label}] skipped {skipped_junk} junk content", flush=True)
+    if resurrected:
+        print(f"  [{label}] resurrected: {resurrected}", flush=True)
+
+
 def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     """Save fetched jobs into the DB. Returns count of new vacancies.
 
@@ -959,19 +1028,12 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     resurrected = 0
 
     for job in jobs:
-        _strip_nul_bytes(job)
-        # Quality gate BEFORE any length comparison: strip cookie banners,
-        # blank pure boilerplate so it never overwrites a real description.
-        if _gate_description(job):
+        title, skip_reason, boilerplate_gated = _gate_job(job)
+        if boilerplate_gated:
             skipped_boilerplate += 1
-        title = _sanitize_title(job.get("title", ""))
-        if filters.title_words_blacklisted(title):
-            continue
-        if not filters.has_enough_content(job):
-            continue
-        junk_reason = filters.is_content_junk(job.get("full_description", ""))
-        if junk_reason:
+        if skip_reason == "junk":
             skipped_junk += 1
+        if skip_reason is not None:
             continue
 
         dedup_hash = make_vacancy_id(org_name, title)
@@ -985,9 +1047,7 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
             continue
 
         loc_entry = _make_location_entry(job)
-        loc_key = (
-            loc_entry.get("city") or loc_entry.get("country") or loc_entry.get("work_mode") or ""
-        )
+        loc_key = _loc_key(loc_entry)
 
         # Check existing: exact hash first, then a same-company renamed/language variant.
         existing, match_kind = _find_existing_vacancy(
@@ -1039,9 +1099,7 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
 
             # Merge locations
             locs = existing.get("locations") or []
-            existing_loc_keys = {
-                l.get("city") or l.get("country") or l.get("work_mode") or "" for l in locs
-            }
+            existing_loc_keys = {_loc_key(l) for l in locs}
             if loc_key not in existing_loc_keys:
                 locs.append(loc_entry)
                 updates["locations"] = Json(locs)
@@ -1057,11 +1115,7 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
             vals = list(updates.values()) + [existing["id"]]
             cur.execute(f"UPDATE vacancy SET {', '.join(set_parts)} WHERE id = %s", vals)
         else:
-            # Resolve deadline: fetcher-provided or fallback regex from description
-            deadline_raw = job.get("deadline") or ""
-            if not deadline_raw:
-                deadline_raw = _extract_deadline_from_description(job.get("full_description") or "")
-            parsed_deadline = _safe_deadline(deadline_raw) if deadline_raw else None
+            parsed_deadline = _resolve_new_deadline(job)
             cur.execute(
                 """INSERT INTO vacancy (
                        dedup_hash, company_id, title, snippet,
@@ -1085,17 +1139,13 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
             new_count += 1
 
     cur.close()
-    if skipped_archived:
-        print(f"  [{org_name}] skipped {skipped_archived} recently archived", flush=True)
-    if skipped_boilerplate:
-        print(
-            f"  [{org_name}] gate dropped {skipped_boilerplate} boilerplate descriptions",
-            flush=True,
-        )
-    if skipped_junk:
-        print(f"  [{org_name}] skipped {skipped_junk} junk content", flush=True)
-    if resurrected:
-        print(f"  [{org_name}] resurrected: {resurrected}", flush=True)
+    _print_merge_summary(
+        org_name,
+        skipped_archived=skipped_archived,
+        skipped_boilerplate=skipped_boilerplate,
+        skipped_junk=skipped_junk,
+        resurrected=resurrected,
+    )
     return new_count
 
 
@@ -1138,19 +1188,12 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
     skipped_inactive: dict[str, int] = {}
 
     for job in jobs:
-        _strip_nul_bytes(job)
-        # Quality gate BEFORE any length comparison: strip cookie banners,
-        # blank pure boilerplate so it never overwrites a real description.
-        if _gate_description(job):
+        title, skip_reason, boilerplate_gated = _gate_job(job)
+        if boilerplate_gated:
             skipped_boilerplate += 1
-        title = _sanitize_title(job.get("title", ""))
-        if filters.title_words_blacklisted(title):
-            continue
-        if not filters.has_enough_content(job):
-            continue
-        junk_reason = filters.is_content_junk(job.get("full_description", ""))
-        if junk_reason:
+        if skip_reason == "junk":
             skipped_junk += 1
+        if skip_reason is not None:
             continue
 
         ext_id = job.get("external_id", "")
@@ -1197,9 +1240,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
             dedup_index_cache[company_id] = dedup_index
 
         loc_entry = _make_location_entry(job)
-        loc_key = (
-            loc_entry.get("city") or loc_entry.get("country") or loc_entry.get("work_mode") or ""
-        )
+        loc_key = _loc_key(loc_entry)
 
         # Check existing: exact hash first, then a same-company renamed/language variant.
         existing, match_kind = _find_existing_vacancy(
@@ -1243,9 +1284,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
                         updates["deadline"] = parsed_dl
 
             locs = existing.get("locations") or []
-            existing_loc_keys = {
-                l.get("city") or l.get("country") or l.get("work_mode") or "" for l in locs
-            }
+            existing_loc_keys = {_loc_key(l) for l in locs}
             if loc_key not in existing_loc_keys:
                 locs.append(loc_entry)
                 updates["locations"] = Json(locs)
@@ -1254,11 +1293,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
             vals = list(updates.values()) + [existing["id"]]
             cur.execute(f"UPDATE vacancy SET {', '.join(set_parts)} WHERE id = %s", vals)
         else:
-            # Resolve deadline: fetcher-provided or fallback regex from description
-            deadline_raw = job.get("deadline") or ""
-            if not deadline_raw:
-                deadline_raw = _extract_deadline_from_description(job.get("full_description") or "")
-            parsed_deadline = _safe_deadline(deadline_raw) if deadline_raw else None
+            parsed_deadline = _resolve_new_deadline(job)
             cur.execute(
                 """INSERT INTO vacancy (
                        dedup_hash, company_id, title, snippet,
@@ -1281,17 +1316,13 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
             new_count += 1
 
     cur.close()
-    if skipped_archived:
-        print(f"  [{board_name}] skipped {skipped_archived} recently archived", flush=True)
-    if skipped_boilerplate:
-        print(
-            f"  [{board_name}] gate dropped {skipped_boilerplate} boilerplate descriptions",
-            flush=True,
-        )
-    if skipped_junk:
-        print(f"  [{board_name}] skipped {skipped_junk} junk content", flush=True)
-    if resurrected:
-        print(f"  [{board_name}] resurrected: {resurrected}", flush=True)
+    _print_merge_summary(
+        board_name,
+        skipped_archived=skipped_archived,
+        skipped_boilerplate=skipped_boilerplate,
+        skipped_junk=skipped_junk,
+        resurrected=resurrected,
+    )
     if skipped_inactive:
         total_skipped = sum(skipped_inactive.values())
         top3 = sorted(skipped_inactive.items(), key=lambda x: -x[1])[:3]
