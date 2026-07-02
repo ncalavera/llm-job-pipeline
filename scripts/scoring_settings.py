@@ -1,22 +1,38 @@
 """Cost/volume settings from the user profile's ``## VOLUME`` section.
 
-Two knobs live here, both tied to the user's plan tier rather than to neutral
+Four knobs live here, all tied to the user's plan tier rather than to neutral
 tool mechanics — so they belong in ``config/user_profile.md`` (gitignored,
 personal), not in ``config/defaults.toml``:
 
-  - ``scoring_model`` — which model tier scores each vacancy. The model is the
-    MAIN cost dial (STRATEGY guardrail 3): a budget plan defaults to the cheaper
-    ``sonnet``; a bigger plan can set ``opus``. Chosen at onboarding, changed in
-    one line.
+  - ``scoring_model`` — the STRONG model tier that scores the finalists in the
+    two-pass flow. The model is the MAIN cost dial (STRATEGY guardrail
+    3): a budget plan defaults to the cheaper ``sonnet``; a bigger plan can set
+    ``opus``. Chosen at onboarding, changed in one line.
+  - ``screen_model`` — the CHEAP model that gives every new vacancy a fast first
+    score (the two-pass SCREEN); only roles that clear ``escalate_threshold`` are
+    re-scored by ``scoring_model``. Defaults to ``haiku`` (the cheapest tier) and
+    is clamped so it can never cost more than the strong model — a screen as
+    expensive as the final pass would defeat the saving.
+  - ``escalate_threshold`` — the screen-score floor at/above which a role is
+    escalated to the strong model. Calibrated against the golden set so the cheap
+    screen drops zero of the strong model's true positives: the lowest
+    golden role the strong model rated a fit screened at 70 on the cheap model, so
+    any floor <= 70 preserves every role the strong pass would surface. The
+    default (50) leaves a 20-point safety margin under that boundary while still
+    diverting the weak majority; raising it saves more but narrows the margin.
   - ``max_per_run`` — a spike-day SAFETY NET, not the primary lever. A quiet day
     scores 20-30 vacancies; a burst day (hundreds of new roles at once) must not
     silently burn the plan. When a run has no explicit ``--limit``, scoring stops
-    at this cap and reports "scored X of Y" so the rest is offered next run.
+    at this cap and reports "scored X of Y" so the rest is offered next run. In
+    the two-pass flow the cap bounds the SCREEN set; the strong pass is a subset,
+    so the cap protects both passes at once.
 
 Section format (same ``key: value`` shape as ``## HARD_FILTERS``)::
 
     ## VOLUME
     scoring_model: sonnet
+    screen_model: haiku
+    escalate_threshold: 50
     max_per_run: 150
 
 A missing file, missing section, missing key, ``(none)`` placeholder, or garbage
@@ -40,8 +56,23 @@ from prompts import _load_user_profile
 DEFAULT_SCORING_MODEL = "sonnet"
 DEFAULT_MAX_PER_RUN = 150
 
+# The cheap two-pass screen model and the escalation floor. haiku is
+# the cheapest tier — it maximises the two-pass saving (Haiku 4.5 costs ~1/5 of
+# Opus 4.8 and ~1/3 of Sonnet 5 per token). The 50 floor was calibrated against
+# the golden set: the cheap model scores ~12 points hotter than the strong model,
+# and the lowest golden role the strong model rated a fit screened at 70 on the
+# cheap model. A floor of 50 therefore clears every strong-model true positive by
+# a 20-point margin while diverting the weak majority (a 40 floor would escalate
+# ~55% of a realistic day — the majority — and erase most of the saving).
+DEFAULT_SCREEN_MODEL = "haiku"
+DEFAULT_ESCALATION_THRESHOLD = 50
+
 # Model tiers the runbook knows how to launch as a subagent.
 _ALLOWED_MODELS = {"haiku", "sonnet", "opus"}
+
+# Price order, cheapest first — used to clamp the screen model so it can never be
+# pricier than the strong model.
+_MODEL_RANK = {"haiku": 0, "sonnet": 1, "opus": 2}
 
 # Values that mean "the user left this field empty".
 _EMPTY_TOKENS = {"", "(none)", "none", "-", "n/a", "na"}
@@ -84,6 +115,46 @@ def scoring_model() -> str:
     if val in _EMPTY_TOKENS or val not in _ALLOWED_MODELS:
         return DEFAULT_SCORING_MODEL
     return val
+
+
+def screen_model() -> str:
+    """Return the CHEAP model tier for the two-pass screen.
+
+    Every new vacancy gets a fast score from this model; only the finalists that
+    clear ``escalation_threshold`` are re-scored by ``scoring_model``. Unknown /
+    empty / placeholder values fall back to the default (haiku, the cheapest
+    tier). The result is CLAMPED to be no pricier than ``scoring_model`` — a
+    screen that costs as much as the final pass defeats the two-pass saving, so a
+    profile that sets, say, ``screen_model: opus`` with a ``sonnet`` strong model
+    is clamped down to ``sonnet``.
+    """
+    val = _volume_fields().get("screen_model", "").strip().lower()
+    if val in _EMPTY_TOKENS or val not in _ALLOWED_MODELS:
+        val = DEFAULT_SCREEN_MODEL
+    strong = scoring_model()
+    if _MODEL_RANK[val] > _MODEL_RANK[strong]:
+        return strong
+    return val
+
+
+def escalation_threshold() -> int:
+    """Return the screen-score floor at/above which a role is escalated to the
+    strong model.
+
+    Calibrated against the golden set so the cheap screen drops zero of the strong
+    model's true positives (the default, 50, sits 20 points under the lowest such
+    golden role's screen score of 70). A garbage / empty value falls back to the
+    default; the result is clamped to 0..100 so it can never resolve to "escalate
+    nothing" or an impossible bound.
+    """
+    val = _volume_fields().get("escalate_threshold", "").strip()
+    if val.lower() in _EMPTY_TOKENS:
+        return DEFAULT_ESCALATION_THRESHOLD
+    try:
+        n = int(val)
+    except ValueError:
+        return DEFAULT_ESCALATION_THRESHOLD
+    return min(100, max(0, n))
 
 
 def max_per_run() -> int:
