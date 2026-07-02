@@ -1503,6 +1503,32 @@ def update_llm_score(vacancy_uuid: str, score_data: dict):
     return rowcount
 
 
+def reset_llm_scores(member_ids: list[str]) -> int:
+    """Null the ``llm_score`` for a set of vacancies so they read as unscored.
+
+    Used by the two-pass driver at the screen->escalate handshake: a
+    finalist's cheap SCREEN score is cleared so the strong pass re-scores it and
+    the driver can reuse the same ``llm_score IS NULL`` idempotency for BOTH
+    passes. The strong pass overwrites each with its own score; an interrupted
+    escalate simply leaves the finalists unscored, and a later run re-screens and
+    re-escalates them — never a silent stale cheap score.
+
+    Like the other DAL writers this does NOT commit — the caller owns the
+    transaction (see AGENTS.md). Returns the number of rows nulled.
+    """
+    if not member_ids:
+        return 0
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE vacancy SET llm_score = NULL WHERE id = ANY(%s::uuid[])",
+        ([str(m) for m in member_ids],),
+    )
+    rowcount = cur.rowcount
+    cur.close()
+    return rowcount
+
+
 # ---------------------------------------------------------------------------
 # Source tracking
 # ---------------------------------------------------------------------------
