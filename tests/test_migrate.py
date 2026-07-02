@@ -368,6 +368,48 @@ def test_duplicate_column_guard_is_scoped_to_known_versions(mig):
 
 
 # ---------------------------------------------------------------------------
+# A version number already recorded as "n/a (other dialect)" must never be
+# reused for a later dialect-specific migration -- it would silently never run
+# (the exact bug fixed by renumbering 0006_company_evidence.sqlite.sql to 0007).
+# ---------------------------------------------------------------------------
+
+
+def test_reusing_a_number_recorded_as_other_dialect_never_applies(mig):
+    """Simulates the real-world timeline: a migration ships Postgres-only
+    first, so every SQLite DB that runs migrate.py in that window records it
+    as "n/a (other dialect)". If a LATER SQLite file reuses that SAME number,
+    the version is already in the ledger -- cmd_migrate sees nothing pending
+    and the SQLite migration never runs, no matter how many times it is
+    invoked afterward."""
+    # (a) old code: a Postgres-only migration. Recorded as n/a on this SQLite DB.
+    (mig.migrations_dir / "0001_evidence.postgres.sql").write_text("SELECT 1;\n", encoding="utf-8")
+    assert mig.m.cmd_migrate(allow_destructive=False, do_backup=False) == 0
+    assert "0001" in _applied_versions(mig.db_path)
+
+    # (b) BUGGY upgrade: the SQLite counterpart reuses number 0001. It never
+    # runs -- 0001 is already applied, so it is invisible.
+    (mig.migrations_dir / "0001_evidence.sqlite.sql").write_text(
+        "ALTER TABLE company ADD COLUMN evidence_flag INTEGER;\n", encoding="utf-8"
+    )
+    assert mig.m.cmd_migrate(allow_destructive=False, do_backup=False) == 0
+    assert "evidence_flag" not in _columns(mig.db_path, "company")
+
+    # (b) FIXED upgrade: ship the SQLite counterpart under the next FREE
+    # number instead of reusing 0001.
+    (mig.migrations_dir / "0001_evidence.sqlite.sql").unlink()
+    (mig.migrations_dir / "0002_evidence.sqlite.sql").write_text(
+        "ALTER TABLE company ADD COLUMN evidence_flag INTEGER;\n", encoding="utf-8"
+    )
+    assert mig.m.cmd_migrate(allow_destructive=False, do_backup=False) == 0
+    assert "evidence_flag" in _columns(mig.db_path, "company")
+    assert _applied_versions(mig.db_path) == {"0001", "0002"}
+
+    # (c) idempotent replay.
+    assert mig.m.cmd_migrate(allow_destructive=False, do_backup=False) == 0
+    assert "evidence_flag" in _columns(mig.db_path, "company")
+
+
+# ---------------------------------------------------------------------------
 # Multiple pending migrations apply in order
 # ---------------------------------------------------------------------------
 
