@@ -103,7 +103,7 @@ def update_vacancies_in_db(updates: dict[str, dict]) -> int:
     updates = {vacancy_uuid: {"url": "..."}}
     Returns number of changed vacancies.
     """
-    from psycopg2.extras import Json, RealDictCursor
+    from db_backend import Json, RealDictCursor
 
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)

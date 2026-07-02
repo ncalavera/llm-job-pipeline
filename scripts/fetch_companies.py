@@ -458,7 +458,7 @@ def cmd_social(args):
         return
 
     from db_conn import get_conn
-    from psycopg2.extras import Json
+    from db_backend import Json
 
     conn = get_conn()
     print(f"Fetching social signals for {len(companies)} companies")

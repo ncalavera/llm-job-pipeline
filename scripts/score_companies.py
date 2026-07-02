@@ -579,7 +579,7 @@ def cmd_save(_args):
     """Read scored results from stdin JSON, save to DB."""
     from db_conn import get_conn
     from database_supabase import auto_review_candidates
-    from psycopg2.extras import Json
+    from db_backend import Json
 
     data = json.load(sys.stdin)
     if not data:
