@@ -28,6 +28,12 @@ export function initArchive() {
         opt.textContent = org;
         sel.appendChild(opt);
       });
+      // Open on "All companies" explicitly. The browser can restore a stale
+      // <select> value across a reload/bfcache (the option is added by JS, so
+      // restoration can land on the alphabetically-first org), which would
+      // silently start the archive filtered to one company. autocomplete="off"
+      // on the element blocks that; this makes the intent deterministic too.
+      sel.value = "";
     }
     archiveInited = true;
   }
@@ -73,11 +79,35 @@ export function renderArchive() {
     return;
   }
 
-  grid.innerHTML = filtered.map((g) => buildArchiveCard(g)).join("");
+  // Per-row isolation: one malformed archived row must never blank the whole
+  // grid. The count above is already set, so an unguarded `.map(...).join("")`
+  // that throws mid-row would leave the grid empty while the header still says
+  // "N of M vacancies" — the exact "count computes but no cards" symptom. A row
+  // that throws falls back to a minimal card so the rendered count always
+  // matches the header.
+  grid.innerHTML = filtered
+    .map((g) => {
+      try {
+        return buildArchiveCard(g);
+      } catch (err) {
+        console.error(
+          "archive: minimal card for malformed row",
+          g && g.id,
+          err,
+        );
+        return buildArchiveFallbackCard(g);
+      }
+    })
+    .join("");
 }
 
 function buildArchiveCard(g) {
-  const [fg, bg] = g.org_color || ["#F97316", "#FFF7ED"];
+  // org_color is a [fg, bg] pair in fresh data, but a legacy/corrupt snapshot
+  // row could carry null or a non-array — destructuring that throws, so coerce
+  // before unpacking.
+  const [fg, bg] = Array.isArray(g.org_color)
+    ? g.org_color
+    : ["#F97316", "#FFF7ED"];
   const firstUrl = safeUrl(
     (g.locations || []).find((l) => l.url)?.url || g.org_url || "",
   );
@@ -147,6 +177,40 @@ function buildArchiveCard(g) {
     "</div>" +
     firstSeenHtml +
     summaryHtml +
+    "</div>"
+  );
+}
+
+// Rendered in place of a row that made buildArchiveCard throw. Reads each
+// scalar field through a guard (a field could be the very thing that threw),
+// so the fallback itself can never throw — the card count stays consistent
+// with the header and the archive degrades to a bare card, never a blank grid.
+function safeField(read, dflt) {
+  try {
+    const v = read();
+    return v == null ? dflt : v;
+  } catch {
+    return dflt;
+  }
+}
+
+function buildArchiveFallbackCard(g) {
+  const org = escHtml(
+    safeField(() => g.company_name || g.org, "") || "Unknown company",
+  );
+  const title = escHtml(safeField(() => g.title, "") || "Untitled role");
+  const id = escHtml(String(safeField(() => g.id, "")));
+  return (
+    '<div class="catalog-card archive-card" data-id="' +
+    id +
+    '">' +
+    '<div class="catalog-card-header"><div class="catalog-header-left">' +
+    '<span class="catalog-org">' +
+    org +
+    "</span></div></div>" +
+    '<h3 class="catalog-title">' +
+    title +
+    "</h3>" +
     "</div>"
   );
 }
