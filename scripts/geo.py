@@ -236,6 +236,19 @@ def region_for_country(name: str) -> str | None:
     return _country_region_map().get(text)
 
 
+def known_regions() -> "frozenset[str]":
+    """The CLOSED set of world-region ids a country can resolve to.
+
+    These are exactly the values of geo.country_region — the only ids
+    region_for_country() ever returns (besides None). A region id outside this
+    set has no member countries, so a ban naming it can never drop a vacancy.
+    config.py validates the profile's ban_regions / onsite_ok_regions against
+    this set and warns on unrecognised ids, so a typo is caught loudly instead
+    of silently disabling the ban.
+    """
+    return frozenset(_country_region_map().values())
+
+
 def is_remote_mode(work_mode: str) -> bool:
     """True if a work_mode string signals remote work (substring match).
 
