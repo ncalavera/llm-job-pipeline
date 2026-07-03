@@ -27,6 +27,7 @@ docs/*
 !docs/assets/
 !docs/assets/**
 !docs/ARCHITECTURE.md
+!docs/fetch-engines.md
 !docs/job-boards-catalogue.md
 !docs/manual-trial-protocol.md
 

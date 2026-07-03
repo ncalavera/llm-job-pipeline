@@ -25,6 +25,7 @@ SCANNED_DOCS = [
     "INSTALL-EASY.md",
     "AGENTS.md",
     "docs/ARCHITECTURE.md",
+    "docs/fetch-engines.md",
     "docs/job-boards-catalogue.md",
 ]
 

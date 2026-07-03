@@ -15,14 +15,14 @@ scheduler — one command a day.
 | Path | What lives there |
 | --- | --- |
 | `scripts/` | The pipeline core — every stage is a plain Python script (see below). |
-| `scripts/fetchers/` | ATS + job-board fetchers, registered by strategy (`COMPANY_FETCHERS`, `BOARD_FETCHERS`). Adding an integration adds a module here, not a branch in the driver. |
+| `scripts/fetchers/` | ATS + job-board fetchers, registered by strategy (`COMPANY_FETCHERS`, `BOARD_FETCHERS`). Adding an integration adds a module here, not a branch in the driver. Every engine — surface, config keys, failure modes, a debug recipe — is documented in [`fetch-engines.md`](fetch-engines.md). |
 | `scripts/prompts/` | The LLM prompt templates (Markdown). Owner-agnostic: the rubric, salary anchor and reference orgs are injected from your profile, never baked in. |
 | `config/defaults.toml` | Machine mechanics — thresholds, geo tables, junk words, the `[boards.*]` catalogue, the `[volume]` window. Neutral; ships for any field. |
 | `config/user_profile.example.md` | The template for your candidate profile. Copy to `config/user_profile.md` (gitignored) — the single place personal taste lives. |
 | `sql/` | `schema.sql` (Postgres) + `schema.sqlite.sql` (SQLite) and `migrations/` (numbered, dual-dialect). |
 | `api/` | Vercel serverless routes (Node) the hosted dashboard calls for live status writes. |
 | `public/` | The static dashboard (vanilla JS/CSS) — six sections: Today, Vacancies, Companies, Applications, Boards, Settings. |
-| `docs/` | This file, the [board catalogue](job-boards-catalogue.md), and the onboarding questionnaire (`index.html`, served by GitHub Pages). |
+| `docs/` | This file, the [board catalogue](job-boards-catalogue.md), the [fetch-engine reference](fetch-engines.md), and the onboarding questionnaire (`index.html`, served by GitHub Pages). |
 | `tests/` | Offline pytest suite — guards, characterizations, parity checks. |
 | `.claude/commands/` | Plain-Markdown runbooks (they double as Claude Code slash commands). See [`AGENTS.md`](../AGENTS.md). |
 
