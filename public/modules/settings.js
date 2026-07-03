@@ -6,7 +6,9 @@
 // the thresholds — each with a neutral `source` pointer (a file + section). No
 // editing UI this wave: the point is one screen where a stranger can see what's
 // configured and the exact line to change. RESOLVED VALUES ONLY reach here —
-// never personal profile prose, secrets or artifact values.
+// never personal profile prose, secrets or artifact values. Values render in
+// neutral mono (not cobalt): they aren't clickable in this UI, and the design
+// protocol reserves cobalt for actual interaction (design-protocol.md #1).
 // =============================================================================
 
 import { escHtml } from "./helpers.js";
@@ -19,43 +21,27 @@ function _valueCell(v) {
 
 function _row(r) {
   return (
-    '<tr class="settings-row">' +
-    '<td class="settings-td settings-td-label">' +
+    '<div class="stg-row">' +
+    '<span class="stg-label">' +
     escHtml(T(r.key, r.key)) +
-    "</td>" +
-    '<td class="settings-td settings-td-value"><code>' +
+    "</span>" +
+    '<span class="stg-value"><code>' +
     _valueCell(r.value) +
-    "</code></td>" +
-    '<td class="settings-td settings-td-source"><code>' +
+    "</code></span>" +
+    '<span class="stg-source"><code>' +
     escHtml(r.source || "") +
-    "</code></td>" +
-    "</tr>"
+    "</code></span>" +
+    "</div>"
   );
 }
 
 function _group(g) {
-  const head =
-    "<thead><tr>" +
-    "<th>" +
-    escHtml(T("settings_col_setting", "Setting")) +
-    "</th>" +
-    "<th>" +
-    escHtml(T("settings_col_value", "Value")) +
-    "</th>" +
-    "<th>" +
-    escHtml(T("settings_col_source", "Where to change")) +
-    "</th>" +
-    "</tr></thead>";
   return (
-    '<section class="settings-group">' +
-    '<h3 class="settings-group-title">' +
+    '<section class="stg-group">' +
+    '<div class="stg-group-title">' +
     escHtml(T(g.key, g.key)) +
-    "</h3>" +
-    '<table class="settings-table">' +
-    head +
-    "<tbody>" +
+    "</div>" +
     (g.rows || []).map(_row).join("") +
-    "</tbody></table>" +
     "</section>"
   );
 }
@@ -67,26 +53,28 @@ export function renderSettings() {
   const data = (window.VACANCY_DATA && window.VACANCY_DATA.settings) || null;
   const groups = (data && data.groups) || [];
 
-  const intro =
-    '<div class="settings-intro">' +
-    '<h2 class="settings-h2">⚙️ <span>' +
+  const header =
+    '<div class="settings-header">' +
+    '<span class="settings-header-title">' +
     escHtml(T("settings_title", "Settings")) +
-    "</span></h2>" +
-    '<p class="settings-sub">' +
+    "</span>" +
+    '<span class="settings-header-sub">' +
     escHtml(
       T(
         "settings_sub",
         "Resolved values in effect right now. Read-only — each row shows the one line to change.",
       ),
     ) +
-    "</p></div>";
+    "</span>" +
+    "</div>";
 
   if (!groups.length) {
-    root.innerHTML = intro + '<div class="settings-empty">—</div>';
+    root.innerHTML = header + '<div class="stg-sheet stg-empty">—</div>';
     return;
   }
 
-  root.innerHTML = intro + groups.map(_group).join("");
+  root.innerHTML =
+    header + '<div class="stg-sheet">' + groups.map(_group).join("") + "</div>";
 }
 
 export function initSettings() {
