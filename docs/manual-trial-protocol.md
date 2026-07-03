@@ -28,6 +28,11 @@ which, do not guess.
   cd manual-trial-simple
   ```
 
+  This clones the default branch's tip. If you're gating a specific
+  branch or commit, clone with `--branch <ref>` (or `git checkout <sha>`
+  right after). Either way, record `git rev-parse HEAD` in your trial notes
+  — a "passed" result is only meaningful against a known commit.
+
 - Test persona (use these answers verbatim at onboarding, for a reproducible
   run): a backend engineer named Alex Rivera, based in Berlin, targeting
   remote or Berlin-based roles, EU passport (no visa sponsorship needed), 4
@@ -61,14 +66,36 @@ Follows INSTALL-EASY.md verbatim. No `.env` at any point in this section.
    source .venv/bin/activate`) and re-run the pip install, per the doc's own
    fallback. A crash with any other message is a real failure.
 
-3. **Action.** Open a coding agent in this folder and run `/jobs-new`
+3. **Action.** Before the first `/jobs-new`, create `config/user_profile.md`
+   — a fresh clone ships only the template, `config/user_profile.example.md`
+   (the real file is gitignored and does not exist yet), and
+   `run_daily.py`'s `validate_profile` stage runs *before* onboarding and
+   aborts if the real file is missing
+   (`scripts/run_daily.py`: "config/user_profile.md is missing. Fill it in
+   ... or run `/jobs-profile`, then re-run"). Ask your coding agent to set up
+   your profile and answer with the Alex Rivera persona above, or do it by
+   hand per INSTALL-EASY.md §3's fallback:
+
+   ```bash
+   cp config/user_profile.example.md config/user_profile.md
+   # then edit ## USER_PROFILE / ## TARGET_ROLES with the Alex Rivera persona
+   ```
+
+   Expected: the file exists and is no longer byte-identical to the example.
+   Optional pre-check (exercises T4's "fails with a clear message" contract):
+   run `/jobs-new` *before* this step and confirm it aborts with exactly that
+   message and exit code 20, instead of hanging or crashing with a
+   traceback — then come back and do this step for real.
+   Fails if: the run proceeds past `validate_profile` with an empty/example
+   profile, or aborts with an unclear message.
+
+4. **Action.** Open a coding agent in this folder and run `/jobs-new`
    (INSTALL-EASY.md §3 / `.claude/commands/jobs-new.md` onboarding gate).
-   Expected, in order: the agent confirms `Backend: local SQLite (...)`;
-   sets up `config/user_profile.md` by asking you to describe yourself in
-   plain language (field, target roles, locations, visa status — answer with
-   the Alex Rivera persona above); web-searches 10–15 real companies and
-   shows a shortlist for a yes/no; on approval, runs the first fetch →
-   filter → score cycle; opens the local dashboard.
+   Expected, in order: the agent confirms `Backend: local SQLite (...)`; the
+   onboarding gate (reached because the company table is empty) web-searches
+   10–15 real companies matching your profile and shows a shortlist for a
+   yes/no; on approval, runs the first fetch → filter → score cycle; opens
+   the local dashboard.
    Fails if: any step is skipped silently, the agent asks something the
    onboarding gate text does not cover, or the banner says
    `Backend: Postgres (Supabase)` — the latter means `SUPABASE_DB_URL` leaked
@@ -77,7 +104,7 @@ Follows INSTALL-EASY.md verbatim. No `.env` at any point in this section.
    documented fix, not a bug — but if the banner is silently wrong (no warning
    printed either way), that is a bug.
 
-4. **Action.** At the company shortlist, before approving, scan the list.
+5. **Action.** At the company shortlist, before approving, scan the list.
    Expected: every company plausibly fits a backend engineer in Berlin. No
    niche impact/nonprofit board (`80k_hours`, `impactpool`, `idealist`,
    `reliefweb`, `datadotorg`, `fast_forward`, `consultants_for_impact` — the
@@ -87,7 +114,7 @@ Follows INSTALL-EASY.md verbatim. No `.env` at any point in this section.
    non-impact persona — this is the exact "boards" failure from the original
    test recurring.
 
-5. **Action.** Approve the shortlist, let the run finish, then open
+6. **Action.** Approve the shortlist, let the run finish, then open
    `http://127.0.0.1:8000/` (or run `python3 scripts/dashboard_local.py` if it
    did not auto-launch).
    Expected: dashboard loads with scored vacancies; six sections are visible
@@ -105,8 +132,16 @@ Continues in the **same scratch clone** from Section 1 — this is the
 documented "easy → hardcore" migration path (INSTALL-EASY.md "Upgrading to
 hardcore later" → INSTALL.md from step 3), not a fresh clone.
 
+**Precondition: use a fresh, empty Supabase project every time you run this
+section** (create a new one, or `TRUNCATE company, vacancy CASCADE;` in the
+SQL Editor on a reused project before step 2). Stale rows from a previous
+trial run carry over company/board state that can mask a real
+backend-parity failure — step 7 below reuses the same test-org name every
+run, so a leftover row from a prior trial would skip the discovery-status
+path it's meant to exercise.
+
 1. **[human]** Create a free Supabase project, any name/region
-   (INSTALL.md §3.1). A throwaway project reused across trial runs is fine.
+   (INSTALL.md §3.1).
    Expected: project ready in the Supabase dashboard.
 
 2. **Action.** Supabase SQL Editor → paste the contents of `sql/schema.sql` →
@@ -196,9 +231,9 @@ hardcore later" → INSTALL.md from step 3), not a fresh clone.
    `## OUTPUT_LANGUAGE` description ("picks the ONE language of the whole
    product: the agent's replies in `/jobs-new` and `/jobs-review`, the run
    reports, the Telegram digest, and the dashboard's default") and
-   `.claude/commands/jobs-new.md:19`'s "Write ALL your chat, gate summaries
-   and progress notes in that language. The driver already prints its
-   banner/summary in it."
+   `.claude/commands/jobs-new.md:18-20`'s "Write ALL your chat, gate
+   summaries and progress notes in that language. The driver already prints
+   its banner/summary in it; match it."
    Fails if: chat stays in English despite the profile change.
 
 3. **Action.** Reload the local dashboard.
@@ -225,16 +260,19 @@ hardcore later" → INSTALL.md from step 3), not a fresh clone.
 
 Build on the run from Section 1 — no new clone needed.
 
-1. **T1 — no insider knowledge.** Re-read the onboarding questions the agent
-   asked in Section 1 step 3.
+1. **T1 — no insider knowledge.** Re-read every question the agent asked
+   you in Section 1 steps 3–4 (the profile-setup conversation, if you did it
+   conversationally, and the company shortlist gate).
    Expected: every question is answerable by someone who has never seen this
    repo before — plain language, no jargon (ATS, WANT score, ticket IDs) left
    unexplained.
    Fails if: a question assumes context only the maintainer would have.
 
-2. **T3 — started and walked away.** Recall Section 1 step 3: count how many
+2. **T3 — started and walked away.** Recall Section 1 step 4: count how many
    times the agent asked you something between hitting Enter on `/jobs-new`
-   and reaching the company shortlist (the first documented gate).
+   and reaching the company shortlist (the first documented gate) — profile
+   setup in step 3 happens before this, so it doesn't count against "no
+   questions mid-run."
    Expected: zero. The driver fetches/validates silently until the first
    gate, per `.claude/commands/jobs-new.md`: "The driver never asks
    questions mid-run."
