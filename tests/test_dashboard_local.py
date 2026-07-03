@@ -20,8 +20,12 @@ import sys
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+MIGRATIONS = REPO_ROOT / "sql" / "migrations"
 
 
 @pytest.fixture()
@@ -292,3 +296,78 @@ def test_unknown_post_route_is_404(server):
     base, _ = server
     status, body = _post(base, "/api/nope", {})
     assert status == 404
+
+
+# ---------------------------------------------------------------------------
+# /api/board-toggle — enable/disable a job board (writes board.enabled only)
+# ---------------------------------------------------------------------------
+
+
+def _ensure_board_schema(dal):
+    """Bring the board table (0002) + enabled flag (0011) onto the temp DB —
+    the shape a migrated install has. The frozen baseline predates both, and the
+    server fixture doesn't apply migrations, so board tests set it up here."""
+    conn = dal.get_conn()
+    cur = conn.cursor()
+    for m in ("0002_board_table", "0011_board_enabled"):
+        cur.execute((MIGRATIONS / f"{m}.sqlite.sql").read_text(encoding="utf-8"))
+    cur.close()
+    conn.commit()
+
+
+def test_board_toggle_enable_persists_and_commits(server):
+    base, dal = server
+    _ensure_board_schema(dal)
+    dal.set_board_enabled("test_board", False)  # seed a known, disabled board
+    assert dal.get_enabled_boards() == []
+
+    status, body = _post(base, "/api/board-toggle", {"board_id": "test_board", "enabled": True})
+    assert status == 200
+    assert body["ok"] is True
+    assert body["enabled"] is True
+    assert dal.get_enabled_boards() == ["test_board"]
+
+    # Committed — survives dropping the connection the endpoint wrote through.
+    dal.close_conn()
+    assert "test_board" in dal.get_enabled_boards()
+
+
+def test_board_toggle_disable_clears_the_flag(server):
+    base, dal = server
+    _ensure_board_schema(dal)
+    dal.set_board_enabled("test_board", True)
+    assert dal.get_enabled_boards() == ["test_board"]
+
+    status, body = _post(base, "/api/board-toggle", {"board_id": "test_board", "enabled": False})
+    assert status == 200
+    assert dal.get_enabled_boards() == []
+
+
+def test_board_toggle_unknown_board_is_404(server):
+    base, dal = server
+    _ensure_board_schema(dal)
+    status, body = _post(base, "/api/board-toggle", {"board_id": "no_such_board", "enabled": True})
+    assert status == 404
+    assert "not found" in body["error"].lower()
+    # Failed closed — nothing was written.
+    assert dal.get_enabled_boards() == []
+
+
+def test_board_toggle_rejects_missing_board_id(server):
+    base, dal = server
+    _ensure_board_schema(dal)
+    status, body = _post(base, "/api/board-toggle", {"enabled": True})
+    assert status == 400
+    assert "board_id" in body["error"]
+
+
+def test_board_toggle_rejects_non_boolean_enabled(server):
+    base, dal = server
+    _ensure_board_schema(dal)
+    dal.set_board_enabled("test_board", False)
+    # A non-boolean must be rejected BEFORE any write — even for a real board,
+    # and the type-check runs before the existence check so it's 400 not 404.
+    status, body = _post(base, "/api/board-toggle", {"board_id": "test_board", "enabled": "yes"})
+    assert status == 400
+    assert "enabled" in body["error"]
+    assert dal.get_enabled_boards() == []

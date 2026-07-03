@@ -66,7 +66,7 @@ import { renderPipeline } from "./modules/pipeline.js";
 import { renderToday, todayAction, openTodayRow } from "./modules/today.js";
 import { initStats, renderStats } from "./modules/stats.js";
 import { initArchive, renderArchive } from "./modules/archive.js";
-import { initBoards, renderBoards } from "./modules/boards.js";
+import { initBoards, renderBoards, toggleBoard } from "./modules/boards.js";
 import {
   initApplications,
   renderApplications,
@@ -661,6 +661,8 @@ window.renderPipeline = renderPipeline;
 window.renderToday = renderToday;
 window.renderArchive = renderArchive;
 window.renderApplications = renderApplications;
+// Boards section (inline onclick on each board's enabled toggle).
+window.toggleBoard = toggleBoard;
 window.renderSettings = renderSettings;
 
 // ---------------------------------------------------------------------------

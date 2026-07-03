@@ -1,8 +1,9 @@
 """Local dashboard server — easy mode, no Vercel, stdlib only.
 
-Serves the existing ``public/`` dashboard on localhost and implements the four
+Serves the existing ``public/`` dashboard on localhost and implements the
 API endpoints the dashboard JS calls (``/api/statuses``, ``/api/company-statuses``,
-``/api/save``, ``/api/company-review``) directly against the data-access layer.
+``/api/save``, ``/api/company-review``, ``/api/board-toggle``) directly against
+the data-access layer.
 Works on the SQLite backend out of the box; if SUPABASE_DB_URL is set it talks
 to Supabase instead — same code path.
 
@@ -106,6 +107,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_save()
         if path == "/api/company-review":
             return self._api_company_review()
+        if path == "/api/board-toggle":
+            return self._api_board_toggle()
         return self._send_json(404, {"error": "Not found"})
 
     # -- static files ------------------------------------------------------
@@ -227,6 +230,39 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(200, {"ok": True, "action": action, "company_id": company_id})
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"  company-review error: {exc}\n")
+            return self._send_json(500, {"error": "Database error"})
+
+    def _api_board_toggle(self):
+        # Local twin of api/board-toggle.js: flips board.enabled — the SAME flag
+        # the CLI (sources.py) writes and run_daily unions in — and nothing else
+        # (STRATEGY guardrail 8). `enabled` is type-checked (not truthiness) so a
+        # legitimate `false` (disable) is accepted, and validated against a
+        # known board (row exists) → 404 otherwise, mirroring _api_save.
+        body = self._read_body()
+        board_id = body.get("board_id")
+        enabled = body.get("enabled")
+        if not isinstance(board_id, str) or not board_id.strip():
+            return self._send_json(400, {"error": "Missing or invalid board_id"})
+        if not isinstance(enabled, bool):
+            return self._send_json(400, {"error": "Missing or invalid enabled"})
+        try:
+            from db_conn import get_conn
+            from database_supabase import set_board_enabled
+
+            with _db_lock:
+                conn = get_conn()
+                cur = conn.cursor()
+                cur.execute("SELECT id FROM board WHERE id = %s", (board_id,))
+                if cur.fetchone() is None:
+                    cur.close()
+                    return self._send_json(404, {"error": "Board not found", "board_id": board_id})
+                cur.close()
+                # set_board_enabled commits internally (a discrete user action
+                # whose whole point is to survive the process) — no _commit().
+                set_board_enabled(board_id, enabled)
+            return self._send_json(200, {"ok": True, "board_id": board_id, "enabled": enabled})
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(f"  board-toggle error: {exc}\n")
             return self._send_json(500, {"error": "Database error"})
 
 
