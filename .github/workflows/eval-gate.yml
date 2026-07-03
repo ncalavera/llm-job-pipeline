@@ -22,7 +22,7 @@ jobs:
   eval-evidence:
     runs-on: ubuntu-latest
     steps:
-      - name: Require a filled "Eval: agreement X% (baseline Y%)" line in the PR body
+      - name: 'Require a filled "Eval: agreement X% (baseline Y%)" line in the PR body'
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
