@@ -3,8 +3,10 @@
 Enrich blind vacancies (no full_description) by scraping their job URLs via Firecrawl.
 
 Loads blind vacancies from Supabase, scrapes each URL, updates full_description.
-Cookie/consent boilerplate is stripped from scrape results; pages that are
-nothing but a cookie wall are NOT saved (logged as js_required instead).
+Every scrape result runs through quality.clean_description() before it is
+saved: a leading OR trailing cookie/consent banner is stripped, and pages
+that are nothing but boilerplate (cookie wall, error page, nav chrome) are
+NOT saved (logged and left blind for a future enrich run instead).
 UNOPS (careers.unops.org) and UNICEF (jobs.unicef.org) detail pages are
 server-rendered — fetched with plain requests, zero Firecrawl credits.
 
@@ -29,8 +31,8 @@ from quality import (
     _COOKIE_BANNER_RE,
     COOKIE_MIN_REMAINDER,
     COOKIE_SCORE_POLLUTION,
-    _find_cookie_banner_end,
-    is_cookie_boilerplate,
+    _strip_trailing_cookie_banner,
+    clean_description,
     strip_cookie_boilerplate,
 )
 import filters
@@ -156,6 +158,19 @@ def _is_unscrapable_host(url: str) -> bool:
     return host == "linkedin.com" or host.endswith(".linkedin.com")
 
 
+def _gate_scraped_description(text: str) -> tuple[str | None, str]:
+    """Quality-gate freshly scraped text before it is written to full_description.
+
+    Thin, unit-testable wrapper around quality.clean_description() — the
+    single gate every description-writing path must share (this write path
+    used to run its own cookie-only check, which missed a trailing
+    consent-widget banner entirely). Returns (text_to_save, verdict);
+    text_to_save is not None only when verdict == "ok". Any other verdict
+    means the vacancy stays blind and is retried on a future enrich run.
+    """
+    return clean_description(text)
+
+
 def main():
     dry_run = "--dry-run" in sys.argv
     limit = None
@@ -237,33 +252,34 @@ def main():
         print(f"  [{i}/{len(blind)}] {vac['org']:25s} {vac['title'][:45]:45s}", end="", flush=True)
 
         text = _fetch_description(client, url)
+        cleaned, verdict = _gate_scraped_description(text)
 
-        if text and is_cookie_boilerplate(text):
-            # Cookie wall with no real content behind it — page needs JS.
-            # Saving it would poison scoring, so treat as a failed scrape.
+        if verdict == "ok":
+            if len(cleaned) < len(text or ""):
+                print(f"  [banner -{len(text) - len(cleaned)} chars]", end="")
+            cur.execute(
+                "UPDATE vacancy SET full_description = %s WHERE id = %s::uuid",
+                (cleaned[:30000], vid),  # cap at 30K chars
+            )
+            enriched += 1
+            print(f"  -> {len(cleaned)} chars")
+        elif verdict == "cookie_wall":
+            # Cookie wall with no real content behind it — page needs JS, or
+            # the banner (leading or trailing) ate almost everything. Saving
+            # it would poison scoring, so treat as a failed scrape: the
+            # vacancy stays blind and is retried on a future enrich run.
             print("  -> cookie/consent page, NOT saved (js_required)", flush=True)
             cookie_pages += 1
             errors += 1
-        else:
-            if text:
-                stripped = strip_cookie_boilerplate(text)
-                if len(stripped) < len(text):
-                    print(f"  [banner -{len(text) - len(stripped)} chars]", end="")
-                text = stripped
-
-            if text and len(text) >= 100:
-                cur.execute(
-                    "UPDATE vacancy SET full_description = %s WHERE id = %s::uuid",
-                    (text[:30000], vid),  # cap at 30K chars
-                )
-                enriched += 1
-                print(f"  -> {len(text)} chars")
-            elif text:
-                print(f"  -> too short ({len(text)} chars)")
-                errors += 1
-            else:
-                print("  -> empty")
-                errors += 1
+        elif verdict in ("error_page", "nav_junk"):
+            print(f"  -> {verdict.replace('_', ' ')}, NOT saved", flush=True)
+            errors += 1
+        elif verdict == "too_short":
+            print(f"  -> too short ({len(text or '')} chars)")
+            errors += 1
+        else:  # "empty"
+            print("  -> empty")
+            errors += 1
 
         # Commit every 10
         if i % 10 == 0:
@@ -280,9 +296,11 @@ def main():
 
 
 def clean_cookie_pages():
-    """Maintenance mode: find saved descriptions that start with a cookie
-    banner, strip the banner, and reset llm_score where the banner had eaten
-    the scoring window. Dry-run by default; --apply executes the UPDATEs."""
+    """Maintenance mode: find saved descriptions carrying a cookie/consent
+    banner — leading (before the JD) or trailing (a widget appended after
+    it) — strip it, and reset llm_score where the removed chunk had eaten
+    enough of the scoring window to matter. Dry-run by default; --apply
+    executes the UPDATEs."""
     apply = "--apply" in sys.argv
     org_filter = ""
     for i, arg in enumerate(sys.argv):
@@ -307,53 +325,53 @@ def clean_cookie_pages():
 
     to_strip, to_blind = [], []
     for vid, org, title, desc, score in cur.fetchall():
-        end = _find_cookie_banner_end(desc)
-        if end is None:
-            continue  # cookie mention is not a leading banner (e.g. footer)
-        stripped = desc[end:].strip()
-        rescore = end >= COOKIE_SCORE_POLLUTION
-        if len(stripped) < COOKIE_MIN_REMAINDER:
-            to_blind.append((vid, org, title, desc, end))
+        cleaned = _strip_trailing_cookie_banner(strip_cookie_boilerplate(desc))
+        removed = len(desc) - len(cleaned)
+        if removed == 0:
+            continue  # anchor matched but nothing to strip (defensive)
+        rescore = removed >= COOKIE_SCORE_POLLUTION
+        if len(cleaned) < COOKIE_MIN_REMAINDER:
+            to_blind.append((vid, org, title, desc, removed))
         else:
-            to_strip.append((vid, org, title, desc, end, stripped, rescore))
+            to_strip.append((vid, org, title, desc, removed, cleaned, rescore))
 
     rescore_n = sum(1 for r in to_strip if r[6]) + len(to_blind)
     print(
-        f"Found {len(to_strip) + len(to_blind)} descriptions with a leading "
-        f"cookie banner ({len(to_blind)} pure cookie walls, "
+        f"Found {len(to_strip) + len(to_blind)} descriptions with a cookie "
+        f"banner ({len(to_blind)} pure cookie walls, "
         f"{rescore_n} need rescoring)",
         flush=True,
     )
 
-    for vid, org, title, desc, end, stripped, rescore in to_strip:
+    for vid, org, title, desc, removed, cleaned, rescore in to_strip:
         action = "strip+rescore" if rescore else "strip        "
         print(
             f"  {action} | {vid} | {org[:28]:28s} | {title[:38]:38s} "
-            f"| -{end} chars | {desc[:100]!r}"
+            f"| -{removed} chars | {desc[:100]!r}"
         )
-    for vid, org, title, desc, end in to_blind:
+    for vid, org, title, desc, removed in to_blind:
         print(
             f"  blind+rescore | {vid} | {org[:28]:28s} | {title[:38]:38s} "
-            f"| -{end} chars | {desc[:100]!r}"
+            f"| -{removed} chars | {desc[:100]!r}"
         )
 
     if not apply:
         print("\nDry run — nothing changed. Re-run with --apply to execute.")
         return
 
-    for vid, org, title, desc, end, stripped, rescore in to_strip:
+    for vid, org, title, desc, removed, cleaned, rescore in to_strip:
         if rescore:
             cur.execute(
                 "UPDATE vacancy SET full_description = %s, llm_score = NULL, "
                 "llm_scored_at = NULL WHERE id = %s::uuid",
-                (stripped[:30000], vid),
+                (cleaned[:30000], vid),
             )
         else:
             cur.execute(
                 "UPDATE vacancy SET full_description = %s WHERE id = %s::uuid",
-                (stripped[:30000], vid),
+                (cleaned[:30000], vid),
             )
-    for vid, org, title, desc, end in to_blind:
+    for vid, org, title, desc, removed in to_blind:
         cur.execute(
             "UPDATE vacancy SET full_description = NULL, llm_score = NULL, "
             "llm_scored_at = NULL WHERE id = %s::uuid",

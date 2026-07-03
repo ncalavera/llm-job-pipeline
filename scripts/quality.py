@@ -5,9 +5,13 @@ Every path that persists a job description (ATS fetch, board merge, Devex /
 LinkedIn import, blind re-enrichment) must run the text through
 ``clean_description()`` first. The gate does two things:
 
-  1. Strips a leading cookie/consent banner so it never poisons the LLM
+  1. Strips a cookie/consent banner — leading (before the JD) or trailing
+     (a Cookiebot/OneTrust widget rendered after the JD, the common shape
+     for a Firecrawl only_main_content scrape) — so it never poisons the LLM
      scoring window (the impactpool incident: an ~11.5K-char consent wall
-     overwrote 149 real descriptions because the check lived in one script).
+     overwrote 149 real descriptions because the check lived in one script;
+     a leading-only strip alone still let trailing-banner descriptions
+     through, since the banner sits after — not before — the real content).
   2. Rejects pages that are nothing but boilerplate — a pure cookie wall, an
      ATS "job gone" error page, or raw navigation chrome — so they are never
      saved as if they were a real JD.
@@ -47,9 +51,19 @@ def _find_cookie_banner_end(text: str):
     Anchors on a strong marker near the top, then chains weak cookie words
     (consent-manager vendor lists mention "cookie" every few hundred chars),
     so a single vague "cookie" inside a legit JD never triggers stripping.
+
+    Requires little/no real content BEFORE the anchor. On a long document a
+    strong marker within the head window is always a genuine leading banner
+    (nothing of substance precedes it). On a SHORT document (real JD under
+    ``COOKIE_HEAD_WINDOW`` chars) a TRAILING widget's anchor can also land
+    inside that window — that's not a leading banner, it's real content
+    followed by a widget, so this returns None for it and lets
+    ``_strip_trailing_cookie_banner`` handle it instead.
     """
     m = _COOKIE_BANNER_RE.search(text, 0, COOKIE_HEAD_WINDOW)
     if not m:
+        return None
+    if len(text[: m.start()].strip()) >= COOKIE_MIN_REMAINDER:
         return None
     end = m.end()
     while True:
@@ -77,11 +91,36 @@ def strip_cookie_boilerplate(text: str) -> str:
     return text[end:].strip()
 
 
+def _strip_trailing_cookie_banner(text: str) -> str:
+    """Remove a cookie-consent block appended AFTER the real content.
+
+    ``_find_cookie_banner_end`` only looks for a banner opening near the top
+    (a LEADING banner, bounded by ``COOKIE_HEAD_WINDOW``). Some sites instead
+    render the consent widget's markdown at the END of the scraped page — a
+    Cookiebot/OneTrust widget injected late in the DOM, which a Firecrawl
+    ``only_main_content`` scrape happily includes after the real job text
+    (observed live: most polluted descriptions had the banner in the final
+    third of the text, not the first).
+
+    Reuses the same anchor list as the leading-banner check — no head-window
+    restriction this time, since real content already precedes the match:
+    everything from the first anchor hit to the end is the banner block.
+    """
+    if not text:
+        return text
+    m = _COOKIE_BANNER_RE.search(text)
+    if not m:
+        return text
+    return text[: m.start()].rstrip()
+
+
 def is_cookie_boilerplate(text: str) -> bool:
     """True when scraped text is essentially a cookie/consent page.
 
     A banner is present AND almost no real content follows it — the page
-    needs JS to render the actual job description.
+    needs JS to render the actual job description. (``_find_cookie_banner_end``
+    already rules out a match that has substantial real content before it,
+    so this only sees genuine leading banners.)
     """
     if not text:
         return False
@@ -197,8 +236,10 @@ def clean_description(text: str, *, min_chars: int = MIN_DESCRIPTION_CHARS):
     if is_navigation_junk(text):
         return None, "nav_junk"
 
-    # Real content with a leading consent banner — strip the banner, keep the JD.
+    # Real content with a leading and/or trailing consent banner — strip
+    # both, keep the JD.
     cleaned = strip_cookie_boilerplate(text).strip()
+    cleaned = _strip_trailing_cookie_banner(cleaned)
 
     if len(cleaned) < min_chars:
         return None, "too_short"
