@@ -42,6 +42,19 @@ CLAUDE = REPO / ".claude"
 # is always excluded from the scans below.
 SELF = Path(__file__).name
 
+# Path components that are never shipped content, so any walk over the repo
+# tree must skip them: Python's own bytecode cache, and .claude/worktrees/ —
+# live agent worktree checkouts (full nested copies of this repo, including
+# their own scripts/prompts/*.md and public/app.js) are local orchestration
+# state, not something that ships. Without this, a scan running while any
+# agent is mid-task reports false leaks at paths like
+# .claude/worktrees/agent-xxx/scripts/prompts/company-scoring.md (DHA-351).
+_SKIP_DIR_NAMES = {"__pycache__", "worktrees"}
+
+
+def _is_skipped(path: Path) -> bool:
+    return any(part in _SKIP_DIR_NAMES for part in path.parts)
+
 
 def _py_files(*roots: Path) -> list[Path]:
     out: list[Path] = []
@@ -49,7 +62,7 @@ def _py_files(*roots: Path) -> list[Path]:
         if not root.exists():
             continue
         for p in root.rglob("*.py"):
-            if "__pycache__" in p.parts or p.name == SELF:
+            if _is_skipped(p) or p.name == SELF:
                 continue
             out.append(p)
     return out
@@ -91,8 +104,24 @@ def _text_files() -> list[Path]:
         files.append(DOCS_INDEX)
     if CLAUDE.exists():
         for p in CLAUDE.rglob("*.md"):
-            files.append(p)
+            if not _is_skipped(p):
+                files.append(p)
     return files
+
+
+def test_claude_worktrees_are_skipped():
+    """Regression for DHA-351: `.claude/worktrees/<agent>/` holds live agent
+    worktree checkouts — full nested copies of this repo — and must be
+    skipped by every scan, the same way `__pycache__` already is. Otherwise a
+    pytest run from the main checkout goes red while any agent is working,
+    flagging paths like
+    `.claude/worktrees/agent-xxx/scripts/prompts/company-scoring.md` as
+    leaks even though that content is identical to the (clean) shipped file.
+    """
+    assert _is_skipped(Path(".claude/worktrees/agent-xxx/scripts/prompts/company-scoring.md"))
+    assert _is_skipped(Path(".claude/worktrees/agent-xxx/public/app.js"))
+    assert not _is_skipped(Path(".claude/commands/jobs-new.md"))
+    assert not _is_skipped(Path("scripts/prompts/company-scoring.md"))
 
 
 def _scan(files, pattern: re.Pattern) -> list[str]:
@@ -571,13 +600,14 @@ def _owner_trace_files() -> list[Path]:
     # All python under scripts/ + tests/ (minus this guard + caches).
     files.extend(_py_files(SCRIPTS, TESTS))
     # The whole .claude/ tree (commands, skills, configs — any text file).
-    # Skip .claude/worktrees/: live agent worktrees are local orchestration
-    # state, never shipped, and their .git link files carry absolute gitdir:
-    # paths by design — scanning them makes every guard run red while any
-    # agent is working (see the wave-1 execution notes in the refactor plan).
+    # _is_skipped() excludes .claude/worktrees/: live agent worktrees are
+    # local orchestration state, never shipped, and their .git link files
+    # carry absolute gitdir: paths by design — scanning them makes every
+    # guard run red while any agent is working (see the wave-1 execution
+    # notes in the refactor plan).
     if CLAUDE.exists():
         for p in CLAUDE.rglob("*"):
-            if p.is_file() and "__pycache__" not in p.parts and "worktrees" not in p.parts:
+            if p.is_file() and not _is_skipped(p):
                 files.append(p)
     # Public dashboard HTML.
     if DOCS_INDEX.exists():
