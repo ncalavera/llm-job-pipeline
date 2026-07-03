@@ -174,6 +174,13 @@ def _sanitize_title(title: str) -> str:
     """
     import html as _html_mod
 
+    # A fetcher may hand back a row whose title key is present but None
+    # (dict.get(k, "") returns None, not the default, when k exists as None).
+    # Coerce to "" so a single malformed row can't crash the whole batch —
+    # _gate_job then skips it as empty_title. Covers every call site at once
+    # (the pre-loop batch_hashes precompute included, which runs before the
+    # per-row gate could catch it).
+    title = title or ""
     title = _html_mod.unescape(title)  # &amp; → &, &nbsp; → space
     title = re.sub(r"\*\*", "", title)  # markdown bold
     title = re.sub(r"\s*!\[.*$", "", title)  # markdown image refs
@@ -888,6 +895,16 @@ def _safe_deadline(raw: str | None) -> str | None:
     if not raw:
         return None
     if re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+        # An ISO-SHAPED string can still be a calendar-invalid date
+        # ("2026-02-30", month 13, day 00). SQLite would store it verbatim as
+        # text, but the canonical Postgres DATE column rejects it and aborts the
+        # run — so validate the calendar here, backend-agnostically (no
+        # IS_SQLITE branch), and drop an impossible date rather than persist it.
+        try:
+            date.fromisoformat(raw)
+        except ValueError:
+            print(f"  dropped calendar-invalid deadline: {raw!r}", flush=True)
+            return None
         return raw
     try:
         return dateutil_parser.parse(raw, fuzzy=True).date().isoformat()
@@ -938,7 +955,8 @@ def _gate_job(job: dict) -> tuple[str, str | None, bool]:
     Returns ``(title, skip_reason, boilerplate_gated)``:
       * ``title`` — the sanitized title.
       * ``skip_reason`` — ``None`` keeps the job; ``"junk"`` drops it AND counts
-        as skipped_junk; ``"blacklist"`` / ``"thin"`` drop it silently.
+        as skipped_junk; ``"empty_title"`` drops a null/blank-title row (logged
+        by the caller); ``"blacklist"`` / ``"thin"`` drop it silently.
       * ``boilerplate_gated`` — True when _gate_description blanked a cookie-wall
         description (count skipped_boilerplate; the row is still kept).
 
@@ -948,6 +966,12 @@ def _gate_job(job: dict) -> tuple[str, str | None, bool]:
     _strip_nul_bytes(job)
     boilerplate_gated = bool(_gate_description(job))
     title = _sanitize_title(job.get("title", ""))
+    # A row with no usable title (null/blank from the source) is junk: skip it
+    # rather than insert a blank-title vacancy — and, crucially, never let it
+    # abort the org's whole save. Checked first so no downstream helper runs on
+    # an empty title.
+    if not title.strip():
+        return title, "empty_title", boilerplate_gated
     if filters.title_words_blacklisted(title):
         return title, "blacklist", boilerplate_gated
     if not filters.has_enough_content(job):
@@ -1033,6 +1057,8 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
             skipped_boilerplate += 1
         if skip_reason == "junk":
             skipped_junk += 1
+        elif skip_reason == "empty_title":
+            print(f"  [{org_name}] skipped a fetched row with a missing/empty title", flush=True)
         if skip_reason is not None:
             continue
 
@@ -1193,6 +1219,8 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
             skipped_boilerplate += 1
         if skip_reason == "junk":
             skipped_junk += 1
+        elif skip_reason == "empty_title":
+            print(f"  [{board_name}] skipped a board row with a missing/empty title", flush=True)
         if skip_reason is not None:
             continue
 
