@@ -515,7 +515,10 @@ def _fetch_one_company(org_name, config, tier, strategy, fetch_stats) -> int:
         new_depts = seen_depts - {d for d in dept_exclude}
         if new_depts:
             print(f"  [{org_name}] new departments (not excluded): {sorted(new_depts)}")
-        jobs = [j for j in jobs if j.get("department", "").lower() not in dept_exclude_lower]
+        # A row whose department key is present but None (dict.get returns None,
+        # not the "" default) must not crash .lower() and abort the run: coerce
+        # to "" so a department-less row simply matches no exclude term and is kept.
+        jobs = [j for j in jobs if (j.get("department") or "").lower() not in dept_exclude_lower]
         excluded = before - len(jobs)
         if excluded:
             print(

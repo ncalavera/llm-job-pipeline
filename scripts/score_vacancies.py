@@ -456,7 +456,20 @@ def cmd_save(args):
                 file=sys.stderr,
             )
 
-        for member_id in entry["member_ids"]:
+        # A malformed entry with no member_ids must be skipped, never allowed to
+        # raise a KeyError out of the loop — that would abort before the single
+        # batch commit below and roll back EVERY good score already staged.
+        member_ids = entry.get("member_ids")
+        if not member_ids:
+            print(
+                f"ERROR: entry missing member_ids — score not saved for "
+                f"{entry.get('org', '?')} — {entry.get('title', '?')}",
+                file=sys.stderr,
+            )
+            errors += 1
+            continue
+
+        for member_id in member_ids:
             rowcount = update_llm_score(member_id, score_data)
             if rowcount == 0:
                 print(
