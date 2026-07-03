@@ -419,14 +419,23 @@ function openVacancyRoute(id) {
   if (!id) return;
   var url = new URL(window.location);
   url.search = build({ screen: "vacancy", id: id });
-  history.pushState({ vacancy: id }, "", url);
+  // inApp marks that a list entry sits beneath this one, so closeDetail can
+  // step back (history.back) instead of pushing a bare entry that browser Back
+  // would then reopen the detail from.
+  history.pushState({ vacancy: id, inApp: true }, "", url);
   showVacancyDetail(id);
   setNavActiveSection(sectionForMode("vacancy"));
 }
 
-// Close whatever detail overlay is open and return to the current list, pushing
-// a bare URL (mirrors closeCompanyProfile's push). Exposed for U6's back button.
+// Close the vacancy detail (U6's back button). If this entry was pushed in-app
+// (a list sits beneath), step back so popstate restores it and no forward entry
+// lingers to reopen the detail. On a cold deep link (no in-app entry beneath)
+// there is nothing to go back to, so replace the URL with a bare one in place.
 function closeDetail() {
+  if (history.state && history.state.inApp) {
+    history.back();
+    return;
+  }
   var url = new URL(window.location);
   url.searchParams.delete("vacancy");
   url.searchParams.delete("company");
