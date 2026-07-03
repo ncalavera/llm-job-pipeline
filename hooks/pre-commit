@@ -37,9 +37,10 @@ while IFS= read -r f; do
 done <<< "$staged"
 
 # 3) Private-DATA SIGNATURES — catch a PII leak by CONTENT, not just by name.
-# public/data.js is already path-blocked (section 1), but a renamed copy, an
-# export, or a debug dump escapes that. Match the serialized triage-review
-# fields in their JSON shape: a quoted key, a colon, then a quoted STRING value.
+# public/data.js is already path-blocked (section 1), but a renamed copy or a
+# JSON-shaped export/dump escapes that. This catches ONLY the double-quoted
+# JSON shape (a quoted key, a colon, then a quoted STRING value) — a repr()/
+# print() dump or a YAML export slips through; section 1 stays the backstop.
 # That opening value-quote is the discriminator: real serialized data pairs the
 # key with a quoted string, whereas the source that BUILDS the payload pairs it
 # with a variable (r.get(...), no quote), so this never fires on the generator
