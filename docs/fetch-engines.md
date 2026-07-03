@@ -50,7 +50,8 @@ column. Config validation lives in `company_registry.validate_company_config`.
 engine. Every board also carries `name`, `url`, `ttl_days`, `tier` and an
 (empty by default) `board_blacklist`.
 
-**Error boundary — "отказ ≠ пусто" (refusal ≠ empty).** Every engine is wrapped
+**Error boundary — refusal ≠ empty (the "silent zero" rule, see `CONCEPTS.md`).**
+Every engine is wrapped
 by `fetchers.registry._guard`: on any exception it **prints, records a
 `fetch_status`, and returns `[]`** — one dead source never crashes the run. The
 reason is preserved so an *empty* result (`[]`, status `ok`) stays
@@ -395,4 +396,7 @@ unset.
 To reproduce a failing source end-to-end (with the real config, TTL and status
 recording) instead of by hand, use the driver:
 `python3 scripts/fetch_vacancies.py --companies "<Name>"` or
-`--strategy <strategy>` for a whole ATS (see `ARCHITECTURE.md`).
+`--strategy <strategy>` for a whole ATS (see `ARCHITECTURE.md`). Unlike the
+read-only recipes above, the driver **writes to whichever database your
+environment points at** — keep `JOBSEARCH_DB_PATH` on a throwaway SQLite (and
+`SUPABASE_DB_URL` unset) unless you intend to touch your real data.
