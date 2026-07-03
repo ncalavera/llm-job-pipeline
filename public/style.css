@@ -40,8 +40,23 @@
   --sky-sheet: #f6f8fa;
   --sky-text: #3a3833;
   --sky-text-secondary: #67635a;
-  --sky-text-tertiary: #8a867c;
-  --sky-text-faint: #b5b1a6;
+  /* tertiary/faint retuned for AA (U16, DHA-400): the originals (#8a867c,
+     #b5b1a6) read 2.9–3.6:1 and 1.7–2.1:1 against every background they're
+     used on (shell/sheet/white), both well under the 4.5:1 floor for
+     body-size text. Contrast is ~L-dominated for this warm-grey hue, so the
+     lightest value that clears 4.5:1 against the worst case (shell
+     #e3e7ed, the un-seated material) sits within a hair of --sky-text-
+     secondary — three visible levels survive, but the bottom two compress
+     close together. Ratios (WCAG relative-luminance):
+       tertiary #6b675f — shell 4.54:1, sheet 5.29:1, white 5.63:1
+       faint    #6c675a — shell 4.54:1, sheet 5.30:1, white 5.64:1
+     Genuinely decorative/redundant glyphs (row-arrow icons, a placeholder,
+     a kbd hint next to an already-labeled control) stay on the ORIGINAL
+     faint value via --sky-text-disabled below — WCAG's contrast minimum
+     doesn't apply to them, and forcing them dark would fight their intent. */
+  --sky-text-tertiary: #6b675f;
+  --sky-text-faint: #6c675a;
+  --sky-text-disabled: #b5b1a6;
   --sky-hairline: rgba(255, 255, 255, 0.85);
   --sky-row-hover: rgba(58, 56, 51, 0.035);
 
@@ -203,14 +218,16 @@ body::after {
 }
 
 .sidebar-search::placeholder {
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
 }
 
 .sidebar-search-kbd {
   flex: none;
   font-family: "JetBrains Mono", monospace;
   font-size: 10px;
-  color: var(--sky-text-secondary);
+  /* Redundant with the labeled search affordance itself — decorative
+     shortcut hint, not required to clear AA (U16). */
+  color: var(--sky-text-disabled);
 }
 
 .sidebar-nav {
@@ -269,7 +286,7 @@ body::after {
   font-family: "JetBrains Mono", monospace;
   font-size: 10.5px;
   font-weight: 600;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
 }
 
 .nav-count--cobalt {
@@ -339,7 +356,7 @@ body::after {
   gap: 8px;
   padding: 6px 10px;
   font-size: 11px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 
 .sync-dot {
@@ -347,7 +364,9 @@ body::after {
   height: 7px;
   flex: none;
   border-radius: 50%;
-  background: var(--sky-text-faint);
+  /* Default/neutral dot; the .sync-label text next to it carries the same
+     state — decorative, not required to clear AA (U16). */
+  background: var(--sky-text-disabled);
 }
 
 .sync-dot.ok {
@@ -363,7 +382,7 @@ body::after {
 }
 
 .sync-label.ok {
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
 }
 
 .sync-label.stale {
@@ -1213,7 +1232,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   font-family: "JetBrains Mono", monospace;
   font-size: 10.5px;
   font-weight: 600;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
 }
 .basket-tab[data-basket="unseen"] .basket-count {
   color: var(--cobalt);
@@ -1362,7 +1381,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 .catalog-row {
   padding: 10px 20px;
@@ -1418,7 +1437,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .catalog-row-sub {
   font-size: 11.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1450,7 +1469,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 
 .catalog-row-loc {
   font-size: 12px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1465,7 +1484,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 .catalog-row-seen {
   font-family: "JetBrains Mono", monospace;
   font-size: 11.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 
 .catalog-row-actions {
@@ -1494,7 +1513,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .catalog-row-btn.pass {
   background: rgba(58, 56, 51, 0.06);
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 .catalog-row-btn.pass:hover {
   background: var(--q-weak-bg);
@@ -1512,7 +1531,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   padding: 12px 20px;
   font-family: "JetBrains Mono", monospace;
   font-size: 10.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   text-align: right;
 }
 
@@ -1814,7 +1833,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.02em;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   background: transparent;
   border: none;
   border-radius: 9999px;
@@ -2304,7 +2323,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   font-family: "Onest", sans-serif;
   font-size: var(--text-sm);
   font-weight: 600;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   cursor: pointer;
 }
 .vac-back:hover {
@@ -2336,7 +2355,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .vac-score--none {
   background: var(--sky-row-hover);
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 .vac-header-text {
   flex: 1;
@@ -2381,7 +2400,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   gap: 10px;
   margin-top: 5px;
   font-size: 12.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   flex-wrap: wrap;
 }
 .vac-org {
@@ -2407,7 +2426,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   color: var(--sky-text-secondary);
 }
 .vac-meta-seen {
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 
 /* --- Actions --- */
@@ -2500,7 +2519,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   font-weight: 600;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   margin-bottom: 8px;
 }
 .vac-reasoning-text {
@@ -2514,7 +2533,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   margin-bottom: 10px;
 }
 .vac-desc {
@@ -2545,7 +2564,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .vac-empty {
   font-size: 13.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
 }
 
 /* --- Facts rail --- */
@@ -2569,7 +2588,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   padding: 4px 0;
 }
 .vac-fact-k {
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
 }
 .vac-fact-v {
   font-weight: 600;
@@ -2647,7 +2666,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .vac-company-note {
   font-size: 11.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   line-height: 1.5;
 }
 .vac-company-link {
@@ -3031,7 +3050,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 
 #statsSection .stats-help {
   font-size: var(--text-xs);
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   margin-bottom: 14px;
 }
 
@@ -3057,7 +3076,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   padding: 6px 14px 10px;
   font-size: 10.5px;
   letter-spacing: 0.06em;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 
 #statsSection .ct-th-active {
@@ -3089,7 +3108,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   background: var(--sky-row-hover);
 }
 #statsSection .ct-row--remote .ct-name-text {
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   font-weight: 500;
 }
 
@@ -3107,12 +3126,12 @@ body[data-dashboard-style="minimal"] .loading-illus {
   color: var(--q-good);
 }
 #statsSection .ct-liked-zero {
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   font-weight: 400;
 }
 
 #statsSection .geo-score-dash {
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 #statsSection .q-good,
 #statsSection .q-moderate,
@@ -3121,7 +3140,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 
 #statsSection .company-empty {
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 /* === U9 Today (redesign) === */
 /* Today (DHA-393, U9): material header (title + subtitle) above a sheet split
@@ -3146,7 +3165,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .today-subtitle {
   font-size: 12.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
 }
 
 .today-sheet {
@@ -3191,7 +3210,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
 }
 .today-rail-block .today-section-label {
   color: #c4c0b6;
@@ -3200,7 +3219,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 .today-section-count {
   font-family: "JetBrains Mono", monospace;
   font-size: 10.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 
 .today-rows {
@@ -3254,7 +3273,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .today-row-sub {
   font-size: 11.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3298,7 +3317,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .today-act.act-pass {
   background: rgba(58, 56, 51, 0.06);
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 .today-act.act-pass:hover {
   background: var(--q-weak-bg);
@@ -3308,7 +3327,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 .today-empty {
   padding: 9px 12px;
   font-size: 12.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 
 /* Rail — Decision discipline, Companies awaiting approval, Learning cycle. */
@@ -3318,7 +3337,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .today-sla-hint {
   font-size: 11.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   margin-bottom: 10px;
 }
 .today-stuck-rows {
@@ -3354,7 +3373,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .today-stuck-meta {
   font-size: 11px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 .today-leakage {
   padding: 10px 12px;
@@ -3415,7 +3434,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 
 .cp-subtitle {
   font-size: 12.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   margin-top: 2px;
 }
 
@@ -3477,7 +3496,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   flex: none;
   width: 74px;
   font-size: 12px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
 }
 .cp-bar-value {
   flex: none;
@@ -3490,7 +3509,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 .cp-mpa-note {
   font-family: "JetBrains Mono", monospace;
   font-size: 11px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   margin-top: 4px;
 }
 
@@ -3513,7 +3532,9 @@ body[data-dashboard-style="minimal"] .loading-illus {
   height: 6px;
   border-radius: 2px;
   margin-top: 7px;
-  background: var(--sky-text-faint);
+  /* Plain list-bullet marker, redundant with its own bullet text —
+     decorative, not required to clear AA (U16). */
+  background: var(--sky-text-disabled);
 }
 .cp-bullet--good {
   background: var(--q-good);
@@ -3554,7 +3575,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   color: var(--sky-text);
 }
 .cp-evidence-quote {
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   font-style: italic;
   margin-top: 2px;
 }
@@ -3594,7 +3615,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .cp-empty-fit {
   font-size: 13px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   font-style: italic;
 }
 
@@ -3607,7 +3628,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 .cp-roles-count {
   font-family: "JetBrains Mono", monospace;
   font-size: 10.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 .cp-dist {
   margin: 10px 0 2px;
@@ -3618,7 +3639,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   align-items: center;
   margin-bottom: 8px;
   font-size: 10.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   flex-wrap: wrap;
 }
 .cp-dist-legend-item {
@@ -3669,7 +3690,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .cp-role-score--none {
   background: var(--sky-row-hover);
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 .cp-role-body {
   flex: 1;
@@ -3697,7 +3718,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .cp-role-meta {
   font-size: 11.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3706,7 +3727,9 @@ body[data-dashboard-style="minimal"] .loading-illus {
 .cp-role-arrow {
   flex: none;
   font-size: 14px;
-  color: var(--sky-text-secondary);
+  /* Purely decorative chevron on an already-labeled, already-clickable row
+     — not required to clear AA (U16). */
+  color: var(--sky-text-disabled);
 }
 .cp-role-row:hover .cp-role-arrow {
   color: var(--cobalt);
@@ -3808,14 +3831,14 @@ body[data-dashboard-style="minimal"] .loading-illus {
 .archive-header-hint {
   margin-left: auto;
   font-size: 11.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 
 .archive-results-count {
   padding: 0 10px 8px;
   font-family: "JetBrains Mono", monospace;
   font-size: 10.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   text-align: right;
 }
 
@@ -3880,7 +3903,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .archive-row-sub {
   font-size: 11.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3888,7 +3911,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 .archive-row-seen {
   flex: none;
   font-size: 11px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 
 /* === U8 companies table (redesign) =========================================
@@ -3942,14 +3965,14 @@ body[data-dashboard-style="minimal"] .loading-illus {
   font-family: "JetBrains Mono", monospace;
   font-size: 10.5px;
   font-weight: 600;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   background: transparent;
   padding: 0;
   min-width: 0;
 }
 .company-sub-tab.active .sub-tab-count {
   background: transparent;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
 }
 @media (max-width: 768px) {
   .company-sub-tab {
@@ -3987,7 +4010,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   text-align: left;
   white-space: nowrap;
   user-select: none;
@@ -4062,7 +4085,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   font-weight: 700;
 }
 .ct-dim-empty {
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   font-family: "JetBrains Mono", monospace;
 }
 .ct-col-open {
@@ -4197,7 +4220,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .ct-liked-zero {
   font-family: "JetBrains Mono", monospace;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 .ct-new-nonzero {
   font-family: "JetBrains Mono", monospace;
@@ -4212,7 +4235,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   display: inline-block;
   max-width: 100%;
   font-size: 12px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4231,7 +4254,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .ct-hot-deadline {
   font-size: 11px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
 }
 
 /* --- Freshness cell (dot + relative time) --- */
@@ -4241,7 +4264,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   gap: 6px;
   font-family: "JetBrains Mono", monospace;
   font-size: 11px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
 }
 .freshness-dot {
   width: 7px;
@@ -4260,7 +4283,9 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .freshness-never {
   background: transparent;
-  border: 1.5px dashed var(--sky-text-faint);
+  /* The adjacent "Never fetched" text carries the same state — decorative,
+     not required to clear AA (U16). */
+  border: 1.5px dashed var(--sky-text-disabled);
 }
 
 /* --- Monitoring status cell (dot + text) --- */
@@ -4269,7 +4294,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   white-space: nowrap;
 }
 .mon-dot {
@@ -4300,7 +4325,9 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .mon-dot--never {
   background: transparent;
-  border: 1.5px dashed var(--sky-text-faint);
+  /* The .mon-cell label text next to it carries the same state —
+     decorative, not required to clear AA (U16). */
+  border: 1.5px dashed var(--sky-text-disabled);
 }
 
 /* --- Company review buttons (Approve ✓ / Archive ✗) --- */
@@ -4344,7 +4371,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 .company-empty {
   text-align: center;
   padding: 48px 24px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   font-size: var(--text-base);
 }
 /* === U12 Triage (redesign) === */
@@ -4383,7 +4410,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 .triage-hint {
   margin-left: auto;
   font-size: 11.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 
 .triage-funnel-track {
@@ -4393,7 +4420,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   flex-wrap: wrap;
   font-family: "JetBrains Mono", monospace;
   font-size: 11px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
 }
 .triage-stage {
   display: inline-flex;
@@ -4421,7 +4448,9 @@ body[data-dashboard-style="minimal"] .loading-illus {
   color: var(--q-good);
 }
 .triage-stage-arrow {
-  color: var(--sky-text-secondary);
+  /* Purely decorative — the funnel strip's numbers already carry the
+     information; not required to clear AA (U16). */
+  color: var(--sky-text-disabled);
 }
 
 .triage-board-controls {
@@ -4481,7 +4510,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   margin-left: auto;
   font-family: "JetBrains Mono", monospace;
   font-size: 10.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 
 .pipe-col-cards {
@@ -4492,7 +4521,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 
 .pipe-col-empty {
   text-align: center;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   padding: 20px 0;
   font-size: 12px;
 }
@@ -4553,7 +4582,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .pipe-card-summary {
   font-size: 11.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   margin-bottom: 4px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -4562,7 +4591,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .pipe-card-loc {
   font-size: 11.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   margin-bottom: 4px;
 }
 .pipe-card-score {
@@ -4603,12 +4632,12 @@ body[data-dashboard-style="minimal"] .loading-illus {
   background: var(--amber-tint);
 }
 .pipe-deadline--active {
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   background: var(--sky-row-hover);
 }
 .pipe-card-note {
   font-size: 11px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   margin-top: 4px;
   line-height: 1.4;
   max-height: 4.2em;
@@ -4616,11 +4645,11 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .pipe-card-note.muted {
   font-style: italic;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 .pipe-card-issue {
   font-size: 11px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   font-weight: 600;
   margin-top: 4px;
 }
@@ -4629,7 +4658,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .pipe-card-open-link {
   font-size: 11px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   text-decoration: none;
 }
 .pipe-card-open-link:hover {
@@ -4677,7 +4706,7 @@ a.pipe-grp-role-title:hover {
 }
 .pipe-grp-role-loc {
   font-size: 10.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   margin-top: 2px;
 }
 
@@ -4711,7 +4740,9 @@ a.pipe-grp-role-title:hover {
 .pipe-card-ghost {
   opacity: 0.4;
   background: color-mix(in srgb, var(--sky-text) 6%, transparent);
-  border: 1px dashed var(--sky-text-faint);
+  /* Transient drag-and-drop placeholder — decorative, not required to
+     clear AA (U16). */
+  border: 1px dashed var(--sky-text-disabled);
 }
 .pipe-card-dragging {
   opacity: 0.95;
@@ -4721,7 +4752,7 @@ a.pipe-grp-role-title:hover {
 .pipeline-empty {
   text-align: center;
   padding: 60px 20px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 .pipeline-empty-icon {
   font-size: 48px;
@@ -4761,7 +4792,7 @@ a.pipe-grp-role-title:hover {
 }
 .apl-hint {
   font-size: 12.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
 }
 
 /* --- Status filter chips: cobalt-active recipe, matching Browse's
@@ -4839,7 +4870,7 @@ a.pipe-grp-role-title:hover {
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 .apl-row:not(.apl-row-head) {
   cursor: pointer;
@@ -4890,12 +4921,12 @@ a.pipe-grp-role-title:hover {
   font-family: "JetBrains Mono", monospace;
   font-size: 10.5px;
   font-weight: 600;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   vertical-align: middle;
 }
 .apl-company {
   font-size: 12.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4918,7 +4949,7 @@ a.pipe-grp-role-title:hover {
 .apl-sent {
   font-family: "JetBrains Mono", monospace;
   font-size: 11px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 
 /* --- Stage chip: 4 colors for 6 statuses (design-protocol.md #1) — see the
@@ -4945,14 +4976,14 @@ a.pipe-grp-role-title:hover {
 }
 .apl-stage-neutral {
   background: var(--sky-row-hover);
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
 }
 
 .apl-empty-sheet {
   padding: 40px 20px;
 }
 .apl-empty {
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   text-align: center;
   padding: 24px 0;
   font-size: 13px;
@@ -5010,7 +5041,7 @@ a.pipe-grp-role-title:hover {
 .boards-header-sub,
 .settings-header-sub {
   font-size: 12.5px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
 }
 
 /* --- Boards table --- */
@@ -5034,7 +5065,7 @@ a.pipe-grp-role-title:hover {
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   text-align: left;
   white-space: nowrap;
 }
@@ -5106,27 +5137,27 @@ a.pipe-grp-role-title:hover {
 }
 .brd-name-id {
   font-size: 10px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 .brd-name-id code {
   font-family: "JetBrains Mono", monospace;
 }
 .brd-audience {
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   max-width: 260px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .brd-empty {
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   padding: 16px 10px;
   font-size: 13px;
 }
 .boards-cli-hint {
   margin: 12px 8px 0;
   font-size: 11px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 .boards-cli-hint code {
   font-family: "JetBrains Mono", monospace;
@@ -5138,7 +5169,7 @@ a.pipe-grp-role-title:hover {
 .boards-live-note {
   margin: 6px 8px 0;
   font-size: 11px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
 }
 
 /* --- Settings grouped rows --- */
@@ -5159,7 +5190,7 @@ a.pipe-grp-role-title:hover {
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   margin-bottom: 12px;
 }
 .stg-row {
@@ -5186,10 +5217,10 @@ a.pipe-grp-role-title:hover {
 .stg-source code {
   font-family: "JetBrains Mono", monospace;
   font-size: 11px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
 }
 .stg-empty {
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   padding: 16px 0;
   font-size: 13px;
 }
@@ -5218,14 +5249,14 @@ a.pipe-grp-role-title:hover {
   gap: 6px;
   padding: 0 18px 10px;
   font-size: 11px;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-faint);
   flex-wrap: wrap;
 }
 .browse-key {
   font-family: "JetBrains Mono", monospace;
   font-size: 10.5px;
   font-weight: 700;
-  color: var(--sky-text-secondary);
+  color: var(--sky-text-tertiary);
   background: rgba(58, 56, 51, 0.05);
   border-radius: 5px;
   padding: 1px 6px;
@@ -5278,7 +5309,9 @@ a.pipe-grp-role-title:hover {
   outline: none;
 }
 .palette-input::placeholder {
-  color: var(--sky-text-faint);
+  /* Input placeholder text — WCAG's contrast minimum doesn't apply here
+     (U16). */
+  color: var(--sky-text-disabled);
   font-weight: 400;
 }
 .palette-results {
