@@ -15,69 +15,11 @@ from company_registry import PARSING_ARTIFACTS
 from database_supabase import load_vacancies, load_all_enrichment
 from db_conn import get_conn
 
-# ---------------------------------------------------------------------------
-# Scoring feed — recent scoring sessions for dashboard stats panel
-# ---------------------------------------------------------------------------
-
-# A candidate company with a vacancy scoring this high gets a 🔥 badge and
-# floats to the top of Pending Review so it doesn't rot unreviewed.
-HOT_VACANCY_SCORE = 55
-# Deadline within this many days → "⏰ deadline DD.MM" urgency marker.
-DEADLINE_SOON_DAYS = 7
-
-
-def _deadline_soon_label(deadline_iso: str) -> str:
-    """Return 'deadline DD.MM' if the deadline is within DEADLINE_SOON_DAYS, else ''."""
-    if not deadline_iso:
-        return ""
-    try:
-        dl = date.fromisoformat(str(deadline_iso)[:10])
-    except (ValueError, TypeError):
-        return ""
-    days_left = (dl - datetime.now(DASHBOARD_TZ).date()).days
-    if 0 <= days_left <= DEADLINE_SOON_DAYS:
-        return f"deadline {dl.day:02d}.{dl.month:02d}"
-    return ""
-
-
-# Statuses that disqualify a vacancy from the "applyable" count: already
-# decided (passed), removed (archived), or protected-but-disappearing
-# (expiring — a first-class status; it needs an explicit decision, it is not a
-# live role to apply to). The deadline-in-the-past check below is an additional
-# guard for live statuses.
-_NON_APPLYABLE_STATUSES = {
-    "archived",
-    "passed",
-    "expiring",
-    "applied",
-    "skipped",
-}
-
-
-def _is_applyable_vacancy(v: dict) -> bool:
-    """True if a vacancy is worth applying to right now.
-
-    A role counts when its score clears APPLYABLE_SCORE, it isn't already
-    archived/passed/expiring, and its deadline (if any) hasn't passed.
-
-    Donor-facing exclusion is deferred: the vacancy scorer emits free-form
-    `tags` with no reliable donor-facing marker, and `llm_tags` isn't even in
-    the light vacancy SELECT used here — so we don't fabricate a tag the scorer
-    never emits. This stays score+status+deadline only until a clean tag exists.
-    """
-    score = v.get("llm_score")
-    if score is None or score < APPLYABLE_SCORE:
-        return False
-    if (v.get("status") or "") in _NON_APPLYABLE_STATUSES:
-        return False
-    deadline = v.get("deadline")
-    if deadline:
-        try:
-            if date.fromisoformat(str(deadline)[:10]) < datetime.now(DASHBOARD_TZ).date():
-                return False
-        except (ValueError, TypeError):
-            pass  # unparseable deadline → treat as no deadline, don't exclude
-    return True
+# Per-company vacancy NUMBERS (vacancy_count, applyable_count, avg score and the
+# hot-vacancy signal) are no longer baked here — they derive in the browser from
+# the shipped roles (KISS derivation, phase 2; public/modules/derive.js
+# `companyRollup`). The payload ships only the raw role-id list per company; the
+# browser owns the math.
 
 
 # ---------------------------------------------------------------------------
@@ -675,10 +617,17 @@ def _custom_boost(mission: dict):
 
 
 def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]:
-    """Aggregate per-company stats from all data sources.
+    """Build one raw row per company for the dashboard frontend.
 
     Loads from Supabase. db param is accepted but ignored (backward compat).
-    Returns a list of company dicts for the dashboard frontend.
+
+    KISS derivation (phase 2): the row carries company ENTITY fields (identity,
+    enrichment, tier, monitoring) plus the raw ``vacancy_ids`` list — but NO
+    per-company vacancy NUMBERS. vacancy_count, applyable_count, the average LLM
+    score, the hot-vacancy signal and the region breakdown are all derived in the
+    browser from those roles (public/modules/derive.js ``companyRollup``), so they
+    react to a like/pass or a passing day with no run and a company's count can
+    never disagree with the roles listed under it.
     """
     if org_colors is None:
         org_colors = {}
@@ -707,62 +656,19 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
         }
     cur.close()
 
-    # --- Aggregate per-org vacancy stats (keyed by canonical name) ---
-    org_stats: dict[str, dict] = {}
+    # --- Collect per-org vacancy ids (keyed by canonical name) ---
+    # This id list is the ONLY per-company vacancy fact that ships now: every
+    # NUMBER — vacancy_count, applyable_count, avg score, the hot-vacancy signal
+    # and the region breakdown — is derived in the browser from these roles
+    # (KISS derivation, phase 2; public/modules/derive.js `companyRollup`). The
+    # browser can't reconstruct which roles belong to a company, so only the ids
+    # ride along.
+    org_vacancy_ids: dict[str, list] = {}
     for vid, v in vacancies.items():
         org = resolve_canonical_name(v.get("org", ""))
         if not org:
             continue
-        if org not in org_stats:
-            org_stats[org] = {
-                "vacancy_count": 0,
-                "applyable_count": 0,
-                "scored_count": 0,
-                "scores": [],
-                "regions": {"europe": 0, "us": 0, "remote": 0, "other": 0},
-                "has_compensation": 0,
-                "first_seen": v.get("first_seen", ""),
-                "last_seen": v.get("first_seen", ""),
-                "vacancy_ids": [],
-            }
-        st = org_stats[org]
-        st["vacancy_count"] += 1
-        st["vacancy_ids"].append(vid)
-        if _is_applyable_vacancy(v):
-            st["applyable_count"] += 1
-        llm = v.get("llm_score")
-        if llm is not None and llm >= 0:
-            st["scored_count"] += 1
-            st["scores"].append(llm)
-            # Track the single strongest vacancy + its deadline (hot-vacancy
-            # signal for candidate companies pending review).
-            if llm > st.get("_hot_score", -1):
-                st["_hot_score"] = llm
-                st["_hot_deadline"] = v.get("deadline") or ""
-        # Region from locations[]
-        locs_list = v.get("locations", [])
-        if locs_list:
-            for loc in locs_list:
-                region = loc.get("region") or "other"
-                if region not in st["regions"]:
-                    region = "other"
-                st["regions"][region] += 1
-                break  # count best region per vacancy
-        else:
-            st["regions"]["other"] += 1
-        # Compensation
-        comp = v.get("compensation", "")
-        if not comp:
-            locs = v.get("locations", [])
-            comp = next((l.get("compensation", "") for l in locs if l.get("compensation")), "")
-        if comp:
-            st["has_compensation"] += 1
-        # Date tracking
-        fs = v.get("first_seen", "")
-        if fs and (not st["first_seen"] or fs < st["first_seen"]):
-            st["first_seen"] = fs
-        if fs and fs > st["last_seen"]:
-            st["last_seen"] = fs
+        org_vacancy_ids.setdefault(org, []).append(vid)
 
     # --- Collect all unique company names (keyed by canonical name) ---
     all_names: dict[str, str] = {}  # canonical → display name
@@ -774,14 +680,14 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
     for canonical, row in company_lookup.items():
         if canonical not in all_names:
             all_names[canonical] = canonical
-    # From Supabase vacancies (already resolved to canonical in org_stats)
-    for canonical in org_stats:
+    # From Supabase vacancies (already resolved to canonical above)
+    for canonical in org_vacancy_ids:
         if canonical not in all_names:
             all_names[canonical] = canonical
 
     # --- Orphan detection: configured companies with 0 vacancies ---
     for name, cfg in COMPANIES.items():
-        if cfg.get("strategy") != "manual_check" and name not in org_stats:
+        if cfg.get("strategy") != "manual_check" and name not in org_vacancy_ids:
             print(
                 f"  ⚠ Orphan: {name} (strategy={cfg.get('strategy')}) — 0 vacancies after aggregation"
             )
@@ -791,7 +697,7 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
     for canonical, display_name in all_names.items():
         cfg = COMPANIES.get(canonical, {})
         csv_row = company_lookup.get(canonical, {})
-        stats = org_stats.get(canonical, {})
+        vacancy_ids = org_vacancy_ids.get(canonical, [])
 
         is_in_config = canonical in COMPANIES
         is_monitored = canonical in company_lookup
@@ -801,13 +707,6 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
 
         # Careers URL: config > CSV
         careers_url = cfg.get("careers_url", "") or csv_row.get("careers_url", "")
-
-        # Vacancy stats
-        vacancy_count = stats.get("vacancy_count", 0)
-        scored_count = stats.get("scored_count", 0)
-        scores = stats.get("scores", [])
-        avg_score = round(sum(scores) / len(scores), 1) if scores else None
-        max_score = max(scores) if scores else None
 
         slug = cfg.get("slug", display_name.lower().replace(" ", "-").replace(".", ""))
 
@@ -822,18 +721,6 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
         mission = enrich.get("mission_fit", {})
         social = enrich.get("social", {})
         is_enriched = bool(about.get("description") or mission.get("alignment_score") is not None)
-
-        # Hot-vacancy signal: only meaningful while the company is still
-        # pending review (candidate). A strong score floats it up; a near
-        # deadline adds urgency. Baked unconditionally; the frontend gates
-        # on review status.
-        hot_vacancy = None
-        hot_score = stats.get("_hot_score")
-        if hot_score is not None and hot_score >= HOT_VACANCY_SCORE:
-            hot_vacancy = {
-                "score": hot_score,
-                "deadline_label": _deadline_soon_label(stats.get("_hot_deadline", "")),
-            }
 
         company_id = csv_row.get("company_id", "")
         company_applications = apps_by_company.get(company_id, []) if company_id else []
@@ -864,24 +751,16 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
                 "is_researched": is_researched,
                 "needs_source": bool(cfg.get("strategy"))
                 and cfg.get("strategy") != "manual_check"
-                and vacancy_count == 0,
+                and len(vacancy_ids) == 0,
                 "is_archived": csv_row.get("status", "") == "inactive",
                 "is_manual_check": cfg.get("strategy") == "manual_check",
-                "vacancy_count": vacancy_count,
-                "applyable_count": stats.get("applyable_count", 0),
-                "scored_count": scored_count,
-                "avg_llm_score": avg_score,
-                "max_llm_score": max_score,
-                "region_breakdown": stats.get(
-                    "regions", {"europe": 0, "us": 0, "remote": 0, "other": 0}
-                ),
-                "has_compensation": stats.get("has_compensation", 0),
-                "first_seen": stats.get("first_seen", ""),
-                "last_seen": stats.get("last_seen", ""),
+                # Per-company NUMBERS (vacancy_count, applyable_count, avg score,
+                # hot-vacancy signal, region breakdown) are derived in the browser
+                # from the roles below (KISS derivation, phase 2;
+                # public/modules/derive.js). Only the raw role-id list ships.
                 "last_fetched": sources.get(canonical, {}).get("last_fetched", ""),
                 "fetch_status": sources.get(canonical, {}).get("fetch_status", ""),
-                "vacancy_ids": stats.get("vacancy_ids", []),
-                "hot_vacancy": hot_vacancy,
+                "vacancy_ids": vacancy_ids,
                 # --- Enrichment fields ---
                 "is_enriched": is_enriched,
                 "description": about.get("description", ""),

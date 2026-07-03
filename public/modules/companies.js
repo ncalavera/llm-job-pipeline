@@ -33,7 +33,9 @@ import {
   qualityClass,
   tierClass,
   safeUrl,
+  isVacancyExpired,
 } from "./helpers.js";
+import { companyRollup } from "./derive.js";
 import { saveCompanyReview, showSyncStatus } from "./api.js";
 import { T } from "./i18n.js";
 // statusChipLabel is U6's vacancy-status pill vocabulary (Liked/Passed/To
@@ -60,6 +62,57 @@ function _counts(c) {
     return { liked: c.liked_count || 0, unseen: c.new_count || 0 };
   }
   return getCompanyStatusCounts(c.vacancy_ids);
+}
+
+// ---------------------------------------------------------------------------
+// Per-company rollups — derived live from the raw roles (DHA-407/408)
+// ---------------------------------------------------------------------------
+
+// A company's raw roles: its role ids mapped through the group index, dropping
+// ids not present in the shipped roles (unscored/archived). This is the SAME
+// join the profile's getCompanyRoles uses, so the table numbers and the roles
+// listed under a company can never disagree.
+function _companyRoles(c) {
+  var roles = [];
+  var ids = c.vacancy_ids || [];
+  for (var i = 0; i < ids.length; i++) {
+    var g = groupsById.get(ids[i]);
+    if (g) roles.push(g);
+  }
+  return roles;
+}
+
+// "deadline DD.MM" when the hottest role's deadline is within a week, else "".
+// Mirrors _deadline_soon_label in scripts/report/data_prep.py — kept plain (not
+// i18n), exactly as the pipeline baked it.
+var HOT_DEADLINE_SOON_DAYS = 7;
+function _hotDeadlineLabel(deadlineIso) {
+  if (!deadlineIso) return "";
+  var dl = new Date(String(deadlineIso).slice(0, 10));
+  if (isNaN(dl.getTime())) return "";
+  var today = new Date(new Date().toISOString().slice(0, 10));
+  var days = Math.round((dl - today) / 86400000);
+  if (days < 0 || days > HOT_DEADLINE_SOON_DAYS) return "";
+  var dd = String(dl.getUTCDate()).padStart(2, "0");
+  var mm = String(dl.getUTCMonth() + 1).padStart(2, "0");
+  return "deadline " + dd + "." + mm;
+}
+
+// Decorate a company row with LIVE rollups derived from its raw roles, replacing
+// the numbers the pipeline used to bake (DHA-407): vacancy_count, applyable_count,
+// avg_llm_score and the hot-vacancy signal. Idempotent — safe to call per render.
+function _decorateRollups(c) {
+  var r = companyRollup(_companyRoles(c), {
+    getStatus: getGroupStatus,
+    isExpired: isVacancyExpired,
+  });
+  c.vacancy_count = r.vacancy_count;
+  c.applyable_count = r.applyable_count;
+  c.avg_llm_score = r.avg_llm_score;
+  c.hot_vacancy = r.hot
+    ? { score: r.hot.score, deadline_label: _hotDeadlineLabel(r.hot.deadline) }
+    : null;
+  return c;
 }
 
 // ---------------------------------------------------------------------------
@@ -210,6 +263,12 @@ function getFilteredSortedCompanies() {
       return state.companyMonitorFilters.has(_getMonitoringStatus(c).level);
     });
   }
+
+  // Derive every per-company number (vacancy_count, applyable_count, avg score,
+  // hot signal) live from its roles before sorting/rendering (DHA-407) — the
+  // pipeline ships only the raw role-id list now, so the sort keys below and the
+  // rendered cells read the same freshly-derived values.
+  filtered.forEach(_decorateRollups);
 
   var col = state.companySortCol;
   var asc = state.companySortAsc;
@@ -2414,6 +2473,7 @@ function getCompanyRoles(c) {
 }
 
 function buildCompanyProfilePage(c) {
+  _decorateRollups(c); // avg score etc. derive live from the roles (DHA-407)
   var roles = getCompanyRoles(c);
   var counts = getCompanyStatusCounts(c.vacancy_ids);
   return companyProfileHtml(c, roles, {

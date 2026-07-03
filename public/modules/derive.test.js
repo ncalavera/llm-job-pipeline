@@ -15,6 +15,10 @@ import {
   groupsInBasket,
   geoBuckets,
   selectTodayRoles,
+  APPLYABLE_MIN_SCORE,
+  HOT_MIN_SCORE,
+  isApplyable,
+  companyRollup,
 } from "./derive.js";
 
 // Mirror of STATUS_BASKET in state.js (kept inline so the test imports nothing
@@ -552,4 +556,114 @@ test("Today keeps a protected 'expiring' role even when its source is stale", ()
   const opts = staleAwareTodayOpts({ prot: "expiring" });
   const { expiring } = selectTodayRoles(groups, opts);
   assert.ok(expiring.some((r) => r.g.id === "prot" && r.kind === "protected"));
+});
+
+// ---------------------------------------------------------------------------
+// Company rollups (DHA-407/408)
+// ---------------------------------------------------------------------------
+
+// getStatus + isExpired only — the two dependencies companyRollup/isApplyable
+// inject. Mirrors companies.js _decorateRollups' opts (getGroupStatus +
+// isVacancyExpired == deadline in the past).
+function rollupOpts(statuses, { today = TODAY } = {}) {
+  return {
+    getStatus: (g) => statuses[g.id] || "unseen",
+    isExpired: (g) => {
+      if (!g.deadline) return false;
+      const dl = new Date(g.deadline);
+      if (isNaN(dl.getTime())) return false;
+      return dl < new Date(today);
+    },
+  };
+}
+
+// A company with the full range: two applyable roles, a sub-floor scored role,
+// an unscored role, and a high-score role whose deadline has already passed.
+function companyRoles() {
+  return [
+    { id: "v1", llm_score: 80, deadline: "2026-07-10" }, // applyable, future deadline
+    { id: "v2", llm_score: 62 }, // applyable, no deadline
+    { id: "v3", llm_score: 30 }, // scored but below the applyable floor
+    { id: "v4", llm_score: null }, // unscored — ignored by avg + not applyable
+    { id: "v5", llm_score: 90, deadline: "2026-06-01" }, // strongest, but expired
+  ];
+}
+
+test("the applyable floor is 60 and the hot floor is 55 (mirror config/data_prep)", () => {
+  assert.equal(APPLYABLE_MIN_SCORE, 60);
+  assert.equal(HOT_MIN_SCORE, 55);
+});
+
+test("isApplyable: score floor, decided/removed statuses, and expiry all gate it", () => {
+  const opts = rollupOpts({ done: "passed", gone: "applied", old: "unseen" });
+  assert.equal(isApplyable({ id: "a", llm_score: 60 }, opts), true);
+  assert.equal(isApplyable({ id: "a", llm_score: 59 }, opts), false); // below floor
+  assert.equal(isApplyable({ id: "a", llm_score: null }, opts), false); // unscored
+  assert.equal(isApplyable({ id: "done", llm_score: 90 }, opts), false); // passed
+  assert.equal(isApplyable({ id: "gone", llm_score: 90 }, opts), false); // applied
+  assert.equal(
+    isApplyable({ id: "old", llm_score: 90, deadline: "2026-06-01" }, opts),
+    false, // deadline in the past
+  );
+  assert.equal(
+    isApplyable({ id: "old", llm_score: 90, deadline: "2026-08-01" }, opts),
+    true, // future deadline, undecided, above floor
+  );
+});
+
+test("companyRollup derives count, applyable, avg and hot from the raw roles", () => {
+  const r = companyRollup(companyRoles(), rollupOpts({}));
+  assert.equal(r.vacancy_count, 5); // every role, scored or not
+  assert.equal(r.applyable_count, 2); // v1 + v2 (v3 below floor, v4 unscored, v5 expired)
+  assert.equal(r.avg_llm_score, 65.5); // mean of 80,62,30,90 (v4 excluded)
+  assert.deepEqual(r.hot, { score: 90, deadline: "2026-06-01" }); // strongest scored role
+});
+
+test("companyRollup: applyable reacts to a pass with no reload", () => {
+  const before = companyRollup(companyRoles(), rollupOpts({}));
+  const after = companyRollup(companyRoles(), rollupOpts({ v2: "passed" }));
+  assert.equal(before.applyable_count, 2);
+  assert.equal(after.applyable_count, 1); // passing v2 drops it live
+});
+
+test("companyRollup: applyable reacts to a deadline lapsing with no run", () => {
+  const before = companyRollup(
+    companyRoles(),
+    rollupOpts({}, { today: "2026-07-03" }),
+  );
+  const after = companyRollup(
+    companyRoles(),
+    rollupOpts({}, { today: "2026-07-11" }),
+  );
+  assert.equal(before.applyable_count, 2);
+  assert.equal(after.applyable_count, 1); // v1's deadline (07-10) now passed
+});
+
+test("companyRollup: no scored roles → avg null and no hot signal", () => {
+  const r = companyRollup(
+    [
+      { id: "x", llm_score: null },
+      { id: "y", llm_score: -1 },
+    ],
+    rollupOpts({}),
+  );
+  assert.equal(r.vacancy_count, 2);
+  assert.equal(r.applyable_count, 0);
+  assert.equal(r.avg_llm_score, null);
+  assert.equal(r.hot, null);
+});
+
+test("companyRollup: a strongest score below the hot floor yields no hot signal", () => {
+  const r = companyRollup([{ id: "x", llm_score: 50 }], rollupOpts({}));
+  assert.equal(r.hot, null); // 50 < HOT_MIN_SCORE (55)
+});
+
+test("companyRollup: empty company → all-zero rollup, never a crash", () => {
+  const r = companyRollup([], rollupOpts({}));
+  assert.deepEqual(r, {
+    vacancy_count: 0,
+    applyable_count: 0,
+    avg_llm_score: null,
+    hot: null,
+  });
 });
