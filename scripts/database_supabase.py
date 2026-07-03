@@ -301,6 +301,23 @@ def make_normalized_id(org: str, title: str) -> str:
     return hashlib.md5(key.encode()).hexdigest()[:16]
 
 
+def make_sibling_vacancy_id(canonical_hash: str, desc_fp: str) -> str:
+    """Disambiguated dedup_hash for a distinct role that shares org+title with an
+    already-stored role but has its OWN, different job description.
+
+    dedup_hash is UNIQUE and make_vacancy_id() hashes only org+title, so two
+    genuinely different roles with the same title cannot both hold the canonical
+    hash. The first-seen role keeps that canonical hash (backward compatible); a
+    later sibling whose description body differs is salted with its description
+    fingerprint so both coexist as separate rows and each re-matches its OWN row
+    on the next fetch (stable: same body -> same fingerprint -> same salt). Only
+    reached when both rows carry a trustworthy fingerprint (a full, role-specific
+    body >= _MIN_DESC_FP_CHARS) that differs — never for a short/absent body.
+    """
+    key = f"{canonical_hash}|{desc_fp}"
+    return hashlib.md5(key.encode()).hexdigest()[:16]
+
+
 def description_fingerprint(description: str | None) -> str | None:
     """Stable fingerprint of a description body, or None when too short.
 
@@ -400,14 +417,36 @@ def _row_apply_urls(row) -> set:
 def _find_existing_vacancy(
     cur, index: dict, batch_hashes: set, dedup_hash: str, norm_hash: str, desc_fp, candidate_url
 ):
-    """Return (existing row, match_kind) for this signature, or (None, None).
+    """Return (existing row, match_kind, insert_hash) for this signature.
 
-    match_kind is "exact", "norm" or "desc".
+    ``existing`` is the row to merge onto, or None to insert a new row.
+    ``match_kind`` is "exact", "norm", "desc", "fork" or None. ``insert_hash`` is
+    the dedup_hash the caller MUST use when it inserts (existing is None):
+    normally the canonical ``dedup_hash``, but a body-salted hash when this is a
+    distinct sibling colliding with the canonical row (match_kind == "fork").
 
-    The exact dedup_hash is authoritative and checked first — unchanged legacy
-    behaviour, no guard applies to it. The additive normalized-title /
-    description keys model a rename OVER TIME (the old title vanished from the
-    source, a new one appeared), so they only fire when that story holds:
+    The exact dedup_hash is checked first, but it is NOT unconditionally
+    authoritative: make_vacancy_id() hashes only org+title, so two GENUINELY
+    different roles that share a title collide on it (e.g. two open reqs listed
+    at once, one via the direct ATS and one via a board). The description body
+    disambiguates them —
+
+      * body guard (exact) — if the exact-hash row and the candidate both carry
+        a trustworthy description fingerprint (a full, role-specific body, see
+        _MIN_DESC_FP_CHARS) and the two DIFFER, they are two distinct roles. Do
+        not merge onto the canonical row; look for THIS role's own salted row (a
+        prior run's sibling) and, failing that, signal a fork so the caller
+        inserts it under a body-salted hash (dedup_hash is UNIQUE, so the
+        canonical hash is already taken by the other sibling). A shared body (a
+        true two-source duplicate or a same-source re-fetch) or a short/absent
+        body (no trustworthy signal) still merges onto the single canonical row.
+        The apply URL is NOT used here: the board path deliberately folds one
+        role's several location-specific URLs onto one row (multi-location
+        posting), so a differing URL is not a distinct-role signal.
+
+    The additive normalized-title / description keys model a rename OVER TIME
+    (the old title vanished, a new one appeared), so they only fire when that
+    story holds:
 
       * batch-alive guard — if the matched existing row's OWN exact title is
         also present in this fetch (its hash is in batch_hashes), both roles are
@@ -420,11 +459,22 @@ def _find_existing_vacancy(
     A claimed inexact match is consumed from the index so a second batch variant
     of the same vanished title forks its own row instead of collapsing again.
     """
+    candidate_url = (candidate_url or "").strip()
     cur.execute("SELECT * FROM vacancy WHERE dedup_hash = %s", (dedup_hash,))
     row = cur.fetchone()
     if row is not None:
-        return row, "exact"
-    candidate_url = (candidate_url or "").strip()
+        row_fp = description_fingerprint(row.get("full_description"))
+        if desc_fp and row_fp and desc_fp != row_fp:
+            # Same org+title, DIFFERENT full description: two distinct roles
+            # colliding on the canonical hash. Re-match this role's own salted
+            # row, else fork so the live sibling is not merged away.
+            salted = make_sibling_vacancy_id(dedup_hash, desc_fp)
+            cur.execute("SELECT * FROM vacancy WHERE dedup_hash = %s", (salted,))
+            sibling = cur.fetchone()
+            if sibling is not None:
+                return sibling, "exact", salted
+            return None, "fork", salted
+        return row, "exact", dedup_hash
     for kind, key in (("norm", norm_hash), ("desc", desc_fp)):
         if not key:
             continue
@@ -442,8 +492,8 @@ def _find_existing_vacancy(
         if candidate_url and existing_urls and candidate_url not in existing_urls:
             continue  # two distinct reqs — do not merge
         _consume_index_entry(index, hit["id"])
-        return cand, kind
-    return None, None
+        return cand, kind, dedup_hash
+    return None, None, dedup_hash
 
 
 def _make_location_entry(job: dict) -> dict:
@@ -1076,7 +1126,7 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
         loc_key = _loc_key(loc_entry)
 
         # Check existing: exact hash first, then a same-company renamed/language variant.
-        existing, match_kind = _find_existing_vacancy(
+        existing, match_kind, insert_hash = _find_existing_vacancy(
             cur, dedup_index, batch_hashes, dedup_hash, norm_hash, desc_fp, job.get("url")
         )
 
@@ -1149,7 +1199,7 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
                        first_seen, last_seen, locations, department
                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
-                    dedup_hash,
+                    insert_hash,
                     company_id,
                     title,
                     job.get("snippet", ""),
@@ -1271,7 +1321,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
         loc_key = _loc_key(loc_entry)
 
         # Check existing: exact hash first, then a same-company renamed/language variant.
-        existing, match_kind = _find_existing_vacancy(
+        existing, match_kind, insert_hash = _find_existing_vacancy(
             cur,
             dedup_index,
             batch_hashes_by_org.get(org, set()),
@@ -1329,7 +1379,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
                        first_seen, last_seen, locations
                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
-                    dedup_hash,
+                    insert_hash,
                     company_id,
                     title,
                     job.get("snippet", ""),
