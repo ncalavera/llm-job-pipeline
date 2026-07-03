@@ -25,13 +25,28 @@ export function clearsScoreFloor(g, minScore) {
   return g.llm_score != null && g.llm_score >= minScore;
 }
 
+// Whether the user has cast an explicit verdict on a role. Any known non-unseen
+// status (liked / to_apply / … / passed / skipped) is a deliberate action; only
+// "unseen" (the default) means undecided. Used to un-floor acted-on roles below.
+export function hasVerdict(g, opts) {
+  const status = opts.getStatus(g);
+  return status !== "unseen" && opts.basketMap[status] != null;
+}
+
 // The shared visibility filter. A role is visible when its company is approved
-// AND it clears the score floor. Expiry is deliberately NOT a visibility gate —
-// an expired role is still "visible", it is only re-bucketed (see
-// effectiveBasket), so it can still be counted and surfaced in the Passed
-// basket rather than vanishing.
+// AND (the user has already acted on it OR it clears the score floor). An
+// explicit verdict overrides the floor — a liked role always shows in Liked and
+// a passed role in Passed regardless of score, the same principle the Today tab
+// uses (a role you acted on must never silently vanish under the discovery
+// floor). Only undecided ("unseen") roles are subject to the floor, which keeps
+// the Catalog/Geo browse surfaces focused on high-fit unreviewed roles. Company
+// approval still gates everything, and expiry is deliberately NOT a visibility
+// gate — an expired liked role stays "visible", it is only re-bucketed to Passed
+// (see effectiveBasket), so it is counted and surfaced rather than vanishing.
 export function isVisible(g, opts) {
-  return opts.isApproved(g) && clearsScoreFloor(g, opts.minScore);
+  if (!opts.isApproved(g)) return false;
+  if (hasVerdict(g, opts)) return true;
+  return clearsScoreFloor(g, opts.minScore);
 }
 
 export function visibleGroups(groups, opts) {

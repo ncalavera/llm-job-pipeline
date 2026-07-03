@@ -6,7 +6,6 @@ import {
   state,
   groups,
   groupsById,
-  stats,
   triageReviews,
   TRIAGE_COLUMNS,
   STATUS_PRI,
@@ -480,7 +479,10 @@ export function renderPipeline() {
   });
 
   const metrics = {
-    base_total: stats.total_roles || 0,
+    // Derived live from the raw payload — `groups` IS the scored-roles list the
+    // pipeline once shipped as stats.total_roles, so groups.length is that same
+    // number, computed in the browser and unable to drift (DHA-376 phase 2).
+    base_total: groups.length,
     liked_queue: buckets.liked.length,
     triaged_total:
       buckets.to_apply.length +

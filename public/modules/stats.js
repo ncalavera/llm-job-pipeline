@@ -23,14 +23,17 @@ const EMPTY_LABEL = "🏢 No data";
 // The shared visibility filter (approved + score floor) and the expiry
 // re-bucketing behind the "liked" column live in derive.js — geoBuckets reads
 // exactly the visible set the Catalog does, so the Geo numbers track live
-// likes/passes and today's expiry with no run (DHA-376).
+// likes/passes and today's expiry with no run (DHA-376). The score floor honours
+// the SAME state.catalogShowAll toggle the Catalog uses, so with "show all" on,
+// Geo and Catalog agree on the sub-threshold roles instead of Geo hiding rows
+// the Catalog shows (DHA-376 Nit B).
 function visOpts() {
   return {
     isApproved: isGroupCompanyApproved,
     getStatus: getGroupStatus,
     isExpired: isVacancyExpired,
     basketMap: STATUS_BASKET,
-    minScore: VISIBLE_MIN_SCORE,
+    minScore: state.catalogShowAll ? null : VISIBLE_MIN_SCORE,
   };
 }
 

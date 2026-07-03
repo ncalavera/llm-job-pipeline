@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   VISIBLE_MIN_SCORE,
   clearsScoreFloor,
+  hasVerdict,
   isVisible,
   visibleGroups,
   effectiveBasket,
@@ -236,6 +237,57 @@ test("a like changes the derived basket counts with no reload", () => {
 });
 
 // ---------------------------------------------------------------------------
+// An explicit verdict un-floors a role (Nit A) — same principle as Today: a
+// role you acted on must never vanish under the discovery score floor.
+// ---------------------------------------------------------------------------
+
+test("hasVerdict: any known non-unseen status is a verdict; unseen is not", () => {
+  const opts = visOpts({ a: "liked", b: "passed", c: "to_apply", d: "unseen" });
+  assert.equal(hasVerdict({ id: "a" }, opts), true);
+  assert.equal(hasVerdict({ id: "b" }, opts), true);
+  assert.equal(hasVerdict({ id: "c" }, opts), true);
+  assert.equal(hasVerdict({ id: "d" }, opts), false); // explicit unseen
+  assert.equal(hasVerdict({ id: "e" }, opts), false); // absent → unseen default
+});
+
+test("a liked below-floor role is visible; an unseen below-floor role is not", () => {
+  const low = { id: "z", approved: true, llm_score: 12, locations: [] };
+  // Unseen + below the 40 floor → hidden from the discovery surfaces.
+  assert.equal(isVisible(low, visOpts({})), false);
+  // The user likes it → the verdict overrides the floor, it stays visible.
+  assert.equal(isVisible(low, visOpts({ z: "liked" })), true);
+  // A pass is just as explicit → still visible (surfaces in Passed).
+  assert.equal(isVisible(low, visOpts({ z: "passed" })), true);
+});
+
+test("Nit A: liking/passing a below-floor role puts it in that basket's count+list", () => {
+  const groups = [
+    { id: "lo_like", approved: true, llm_score: 10, locations: [] },
+    { id: "lo_pass", approved: true, llm_score: 15, locations: [] },
+    { id: "lo_unseen", approved: true, llm_score: 20, locations: [] },
+  ];
+  const opts = visOpts({ lo_like: "liked", lo_pass: "passed" });
+  const counts = basketCounts(groups, opts);
+  // The acted-on low scorers surface in their baskets; the undecided one is
+  // still floored out.
+  assert.deepEqual(counts, { liked: 1, unseen: 0, passed: 1 });
+  // Badge == list holds for the un-floored roles too.
+  assert.deepEqual(
+    groupsInBasket(groups, "liked", opts).map((g) => g.id),
+    ["lo_like"],
+  );
+  assert.deepEqual(
+    groupsInBasket(groups, "passed", opts).map((g) => g.id),
+    ["lo_pass"],
+  );
+});
+
+test("Nit A: an un-approved company still hides a liked role (approval gates all)", () => {
+  const g = { id: "np", approved: false, llm_score: 90, locations: [] };
+  assert.equal(isVisible(g, visOpts({ np: "liked" })), false);
+});
+
+// ---------------------------------------------------------------------------
 // Geo aggregation
 // ---------------------------------------------------------------------------
 
@@ -414,4 +466,90 @@ test("Today drops a liked role from expiring once its deadline passes", () => {
   );
   assert.ok(before.expiring.some((r) => r.g.id === "t3"));
   assert.ok(!after.expiring.some((r) => r.g.id === "t3")); // deadline lapsed → not live
+});
+
+// A stale-source-aware isLiveRole, mirroring today.js `_isLiveRole`: a role whose
+// source stopped confirming it STALE_SOURCE_DAYS+ days ago is no longer live
+// (except a protected `expiring` role, which stays until decided). This exercises
+// the STALE_SOURCE_DAYS branch selectTodayRoles delegates to via opts.isLiveRole —
+// the default todayOpts mock only ever checked the deadline, never staleness.
+const STALE_SOURCE_DAYS = 14; // mirrors helpers.STALE_SOURCE_DAYS
+function staleAwareTodayOpts(statuses, cfg = {}) {
+  const base = todayOpts(statuses, cfg);
+  const today = cfg.today || TODAY;
+  const sourceAgeDays = (lastSeen) => {
+    if (!lastSeen) return null;
+    const d = new Date(lastSeen);
+    if (isNaN(d.getTime())) return null;
+    return Math.floor((new Date(today).getTime() - d.getTime()) / 86400000);
+  };
+  const isLiveRole = (g) => {
+    const s = base.getStatus(g);
+    if (s === "archived" || s === "passed" || s === "skipped") return false;
+    if (s === "expiring") return true; // protected — exempt from staleness
+    if (base.daysUntil(g.deadline) != null && base.daysUntil(g.deadline) < 0) {
+      return false;
+    }
+    const age = sourceAgeDays(g.last_seen);
+    if (age != null && age >= STALE_SOURCE_DAYS) return false; // stale source
+    return true;
+  };
+  return { ...base, isLiveRole };
+}
+
+test("Today drops a stale-source role and keeps a fresh one (STALE_SOURCE_DAYS)", () => {
+  // Two to_apply roles: one confirmed by its source today, one gone stale
+  // 20 days ago (past the 14-day staleness line). Same for a new-high-fit unseen.
+  const groups = [
+    {
+      id: "fresh_apply",
+      approved: true,
+      llm_score: 80,
+      last_seen: "2026-07-03",
+    },
+    {
+      id: "stale_apply",
+      approved: true,
+      llm_score: 80,
+      last_seen: "2026-06-13",
+    },
+    {
+      id: "fresh_new",
+      approved: true,
+      llm_score: 75,
+      first_seen: "2026-07-03",
+      last_seen: "2026-07-03",
+    },
+    {
+      id: "stale_new",
+      approved: true,
+      llm_score: 75,
+      first_seen: "2026-07-03",
+      last_seen: "2026-06-13",
+    },
+  ];
+  const opts = staleAwareTodayOpts({
+    fresh_apply: "to_apply",
+    stale_apply: "to_apply",
+  });
+  const { ready, newHighFit } = selectTodayRoles(groups, opts);
+  assert.deepEqual(
+    ready.map((g) => g.id),
+    ["fresh_apply"], // stale_apply dropped by the staleness branch
+  );
+  assert.deepEqual(
+    newHighFit.map((g) => g.id),
+    ["fresh_new"], // stale_new dropped by the staleness branch
+  );
+});
+
+test("Today keeps a protected 'expiring' role even when its source is stale", () => {
+  // A protected role gone stale 30 days ago must still surface — it needs a
+  // decision, so the staleness branch is bypassed for status 'expiring'.
+  const groups = [
+    { id: "prot", approved: true, llm_score: 50, last_seen: "2026-06-03" },
+  ];
+  const opts = staleAwareTodayOpts({ prot: "expiring" });
+  const { expiring } = selectTodayRoles(groups, opts);
+  assert.ok(expiring.some((r) => r.g.id === "prot" && r.kind === "protected"));
 });

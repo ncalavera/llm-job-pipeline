@@ -301,7 +301,8 @@ def test_day1_report_builds_with_and_without_data(dal, monkeypatch):
     # Empty DB: must not crash and must yield zero groups.
     empty = data_prep.prepare_report_data()
     assert empty["groups"] == []
-    assert empty["stats"]["total_roles"] == 0
+    # total_roles is derived in the browser now (groups.length), no longer baked.
+    assert len(empty["groups"]) == 0
 
     # With scored data the dashboard surfaces the scored roles.
     dal.ensure_company("Acme Foundation", status="active")
@@ -311,9 +312,38 @@ def test_day1_report_builds_with_and_without_data(dal, monkeypatch):
     _run_save(monkeypatch, _fake_scores(payload, lambda o, t: (66, _summary(t))))
 
     data = data_prep.prepare_report_data()
-    assert data["stats"]["total_roles"] == 3
+    assert len(data["groups"]) == 3  # the browser derives total_roles from this
     report_titles = {g["title"] for g in data["groups"]}
     assert report_titles == {"Volunteer Coordinator", "Software Engineer", "Research Fellowship"}
+
+
+def test_report_stats_carries_only_the_nonderivable_run_fact(dal):
+    """KISS derivation, phase 2: the payload ships raw rows, not baked UI aggregates.
+
+    Every dashboard number is derived in the browser from ``groups`` through the
+    shared visibility filter (public/modules/derive.js). The ONE survivor in
+    ``stats`` is ``unscored_count`` — a run-level fact about fetched-but-unscored
+    rows that are deliberately NOT shipped in ``groups``, so the browser can't
+    derive it. This locks that contract: the removed aggregates stay gone.
+    """
+    import report.data_prep as data_prep
+
+    importlib.reload(data_prep)
+
+    stats = data_prep.prepare_report_data()["stats"]
+    # The single non-derivable run-level fact ships, and nothing else.
+    assert set(stats) == {"unscored_count"}
+    # None of the browser-derivable aggregates may creep back in.
+    for baked in (
+        "total_roles",
+        "total_postings",
+        "new_today",
+        "with_comp",
+        "europe_count",
+        "relevant",
+        "total_in_db",
+    ):
+        assert baked not in stats, f"{baked} must be derived in the browser, not baked"
 
 
 def test_day1_like_dislike_persist(dal):
