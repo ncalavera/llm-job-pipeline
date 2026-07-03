@@ -392,6 +392,31 @@ def test_cmd_save_accepts_integer_valued_float(sqlite_dal, monkeypatch):
     assert db.load_vacancies()[vid]["llm_score"] == 85
 
 
+@pytest.mark.parametrize("bad", [999, -5, 3.7])
+def test_cmd_save_rejects_bad_score_via_strict_score_data(sqlite_dal, monkeypatch, bad):
+    """The strict pre-built ``score_data`` shape goes through the same
+    validation as the flat shape — a slip can't sneak in via that path."""
+    db = sqlite_dal
+    vid = _seed_one_vacancy(db)
+    monkeypatch.setitem(
+        sys.modules, "report", types.SimpleNamespace(generate_dashboard=lambda *a, **k: None)
+    )
+    payload = [
+        {
+            "member_ids": [vid],
+            "org": "Acme Robotics",
+            "title": "Head of Community",
+            "score_data": {"llm_score": bad, "llm_reasoning": "r", "llm_summary": "s"},
+        }
+    ]
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    import score_vacancies
+
+    importlib.reload(score_vacancies)
+    score_vacancies.cmd_save(types.SimpleNamespace(archive=False, scored_by=None))
+    assert db.load_vacancies()[vid]["llm_score"] is None
+
+
 def test_coerce_score_unit():
     import score_vacancies
 

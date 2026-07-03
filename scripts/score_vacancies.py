@@ -455,6 +455,18 @@ def cmd_save(args):
         #      top-level ``score`` / ``reasoning`` / ``short_summary`` /
         #      ``hard_requirements`` / ``tags``. Build score_data from it.
         score_data = entry.get("score_data")
+        if score_data:
+            coerced = _coerce_score(score_data.get("llm_score"))
+            if coerced is None:
+                print(
+                    f"ERROR: invalid score {score_data.get('llm_score')!r} in "
+                    f"score_data (must be an integer 0-100) — score not saved "
+                    f"for {entry.get('org', '?')} — {entry.get('title', '?')}",
+                    file=sys.stderr,
+                )
+                errors += 1
+                continue
+            score_data["llm_score"] = coerced
         if not score_data:
             if "score" in entry:
                 score = _coerce_score(entry["score"])
