@@ -58,7 +58,7 @@ import {
   renderProfileForSlug,
 } from "./modules/companies.js";
 import { renderPipeline } from "./modules/pipeline.js";
-import { renderToday, todayAction } from "./modules/today.js";
+import { renderToday, todayAction, openTodayRow } from "./modules/today.js";
 import { initStats, renderStats } from "./modules/stats.js";
 import { initArchive, renderArchive } from "./modules/archive.js";
 import { initBoards, renderBoards } from "./modules/boards.js";
@@ -631,6 +631,7 @@ window.toggleCatalogSort = toggleCatalogSort;
 window.toggleCatalogShowAll = toggleCatalogShowAll;
 window.catalogThumbAction = catalogThumbAction;
 window.todayAction = todayAction;
+window.openTodayRow = openTodayRow;
 window.openCatalogRow = openCatalogRow;
 window.renderCatalog = renderCatalog;
 window.renderCompanies = renderCompanies;
