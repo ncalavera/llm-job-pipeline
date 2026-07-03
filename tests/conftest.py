@@ -63,6 +63,36 @@ os.environ["USER_PROFILE_PATH"] = os.path.join(
 )
 
 
+@pytest.fixture(autouse=True)
+def _reset_report_package_cache():
+    """Guard against ``report``/``report.*`` desync in ``sys.modules``.
+
+    Several tests reload the backend chain via ad hoc ``sys.modules`` surgery to
+    point the ``report`` package at a fresh throwaway SQLite file (see e.g.
+    ``tests/test_applications.py::_fresh_sqlite``,
+    ``tests/test_dashboard_generation.py::_force_sqlite``). Their pop lists
+    aren't consistent: some evict only the top-level package name
+    (``"report"``), not its already-imported submodule (``"report.data_prep"``
+    lives under a SEPARATE ``sys.modules`` key). When a later test re-imports
+    the package but the submodule is still cached, Python reuses the STALE
+    submodule instead of re-executing it — silently binding that test's
+    ``report`` to a PRIOR test's orphaned ``db_backend`` module (and its
+    now-closed-over SQLite connection). Depending on run order this either
+    crashes (dict-vs-tuple row shape mismatch) or, worse, silently mixes two
+    different temp databases in one dashboard render.
+    Evicting the whole package tree after every test guarantees the next test
+    that needs ``report`` gets a single, consistently fresh reimport — no test
+    relies on it surviving across test boundaries, they all reload it
+    explicitly when they need it.
+    """
+    yield
+    import sys as _sys
+
+    for _name in list(_sys.modules):
+        if _name == "report" or _name.startswith("report."):
+            _sys.modules.pop(_name, None)
+
+
 @pytest.fixture
 def empty_db():
     return {
