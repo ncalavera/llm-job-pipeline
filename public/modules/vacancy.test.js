@@ -290,6 +290,35 @@ test("vacancyPageHtml escapes every externally-sourced string", () => {
   assert.ok(html.includes("&lt;script&gt;"), "payload not rendered escaped");
 });
 
+test("vacancyPageHtml escapes a quote-breakout URL in href attributes (R14)", () => {
+  // safeUrl passes this (scheme is https) but does not escape the quote; without
+  // escHtml it would close href="…" and inject an <img onerror>. Covers both the
+  // "Open posting" primary URL and the Locations rail link.
+  const breakout = 'https://x.com/"><img src=x onerror=alert(1)>';
+  const grp = {
+    id: "b1",
+    org: "Acme",
+    company_name: "Acme",
+    company_slug: null,
+    title: "Role",
+    llm_score: 60,
+    llm_summary: "s",
+    llm_reasoning: "",
+    full_description: "",
+    llm_hard_requirements: [],
+    us_eligibility: "",
+    compensation: "",
+    deadline: "",
+    first_seen: "",
+    org_url: breakout,
+    locations: [{ location: "Remote", url: breakout, region: "remote" }],
+    member_ids: [],
+  };
+  const html = vacancyPageHtml(grp, null, "unseen", opts);
+  assert.ok(!html.includes('"><img'), "quote broke out of an href attribute");
+  assert.ok(html.includes("&quot;"), "the breakout quote was not escaped");
+});
+
 // --- not-found shape --------------------------------------------------------
 
 test("vacancyNotFoundHtml is a fixed, parameter-free panel", () => {

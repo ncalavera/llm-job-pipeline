@@ -343,6 +343,9 @@ function clearCompanyOverlay() {
 
 function clearVacancyOverlay() {
   state.currentVacancyId = null;
+  // Drop the auto-advance entry context too, so a later open that isn't a
+  // Browse-list entry can't inherit a stale queue (F3).
+  state.vacancyEntry = null;
   var el = document.getElementById("vacancyDetail");
   if (el) {
     el.classList.remove("active");
@@ -422,7 +425,10 @@ function showVacancyDetail(id) {
 // the originating list). Exposed on window for U6's rows + actions to call.
 // `opts.context` records HOW it was entered: "browse" (with `opts.queue`, the
 // ordered unreviewed id list) enables "Move to apply" auto-advance (F3); any
-// other entry omits opts and confirms in place.
+// other entry omits opts and confirms in place. `opts.replace` swaps the
+// current history entry instead of pushing a new one — the auto-advance chain
+// uses it so walking a whole queue stays ONE history entry and Back from any
+// hop returns straight to the originating list (F1), not step-by-step.
 function openVacancyRoute(id, opts) {
   if (!id) return;
   var url = new URL(window.location);
@@ -430,7 +436,12 @@ function openVacancyRoute(id, opts) {
   // inApp marks that a list entry sits beneath this one, so closeDetail can
   // step back (history.back) instead of pushing a bare entry that browser Back
   // would then reopen the detail from.
-  history.pushState({ vacancy: id, inApp: true }, "", url);
+  var histState = { vacancy: id, inApp: true };
+  if (opts && opts.replace) {
+    history.replaceState(histState, "", url);
+  } else {
+    history.pushState(histState, "", url);
+  }
   showVacancyDetail(id);
   state.vacancyEntry =
     opts && opts.context

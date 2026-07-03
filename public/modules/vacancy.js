@@ -148,9 +148,15 @@ export function buildFactsRail(g, company, opts) {
   if (src)
     facts.push({ label: t("vac_source", "Source"), value: escHtml(src) });
 
+  // safeUrl validates the scheme but does NOT escape quotes; escHtml here so the
+  // value is safe to drop straight into href="…" (R14 — matches catalog.js:299,
+  // today.js:142). "" (unsafe/absent) stays falsy for the link/plain branch.
   const locations = (g.locations || [])
     .filter((l) => l && l.location)
-    .map((l) => ({ text: escHtml(l.location), url: safeUrl(l.url || "") }));
+    .map((l) => ({
+      text: escHtml(l.location),
+      url: escHtml(safeUrl(l.url || "")),
+    }));
 
   return { facts, locations };
 }
@@ -263,7 +269,7 @@ export function vacancyPageHtml(g, company, status, opts) {
   );
   const openPosting = primaryUrl
     ? '<a class="vac-btn vac-btn--link" href="' +
-      primaryUrl +
+      escHtml(primaryUrl) +
       '" target="_blank" rel="noopener">' +
       escHtml(t("vac_open_posting", "Open posting")) +
       " ↗</a>"
@@ -572,7 +578,13 @@ export function vacancyMoveToApply(id) {
   };
   const next = nextUnreviewedId(id, entry.queue, isUnseen);
   if (next) {
-    window.openVacancyRoute(next, { context: "browse", queue: entry.queue });
+    // replace (not push) so the whole advance chain is one history entry: Back
+    // from any hop returns straight to the originating Browse list (F1).
+    window.openVacancyRoute(next, {
+      context: "browse",
+      queue: entry.queue,
+      replace: true,
+    });
     return;
   }
   // Queue drained — terminal done banner. Clear the id so the scheduled
