@@ -3,6 +3,15 @@
 This repo is agent-agnostic. It works with Claude Code, Codex, or any coding
 agent that can run shell commands and follow markdown runbooks.
 
+## Read STRATEGY.md first (hard rule)
+
+Before ANY product work — a feature, a prompt or runbook change, a new source,
+board, or flag — read `STRATEGY.md`. It is the decision frame: three goals and
+eight guardrails every change must pass. If a request or ticket conflicts with
+STRATEGY.md, STOP and ask the user which wins; do not proceed on the conflicting
+path. A change that fails a guardrail gets rewritten or rejected, however useful
+it is to one user.
+
 ## Where the runbooks live
 
 `.claude/commands/*.md` are plain-markdown, step-by-step runbooks — they are
