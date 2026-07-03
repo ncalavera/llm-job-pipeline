@@ -2890,88 +2890,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
   }
 }
 
-/* === BOARDS MODE ============================================================ */
-.boards-section {
-  display: none;
-}
-.boards-section.active {
-  display: block;
-  position: relative;
-}
-.boards-intro {
-  margin: 8px 0 20px;
-}
-.boards-title {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--text);
-  margin: 0 0 4px;
-}
-.boards-sub {
-  color: var(--muted);
-  margin: 0;
-}
-.boards-loading,
-.boards-empty {
-  color: var(--muted);
-  padding: 16px 0;
-}
-.boards-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
-}
-.boards-table th,
-.boards-table td {
-  text-align: left;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--surface);
-}
-.boards-table th {
-  font-weight: 600;
-  color: var(--muted);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.boards-table td.num,
-.boards-table th.num {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.boards-table td code {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 12px;
-  color: #8a5a2a;
-}
-.boards-table a {
-  color: #1e40af;
-  text-decoration: none;
-}
-.boards-table a:hover {
-  text-decoration: underline;
-}
-.board-status {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.board-status-ok {
-  background: #d1fae5;
-  color: #065f46;
-}
-.board-status-overdue {
-  background: #fef3c7;
-  color: #92400e;
-}
-.board-status-never {
-  background: #fee2e2;
-  color: #991b1b;
-}
-
 /* Applications & research — small blocks in the company profile. Full
    standalone Applications section is later. */
 .cp-app-list {
@@ -3089,112 +3007,11 @@ body[data-dashboard-style="minimal"] .loading-illus {
   display: block;
   position: relative;
 }
-.settings-intro {
-  margin: 8px 0 16px;
-}
-.settings-h2 {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--text);
-  margin: 0 0 4px;
-}
-.settings-sub {
-  color: var(--muted);
-  margin: 0;
-}
-.settings-empty {
-  color: var(--muted);
-  padding: 24px 0;
-  text-align: center;
-}
-/* Applied's own header/filter/table styling moved to the U13 redesign block
-   at EOF (a fresh `.apl-*` namespace — Settings never used `.apps-*`, so
-   nothing above needs to stay for its sake). */
-
-/* Settings section. */
-.settings-group {
-  margin-bottom: 24px;
-}
-.settings-group-title {
-  font-size: var(--text-md);
-  font-weight: 700;
-  color: var(--text);
-  margin: 0 0 8px;
-}
-.settings-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
-  background: var(--card);
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: var(--shadow-sm);
-}
-.settings-table th,
-.settings-table td {
-  text-align: left;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--surface);
-}
-.settings-table th {
-  font-weight: 600;
-  color: var(--muted);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.settings-td-value code {
-  font-family: "JetBrains Mono", monospace;
-  font-weight: 600;
-  color: var(--text);
-}
-.settings-td-source code {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-/* Boards catalogue additions (audience, enabled, id, hints). */
-.board-audience {
-  color: var(--muted);
-  max-width: 320px;
-}
-.board-id code {
-  font-size: 11px;
-  color: var(--muted);
-}
-.board-enabled {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 12px;
-  font-weight: 600;
-}
-.board-enabled-on {
-  background: #d1fae5;
-  color: #065f46;
-}
-.board-enabled-off {
-  background: #f3f4f6;
-  color: #6b7280;
-}
-.boards-cli-hint {
-  margin: 0 0 8px;
-}
-.boards-cli-hint code {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 12px;
-  color: #8a5a2a;
-  background: var(--surface);
-  padding: 4px 8px;
-  border-radius: 6px;
-  display: inline-block;
-}
-.boards-live-note {
-  color: var(--muted);
-  font-size: 12px;
-  margin: 0 0 12px;
-}
+/* .settings-intro/.settings-h2/.settings-sub/.settings-empty (pre-redesign)
+   removed here — settings.js (U14) now emits .settings-header/-header-title/
+   -header-sub and .stg-empty instead (EOF block). The display/.active toggle
+   above stays: Settings' new markup still lives in the same #settingsSection
+   element, and it's still shared with Applications. */
 
 /* === U10 Geo (redesign) ===================================================
    Geo (`#statsSection`) reuses the shared `.company-table` / `.ct-*` classes
@@ -5136,4 +4953,236 @@ a.pipe-grp-role-title:hover {
 .apl-empty-icon {
   font-size: 32px;
   margin-bottom: 8px;
+}
+
+/* === U14 Boards+Settings (redesign) =========================================
+   Boards + Settings (DHA-398): both read-mostly screens get the header-on-
+   material + sheet-below anatomy (design-protocol.md #6), matching Archive
+   (U11) and Companies (U8). Overrides `.boards-section`/`.settings-section`
+   below instead of editing the generic multi-section sheet rule near the top
+   of this file — see the U11 Archive comment for why. Old boards-table /
+   board-status / settings-table rules (pre-redesign) were removed; the
+   applications-shared toggle + intro rules near "DHA-348" are untouched
+   (Applied's own reskin owns those). */
+
+/* .boards-section's display:none/.active toggle used to live in the deleted
+   pre-redesign "BOARDS MODE" block above — unlike Settings, it was never
+   shared with another section, so it has to be restored here rather than
+   overridden. */
+.boards-section {
+  display: none;
+}
+.boards-section.active {
+  display: block;
+  position: relative;
+}
+
+.boards-section,
+.settings-section {
+  background: none;
+  box-shadow: none;
+  padding: 4px 0 0;
+}
+
+/* --- Shared header-on-material recipe (matches .archive-header*) --- */
+.boards-header,
+.settings-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 2px 10px 12px;
+  flex-wrap: wrap;
+}
+.boards-header-title,
+.settings-header-title {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--sky-text);
+}
+.boards-header-sub,
+.settings-header-sub {
+  font-size: 12.5px;
+  color: var(--sky-text-tertiary);
+}
+
+/* --- Boards table --- */
+.boards-table-wrap {
+  overflow-x: auto;
+}
+.boards-table {
+  width: 100%;
+  min-width: 860px;
+  background: var(--sky-sheet);
+  border-radius: var(--radius-sheet);
+  box-shadow:
+    inset 0 0 0 1px var(--sky-hairline),
+    0 1px 3px rgba(58, 56, 51, 0.05);
+  border-collapse: collapse;
+  overflow: hidden;
+}
+.brd-th {
+  padding: 10px 10px 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sky-text-faint);
+  text-align: left;
+  white-space: nowrap;
+}
+.brd-th.num {
+  text-align: right;
+}
+.brd-td {
+  padding: 10px 10px;
+  vertical-align: middle;
+  font-size: var(--text-sm);
+  color: var(--sky-text-secondary);
+}
+.brd-td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: "JetBrains Mono", monospace;
+  color: var(--sky-text-secondary);
+}
+.brd-row {
+  transition: background 0.12s;
+}
+.brd-row:hover {
+  background: var(--sky-row-hover);
+}
+.brd-row--off {
+  opacity: 0.6;
+}
+.brd-row--off:hover {
+  opacity: 0.85;
+}
+.brd-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.brd-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.brd-dot-on {
+  background: var(--q-good);
+}
+.brd-dot-off {
+  background: var(--sky-text-faint);
+}
+.brd-name-col {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.brd-name-text {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--sky-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.brd-name-text a {
+  color: var(--sky-text);
+  text-decoration: none;
+}
+.brd-name-text a:hover {
+  color: var(--cobalt);
+}
+.brd-name-id {
+  font-size: 10px;
+  color: var(--sky-text-faint);
+}
+.brd-name-id code {
+  font-family: "JetBrains Mono", monospace;
+}
+.brd-audience {
+  color: var(--sky-text-tertiary);
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.brd-empty {
+  color: var(--sky-text-tertiary);
+  padding: 16px 10px;
+  font-size: 13px;
+}
+.boards-cli-hint {
+  margin: 12px 8px 0;
+  font-size: 11px;
+  color: var(--sky-text-faint);
+}
+.boards-cli-hint code {
+  font-family: "JetBrains Mono", monospace;
+  background: rgba(58, 56, 51, 0.05);
+  border-radius: 5px;
+  padding: 1px 6px;
+  color: var(--sky-text-secondary);
+}
+.boards-live-note {
+  margin: 6px 8px 0;
+  font-size: 11px;
+  color: var(--sky-text-faint);
+}
+
+/* --- Settings grouped rows --- */
+.stg-sheet {
+  background: var(--sky-sheet);
+  border-radius: var(--radius-sheet);
+  box-shadow:
+    inset 0 0 0 1px var(--sky-hairline),
+    0 1px 3px rgba(58, 56, 51, 0.05);
+  padding: 26px 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  max-width: 820px;
+}
+.stg-group-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--sky-text-faint);
+  margin-bottom: 12px;
+}
+.stg-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) 130px minmax(160px, 1.2fr);
+  gap: 14px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid rgba(58, 56, 51, 0.07);
+}
+.stg-group-title + .stg-row {
+  border-top: none;
+}
+.stg-label {
+  font-size: 13px;
+  color: var(--sky-text);
+}
+.stg-value code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--sky-text);
+}
+.stg-source code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: var(--sky-text-tertiary);
+}
+.stg-empty {
+  color: var(--sky-text-tertiary);
+  padding: 16px 0;
+  font-size: 13px;
 }

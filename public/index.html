@@ -692,15 +692,17 @@
           </div>
           <!-- /archive-section -->
 
-          <!-- === BOARDS MODE === -->
+          <!-- === BOARDS MODE ===
+           Header on the material (design-protocol.md #6); the table sits in
+           the sheet below (U14, DHA-398). -->
           <div class="boards-section" id="boardsSection">
-            <div class="boards-intro">
-              <h2 class="boards-title">
-                &#128202; <span data-i18n="boards_title">Job boards</span>
-              </h2>
-              <p class="boards-sub" data-i18n="boards_sub">
-                Live status of the aggregators feeding the pipeline.
-              </p>
+            <div class="boards-header">
+              <span class="boards-header-title" data-i18n="boards_title"
+                >Job boards</span
+              >
+              <span class="boards-header-sub" data-i18n="boards_sub"
+                >Live status of the aggregators feeding the pipeline.</span
+              >
             </div>
             <div class="boards-grid" id="boardsGrid"></div>
           </div>
@@ -740,7 +742,8 @@
           <!-- === SETTINGS MODE ===
            Read-only display of the RESOLVED dials baked by the generator
            (volume, scoring model tier, thresholds), each with the one line to
-           change it. No editing UI. -->
+           change it. No editing UI. Header + grouped rows are rendered by
+           settings.js (U14, DHA-398). -->
           <div class="settings-section" id="settingsSection"></div>
           <!-- /settings-section -->
 
