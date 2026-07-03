@@ -228,6 +228,65 @@ test("companyProfileHtml (scored): WANT bars use the shared q-good/q-moderate/q-
   assert.ok(html.includes('class="cp-bar-value q-weak"'));
 });
 
+test("companyProfileHtml (approved): status shows once, in the rail pill — no duplicate action banner (DHA-412 #6)", () => {
+  const html = companyProfileHtml(scoredCompany, [], {
+    t,
+    reviewStatus: "approved",
+    counts,
+  });
+  // The full-width green "Approved" banner (+ its Archive button) is gone…
+  assert.ok(
+    !html.includes("cp-review-banner"),
+    "approved banner must not render",
+  );
+  // …but the single source of truth, the rail Status pill, still reads Approved.
+  assert.ok(html.includes("cp-status-pill"));
+  assert.ok(html.includes("Approved"));
+});
+
+test("companyProfileHtml: pending/rejected keep their action banners (only approved's duplicate went)", () => {
+  const pending = companyProfileHtml(scoredCompany, [], {
+    t,
+    reviewStatus: "pending",
+    counts,
+  });
+  assert.ok(
+    pending.includes("cp-review-banner"),
+    "pending needs Approve/Reject",
+  );
+  const rejected = companyProfileHtml(scoredCompany, [], {
+    t,
+    reviewStatus: "rejected",
+    counts,
+  });
+  assert.ok(rejected.includes("cp-review-banner"), "rejected needs Restore");
+});
+
+test("companyProfileHtml: Facts rail is the quiet 5-row block, not the 12-row enrichment dump (DHA-412 #10)", () => {
+  const html = companyProfileHtml(scoredCompany, [], {
+    t,
+    reviewStatus: "approved",
+    counts,
+  });
+  // Kept: HQ, Size, Founded, Funding, ATS.
+  assert.ok(html.includes("Oakland, CA")); // HQ
+  assert.ok(html.includes(">ATS<")); // ATS fact key
+  // Dropped: the deeper enrichment rows that had swollen the rail.
+  assert.ok(!html.includes("Oakland, Remote"), "Offices row removed");
+  assert.ok(!html.includes("Glassdoor"), "Glassdoor row removed");
+  assert.ok(!html.includes("4.2/5"), "Glassdoor value removed");
+  assert.ok(!html.includes("LinkedIn"), "LinkedIn row removed");
+  assert.ok(
+    !html.includes("Experience rating"),
+    "experience-rating row removed",
+  );
+  assert.ok(!html.includes("Interest rating"), "interest-rating row removed");
+  assert.ok(
+    !html.includes("cp-fact-link"),
+    "Website/Careers link rows removed",
+  );
+});
+
 test("companyProfileHtml (scored): the big fit score also uses the shared band class", () => {
   // alignment_score 82 -> good
   const html = companyProfileHtml(scoredCompany, [], {

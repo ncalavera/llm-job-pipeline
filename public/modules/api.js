@@ -34,7 +34,9 @@ export function showSyncStatus(text, isError) {
 export function showOfflineBanner() {
   const el = document.getElementById("syncIndicator");
   if (!el) return;
-  el.textContent = "\u26A0 Offline \u2014 changes are not being saved";
+  // Plain text + the crimson .sync-offline colour carry the warning; no
+  // decorative \u26A0 glyph (design-protocol "no decorative icons", DHA-412 #3).
+  el.textContent = "Offline \u2014 changes are not being saved";
   el.classList.remove("fade-out");
   el.classList.add("sync-offline");
   if (syncHideTimer) clearTimeout(syncHideTimer);

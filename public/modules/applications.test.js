@@ -221,7 +221,9 @@ test("submitted artifacts show a count badge with the key list in the tooltip", 
     ...baseApp,
     artifacts: ["cv", "cover_letter"],
   });
-  assert.match(html, /apl-artifacts" title="Artifacts: cv, cover_letter">📎2</);
+  // Quiet count, no decorative 📎 glyph (DHA-412 #3) — keys stay in the tooltip.
+  assert.match(html, /apl-artifacts" title="Artifacts: cv, cover_letter">2</);
+  assert.doesNotMatch(html, /📎/);
 });
 
 test("no artifacts recorded -> no badge rendered at all", () => {

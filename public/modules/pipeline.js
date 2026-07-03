@@ -170,45 +170,10 @@ function renderTriageControls(controlsEl, metrics) {
 // Triage card
 // ---------------------------------------------------------------------------
 
-const MOVE_LABELS = {
-  liked: "Like",
-  to_apply: "Apply",
-  to_research: "Research",
-  to_network: "Network",
-  applied: "Applied ✓",
-  skipped: "Skip",
-};
-
-// One compact, colour-coded button per column the card is NOT already in.
-// Shared by single and grouped cards; the click handler reads data-canon-ids
-// off the enclosing .pipe-card and moves every role to the target column.
-function buildMoveBtns(curColKey) {
-  return (
-    '<div class="triage-move-btns">' +
-    TRIAGE_COLUMNS.filter(function (c) {
-      // Derived columns ('expired') aren't real statuses — no move-to button.
-      return c.key !== curColKey && !c.derived;
-    })
-      .map(function (c) {
-        const lbl = MOVE_LABELS[c.key] || c.label;
-        return (
-          '<button type="button" class="triage-move-btn" data-move-to="' +
-          c.key +
-          '" style="border-color:' +
-          c.color +
-          ";color:" +
-          c.color +
-          '" title="Move to ' +
-          escHtml(lbl) +
-          '">' +
-          escHtml(lbl) +
-          "</button>"
-        );
-      })
-      .join("") +
-    "</div>"
-  );
-}
+// Cards carry no in-card move-button row (DHA-412 #5): the mock's cards are
+// title + org + score + note, and cards move between columns by drag alone
+// (SortableJS, see renderPipeline). This keeps the columns narrow enough that
+// ~6 fit at 1440px instead of ~4.
 
 // Deadline (urgency-coloured) or, when a role has no deadline but its source
 // went quiet, a staleness line reusing the Catalog freshness badge look.
@@ -254,11 +219,6 @@ export function buildTriageCard(g, col, review, companies) {
       g.org_url ||
       "",
   );
-  const locs = (g.locations || [])
-    .map(function (l) {
-      return l.location;
-    })
-    .join(", ");
   const isCompact = !!col.compact;
 
   let meta = "";
@@ -268,7 +228,7 @@ export function buildTriageCard(g, col, review, companies) {
     // render inert, not execute). See DHA-373.
     if (review.deadline)
       meta +=
-        '<div class="pipe-card-deadline">\u23F0 ' +
+        '<div class="pipe-card-deadline">' +
         escHtml(review.deadline) +
         "</div>";
     if (review.cv_notes)
@@ -313,12 +273,10 @@ export function buildTriageCard(g, col, review, companies) {
       "</a>"
     : escHtml(g.title);
 
-  const openLinkHtml = firstUrl
-    ? '<div class="pipe-card-actions"><a class="pipe-card-open-link" href="' +
-      escHtml(firstUrl) +
-      '" target="_blank" rel="noopener">Open \u2197</a></div>'
-    : "";
-
+  // Compact card (DHA-412 #5): title + org + score + one-line note only. The
+  // description snippet, location line, "Open \u2197" link, and the move-button row
+  // are gone \u2014 cards move by drag (see renderPipeline). `meta` (a review note)
+  // still renders on non-compact columns; the Liked column stays note-free.
   return (
     '<div class="pipe-card' +
     (isCompact ? " compact" : " expanded") +
@@ -329,12 +287,6 @@ export function buildTriageCard(g, col, review, companies) {
     '<div class="pipe-card-title">' +
     titleHtml +
     "</div>" +
-    (g.llm_summary
-      ? '<div class="pipe-card-summary">' + escHtml(g.llm_summary) + "</div>"
-      : "") +
-    '<div class="pipe-card-loc">' +
-    escHtml(locs || "\u2014") +
-    "</div>" +
     (g.llm_score != null
       ? '<span class="pipe-card-score ' +
         qualityClass(g.llm_score) +
@@ -343,9 +295,7 @@ export function buildTriageCard(g, col, review, companies) {
         "</span>"
       : "") +
     buildTriageFreshness(g) +
-    openLinkHtml +
     meta +
-    buildMoveBtns(col.key) +
     "</div>"
   );
 }
@@ -426,7 +376,6 @@ function buildTriageGroupCard(entries, col, companies) {
     '<ul class="pipe-grp-roles">' +
     rolesHtml +
     "</ul>" +
-    buildMoveBtns(col.key) +
     "</div>"
   );
 }
@@ -547,7 +496,8 @@ export function renderPipeline() {
 
   // Move every role on a card (one for a single card, all for a grouped card)
   // to the target column. updateStatus emits "statusChanged"; app.js handles
-  // save + re-render. Shared by the move-buttons and drag-and-drop.
+  // save + re-render. The sole caller is drag-and-drop's onEnd — the in-card
+  // move-button row was removed for the compact card (DHA-412 #5).
   function moveCardToColumn(card, target) {
     if (!card || !target) return;
     let ids;
@@ -561,20 +511,6 @@ export function renderPipeline() {
       if (g) updateStatus(g.id, g.member_ids || [], target);
     });
   }
-
-  // Bind move buttons.
-  board
-    .querySelectorAll(".triage-move-btn[data-move-to]")
-    .forEach(function (btn) {
-      btn.addEventListener("click", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        moveCardToColumn(
-          btn.closest(".pipe-card[data-canon-ids]"),
-          btn.getAttribute("data-move-to"),
-        );
-      });
-    });
 
   // Drag-and-drop: each column's card list is a Sortable connected to the
   // shared "triage" group, so cards drag between columns. Dropping into a

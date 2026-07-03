@@ -196,10 +196,15 @@ export function recordSyncOutcome(outcome) {
   state.sync = nextSyncState(state.sync, outcome);
 }
 
-// Initialize dbData — all vacancies start as "unseen", real statuses come from API
+// Seed dbData from each group's baked status as the BASE layer, defaulting to
+// "unseen" when the payload carries none (DHA-412). In full mode the live
+// /api/statuses fetch (mergeRemoteStatuses) overwrites this base right after
+// load, so the API still wins; in simple/static mode (no API) the baked status
+// is what the basket/Triage/Applied views read, instead of everything showing
+// "unseen" regardless of what data.js baked in.
 for (const g of groups) {
   g.member_ids = Array.isArray(g.member_ids) ? g.member_ids : [];
-  state.dbData[g.id] = { status: "unseen" };
+  state.dbData[g.id] = { status: g.status || "unseen" };
 }
 
 // ---------------------------------------------------------------------------
@@ -347,7 +352,11 @@ export function applySnapshot(payload) {
   groupsById.clear();
   for (const g of groups) {
     g.member_ids = Array.isArray(g.member_ids) ? g.member_ids : [];
-    if (!state.dbData[g.id]) state.dbData[g.id] = { status: "unseen" };
+    // New group from a polled snapshot: seed from its baked status (base
+    // layer), same rule as the initial seed above. Existing entries keep the
+    // live status already merged in — the snapshot never clobbers a decision.
+    if (!state.dbData[g.id])
+      state.dbData[g.id] = { status: g.status || "unseen" };
     groupsById.set(g.id, g);
   }
 

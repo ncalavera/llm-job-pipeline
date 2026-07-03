@@ -157,11 +157,13 @@ function _filterChips(byStatus, active) {
 function _artifactsBadge(artifacts, t) {
   if (!artifacts || !artifacts.length) return "";
   return (
+    // Quiet mono count, no decorative 📎 glyph — the full key list stays in the
+    // title tooltip (design-protocol "no decorative icons", DHA-412 #3).
     ' <span class="apl-artifacts" title="' +
     escHtml(
       t("apps_col_artifacts", "Artifacts") + ": " + artifacts.join(", "),
     ) +
-    '">📎' +
+    '">' +
     artifacts.length +
     "</span>"
   );

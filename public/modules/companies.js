@@ -2034,59 +2034,22 @@ function companyRolesBlockHtml(c, roles, counts, t) {
 // ---------------------------------------------------------------------------
 
 function companyFactsHtml(c, t) {
+  // Quiet 5-row facts block per the mock (DHA-412 #10): HQ, Size, Founded,
+  // Funding, ATS. The deeper enrichment signals that had swollen this to ~12
+  // rows (Offices, Sector, Glassdoor, LinkedIn, experience/interest ratings,
+  // Website/Careers links) are dropped to keep the side rail quiet — the fit
+  // ratings already surface in the reading column, and the ATS type also shows
+  // under Monitoring, exactly as the mock has it.
   var facts = [];
   if (c.hq_location && c.hq_location !== "N/A")
     facts.push([t("cp_hq", "HQ"), escHtml(c.hq_location)]);
-  if (c.offices) facts.push([t("cp_offices", "Offices"), escHtml(c.offices)]);
   if (c.employee_count && c.employee_count !== "N/A")
     facts.push([t("cp_size", "Size"), escHtml(c.employee_count)]);
   if (c.founded_year && c.founded_year !== "N/A")
     facts.push([t("cp_founded", "Founded"), escHtml(c.founded_year)]);
   if (c.funding_status && c.funding_status !== "N/A")
     facts.push([t("cp_funding", "Funding"), escHtml(c.funding_status)]);
-  if (c.sector && c.sector !== c.category)
-    facts.push([t("cp_sector", "Sector"), escHtml(c.sector)]);
-  if (c.glassdoor_rating != null)
-    facts.push(["Glassdoor", c.glassdoor_rating + "/5"]);
-  if (c.linkedin_employees)
-    facts.push([
-      "LinkedIn",
-      escHtml(c.linkedin_employees) +
-        " " +
-        escHtml(t("cp_employees_suffix", "employees")),
-    ]);
-  if (c.experience_match != null)
-    facts.push([
-      t("cp_exp_rating", "Experience rating"),
-      c.experience_match + "/10",
-    ]);
-  if (c.personal_interest != null)
-    facts.push([
-      t("cp_interest_rating", "Interest rating"),
-      c.personal_interest + "/10",
-    ]);
-  var websiteUrl = safeUrl(c.website);
-  if (websiteUrl) {
-    facts.push([
-      t("cp_website", "Website"),
-      '<a class="cp-fact-link" href="' +
-        escHtml(websiteUrl) +
-        '" target="_blank" rel="noopener">' +
-        escHtml(t("cp_visit", "Visit")) +
-        " ↗</a>",
-    ]);
-  }
-  var careersUrl = safeUrl(c.careers_url);
-  if (careersUrl) {
-    facts.push([
-      t("cp_careers", "Careers"),
-      '<a class="cp-fact-link" href="' +
-        escHtml(careersUrl) +
-        '" target="_blank" rel="noopener">' +
-        escHtml(t("cp_visit", "Visit")) +
-        " ↗</a>",
-    ]);
-  }
+  if (c.strategy) facts.push(["ATS", escHtml(c.strategy)]);
   if (!facts.length) return "";
   return (
     '<div class="vac-rail-group"><div class="vac-section-label">' +
@@ -2231,18 +2194,12 @@ export function companyProfileHtml(c, roles, opts) {
       "','reject')\">" +
       escHtml(t("btn_reject", "Reject")) +
       "</button></div>";
-  } else if (reviewStatus === "approved" && c.company_id) {
-    var cidA = jsAttr(c.company_id);
-    banner =
-      '<div class="cp-review-banner q-good-bg">' +
-      '<span class="cp-review-label">' +
-      escHtml(t("cp_review_approved", "Approved")) +
-      "</span>" +
-      '<button class="vac-btn vac-btn--pass" onclick="reviewCompany(\'' +
-      cidA +
-      "','reject')\">" +
-      escHtml(t("cp_archive", "Archive")) +
-      "</button></div>";
+    // Approved is a settled state: its status shows once, in the rail pill
+    // (companyStatusPillHtml) — no second full-width banner (DHA-412 #6, the
+    // mock's single-source-of-truth placement). Archiving an approved company
+    // stays available from the Companies list row's ✗ action. Only pending
+    // (needs Approve/Reject) and rejected (needs Restore) keep a banner, since
+    // those carry an action the rail pill can't.
   } else if (reviewStatus === "rejected" && c.company_id) {
     var cidR = jsAttr(c.company_id);
     banner =
