@@ -10,6 +10,7 @@ Edit your profile in one place; both prompts see the change.
 
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -34,28 +35,117 @@ def _load_template(name: str) -> str:
 # or in a test is picked up on the next call instead of serving a stale parse.
 _profile_cache: dict[str, tuple[float, dict[str, str]]] = {}
 
+# Memo for the linked-worktree → main-checkout profile lookup. The git topology
+# is fixed for the life of a process, and ``_resolve_profile_path()`` runs on
+# every profile load (to compute the cache key); without this the fallback would
+# spawn ``git rev-parse`` on every call. Keyed by the repo root so a test that
+# repoints ``_REPO_ROOT`` re-evaluates. Cleared alongside the parsed cache. The
+# sentinel distinguishes "not looked up yet" from "looked up, found nothing".
+_UNRESOLVED = object()
+_worktree_profile_memo: dict[str, "Path | None"] = {}
+
 
 def clear_profile_cache() -> None:
     """Drop all cached parsed profiles (e.g. in tests, or after an edit)."""
     _profile_cache.clear()
+    _worktree_profile_memo.clear()
 
 
-def _resolve_profile_path() -> "tuple[Path | None, bool]":
-    """Decide which profile file to read and whether it's the EXAMPLE fallback.
+def _worktree_main_profile() -> "Path | None":
+    """Locate ``config/user_profile.md`` in the MAIN checkout when this process
+    runs inside a LINKED git worktree that lacks its own copy.
 
-    Returns ``(path, warn_example)``. ``path`` is None only when neither a real
+    ``config/user_profile.md`` is gitignored (personal data), so a ``git
+    worktree`` never carries it — a pipeline launched from a worktree would fall
+    through to the bundled EXAMPLE and bake default settings into shared state
+    (the same failure class as the wave-3 ".env priority" trap). Detection is
+    read-only: ``git rev-parse --git-common-dir`` points at the shared ``.git``
+    of the main checkout; in a linked worktree it differs from ``--git-dir``. The
+    main checkout root is the parent of that common ``.git`` directory.
+
+    Returns the resolved path only when it actually exists there, else None (so
+    the caller keeps its existing EXAMPLE fallback). Memoized per repo root;
+    never raises (git missing / not a repo → None).
+    """
+    key = str(_REPO_ROOT)
+    cached = _worktree_profile_memo.get(key, _UNRESOLVED)
+    if cached is not _UNRESOLVED:
+        return cached
+
+    result: "Path | None" = None
+    try:
+        common = subprocess.run(
+            ["git", "-C", str(_REPO_ROOT), "rev-parse", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        git_dir = subprocess.run(
+            ["git", "-C", str(_REPO_ROOT), "rev-parse", "--git-dir"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if common.returncode == 0 and git_dir.returncode == 0:
+            common_dir = Path(common.stdout.strip())
+            if not common_dir.is_absolute():
+                common_dir = _REPO_ROOT / common_dir
+            common_dir = common_dir.resolve()
+            gd = Path(git_dir.stdout.strip())
+            if not gd.is_absolute():
+                gd = _REPO_ROOT / gd
+            gd = gd.resolve()
+            # Only a LINKED worktree has a per-worktree git dir distinct from the
+            # shared common dir; in the main checkout they're the same → no-op.
+            if gd != common_dir:
+                candidate = common_dir.parent / "config" / "user_profile.md"
+                if candidate.exists():
+                    result = candidate
+    except (OSError, subprocess.SubprocessError):
+        result = None
+
+    _worktree_profile_memo[key] = result
+    return result
+
+
+def _resolve_profile_path() -> "tuple[Path | None, bool, bool]":
+    """Decide which profile file to read.
+
+    Returns ``(path, warn_example, from_worktree)``. ``warn_example`` is True
+    when falling back to the bundled EXAMPLE; ``from_worktree`` is True when the
+    profile was recovered from the MAIN checkout because this linked worktree
+    lacks its own (gitignored) copy. ``path`` is None only when neither a real
     nor an example profile exists. An explicit ``USER_PROFILE_PATH`` is honoured
     verbatim even if it does not exist — the caller surfaces the read error, so
     a mistyped override fails loudly rather than silently using the example.
     """
     path_env = os.environ.get("USER_PROFILE_PATH")
     if path_env:
-        return Path(path_env).expanduser().resolve(), False
+        return Path(path_env).expanduser().resolve(), False, False
     if DEFAULT_PROFILE_PATH.exists():
-        return DEFAULT_PROFILE_PATH, False
+        return DEFAULT_PROFILE_PATH, False, False
+    # Linked-worktree trap: config/user_profile.md is gitignored, so a worktree
+    # doesn't have it. Recover the REAL profile from the main checkout before
+    # degrading to the meaningless EXAMPLE.
+    main_profile = _worktree_main_profile()
+    if main_profile is not None:
+        return main_profile, False, True
     if EXAMPLE_PROFILE_PATH.exists():
-        return EXAMPLE_PROFILE_PATH, True
-    return None, False
+        return EXAMPLE_PROFILE_PATH, True, False
+    return None, False, False
+
+
+def has_real_profile() -> bool:
+    """True when profile resolution finds a genuine profile — the default file,
+    an explicit ``USER_PROFILE_PATH``, or the linked-worktree fallback to the
+    main checkout. False when it would silently use the bundled EXAMPLE (implicit
+    fallback) or finds nothing at all.
+
+    A production writer (the shared dashboard snapshot) uses this to refuse to
+    bake example/default values into shared state — the linked-worktree trap.
+    """
+    path, warn_example, _ = _resolve_profile_path()
+    return path is not None and not warn_example
 
 
 def profile_raw_text() -> "str | None":
@@ -66,7 +156,7 @@ def profile_raw_text() -> "str | None":
     same file _load_user_profile() parses. Never warns, never raises: a missing
     or unreadable file yields None.
     """
-    path, _ = _resolve_profile_path()
+    path, _, _ = _resolve_profile_path()
     if path is None:
         return None
     try:
@@ -87,7 +177,7 @@ def _load_user_profile() -> dict[str, str]:
     that was actually chosen, so a changed profile path (e.g. in tests) is a
     cache miss and the "no profile found" case is never cached as a success.
     """
-    path, warn_example = _resolve_profile_path()
+    path, warn_example, from_worktree = _resolve_profile_path()
     if path is None:
         raise FileNotFoundError(
             "No user profile found. Create config/user_profile.md "
@@ -113,6 +203,14 @@ def _load_user_profile() -> dict[str, str]:
             "(a fictional person). Scores are MEANINGLESS until you create your "
             "own: copy config/user_profile.example.md to config/user_profile.md "
             "and fill it in.",
+            file=sys.stderr,
+        )
+    elif from_worktree:
+        # Gitignored profile doesn't travel with a linked worktree — say once,
+        # on stderr, which file is actually being read so the recovery is visible.
+        print(
+            f"  (profile: config/user_profile.md is absent in this git worktree "
+            f"(gitignored) — reading the main checkout's {path})",
             file=sys.stderr,
         )
 
