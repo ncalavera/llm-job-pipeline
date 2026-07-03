@@ -3,16 +3,14 @@
 // =============================================================================
 
 import { archivedGroups } from "./state.js";
-import {
-  escHtml,
-  parseLocationChips,
-  renderLocationChips,
-  llmScoreBadge,
-  screenScoreBadge,
-  relativeTime,
-  safeUrl,
-} from "./helpers.js";
+import { escHtml, relativeTime, safeUrl, qualityBand } from "./helpers.js";
 import { T } from "./i18n.js";
+
+// Archived rows are NOT in state.js's groupsById (that map is built from the
+// live `groups` array only), so window.openVacancyRoute(id) would render the
+// vacancy page's "not found" panel for an archived id. Rows stay non-clickable
+// (only the title's outbound link, when present, is interactive) rather than
+// wiring a route that always 404s.
 
 let archiveInited = false;
 
@@ -88,26 +86,34 @@ export function renderArchive() {
   grid.innerHTML = filtered
     .map((g) => {
       try {
-        return buildArchiveCard(g);
+        return buildArchiveRow(g);
       } catch (err) {
-        console.error(
-          "archive: minimal card for malformed row",
-          g && g.id,
-          err,
-        );
-        return buildArchiveFallbackCard(g);
+        console.error("archive: minimal row for malformed row", g && g.id, err);
+        return buildArchiveFallbackRow(g);
       }
     })
     .join("");
 }
 
-function buildArchiveCard(g) {
-  // org_color is a [fg, bg] pair in fresh data, but a legacy/corrupt snapshot
-  // row could carry null or a non-array — destructuring that throws, so coerce
-  // before unpacking.
-  const [fg, bg] = Array.isArray(g.org_color)
-    ? g.org_color
-    : ["#F97316", "#FFF7ED"];
+// First location's display text, "+N" suffixed when there are more, with a
+// title tooltip listing them all — same reduction Browse's dense rows use
+// (catalog.js's primaryLocationInfo) so a flat list stays scannable.
+function primaryLocationInfo(g) {
+  const locs = (g.locations || []).filter((l) => l.location);
+  if (!locs.length) return null;
+  const extra = locs.length - 1;
+  return {
+    text: locs[0].location + (extra > 0 ? " +" + extra : ""),
+    title: locs.map((l) => l.location).join(", "),
+  };
+}
+
+function buildArchiveRow(g) {
+  const score = g.llm_score;
+  const scoreCls =
+    score == null ? "vac-score--none" : "q-" + qualityBand(score) + "-bg";
+  const scoreTxt = score == null ? "—" : String(score);
+
   const firstUrl = safeUrl(
     (g.locations || []).find((l) => l.url)?.url || g.org_url || "",
   );
@@ -119,72 +125,49 @@ function buildArchiveCard(g) {
       "</a>"
     : escHtml(g.title);
 
-  const catalogChips = (g.locations || []).flatMap((l) => {
-    const chips = parseLocationChips(l.location);
-    chips.forEach((c) => {
-      if (l.url) c.url = l.url;
-    });
-    return chips;
-  });
-  const seen = new Set();
-  const uniqueChips = catalogChips.filter((c) => {
-    const key = c.text.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  const locChips = renderLocationChips(uniqueChips, {
-    chipClass: "loc-chip",
-    useRegionColor: false,
-    maxVisible: 3,
-  });
+  const loc = primaryLocationInfo(g);
+  const subParts = [escHtml(g.company_name || g.org)];
+  if (loc) {
+    subParts.push(
+      '<span title="' +
+        escHtml(loc.title) +
+        '">' +
+        escHtml(loc.text) +
+        "</span>",
+    );
+  }
 
-  const firstSeenHtml = g.first_seen
-    ? '<div class="card-comp-row"><span class="card-first-seen">' +
-      relativeTime(g.first_seen, T) +
-      "</span></div>"
-    : "";
-
-  const summaryText = g.llm_summary || g.snippet || "";
-  const summaryHtml = summaryText
-    ? '<p class="card-snippet">' + escHtml(summaryText) + "</p>"
-    : "";
+  const seenText = g.first_seen ? relativeTime(g.first_seen, T) : "—";
 
   return (
-    '<div class="catalog-card archive-card" data-id="' +
-    g.id +
+    '<div class="archive-row" data-id="' +
+    escHtml(g.id) +
     '">' +
-    '<div class="catalog-card-header">' +
-    '<div class="catalog-header-left">' +
-    '<span class="catalog-org" style="color:' +
-    fg +
-    ";background:" +
-    bg +
+    '<div class="archive-row-score ' +
+    scoreCls +
     '">' +
-    escHtml(g.company_name || g.org) +
-    "</span>" +
+    scoreTxt +
     "</div>" +
-    '<div class="catalog-header-right">' +
-    llmScoreBadge(g.llm_score) +
-    screenScoreBadge(g) +
-    "</div>" +
-    "</div>" +
-    '<h3 class="catalog-title">' +
+    '<div class="archive-row-role">' +
+    '<div class="archive-row-title">' +
     titleHtml +
-    "</h3>" +
-    '<div class="catalog-loc-row">' +
-    locChips +
     "</div>" +
-    firstSeenHtml +
-    summaryHtml +
+    '<div class="archive-row-sub">' +
+    subParts.join(" · ") +
+    "</div>" +
+    "</div>" +
+    '<span class="archive-row-seen">' +
+    escHtml(seenText) +
+    "</span>" +
     "</div>"
   );
 }
 
-// Rendered in place of a row that made buildArchiveCard throw. Reads each
+// Rendered in place of a row that made buildArchiveRow throw. Reads each
 // scalar field through a guard (a field could be the very thing that threw),
-// so the fallback itself can never throw — the card count stays consistent
-// with the header and the archive degrades to a bare card, never a blank grid.
+// so the fallback itself can never throw — the rendered row count stays
+// consistent with the header and the archive degrades to a bare row, never a
+// blank grid.
 function safeField(read, dflt) {
   try {
     const v = read();
@@ -194,23 +177,26 @@ function safeField(read, dflt) {
   }
 }
 
-function buildArchiveFallbackCard(g) {
+function buildArchiveFallbackRow(g) {
   const org = escHtml(
     safeField(() => g.company_name || g.org, "") || "Unknown company",
   );
   const title = escHtml(safeField(() => g.title, "") || "Untitled role");
   const id = escHtml(String(safeField(() => g.id, "")));
   return (
-    '<div class="catalog-card archive-card" data-id="' +
+    '<div class="archive-row" data-id="' +
     id +
     '">' +
-    '<div class="catalog-card-header"><div class="catalog-header-left">' +
-    '<span class="catalog-org">' +
-    org +
-    "</span></div></div>" +
-    '<h3 class="catalog-title">' +
+    '<div class="archive-row-score vac-score--none">—</div>' +
+    '<div class="archive-row-role">' +
+    '<div class="archive-row-title">' +
     title +
-    "</h3>" +
+    "</div>" +
+    '<div class="archive-row-sub">' +
+    org +
+    "</div>" +
+    "</div>" +
+    '<span class="archive-row-seen">—</span>' +
     "</div>"
   );
 }

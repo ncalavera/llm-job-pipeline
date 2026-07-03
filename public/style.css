@@ -735,13 +735,6 @@ body::after {
   margin-bottom: 8px;
 }
 
-.card-comp-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
-}
-
 .card-deadline {
   font-size: var(--text-sm);
   font-weight: 500;
@@ -765,12 +758,6 @@ body::after {
   text-decoration: line-through;
 }
 
-.card-first-seen {
-  color: var(--muted);
-  font-size: var(--text-xs);
-  margin-left: auto;
-}
-
 .card-freshness {
   font-size: var(--text-xs);
   padding: 1px 6px;
@@ -784,17 +771,6 @@ body::after {
 .card-freshness.stale {
   color: var(--coral);
   background: color-mix(in srgb, var(--coral) 14%, transparent);
-}
-
-.card-snippet {
-  font-size: var(--text-sm);
-  color: var(--muted);
-  line-height: 1.6;
-  margin-bottom: 8px;
-  padding: 10px 14px;
-  background: #faf8f3;
-  border-radius: 8px;
-  border-left: 3px solid var(--surface);
 }
 
 .card-full-desc {
@@ -1280,22 +1256,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
   outline-offset: 1px;
 }
 
-/* --- Catalog filters --- */
-.catalog-filters {
-  background: var(--card);
-  border-radius: 14px;
-  padding: 12px 16px;
-  margin-bottom: 20px;
-  box-shadow: var(--shadow-sm);
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-  position: sticky;
-  top: 56px;
-  z-index: 10;
-}
-
 /* Filter group layout */
 .filter-group {
   display: flex;
@@ -1363,13 +1323,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
 
 .catalog-org-filter:focus {
   border-color: var(--coral);
-}
-
-.catalog-results-count {
-  text-align: center;
-  font-size: var(--text-sm);
-  color: var(--muted);
-  margin-bottom: 14px;
 }
 
 /* ===========================================================================
@@ -1561,73 +1514,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
   text-align: right;
 }
 
-/* --- Catalog grid (Archive's read-only cards — U5 retired Browse's own
-   instance; this stays for Archive until U11) --- */
-.catalog-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 14px;
-}
-
-/* --- Compact card (archive.js's read-only cards reuse it — U5 retired
-   Browse's own instance; the CSS stays for Archive until U11) --- */
-.catalog-card {
-  background: var(--card);
-  border-radius: 14px;
-  padding: 16px 18px;
-  box-shadow: var(--shadow-sm);
-  transition:
-    transform 150ms ease,
-    box-shadow 150ms ease;
-  cursor: pointer;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  opacity: 0;
-}
-
-.catalog-card:hover {
-  transform: scale(1.02);
-  box-shadow: var(--shadow-lg);
-}
-
-.catalog-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-
-.catalog-header-left {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.catalog-org {
-  font-size: var(--text-sm);
-  font-weight: 700;
-  padding: 3px 12px;
-  border-radius: 9999px;
-  cursor: default;
-  letter-spacing: 0.02em;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex-shrink: 1;
-}
-
-.catalog-header-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
 /* LLM score badge */
 .llm-score-badge {
   display: inline-flex;
@@ -1685,28 +1571,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
   cursor: help;
 }
 
-.catalog-title {
-  font-size: var(--text-base);
-  font-weight: 700;
-  line-height: 1.35;
-  color: var(--text);
-  margin: 0;
-}
-
-.catalog-title a {
-  color: var(--text);
-  text-decoration: none;
-}
-.catalog-title a:hover {
-  color: var(--coral);
-}
-
-.catalog-loc-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
 .catalog-empty {
   text-align: center;
   padding: 48px 24px;
@@ -1731,13 +1595,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
   background: var(--surface);
   padding: 1px 5px;
   border-radius: 4px;
-}
-
-/* --- Responsive --- */
-@media (max-width: 768px) {
-  .catalog-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* Hard requirements tags */
@@ -5221,4 +5078,145 @@ a.pipe-grp-role-title:hover {
   font-size: 12.5px;
   color: var(--sky-text);
   margin-top: 4px;
+}
+
+/* === U11 Archive (redesign) === */
+/* Flat rows in the new look (DHA-395): header on the material, rows in a
+   sheet, per design-protocol.md #6. Overrides the generic section-sheet rule
+   near the top of this file (same selector, later in the cascade) instead of
+   editing that shared multi-section rule directly — this file is touched by
+   several parallel reskin units and that rule is exactly the kind of shared
+   line every one of them would otherwise collide on. */
+.archive-section {
+  background: none;
+  box-shadow: none;
+  padding: 4px 0 0;
+}
+
+.archive-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 10px 12px;
+  flex-wrap: wrap;
+}
+.archive-header-title {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--sky-text);
+}
+.archive-org-filter {
+  border: none;
+  padding: 3.5px 12px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--sky-text-secondary);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: "Onest", sans-serif;
+  cursor: pointer;
+}
+.archive-org-filter:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: -1px;
+}
+.archive-search {
+  border: none;
+  padding: 7px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--sky-text);
+  font-size: 12px;
+  width: 190px;
+  font-family: "Onest", sans-serif;
+}
+.archive-search:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: -1px;
+}
+.archive-header-hint {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--sky-text-faint);
+}
+
+.archive-results-count {
+  padding: 0 10px 8px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  color: var(--sky-text-faint);
+  text-align: right;
+}
+
+.archive-sheet {
+  background: var(--sky-sheet);
+  border-radius: var(--radius-sheet);
+  box-shadow:
+    inset 0 0 0 1px var(--sky-hairline),
+    0 1px 3px rgba(58, 56, 51, 0.05);
+  overflow: auto;
+  padding: 10px 8px;
+}
+
+/* Rows are quieter than Browse's (opacity .78, full at rest on hover) since
+   Archive is a decided-out, read-only list (design-protocol mock). Not
+   clickable — archived groups aren't in state.js's groupsById, so the only
+   interactive element is the title's outbound link when a posting URL
+   exists (see archive.js). */
+.archive-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  margin: 0 8px;
+  border-radius: var(--radius-row);
+  opacity: 0.78;
+}
+.archive-row:hover {
+  background: var(--sky-row-hover);
+  opacity: 1;
+}
+.archive-row-score {
+  flex: none;
+  width: 36px;
+  height: 26px;
+  border-radius: var(--radius-tile);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.archive-row-role {
+  min-width: 0;
+  flex: 1;
+}
+.archive-row-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--sky-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.archive-row-title a {
+  color: var(--sky-text);
+  text-decoration: none;
+}
+.archive-row-title a:hover {
+  text-decoration: underline;
+}
+.archive-row-sub {
+  font-size: 11.5px;
+  color: var(--sky-text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.archive-row-seen {
+  flex: none;
+  font-size: 11px;
+  color: var(--sky-text-faint);
 }

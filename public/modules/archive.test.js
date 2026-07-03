@@ -140,7 +140,7 @@ function setRows(next) {
   rows.push(...next);
 }
 
-const cardCount = () => (grid.innerHTML.match(/archive-card/g) || []).length;
+const cardCount = () => (grid.innerHTML.match(/archive-row"/g) || []).length;
 
 // --- Tests -----------------------------------------------------------------
 
@@ -189,9 +189,12 @@ test("one malformed row does not blank the grid (count matches rendered cards)",
 
 test("a single malformed match still yields a card, never a blank grid", () => {
   const bad = archivedRow("only", "Solo Broken");
-  Object.defineProperty(bad, "org_color", {
+  // locations is read for the score tile's URL + subline location text
+  // (buildArchiveRow), so a corrupt copy is what exercises the fallback path
+  // today (the row builder no longer reads org_color).
+  Object.defineProperty(bad, "locations", {
     get() {
-      throw new Error("corrupt color");
+      throw new Error("corrupt locations");
     },
     enumerable: true,
   });
@@ -203,4 +206,107 @@ test("a single malformed match still yields a card, never a blank grid", () => {
   assert.equal(count.textContent, "1 of 2 vacancies");
   assert.equal(cardCount(), 1, "the one match renders instead of a blank grid");
   assert.notEqual(grid.innerHTML.trim(), "");
+});
+
+test("row markup carries the score tile and title/subline hooks", () => {
+  sel.value = "";
+  search.value = "";
+  setRows([Object.assign(archivedRow("v-good", "GoodOrg"), { llm_score: 82 })]);
+  renderArchive();
+
+  const html = grid.innerHTML;
+  assert.ok(html.includes("archive-row-score"), "score tile hook present");
+  assert.ok(
+    html.includes("q-good-bg"),
+    "a high score gets the good quality band",
+  );
+  assert.ok(html.includes("archive-row-title"), "title hook present");
+  assert.ok(html.includes("archive-row-sub"), "subline hook present");
+  assert.ok(html.includes("GoodOrg — Role"), "title text renders");
+});
+
+test("row output escapes malicious text in both text and attribute positions", () => {
+  sel.value = "";
+  search.value = "";
+  const evilRow = archivedRow("evil", 'Evil "Org" <b>Co</b>', {
+    title: "<script>alert(1)</script>",
+    org_url: "https://evil.example/><script>alert(2)</script>",
+    // No location carries a url, so firstUrl falls through to org_url above
+    // (buildArchiveRow prefers a location url when one exists).
+    locations: [
+      {
+        location: 'Berlin "HQ" <b>DE</b>',
+        url: "",
+        work_mode: "",
+        region: "",
+        city: "",
+        country: "",
+      },
+    ],
+  });
+  setRows([evilRow]);
+  renderArchive();
+
+  const html = grid.innerHTML;
+  assert.ok(!html.includes("<script>"), "title script tag is neutralized");
+  assert.ok(!html.includes("<b>Co</b>"), "org markup is neutralized");
+  assert.ok(!html.includes("<b>DE</b>"), "location markup is neutralized");
+  assert.ok(
+    html.includes(
+      'href="https://evil.example/&gt;&lt;script&gt;alert(2)&lt;/script&gt;"',
+    ),
+    "the href attribute value itself is escaped, not raw",
+  );
+  assert.ok(
+    html.includes("&quot;HQ&quot;"),
+    "the location tooltip attribute escapes embedded quotes",
+  );
+});
+
+test("a javascript: location URL never reaches an href", () => {
+  sel.value = "";
+  search.value = "";
+  setRows([
+    archivedRow("unsafe-url", "UnsafeOrg", {
+      locations: [
+        {
+          location: "Remote",
+          url: "javascript:alert(1)",
+          work_mode: "",
+          region: "",
+          city: "",
+          country: "",
+        },
+      ],
+    }),
+  ]);
+  renderArchive();
+
+  const html = grid.innerHTML;
+  assert.ok(
+    !html.includes("javascript:"),
+    "unsafe scheme never reaches the DOM",
+  );
+  assert.ok(
+    !html.includes("<a "),
+    "no link renders when the only URL is unsafe",
+  );
+});
+
+test("empty state distinguishes a truly empty archive from a query with no matches", () => {
+  setRows([]);
+  sel.value = "";
+  search.value = "";
+  renderArchive();
+  assert.equal(count.textContent, "0 of 0 vacancies");
+  assert.equal(cardCount(), 0);
+  assert.ok(grid.innerHTML.includes("The archive is empty"));
+
+  setRows([archivedRow("g1", "Alpha")]);
+  search.value = "zzz-no-such-match";
+  renderArchive();
+  assert.equal(count.textContent, "0 of 1 vacancies");
+  assert.equal(cardCount(), 0);
+  assert.ok(grid.innerHTML.includes("Nothing matches the filters"));
+  search.value = ""; // leave shared fake clean for any later test
 });
