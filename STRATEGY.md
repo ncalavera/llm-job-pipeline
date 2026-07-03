@@ -32,4 +32,4 @@ Every PR / feature / prompt change must pass all of these:
 
 ## Quick test for any new idea
 
-Ask in order: Which of the three goals does it serve? Does it survive guardrails 1–8? What is its daily cost in LLM tokens and in operator attention? If the answers take more than a minute, the idea needs a smaller version.
+Ask in order: Which of the three goals does it serve? Does it survive the guardrails? What is its daily cost in LLM tokens and in operator attention? If the answers take more than a minute, the idea needs a smaller version.
