@@ -108,6 +108,20 @@ frozen data), pass `--version N` to `emit` / `measure` / `stats`.
 
 ---
 
+## Before a prompt PR
+
+Any PR that touches `scripts/prompts/vacancy-scoring.md`, `scripts/prompts/company-scoring.md`,
+or `scripts/prompts.py` needs eval evidence in its body, or CI's eval-gate
+workflow fails the PR (it only runs when one of those paths changes). Measure
+**twice**: once on `main` before your edit, once on your branch after it —
+same golden set, same threshold, both from the steps above. Take the
+`AGREEMENT` percentage from each `measure` run and paste one line into the PR
+body: `Eval: agreement X% (baseline Y%)`, where `X` is your branch's number and
+`Y` is `main`'s. The gate only checks that the line is present and filled with
+real numbers (case/whitespace-insensitive) — it does not judge whether the
+number went up or down; that judgment is yours, made visible to reviewers
+instead of asserted from memory.
+
 ## Notes
 
 - Seed labels come from real triage verdicts, which you may have made after
