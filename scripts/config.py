@@ -182,13 +182,46 @@ GEO_ONSITE_PENALTY = int(_HARD_FILTERS["onsite_penalty"])
 # pre-score filter, the post-score ban, and the soft penalty share one normalised
 # view of the policy. geo.canonical_country only depends on settings → no cycle.
 from geo import canonical_country as _canon  # noqa: E402
+from geo import known_regions as _known_regions  # noqa: E402
+
+
+def _validate_regions(region_ids: list[str], field_name: str) -> frozenset[str]:
+    """Normalise profile region ids, warning loudly about ones no country maps to.
+
+    The region→country map is CLOSED: geo.region_for_country only ever returns an
+    id from geo.known_regions(). So a misspelled or prose region id — a user
+    writing a country name, or "east asia" for "east_asia" — has zero member
+    countries and can NEVER match a vacancy. Such an id is DROPPED (not applied
+    "best-effort"): there is nothing to apply, and keeping it would make
+    GEO_ACTIVE claim a geo ban that silently does nothing. We warn to stderr,
+    listing the unrecognised ids and the known set, so the user learns their
+    ban/preference did not take effect and can fix the spelling.
+
+    If the structural region map is absent (known set empty) we cannot tell valid
+    from invalid, so we pass the ids through unchanged rather than cry wolf.
+    """
+    cleaned = [r.lower().strip() for r in region_ids if r and r.strip()]
+    known = _known_regions()
+    if not known:
+        return frozenset(cleaned)
+    unknown = sorted({r for r in cleaned if r not in known})
+    if unknown:
+        print(
+            f"  WARNING: profile HARD_FILTERS.{field_name} lists unrecognised "
+            f"region id(s): {', '.join(unknown)}. They are IGNORED — a region no "
+            f"country belongs to can never match, so this filter has NO effect. "
+            f"Known regions: {', '.join(sorted(known))}.",
+            file=sys.stderr,
+        )
+    return frozenset(r for r in cleaned if r in known)
+
 
 GEO_BANNED_COUNTRIES = frozenset(
     _canon(c) for c in (list(EXCLUDE_COUNTRIES) + list(GEO_BAN_COUNTRIES)) if _canon(c)
 )
-GEO_BANNED_REGIONS = frozenset(r.lower().strip() for r in GEO_BAN_REGIONS if r and r.strip())
+GEO_BANNED_REGIONS = _validate_regions(GEO_BAN_REGIONS, "ban_regions")
 GEO_KEEP_COUNTRIES_SET = frozenset(_canon(c) for c in GEO_KEEP_COUNTRIES if _canon(c))
-GEO_ONSITE_OK_SET = frozenset(r.lower().strip() for r in GEO_ONSITE_OK_REGIONS if r and r.strip())
+GEO_ONSITE_OK_SET = _validate_regions(GEO_ONSITE_OK_REGIONS, "onsite_ok_regions")
 #: True when ANY geography ban is configured (explicit country or whole region).
 GEO_ACTIVE = bool(GEO_BANNED_COUNTRIES or GEO_BANNED_REGIONS)
 

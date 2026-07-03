@@ -40,6 +40,41 @@ def clear_profile_cache() -> None:
     _profile_cache.clear()
 
 
+def _resolve_profile_path() -> "tuple[Path | None, bool]":
+    """Decide which profile file to read and whether it's the EXAMPLE fallback.
+
+    Returns ``(path, warn_example)``. ``path`` is None only when neither a real
+    nor an example profile exists. An explicit ``USER_PROFILE_PATH`` is honoured
+    verbatim even if it does not exist — the caller surfaces the read error, so
+    a mistyped override fails loudly rather than silently using the example.
+    """
+    path_env = os.environ.get("USER_PROFILE_PATH")
+    if path_env:
+        return Path(path_env).expanduser().resolve(), False
+    if DEFAULT_PROFILE_PATH.exists():
+        return DEFAULT_PROFILE_PATH, False
+    if EXAMPLE_PROFILE_PATH.exists():
+        return EXAMPLE_PROFILE_PATH, True
+    return None, False
+
+
+def profile_raw_text() -> "str | None":
+    """Return the raw text of the ACTIVE profile file, or None if none exists.
+
+    Lets callers inspect the file's literal structure — e.g. hard_filters.py
+    detecting a mistyped ``## HARD_FILTERS`` heading — while seeing exactly the
+    same file _load_user_profile() parses. Never warns, never raises: a missing
+    or unreadable file yields None.
+    """
+    path, _ = _resolve_profile_path()
+    if path is None:
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
 def _load_user_profile() -> dict[str, str]:
     """Load user profile from a Markdown file with H2 sections.
 
@@ -52,17 +87,8 @@ def _load_user_profile() -> dict[str, str]:
     that was actually chosen, so a changed profile path (e.g. in tests) is a
     cache miss and the "no profile found" case is never cached as a success.
     """
-    path_env = os.environ.get("USER_PROFILE_PATH")
-    if path_env:
-        path = Path(path_env).expanduser().resolve()
-        warn_example = False
-    elif DEFAULT_PROFILE_PATH.exists():
-        path = DEFAULT_PROFILE_PATH
-        warn_example = False
-    elif EXAMPLE_PROFILE_PATH.exists():
-        path = EXAMPLE_PROFILE_PATH
-        warn_example = True
-    else:
+    path, warn_example = _resolve_profile_path()
+    if path is None:
         raise FileNotFoundError(
             "No user profile found. Create config/user_profile.md "
             "(copy from config/user_profile.example.md and fill in)."
