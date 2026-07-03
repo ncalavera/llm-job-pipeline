@@ -3,10 +3,10 @@
 A ~30-minute hands-on checklist for a smart non-engineer to run before a
 release. It covers what CI cannot: does the product actually feel right when
 a stranger follows the docs verbatim, with no insider knowledge? CI covers
-three synthetic personas and cost/volume math with fixtures and no network
-calls — see `tests/` for that half. This document is the other half: the
-parts that need a real terminal, a real clock, and (for the last section) a
-real second person.
+synthetic persona fixtures and cost/volume math offline, no network calls
+required — see `tests/fixtures/` and the trials suite for that half. This
+document is the other half: the parts that need a real terminal, a real
+clock, and (for the last section) a real second person.
 
 Every step below traces back to a claim already made in a shipped doc
 (README, INSTALL.md, INSTALL-EASY.md, AGENTS.md, docs/ARCHITECTURE.md) or to
@@ -144,15 +144,42 @@ hardcore later" → INSTALL.md from step 3), not a fresh clone.
    Expected: the banner explicitly prints `Backend: Postgres (Supabase)`.
    Fails if: it still says SQLite — `.env` is not being picked up.
 
-7. **Action.** `/jobs-add <any company>` and check the new company's status
-   in the dashboard's Companies → Pending view.
-   Expected: it lands as `candidate`, awaiting your review — the same gate
-   simple mode used in Section 1, per INSTALL-EASY.md's explicit claim that
-   "a board/ATS-discovered company lands in the same review gate on both...
-   easy mode does not skip it."
-   Fails if: the company is auto-`active` here while it was `candidate` (or
-   vice-versa) in Section 1 — a real backend-parity regression, not a
-   documented difference.
+7. **Action.** Add a single vacancy at an org the database has never seen,
+   via `/jobs-add` **vacancy mode** (not company mode — company mode always
+   approves explicitly and lands `active`, per
+   `.claude/commands/jobs-add.md:379`). Vacancy mode on an unknown org
+   creates a fetch-less stub company first, documented at
+   `.claude/commands/jobs-add.md:199-214` ("C3. Unknown-company handling"):
+
+   ```bash
+   python3 -c "
+   import sys
+   sys.path.insert(0, 'scripts')
+   from database_supabase import save_vacancies, resolve_company_id, get_conn
+
+   org = 'Manual Trial Test Co'
+   job = {
+       'title': 'Trial vacancy — delete me',
+       'url': 'https://example.test/trial-vacancy',
+       'full_description': 'Placeholder description for the manual trial protocol, long enough to clear the quality gate.',
+   }
+   print('new_count=', save_vacancies(org, 2, [job]))
+   get_conn().commit()
+   cur = get_conn().cursor()
+   cur.execute('SELECT status FROM company WHERE id = %s', (resolve_company_id(org),))
+   print('company status=', cur.fetchone()[0])
+   "
+   ```
+
+   Expected: `company status= candidate` — the stub lands in the same review
+   gate every auto-discovered company goes through, on both backends, per
+   `scripts/database_supabase.py`'s `_auto_discovery_status()` (documented as
+   backend-agnostic by design: "Same rule on BOTH backends... product
+   behaviour never branches on IS_SQLITE"). This scratch Supabase project is
+   disposable — no cleanup needed.
+   Fails if: the stub lands `active` instead of `candidate` — that would mean
+   an org discovered through a vacancy add skips the review gate, which no
+   shipped doc claims.
 
 ---
 
@@ -165,10 +192,13 @@ hardcore later" → INSTALL.md from step 3), not a fresh clone.
 
 2. **Action.** Run `/jobs-new` (or `/jobs-review`) again.
    Expected: the agent's chat replies, the run banner, and the end-of-run
-   summary are all in Russian — per `.claude/commands/jobs-new.md`'s "Reply
-   in the user's product language" instruction and
-   `docs/ARCHITECTURE.md`'s claim that `## OUTPUT_LANGUAGE` drives "the
-   agent's replies... the run banner + summary."
+   summary are all in Russian — per `config/user_profile.example.md`'s
+   `## OUTPUT_LANGUAGE` description ("picks the ONE language of the whole
+   product: the agent's replies in `/jobs-new` and `/jobs-review`, the run
+   reports, the Telegram digest, and the dashboard's default") and
+   `.claude/commands/jobs-new.md:19`'s "Write ALL your chat, gate summaries
+   and progress notes in that language. The driver already prints its
+   banner/summary in it."
    Fails if: chat stays in English despite the profile change.
 
 3. **Action.** Reload the local dashboard.
