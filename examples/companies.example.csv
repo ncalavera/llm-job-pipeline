@@ -2,5 +2,5 @@ canonical_name,fetch_strategy,ats_slug,careers_url,tier,category,status,aliases
 Wikimedia Foundation,greenhouse,wikimedia,https://wikimediafoundation.org/about/jobs/,A,nonprofit,active,"{Wikimedia,Wikipedia Foundation}"
 GiveDirectly,greenhouse,givedirectly,https://www.givedirectly.org/careers/,A,nonprofit,active,{GiveDirectly Inc}
 Mozilla,greenhouse,mozilla,https://www.mozilla.org/en-US/careers/,B,tech,active,{Mozilla Corporation}
-Ecosia,personio,ecosia,https://www.ecosia.org/jobs,B,tech,active,{}
+Ecosia,firecrawl_scrape,,https://ecosia.jobs.personio.com/,B,tech,active,{}
 GitLab,greenhouse,gitlab,https://about.gitlab.com/jobs/,B,tech,active,{}
