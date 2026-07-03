@@ -151,6 +151,7 @@ from fetchers import (
 from database_supabase import (
     get_conn,
     save_vacancies,
+    refresh_unchanged_company_last_seen,
     archive_gone_vacancies,
     should_fetch_board,
     mark_board_fetched,
@@ -526,6 +527,21 @@ def _fetch_one_company(org_name, config, tier, strategy, fetch_stats) -> int:
             )
 
     new_count = save_vacancies(org_name, tier, jobs)
+
+    # Firecrawl reported the careers page byte-identical to the last scrape
+    # (changeStatus == "same"): it returns an empty UnchangedListing sentinel, so
+    # save_vacancies touched nothing. Every previously captured role is still
+    # listed, so bump last_seen on this company's own live rows — otherwise the
+    # whole roster freezes and falsely ages into Triage's "Expired" column. The
+    # per-company commit in main() persists it.
+    if getattr(jobs, "unchanged", False):
+        refreshed = refresh_unchanged_company_last_seen(org_name)
+        if refreshed:
+            print(
+                f"  [{org_name}] Page unchanged — refreshed last_seen on "
+                f"{refreshed} still-listed role(s)"
+            )
+
     update_source_tracking(org_name, tier, strategy, new_count, fetch_status)
     if new_count > 0:
         print(f"  [{org_name}] {new_count} NEW vacancies added")

@@ -46,6 +46,23 @@ FIRECRAWL_JOBS_SCHEMA = {
 # lives on the fetchers package namespace — see fetchers/__init__.py.
 
 
+class UnchangedListing(list):
+    """Sentinel result for a careers page Firecrawl reports as byte-identical to
+    the last scrape (change-tracking ``changeStatus == "same"``).
+
+    It is an EMPTY list — change-tracking gives us nothing to diff, so the save
+    layer must neither import nor fabricate any role — but it is NOT the same as
+    a genuinely empty page: every role captured on the previous scrape is STILL
+    listed. The ``unchanged`` flag lets the fetch driver tell an unchanged page
+    apart from a real empty one and bump ``last_seen`` on the company's own live
+    rows, so the whole roster does not freeze and falsely age into Triage's
+    "Expired" column. Duck-typed downstream via ``getattr(jobs, "unchanged",
+    False)`` — any plain ``list`` reads as changed.
+    """
+
+    unchanged = True
+
+
 def get_firecrawl_change_statuses() -> dict[str, str]:
     """Return the change tracking statuses from the last fetch run."""
     return dict(_pkg._last_firecrawl_change_status)
@@ -400,8 +417,11 @@ def fetch_firecrawl_scrape(
             status = getattr(change_tracking, "change_status", None)
         _pkg._last_firecrawl_change_status[org_name] = status or "unknown"
         if status == "same":
-            print(f"  [{org_name}] Page unchanged since last scrape — skipping")
-            return []
+            # Byte-identical page: nothing to diff, so DON'T fabricate roles.
+            # Return an empty sentinel the driver recognises to refresh last_seen
+            # on this company's still-listed rows (see UnchangedListing).
+            print(f"  [{org_name}] Page unchanged since last scrape — refreshing last_seen")
+            return UnchangedListing()
 
     # --- Try JSON extraction first ---
     if use_json:
