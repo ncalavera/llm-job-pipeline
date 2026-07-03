@@ -93,7 +93,7 @@ jobs:
 
       - name: Create profile (INSTALL-EASY.md step 3 — neutral persona)
         run: |
-          set -euo pipefail
+          set -eu
           # INSTALL-EASY: copy the example, then edit it to describe yourself.
           cp config/user_profile.example.md config/user_profile.md
           # The manual "describe yourself" edit is stood in for by a committed,
@@ -105,12 +105,16 @@ jobs:
 
       - name: First run reaches the onboarding gate (exit 10, no network)
         run: |
-          set -uo pipefail
+          set -u
           # Simple mode is SQLite. Match INSTALL-EASY's warning: a stray Supabase
           # URL inherited from elsewhere would silently flip the backend to
           # Postgres (an empty value is not "unset"), so unset both for this run.
           unset SUPABASE_DB_URL SUPABASE_DIRECT_URL FIRECRAWL_API_KEY
-          out="$(python3 scripts/run_daily.py 2>&1)"; code=$?
+          # The container has no bash, so this step runs under `sh -e`. run_daily
+          # deliberately exits 10 at the gate; capture that via `|| code=$?` (the
+          # left of `||` is exempt from errexit) instead of letting -e kill us.
+          code=0
+          out="$(python3 scripts/run_daily.py 2>&1)" || code=$?
           echo "$out"
           echo "---------- run_daily.py exit code: $code ----------"
           case "$code" in
