@@ -52,7 +52,26 @@ function withEnv(env, fn) {
 
 // Env present so the withHandler preamble passes and we reach the validation
 // (which returns before ever calling getSupabase).
-const CONFIGURED = { SUPABASE_URL: "x", SUPABASE_SERVICE_ROLE_KEY: "y" };
+const CONFIGURED = {
+  SUPABASE_URL: "x",
+  SUPABASE_SERVICE_ROLE_KEY: "y",
+  AUTH_USER: "u",
+  AUTH_PASS: "p",
+};
+
+test("fails closed with 503 when AUTH_USER/AUTH_PASS are unset", async () => {
+  await withEnv(
+    { SUPABASE_URL: "x", SUPABASE_SERVICE_ROLE_KEY: "y" },
+    async () => {
+      const res = fakeRes();
+      await handler(
+        { method: "POST", body: { board_id: "80k_hours", enabled: true } },
+        res,
+      );
+      assert.equal(res.statusCode, 503);
+    },
+  );
+});
 
 test("rejects a non-POST method with 405 before any business logic", async () => {
   await withEnv(CONFIGURED, async () => {
