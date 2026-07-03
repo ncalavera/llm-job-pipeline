@@ -447,7 +447,7 @@ export function catalogRowHtml(g, basket, opts) {
     ? '<div class="catalog-row-sub">' + escHtml(subText) + "</div>"
     : "";
 
-  const mids = JSON.stringify(g.member_ids).replace(/"/g, "&quot;");
+  const mids = jsAttr(JSON.stringify(g.member_ids));
   const likeLabel = escHtml(t("vac_like", "Like"));
   const passLabel = escHtml(t("vac_pass", "Pass"));
   const likeBtn =

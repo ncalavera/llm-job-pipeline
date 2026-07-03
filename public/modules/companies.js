@@ -1187,7 +1187,7 @@ function _buildApprovedRow(c) {
     "</td>" +
     '<td class="ct-td ct-col-review">' +
     '<button class="cr-btn cr-reject" onclick="event.stopPropagation();reviewCompany(\'' +
-    escHtml(c.company_id || "") +
+    jsAttr(c.company_id || "") +
     "','reject')\" title=\"Archive\">✗</button>" +
     "</td>" +
     "</tr>"
@@ -1201,7 +1201,7 @@ function _buildPendingRow(c) {
   var catText = c.category ? escHtml(c.category) : "\u2014";
   var sourceText = c.strategy ? escHtml(c.strategy) : "\u2014";
 
-  var cid = escHtml(c.company_id || "");
+  var cid = jsAttr(c.company_id || "");
   var reviewHtml =
     '<button class="cr-btn cr-approve" onclick="event.stopPropagation();reviewCompany(\'' +
     cid +
@@ -1294,7 +1294,7 @@ function _buildArchivedRow(c) {
     "</td>" +
     '<td class="ct-td ct-col-review">' +
     '<button class="cr-btn cr-approve" onclick="event.stopPropagation();reviewCompany(\'' +
-    escHtml(c.company_id || "") +
+    jsAttr(c.company_id || "") +
     "','approve')\" title=\"Restore to active\">✓</button>" +
     "</td>" +
     "</tr>"
@@ -1411,15 +1411,6 @@ export function viewOrgInCatalog(orgName) {
 // ---------------------------------------------------------------------------
 // Company profile page
 // ---------------------------------------------------------------------------
-
-export function getCompanySlugFromUrl() {
-  try {
-    var params = new URLSearchParams(window.location.search);
-    return params.get("company") || null;
-  } catch (e) {
-    return null;
-  }
-}
 
 export function openCompanyProfile(slug) {
   var c = getCompanyBySlug(slug);

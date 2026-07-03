@@ -904,17 +904,6 @@ export function scoreLabel(score) {
   return "Weak";
 }
 
-export function ratingDotsHtml(value, max) {
-  max = max || 5;
-  const filled = Math.round(value || 0);
-  let dots = "";
-  for (let i = 1; i <= max; i++) {
-    dots +=
-      '<span class="rating-dot' + (i <= filled ? " filled" : "") + '"></span>';
-  }
-  return '<span class="rating-dots">' + dots + "</span>";
-}
-
 // ---------------------------------------------------------------------------
 // Triage dedup helpers
 // ---------------------------------------------------------------------------
