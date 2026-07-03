@@ -191,6 +191,40 @@ test("applicationRowHtml: a row with no company_slug renders plain text, no link
   assert.match(html, /apl-company">GiveDirectly</);
 });
 
+// --- channel + artifacts parity (fix: DHA-397 follow-up review) ------------
+
+test("a recorded channel rides along with the sent date, not a dropped field", () => {
+  const html = applicationRowHtml({ ...baseApp, channel: "email" });
+  assert.match(html, /apl-sent">.*· email</s);
+});
+
+test("no channel recorded -> no trailing separator (blank, not '· ')", () => {
+  const html = applicationRowHtml({ ...baseApp, channel: "" });
+  assert.doesNotMatch(html, /·/);
+});
+
+test("submitted artifacts show a count badge with the key list in the tooltip", () => {
+  const html = applicationRowHtml({
+    ...baseApp,
+    artifacts: ["cv", "cover_letter"],
+  });
+  assert.match(html, /apl-artifacts" title="Artifacts: cv, cover_letter">📎2</);
+});
+
+test("no artifacts recorded -> no badge rendered at all", () => {
+  const html = applicationRowHtml({ ...baseApp, artifacts: [] });
+  assert.doesNotMatch(html, /apl-artifacts/);
+});
+
+test("an artifact key with HTML is escaped in the tooltip attribute", () => {
+  const html = applicationRowHtml({
+    ...baseApp,
+    artifacts: ['cv"><script>alert(1)</script>'],
+  });
+  assert.doesNotMatch(html, /<script>alert/);
+  assert.match(html, /&lt;script&gt;/);
+});
+
 test("openApplicationRow forwards id + applied context (no queue — no auto-advance, F3) to the router", () => {
   let called = null;
   globalThis.window.openVacancyRoute = (id, o) => {

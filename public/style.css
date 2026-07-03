@@ -5058,6 +5058,17 @@ a.pipe-grp-role-title:hover {
   text-overflow: ellipsis;
   min-width: 0;
 }
+/* Artifact-count badge (parity: the old dedicated Artifacts column, now a
+   compact tag next to the title — full key list is the title tooltip). Quiet
+   by design: it's metadata about the submission, not a quality signal. */
+.apl-artifacts {
+  display: inline-block;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--sky-text-faint);
+  vertical-align: middle;
+}
 .apl-company {
   font-size: 12.5px;
   color: var(--sky-text-tertiary);

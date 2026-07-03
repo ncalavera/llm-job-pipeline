@@ -147,12 +147,33 @@ function _filterChips(byStatus, active) {
   return '<div class="apl-filter">' + chips.join("") + "</div>";
 }
 
-// One grid row: tinted fit tile · role · company (linked when the company has
-// a slug) · stage chip · sent date. Pure (no DOM read) so the escaping and
-// linked/unlinked tests can assert on it directly, same shape as
-// todayRowHtml/buildArchiveRow. `a.live` decides the row's own click — an
-// application whose vacancy is no longer in the live payload renders with no
-// route (its vacancy page would just 404, same call archive.js already made).
+// Quiet count badge for submitted artifacts (cv/cover_letter/research_urls —
+// the KEYS only; the DAL redacts values before this ever reaches the public
+// payload, see _project_application, so there is nothing to link to). Sits
+// next to the role title, full key list in the title tooltip — same
+// compact-badge/full-detail-on-hover tradeoff primaryLocationInfo already
+// makes for "+N more" locations elsewhere in this codebase. Renders nothing
+// when no artifacts were recorded (the common case for older/manual entries).
+function _artifactsBadge(artifacts, t) {
+  if (!artifacts || !artifacts.length) return "";
+  return (
+    ' <span class="apl-artifacts" title="' +
+    escHtml(
+      t("apps_col_artifacts", "Artifacts") + ": " + artifacts.join(", "),
+    ) +
+    '">📎' +
+    artifacts.length +
+    "</span>"
+  );
+}
+
+// One grid row: tinted fit tile · role (+ artifact badge) · company (linked
+// when the company has a slug) · stage chip · sent date (+ channel). Pure (no
+// DOM read) so the escaping and linked/unlinked tests can assert on it
+// directly, same shape as todayRowHtml/buildArchiveRow. `a.live` decides the
+// row's own click — an application whose vacancy is no longer in the live
+// payload renders with no route (its vacancy page would just 404, same call
+// archive.js already made).
 export function applicationRowHtml(a, opts) {
   const t = (opts && opts.t) || ((key, fallback) => fallback);
   const scoreCls =
@@ -168,7 +189,12 @@ export function applicationRowHtml(a, opts) {
       escHtml(a.org) +
       "</button>"
     : escHtml(a.org);
+  // Channel rides along with the date rather than a 6th column — the mock's
+  // grid is a fixed 5 columns, and a dedicated column for one short word
+  // would widen every row for a field that's sometimes blank ("" for older/
+  // manually-added entries with no recorded channel).
   const sentText = a.applied_at ? escHtml(relativeTime(a.applied_at, t)) : "—";
+  const channelText = a.channel ? " · " + escHtml(a.channel) : "";
   const rowCls = "apl-row" + (a.live ? "" : " apl-row-unlinked");
   const rowClick = a.live
     ? " onclick=\"openApplicationRow('" + jsAttr(a.id) + "')\""
@@ -188,6 +214,7 @@ export function applicationRowHtml(a, opts) {
     "</div>" +
     '<div class="apl-role">' +
     escHtml(a.title) +
+    _artifactsBadge(a.artifacts, t) +
     "</div>" +
     '<div class="apl-company">' +
     companyHtml +
@@ -199,6 +226,7 @@ export function applicationRowHtml(a, opts) {
     "</span></div>" +
     '<div class="apl-sent">' +
     sentText +
+    channelText +
     "</div>" +
     "</div>"
   );
