@@ -145,6 +145,83 @@ export function geoBuckets(groups, opts) {
 }
 
 // ---------------------------------------------------------------------------
+// Company rollups — the per-company numbers the pipeline used to bake.
+//
+// Each is a pure function of a company's raw roles (the groups the browser
+// already holds) + live statuses + today, so a like/pass or a passing day
+// changes them with no run, and a company's count can never disagree with the
+// roles listed under it (DHA-407). The pipeline now ships only the raw role-id
+// list per company; every NUMBER derives here.
+// ---------------------------------------------------------------------------
+
+// Mirrors APPLYABLE_SCORE in scripts/config.py: the score a role must clear to
+// count as "worth applying to right now".
+export const APPLYABLE_MIN_SCORE = 60;
+// Mirrors HOT_VACANCY_SCORE in scripts/report/data_prep.py: a candidate company
+// hiding a role this strong floats up Pending Review with a 🔥 badge.
+export const HOT_MIN_SCORE = 55;
+
+// Statuses that disqualify a role from "applyable now" — already decided
+// (passed), removed (archived), already applied, skipped, or protected-but-
+// disappearing (expiring). Mirrors _NON_APPLYABLE_STATUSES in
+// scripts/report/data_prep.py; deadline-in-the-past is handled via
+// opts.isExpired so expiry stays the one shared notion across the dashboard.
+const NON_APPLYABLE_STATUSES = new Set([
+  "archived",
+  "passed",
+  "expiring",
+  "applied",
+  "skipped",
+]);
+
+// A role is worth applying to right now when it clears APPLYABLE_MIN_SCORE, the
+// user hasn't already decided/removed it, and its deadline hasn't passed.
+export function isApplyable(g, opts) {
+  if (g.llm_score == null || g.llm_score < APPLYABLE_MIN_SCORE) return false;
+  if (NON_APPLYABLE_STATUSES.has(opts.getStatus(g))) return false;
+  if (opts.isExpired(g)) return false;
+  return true;
+}
+
+// One company's live rollup over its raw roles. `roles` is the company's group
+// objects (already resolved from its role-id list); `opts` injects getStatus +
+// isExpired. Returns the numbers the Companies section renders:
+//   { vacancy_count, applyable_count, avg_llm_score, hot }
+// where `hot` is { score, deadline } for the single strongest role at/above
+// HOT_MIN_SCORE (or null), and avg_llm_score is over scored roles only (null
+// when none are scored). No score floor is applied — the roll-up counts every
+// role the company has, matching the roles the profile lists under it.
+export function companyRollup(roles, opts) {
+  let scoreSum = 0;
+  let scoreN = 0;
+  let applyable = 0;
+  let hotScore = -1;
+  let hotDeadline = "";
+  for (const g of roles) {
+    const score =
+      typeof g.llm_score === "number" && g.llm_score >= 0 ? g.llm_score : null;
+    if (score !== null) {
+      scoreSum += score;
+      scoreN += 1;
+      if (score > hotScore) {
+        hotScore = score;
+        hotDeadline = g.deadline || "";
+      }
+    }
+    if (isApplyable(g, opts)) applyable += 1;
+  }
+  return {
+    vacancy_count: roles.length,
+    applyable_count: applyable,
+    avg_llm_score: scoreN > 0 ? +(scoreSum / scoreN).toFixed(1) : null,
+    hot:
+      hotScore >= HOT_MIN_SCORE
+        ? { score: hotScore, deadline: hotDeadline }
+        : null,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Today cockpit — the few roles that need a decision now.
 // ---------------------------------------------------------------------------
 

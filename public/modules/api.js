@@ -205,12 +205,10 @@ const DEEP_PROFILE_FIELDS = [
   "linkedin_employees",
   "recent_news",
   "org_color",
-  "region_breakdown",
   "status_reason",
-  // Per-company "applyable roles" count, computed at snapshot-generation time
-  // (the live /api/companies vacancy SELECT lacks score/deadline). Pairs with
-  // the live vacancy_count for the "N applyable / M total" badge.
-  "applyable_count",
+  // Note: vacancy_count / applyable_count / avg_llm_score / hot_vacancy / the
+  // region breakdown are NOT merged here anymore — they derive in the browser
+  // from the shipped roles (DHA-407/408, companies.js _decorateRollups).
 ];
 
 export function loadCompanies() {
