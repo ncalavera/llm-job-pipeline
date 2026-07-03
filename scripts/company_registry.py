@@ -7,6 +7,7 @@ Breaks the circular import by using db_conn directly (zero config imports).
 import json
 import re
 import sys
+import time
 from pathlib import Path
 
 from db_conn import get_conn
@@ -43,6 +44,15 @@ _STRATEGY_REQUIRES_URL = {"firecrawl_scrape", "unops_widget"}
 REGISTRY_LOAD_FAILED: bool = False
 REGISTRY_LOAD_ERROR: str | None = None
 
+# Ordinary DB contention (a lock or statement-timeout on the company SELECT) is
+# transient: the connection is alive and a retry a moment later usually clears
+# it. We retry a bounded number of times before declaring the backend
+# unreachable, so a few seconds of contention no longer trips REGISTRY_LOAD_FAILED
+# and hard-aborts a healthy run. A genuine outage still fails every attempt and
+# sets the flag as before.
+_REGISTRY_LOAD_ATTEMPTS = 3
+_REGISTRY_LOAD_BACKOFF_S = 0.5
+
 
 def registry_load_failed() -> bool:
     """True if the registry failed to load from the DB (outage), not empty table."""
@@ -63,24 +73,45 @@ def _build_companies_from_db() -> dict:
     so importing this module never crashes.
     """
     global REGISTRY_LOAD_FAILED, REGISTRY_LOAD_ERROR
-    try:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT canonical_name, fetch_strategy, status, tier, careers_url,
-                   ats_slug, ats_config, category
-            FROM company
-            WHERE status = 'active'
-              AND fetch_strategy IS NOT NULL
-              AND fetch_strategy != ''
-        """)
-        rows = cur.fetchall()
-        cur.close()
-        conn.commit()
-    except Exception as exc:  # noqa: BLE001 — registry must never crash import
-        print(f"⚠ Company registry: backend unavailable, empty registry ({exc})", file=sys.stderr)
+    rows = None
+    last_exc: Exception | None = None
+    conn = None
+    for attempt in range(_REGISTRY_LOAD_ATTEMPTS):
+        try:
+            conn = get_conn()
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT canonical_name, fetch_strategy, status, tier, careers_url,
+                       ats_slug, ats_config, category
+                FROM company
+                WHERE status = 'active'
+                  AND fetch_strategy IS NOT NULL
+                  AND fetch_strategy != ''
+            """)
+            rows = cur.fetchall()
+            cur.close()
+            conn.commit()
+            break
+        except Exception as exc:  # noqa: BLE001 — registry must never crash import
+            last_exc = exc
+            # Clear the aborted transaction so the next attempt can run on the
+            # same live connection; a genuinely dead connection is reconnected
+            # by get_conn()'s own liveness check on the next attempt.
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
+            if attempt + 1 < _REGISTRY_LOAD_ATTEMPTS:
+                time.sleep(_REGISTRY_LOAD_BACKOFF_S * (attempt + 1))
+    else:
+        print(
+            f"⚠ Company registry: backend unavailable after {_REGISTRY_LOAD_ATTEMPTS} "
+            f"attempts, empty registry ({last_exc})",
+            file=sys.stderr,
+        )
         REGISTRY_LOAD_FAILED = True
-        REGISTRY_LOAD_ERROR = str(exc)
+        REGISTRY_LOAD_ERROR = str(last_exc)
         return {}
 
     REGISTRY_LOAD_FAILED = False

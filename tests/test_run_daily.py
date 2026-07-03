@@ -267,8 +267,31 @@ def test_resolve_boards_propagates_real_db_failures(rd, monkeypatch):
 
     monkeypatch.setattr(database_supabase, "get_enabled_boards", _boom)
     monkeypatch.delenv("JOB_BOARDS", raising=False)
+    # BoardResolveError subclasses RuntimeError and preserves the message, so
+    # this "a real failure propagates" contract still holds now that it is routed
+    # through a typed abort.
     with pytest.raises(RuntimeError, match="connection refused"):
         rd._resolve_boards("idealist")
+
+
+def test_new_run_aborts_cleanly_on_board_load_db_outage(rd, monkeypatch, capsys):
+    """A durably-unreachable DB during board resolution must abort through the
+    documented EXIT_ABORT path with a clear message, NOT crash main() with a raw
+    traceback + undocumented exit 1 before the stage machine's preflight DB-outage
+    stop can run."""
+    import database_supabase
+
+    def _outage():
+        raise RuntimeError("could not connect to server: connection refused")
+
+    monkeypatch.setattr(database_supabase, "get_enabled_boards", _outage)
+    monkeypatch.delenv("JOB_BOARDS", raising=False)
+
+    rc = rd.main(["--new", "--no-publish"])
+
+    assert rc == rd.EXIT_ABORT
+    err = capsys.readouterr().err.lower()
+    assert "aborted" in err and "unreachable" in err
 
 
 # ---------------------------------------------------------------------------
@@ -693,6 +716,47 @@ def test_two_pass_advances_when_nothing_escalates(rd, monkeypatch, tmp_path):
     assert kind == "advance"
     assert "0 escalated" in info
     assert resets == []  # nothing nulled when nothing escalates
+
+
+def test_two_pass_resume_errors_on_corrupt_screen_payload(rd, monkeypatch, tmp_path):
+    """A truncated/unreadable score payload on --resume must NOT be read as
+    'scoring complete': when the DB still shows unscored targets but the payload
+    can't supply the gate tasks, fail loudly (stage error) instead of silently
+    skipping them into a publish."""
+    _stub_two_pass(rd, monkeypatch, tmp_path)
+    # DB ground truth: v1 is still unscored...
+    monkeypatch.setattr(rd, "_unscored_vacancy_ids", lambda ids: {"v1"})
+    # ...but the payload file was truncated (a partial write / disk hiccup).
+    rd.VAC_PAYLOAD_PATH.write_text('[{"member_ids": ["v1"', encoding="utf-8")
+
+    state = rd._new_state(rd.Opts())
+    entry = rd._stage(state, "vacancy_scoring")
+    entry["emitted"] = True
+    entry["phase"] = "screen"
+    entry["target_ids"] = ["v1"]
+
+    kind, msg = rd._h_vacancy_scoring(state, entry, rd.Opts())
+    assert kind == "error"
+    assert "payload" in msg.lower() and "unscored" in msg.lower()
+
+
+def test_two_pass_resume_errors_on_corrupt_escalate_payload(rd, monkeypatch, tmp_path):
+    """Same guard on the ESCALATE resume: a lost payload with finalists still
+    unscored must error, not fall through to a false 'complete' advance."""
+    _stub_two_pass(rd, monkeypatch, tmp_path)
+    monkeypatch.setattr(rd, "_unscored_vacancy_ids", lambda ids: {"v2"})
+    rd.VAC_PAYLOAD_PATH.write_text("", encoding="utf-8")  # empty/unreadable
+
+    state = rd._new_state(rd.Opts())
+    entry = rd._stage(state, "vacancy_scoring")
+    entry["emitted"] = True
+    entry["phase"] = "escalate"
+    entry["escalate_target_ids"] = ["v2"]
+    entry["screen_counts"] = {"screened": 3, "escalated": 1, "kept_cheap": 2, "threshold": 40}
+
+    kind, msg = rd._h_vacancy_scoring(state, entry, rd.Opts())
+    assert kind == "error"
+    assert "payload" in msg.lower()
 
 
 def test_full_rescore_stays_single_pass_oneshot(rd, monkeypatch, tmp_path):
