@@ -5,6 +5,7 @@ Breaks the circular import by using db_conn directly (zero config imports).
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -212,15 +213,31 @@ PARSING_ARTIFACTS: set[str] = _load_parsing_artifacts()
 # ---------------------------------------------------------------------------
 
 
+def _normalize_org_whitespace(name: str) -> str:
+    """Strip and collapse incidental whitespace before any name matching.
+
+    A source's raw org string can carry leading/trailing or doubled whitespace
+    that another source never introduces for the same real-world company — e.g.
+    fetchers/boards/algolia.py's ``company_name`` field is not stripped, unlike
+    its sibling board fetchers. Left as-is, that mismatch fails every lookup
+    stage below, so ``ensure_company`` forks a second company row for the same
+    org and every vacancy for it duplicates (make_vacancy_id embeds the raw org
+    string). Whitespace-only: no case folding or legal-suffix stripping, which
+    would risk merging genuinely distinct companies instead.
+    """
+    return re.sub(r"\s+", " ", name or "").strip()
+
+
 def resolve_canonical_name(name: str) -> str:
     """Resolve a company name to its canonical form.
 
-    Resolution order:
+    Resolution order (after whitespace normalization):
       1. Exact match in COMPANIES → return as-is
       2. Case-insensitive match in COMPANIES → return canonical key
       3. lower(name) in alias index → return canonical
-      4. Passthrough (unknown names kept as-is)
+      4. Passthrough (unknown names kept, whitespace-normalized)
     """
+    name = _normalize_org_whitespace(name)
     if name in COMPANIES:
         return name
     lower = name.lower()

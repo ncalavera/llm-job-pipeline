@@ -74,7 +74,7 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
     jobs = []
     generic_filtered_out = 0
     for hit in filtered:  # NO cap — LLM scoring decides relevance
-        org = hit.get("company_name") or f"[via {board_name}]"
+        org = (hit.get("company_name") or "").strip() or f"[via {board_name}]"
         title = hit.get("title") or ""
         if _is_generic_pipeline_title(title):
             generic_filtered_out += 1
