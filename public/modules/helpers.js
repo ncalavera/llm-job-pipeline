@@ -49,21 +49,25 @@ export function safeUrl(url) {
 // Time formatting
 // ---------------------------------------------------------------------------
 
-export function relativeTime(dateStr) {
+// `t` is the i18n T(key, fallback) function, optional so this still runs (in
+// the original English) with no i18n wired up \u2014 callers that already import T
+// (all 5 current call sites do) pass it through to localize the unit suffix.
+export function relativeTime(dateStr, t) {
   if (!dateStr) return "\u2014";
+  var tr = t || ((key, fallback) => fallback);
   var d = new Date(dateStr);
   if (isNaN(d.getTime())) return "\u2014";
   var diff = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (diff < 60) return "now";
+  if (diff < 60) return tr("time_just_now", "now");
   var m = Math.floor(diff / 60);
-  if (m < 60) return m + "m ago";
+  if (m < 60) return tr("time_min_ago", "{n}m ago").replace("{n}", m);
   var h = Math.floor(m / 60);
-  if (h < 24) return h + "h ago";
+  if (h < 24) return tr("time_hour_ago", "{n}h ago").replace("{n}", h);
   var days = Math.floor(h / 24);
-  if (days < 30) return days + "d ago";
+  if (days < 30) return tr("time_day_ago", "{n}d ago").replace("{n}", days);
   var mo = Math.floor(days / 30);
-  if (mo < 12) return mo + "mo ago";
-  return Math.floor(mo / 12) + "y ago";
+  if (mo < 12) return tr("time_month_ago", "{n}mo ago").replace("{n}", mo);
+  return tr("time_year_ago", "{n}y ago").replace("{n}", Math.floor(mo / 12));
 }
 
 // ---------------------------------------------------------------------------
@@ -732,28 +736,42 @@ export function screenScoreBadge(g) {
   );
 }
 
-export function formatDeadlineHtml(deadline, cssPrefix) {
+// `opts.t` is the i18n T(key, fallback) function and `opts.locale` an Intl
+// locale ("en-US"/"ru-RU"); both optional so this stays testable with no
+// browser/i18n wired up (falls back to the original English copy).
+export function formatDeadlineHtml(deadline, cssPrefix, opts) {
   if (!deadline) return "";
-  const dl = new Date(deadline);
+  const t = (opts && opts.t) || ((key, fallback) => fallback);
+  const locale = (opts && opts.locale) || "en-US";
+  // Take the calendar date as written \u2014 the first 10 chars, "YYYY-MM-DD" \u2014
+  // rather than handing the full string to Date(), which parses a bare date
+  // as UTC midnight but a datetime-with-no-offset as LOCAL midnight. Slicing
+  // first makes the parse deterministic regardless of what the source sent.
+  const dl = new Date(String(deadline).slice(0, 10));
   if (isNaN(dl.getTime())) return "";
   const todayD = new Date(new Date().toISOString().slice(0, 10));
   const isExpired = dl < todayD;
   const diffMs = dl - todayD;
   const diffDays = Math.round(diffMs / 86400000);
-  const dateStr = dl.toLocaleDateString("en-US", {
+  // timeZone: "UTC" pins the rendered day/month/year to dl's own UTC-midnight
+  // calendar date. Without it, toLocaleDateString reformats in the viewer's
+  // local zone and can print a different calendar day than diffDays implies
+  // (DHA-369 #2).
+  const dateStr = dl.toLocaleDateString(locale, {
     day: "numeric",
     month: "short",
     year: "numeric",
+    timeZone: "UTC",
   });
-  let label = "\u23F0 Deadline: " + dateStr;
+  let label = "\u23F0 " + t("deadline_prefix", "Deadline:") + " " + dateStr;
   if (isExpired) {
-    label += " (expired)";
+    label += " " + t("deadline_expired", "(expired)");
   } else if (diffDays === 0) {
-    label += " (today!)";
+    label += " " + t("deadline_today", "(today!)");
   } else if (diffDays === 1) {
-    label += " (tomorrow!)";
+    label += " " + t("deadline_tomorrow", "(tomorrow!)");
   } else if (diffDays <= 7) {
-    label += " (in " + diffDays + "d)";
+    label += " " + t("deadline_in_days", "(in {n}d)").replace("{n}", diffDays);
   }
   // Urgency tiers: past = expired (red), within a week = soon (amber),
   // further out = active (default).

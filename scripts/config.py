@@ -22,6 +22,7 @@ For a public reusable pipeline:
 import os
 import sys
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import settings
 
@@ -274,6 +275,13 @@ APPLYABLE_SCORE = int(os.environ.get("APPLYABLE_SCORE", 60))
 #: A vacancy not confirmed by its source for this many days is shown as
 #: "probably closed" on the catalog card.
 STALE_SOURCE_DAYS = int(os.environ.get("STALE_SOURCE_DAYS", 14))
+
+#: Timezone for "today" boundaries that must stay deterministic regardless of
+#: the machine's local tz: stamping first_seen/last_seen at fetch time
+#: (database_supabase.py, which the STALE_SOURCE_DAYS clock above starts
+#: from) and every "today"-relative dashboard date (scripts/report/
+#: data_prep.py). Override via env var (e.g. "Europe/Berlin"); defaults to UTC.
+DASHBOARD_TZ = ZoneInfo(os.environ.get("DASHBOARD_TZ", "UTC"))
 
 #: The catalog hides vacancies scoring below this by default ("показать все"
 #: reveals them).

@@ -738,7 +738,7 @@ function _freshnessHtml(c) {
     '<span class="freshness-cell"><span class="freshness-dot ' +
     dotCls +
     '"></span>' +
-    relativeTime(c.last_fetched) +
+    relativeTime(c.last_fetched, T) +
     "</span>"
   );
 }

@@ -2,10 +2,15 @@
 
 import json
 import re
-from datetime import date
-from zoneinfo import ZoneInfo
+from datetime import date, datetime
 
-from config import COMPANIES, PROJECT_ROOT, APPLYABLE_SCORE, resolve_canonical_name
+from config import (
+    COMPANIES,
+    PROJECT_ROOT,
+    APPLYABLE_SCORE,
+    DASHBOARD_TZ,
+    resolve_canonical_name,
+)
 from company_registry import PARSING_ARTIFACTS
 from database_supabase import load_vacancies, load_all_enrichment
 from db_conn import get_conn
@@ -13,12 +18,6 @@ from db_conn import get_conn
 # ---------------------------------------------------------------------------
 # Scoring feed — recent scoring sessions for dashboard stats panel
 # ---------------------------------------------------------------------------
-
-import os
-
-# Dashboard timezone — used for grouping scoring sessions and rendering dates.
-# Override by setting DASHBOARD_TZ env var (e.g. "Europe/Berlin", "UTC").
-DASHBOARD_TZ = ZoneInfo(os.environ.get("DASHBOARD_TZ", "UTC"))
 
 # A candidate company with a vacancy scoring this high gets a 🔥 badge and
 # floats to the top of Pending Review so it doesn't rot unreviewed.
@@ -35,7 +34,7 @@ def _deadline_soon_label(deadline_iso: str) -> str:
         dl = date.fromisoformat(str(deadline_iso)[:10])
     except (ValueError, TypeError):
         return ""
-    days_left = (dl - date.today()).days
+    days_left = (dl - datetime.now(DASHBOARD_TZ).date()).days
     if 0 <= days_left <= DEADLINE_SOON_DAYS:
         return f"deadline {dl.day:02d}.{dl.month:02d}"
     return ""
@@ -74,7 +73,7 @@ def _is_applyable_vacancy(v: dict) -> bool:
     deadline = v.get("deadline")
     if deadline:
         try:
-            if date.fromisoformat(str(deadline)[:10]) < date.today():
+            if date.fromisoformat(str(deadline)[:10]) < datetime.now(DASHBOARD_TZ).date():
                 return False
         except (ValueError, TypeError):
             pass  # unparseable deadline → treat as no deadline, don't exclude
@@ -128,7 +127,7 @@ def compute_latency_metrics(conn=None) -> dict:
     from db_backend import RealDictCursor
 
     conn = conn or get_conn()
-    today = date.today()
+    today = datetime.now(DASHBOARD_TZ).date()
 
     cur = conn.cursor(cursor_factory=RealDictCursor)
     placeholders = ", ".join(["%s"] * len(_SLA_ACTIVE_STATUSES))

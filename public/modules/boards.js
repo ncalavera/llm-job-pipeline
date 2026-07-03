@@ -152,7 +152,7 @@ export function renderBoards() {
         : '<span class="board-enabled board-enabled-off">' +
           escHtml(T("boards_enabled_no", "Off")) +
           "</span>";
-      const last = b.last_fetched ? relativeTime(b.last_fetched) : "—";
+      const last = b.last_fetched ? relativeTime(b.last_fetched, T) : "—";
       const liveCells = hasLive
         ? "<td>" +
           _statusCell(b._live) +

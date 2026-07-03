@@ -143,7 +143,7 @@ function _appRow(a) {
         .join("") +
       "</span>"
     : '<span class="apps-artifact-none">—</span>';
-  const when = a.applied_at ? escHtml(relativeTime(a.applied_at)) : "—";
+  const when = a.applied_at ? escHtml(relativeTime(a.applied_at, T)) : "—";
   return (
     '<tr class="apps-row">' +
     '<td class="apps-td apps-td-role">' +

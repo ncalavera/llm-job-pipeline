@@ -22,7 +22,7 @@ current code — every behaviour class was verified to actually fire (no stubs).
 import importlib
 import json
 import sys
-from datetime import date, timedelta as _td
+from datetime import date, datetime, timedelta as _td
 from pathlib import Path
 
 
@@ -71,15 +71,38 @@ class _FrozenDate(date, metaclass=_FrozenDateMeta):
         return FROZEN_TODAY
 
 
-def _freeze_clock(monkeypatch, module):
-    """Pin `module.date.today()` to FROZEN_TODAY.
+class _FrozenDateTimeMeta(type):
+    """Mirrors _FrozenDateMeta for datetime (isinstance stays truthful)."""
 
-    Both database_supabase and filter_vacancies do `from datetime import date`
-    and call date.today() / date.fromisoformat(); swapping the module-level
-    `date` for the frozen subclass freezes today() while keeping fromisoformat()
-    and isinstance() intact.
+    def __instancecheck__(cls, obj):
+        return isinstance(obj, datetime)
+
+
+class _FrozenDateTime(datetime, metaclass=_FrozenDateTimeMeta):
+    """A datetime subclass whose now() is pinned to FROZEN_TODAY (any tz).
+
+    database_supabase stamps first_seen/last_seen via
+    datetime.now(DASHBOARD_TZ).date() — deterministic regardless of the fetch
+    machine's local tz; freezing datetime.now() alongside date.today() keeps
+    that stamp pinned too, whatever DASHBOARD_TZ resolves to.
+    """
+
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(FROZEN_TODAY.year, FROZEN_TODAY.month, FROZEN_TODAY.day, tzinfo=tz)
+
+
+def _freeze_clock(monkeypatch, module):
+    """Pin `module.date.today()` and `module.datetime.now()` to FROZEN_TODAY.
+
+    Both database_supabase and filter_vacancies do `from datetime import date,
+    datetime` and call date.today() / date.fromisoformat() / datetime.now();
+    swapping the module-level names for the frozen subclasses freezes today()
+    and now() while keeping fromisoformat()/arithmetic/isinstance() intact.
     """
     monkeypatch.setattr(module, "date", _FrozenDate)
+    if hasattr(module, "datetime"):
+        monkeypatch.setattr(module, "datetime", _FrozenDateTime)
 
 
 def _fresh_db(tmp_path, monkeypatch, name):

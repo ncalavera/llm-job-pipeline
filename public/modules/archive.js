@@ -141,7 +141,7 @@ function buildArchiveCard(g) {
 
   const firstSeenHtml = g.first_seen
     ? '<div class="card-comp-row"><span class="card-first-seen">' +
-      relativeTime(g.first_seen) +
+      relativeTime(g.first_seen, T) +
       "</span></div>"
     : "";
 
