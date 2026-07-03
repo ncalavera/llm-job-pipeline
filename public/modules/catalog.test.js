@@ -24,6 +24,7 @@ globalThis.location = { protocol: "file:", origin: "" };
 
 const { catalogQueueIds, catalogRowHtml, openCatalogRow } =
   await import("./catalog.js");
+const { actionsFor } = await import("./keys.js");
 
 const t = (key, fallback) => fallback;
 const opts = { t, locale: "en-US" };
@@ -71,6 +72,32 @@ test("passed basket: only like renders", () => {
   const html = catalogRowHtml(baseGroup, "passed", opts);
   assert.match(html, /catalog-row-btn like/);
   assert.doesNotMatch(html, /catalog-row-btn pass/);
+});
+
+// keys.js:actionsFor drives the keyboard l/x gating; it MUST mirror the thumb
+// buttons catalogRowHtml renders, or a keyboard key fires where no button
+// exists (e.g. a to_apply role in the Liked tab). Pin the mirror for all 9
+// statuses so the two can't drift apart.
+test("actionsFor mirrors catalogRowHtml button gating for every status", () => {
+  const statuses = [
+    "unseen",
+    "liked",
+    "passed",
+    "to_apply",
+    "to_research",
+    "to_network",
+    "applied",
+    "expiring",
+    "skipped",
+  ];
+  for (const status of statuses) {
+    const html = catalogRowHtml(baseGroup, status, opts);
+    const showsLike = /catalog-row-btn like/.test(html);
+    const showsPass = /catalog-row-btn pass/.test(html);
+    const a = actionsFor(status);
+    assert.equal(a.like, showsLike, `like mismatch for status "${status}"`);
+    assert.equal(a.pass, showsPass, `pass mismatch for status "${status}"`);
+  }
 });
 
 // --- catalogRowHtml: click contract --------------------------------------

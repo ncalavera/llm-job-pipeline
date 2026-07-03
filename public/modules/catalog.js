@@ -309,6 +309,8 @@ function scrollCursorIntoView() {
 // buttons use (badge==list holds); Enter opens via the SAME router entry a row
 // click uses; Escape clears the cursor.
 function browseKeydown(e) {
+  // Mid-IME-composition keystrokes belong to the composer, not triage.
+  if (e.isComposing) return;
   // Never hijack browser/OS combos (⌘L address bar, ⌘K palette, etc.).
   if (e.metaKey || e.ctrlKey || e.altKey) return;
 
@@ -356,14 +358,23 @@ function browseKeydown(e) {
   }
 
   if (key === "l" || key === "x") {
-    const action = key === "l" ? "like" : "pass";
-    // Per-basket mirroring: `l` in Liked and `x` in Passed show no button, so
-    // they do nothing here either (keys.js:actionsFor mirrors catalogRowHtml).
-    if (!actionsFor(state.currentBasket)[action]) return;
-    e.preventDefault();
     const g = groupsById.get(_browseCursor.id);
     if (!g) return;
+    const action = key === "l" ? "like" : "pass";
+    // Gate on the cursor row's OWN status, mirroring catalogRowHtml's button
+    // rendering exactly (keys.js:actionsFor): a status that shows no thumb
+    // button (to_apply, applied, expiring, …) makes l/x a no-op here too — the
+    // 3-value basket tab this row sits in isn't a faithful proxy for that.
+    if (!actionsFor(getGroupStatus(g))[action]) return;
+    e.preventDefault();
     catalogThumbAction(g.id, g.member_ids || [], action);
+    // Advance the cursor optimistically so a rapid second l/x lands on the NEXT
+    // row, not the one just actioned — catalogThumbAction defers the status
+    // write ~200ms, so without this both presses hit the same vacancy. A single
+    // press lands identically to the post-render reconcile, so this only
+    // changes fast repeats.
+    _browseCursor.move(1, _browseQueue);
+    applyCursorHighlight();
   }
 }
 
@@ -374,8 +385,9 @@ if (typeof document !== "undefined") {
 // ---------------------------------------------------------------------------
 // Row assembly — pure (KTD2): no DOM/state reads beyond the arguments given,
 // so the click contract (row → vacancy id, action-button gating, escaping) is
-// directly unit-testable. `basket` is the group's current status bucket
-// (unseen/liked/passed), matching getGroupStatus(g)'s three basket values.
+// directly unit-testable. `basket` is the group's RAW status (getGroupStatus(g),
+// 9 values) — only unseen/liked/passed render thumb buttons; every other status
+// shows none. keys.js:actionsFor mirrors this exact gating for the keyboard.
 // ---------------------------------------------------------------------------
 
 // First location's text plus a "+N" hint when there are more; the full list

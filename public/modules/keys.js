@@ -17,16 +17,20 @@
 // removed row was at the end.
 // =============================================================================
 
-// Which triage actions a basket's rows actually expose — mirrors catalog.js's
-// per-basket thumb gating EXACTLY (unseen → like+pass, liked → pass only,
-// passed → like only), so `l` in the Liked basket and `x` in the Passed basket
-// are no-ops just like their absent buttons. Kept in lock-step with
-// catalog.js:catalogRowHtml's `actionsHtml` branch — the source of truth for
-// what each basket renders.
-export function actionsFor(basket) {
+// Which triage actions a row exposes for a given RAW vacancy status (the
+// 9-value getGroupStatus, NOT the 3-value basket tab). Mirrors
+// catalog.js:catalogRowHtml's `actionsHtml` branch EXACTLY: like+pass for
+// "unseen", pass only for "liked", like only for "passed", and NOTHING for
+// every other status (to_apply / to_research / to_network / applied /
+// expiring / skipped) — those rows show no thumb button. Gating the keyboard
+// on the cursor row's own status keeps l/x a true no-op wherever the button is
+// absent (e.g. a to_apply role sitting in the Liked tab), which a 3-value
+// basket check got wrong. catalog.test.js cross-checks this against
+// catalogRowHtml for every status so the two can't drift.
+export function actionsFor(status) {
   return {
-    like: basket === "unseen" || basket === "passed",
-    pass: basket === "unseen" || basket === "liked",
+    like: status === "unseen" || status === "passed",
+    pass: status === "unseen" || status === "liked",
   };
 }
 
@@ -58,9 +62,10 @@ export function createCursor() {
       return index;
     },
 
-    // Explicitly select an id (e.g. a click that also sets the keyboard
-    // cursor). Records its index when present; a not-yet-visible id is stored
-    // with index -1 so a later reconcile can still keep it if it appears.
+    // Point the cursor at a specific id, recording its index in the visible
+    // list (index -1 when not present, so a later reconcile can still keep it
+    // if it appears). Not wired to row clicks today — j/k is the only entry —
+    // but kept for that and used directly by the tests.
     set(nextId, visibleIds) {
       const ids = visibleIds || [];
       id = nextId == null ? null : nextId;

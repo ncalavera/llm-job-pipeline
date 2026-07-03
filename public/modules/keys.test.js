@@ -10,21 +10,30 @@ import assert from "node:assert/strict";
 
 import { createCursor, actionsFor } from "./keys.js";
 
-// --- actionsFor: per-basket mirroring (matches catalog.js thumb gating) -----
+// --- actionsFor: mirrors catalog.js row-button gating for ALL statuses ------
+// catalogRowHtml renders like+pass for unseen, pass for liked, like for passed,
+// and NOTHING for every other status. actionsFor must agree across all 9 so a
+// keyboard l/x is a no-op exactly where the row shows no button. catalog.test.js
+// cross-checks these against catalogRowHtml itself so they can't silently drift.
+const ACTIONS_BY_STATUS = {
+  unseen: { like: true, pass: true },
+  liked: { like: false, pass: true },
+  passed: { like: true, pass: false },
+  to_apply: { like: false, pass: false },
+  to_research: { like: false, pass: false },
+  to_network: { like: false, pass: false },
+  applied: { like: false, pass: false },
+  expiring: { like: false, pass: false },
+  skipped: { like: false, pass: false },
+};
 
-test("actionsFor(unseen) exposes both like and pass", () => {
-  assert.deepEqual(actionsFor("unseen"), { like: true, pass: true });
-});
+for (const [status, expected] of Object.entries(ACTIONS_BY_STATUS)) {
+  test(`actionsFor(${status}) = ${JSON.stringify(expected)}`, () => {
+    assert.deepEqual(actionsFor(status), expected);
+  });
+}
 
-test("actionsFor(liked) exposes pass only — l is a no-op in Liked", () => {
-  assert.deepEqual(actionsFor("liked"), { like: false, pass: true });
-});
-
-test("actionsFor(passed) exposes like only — x is a no-op in Passed", () => {
-  assert.deepEqual(actionsFor("passed"), { like: true, pass: false });
-});
-
-test("actionsFor(unknown basket) exposes neither", () => {
+test("actionsFor(unknown status) exposes neither", () => {
   assert.deepEqual(actionsFor("whatever"), { like: false, pass: false });
 });
 
