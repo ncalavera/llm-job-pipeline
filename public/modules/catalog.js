@@ -9,6 +9,7 @@
 import {
   state,
   groups,
+  groupsById,
   stats,
   STATUS_BASKET,
   getGroupStatus,
@@ -26,6 +27,7 @@ import {
 } from "./helpers.js";
 import { T, dateLocale } from "./i18n.js";
 import { VISIBLE_MIN_SCORE, basketCounts, groupsInBasket } from "./derive.js";
+import { createCursor, actionsFor } from "./keys.js";
 
 // The shared visibility options the basket badge AND the basket list both read,
 // so a count can never disagree with its list (DHA-374). The score floor is
@@ -152,8 +154,14 @@ function _renderCatalogHiddenNote(grid) {
 
 // The ordered id queue for the currently rendered rows — what a row click
 // hands the U4 router as the "browse" context (F3's auto-advance walks this
-// same order). Read by openCatalogRow's thin DOM shell below.
+// same order). Read by openCatalogRow's thin DOM shell below, and the set the
+// keyboard cursor (U15) steps through.
 let _browseQueue = [];
+
+// The keyboard-triage cursor (U15, DHA-399) — a single id-keyed cursor over the
+// currently rendered rows. Pure logic in keys.js; this module is the thin DOM
+// shell (highlight + scroll + the keydown listener at the bottom of the file).
+const _browseCursor = createCursor();
 
 export function renderCatalog() {
   const query = (
@@ -196,6 +204,7 @@ export function renderCatalog() {
 
   if (filtered.length === 0) {
     _browseQueue = [];
+    _browseCursor.reconcile(_browseQueue); // clears an active cursor; no rows to highlight
     const hasFilters = query || orgFilter || state.activeCatalogLocs.size > 0;
     // Fetched-but-unscored: the DB has vacancies, but none are scored yet, so the
     // dashboard (which only shows scored roles) looks empty. Tell the user to run
@@ -240,17 +249,145 @@ export function renderCatalog() {
   }
 
   _browseQueue = catalogQueueIds(filtered);
+  // Data may have hot-swapped since the last render (a 60s poll can insert a
+  // higher-scored row above the cursor, AE5); reconcile the id-keyed cursor to
+  // the freshly-computed visible set BEFORE the rows rebuild, then re-apply its
+  // highlight to the new DOM below.
+  _browseCursor.reconcile(_browseQueue);
   const rowOpts = { t: T, locale: dateLocale() };
   grid.innerHTML = filtered
     .map((g) => catalogRowHtml(g, getGroupStatus(g), rowOpts))
     .join("");
+  applyCursorHighlight();
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard triage (U15, DHA-399) — thin DOM shell over keys.js's pure cursor.
+// ---------------------------------------------------------------------------
+
+// The currently-highlighted row element, or null when the cursor is dormant.
+function cursorRowEl() {
+  const grid = document.getElementById("catalogGrid");
+  if (!grid || _browseCursor.id == null) return null;
+  return (
+    Array.from(grid.querySelectorAll(".catalog-row")).find(
+      (el) => el.dataset.id === _browseCursor.id,
+    ) || null
+  );
+}
+
+// Paint the persistent cobalt selection class onto the cursor row and strip it
+// from every other row. Compares dataset.id (not a CSS selector) so ids with
+// quotes/markup can't break the query. Called after every renderCatalog (rows
+// rebuild) and after each cursor move.
+function applyCursorHighlight() {
+  const grid = document.getElementById("catalogGrid");
+  if (!grid) return;
+  const id = _browseCursor.id;
+  grid.querySelectorAll(".catalog-row").forEach((el) => {
+    el.classList.toggle(
+      "catalog-row--cursor",
+      id != null && el.dataset.id === id,
+    );
+  });
+}
+
+// Instant (never smooth) so it honours prefers-reduced-motion by construction —
+// scrollIntoView's default behavior is not animated.
+function scrollCursorIntoView() {
+  const row = cursorRowEl();
+  if (row && typeof row.scrollIntoView === "function") {
+    row.scrollIntoView({ block: "nearest" });
+  }
+}
+
+// One document-level keydown listener (registered once at module load below).
+// Returns early unless Browse is the active, in-focus surface with no detail
+// overlay open — the catalogSection loses `.active` when a vacancy/company
+// overlay shows or another section is active, so that one check covers all
+// three. j/k move the cursor; l/x apply the SAME status path the row thumb
+// buttons use (badge==list holds); Enter opens via the SAME router entry a row
+// click uses; Escape clears the cursor.
+function browseKeydown(e) {
+  // Mid-IME-composition keystrokes belong to the composer, not triage.
+  if (e.isComposing) return;
+  // Never hijack browser/OS combos (⌘L address bar, ⌘K palette, etc.).
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  // Ignore while typing in a field or focused on a form control.
+  const active = document.activeElement;
+  if (active) {
+    const tag = active.tagName;
+    if (
+      tag === "INPUT" ||
+      tag === "TEXTAREA" ||
+      tag === "SELECT" ||
+      active.isContentEditable
+    )
+      return;
+  }
+
+  // Only when Browse is the visible section (no overlay, not another mode).
+  const cat = document.getElementById("catalogSection");
+  if (!cat || !cat.classList.contains("active")) return;
+
+  const key = e.key;
+
+  if (key === "j" || key === "k") {
+    e.preventDefault();
+    _browseCursor.move(key === "j" ? 1 : -1, _browseQueue);
+    applyCursorHighlight();
+    scrollCursorIntoView();
+    return;
+  }
+
+  if (key === "Escape") {
+    if (_browseCursor.id == null) return;
+    _browseCursor.clear();
+    applyCursorHighlight();
+    return;
+  }
+
+  // l / x / Enter act on the selection — a no-op until j/k picks a row.
+  if (_browseCursor.id == null) return;
+
+  if (key === "Enter") {
+    e.preventDefault();
+    openCatalogRow(_browseCursor.id);
+    return;
+  }
+
+  if (key === "l" || key === "x") {
+    const g = groupsById.get(_browseCursor.id);
+    if (!g) return;
+    const action = key === "l" ? "like" : "pass";
+    // Gate on the cursor row's OWN status, mirroring catalogRowHtml's button
+    // rendering exactly (keys.js:actionsFor): a status that shows no thumb
+    // button (to_apply, applied, expiring, …) makes l/x a no-op here too — the
+    // 3-value basket tab this row sits in isn't a faithful proxy for that.
+    if (!actionsFor(getGroupStatus(g))[action]) return;
+    e.preventDefault();
+    catalogThumbAction(g.id, g.member_ids || [], action);
+    // Advance the cursor optimistically so a rapid second l/x lands on the NEXT
+    // row, not the one just actioned — catalogThumbAction defers the status
+    // write ~200ms, so without this both presses hit the same vacancy. A single
+    // press lands identically to the post-render reconcile, so this only
+    // changes fast repeats.
+    _browseCursor.move(1, _browseQueue);
+    applyCursorHighlight();
+  }
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("keydown", browseKeydown);
 }
 
 // ---------------------------------------------------------------------------
 // Row assembly — pure (KTD2): no DOM/state reads beyond the arguments given,
 // so the click contract (row → vacancy id, action-button gating, escaping) is
-// directly unit-testable. `basket` is the group's current status bucket
-// (unseen/liked/passed), matching getGroupStatus(g)'s three basket values.
+// directly unit-testable. `basket` is the group's RAW status (getGroupStatus(g),
+// 9 values) — only unseen/liked/passed render thumb buttons; every other status
+// shows none. keys.js:actionsFor mirrors this exact gating for the keyboard.
 // ---------------------------------------------------------------------------
 
 // First location's text plus a "+N" hint when there are more; the full list

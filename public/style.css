@@ -5186,3 +5186,43 @@ a.pipe-grp-role-title:hover {
   padding: 16px 0;
   font-size: 13px;
 }
+
+/* ===========================================================================
+   Keyboard triage (U15, DHA-399)
+   =========================================================================== */
+
+/* The selected Browse row. Cobalt marks selection (design-protocol §1) — a
+   persistent full-row cobalt wash + inset cobalt hairline, deliberately
+   distinct from the transient grey :hover tint, and never a left-border accent
+   stripe (protocol §1 "AI slop" ban). The :hover override keeps the selection
+   visible when the pointer rests on the cursor row. */
+.catalog-row--cursor,
+.catalog-row--cursor:hover {
+  background: var(--cobalt-tint);
+  box-shadow: inset 0 0 0 1px rgba(37, 69, 211, 0.28);
+}
+
+/* Keyboard hint row under the Browse header (design-protocol §4 — keep
+   j/k/l/x/Enter affordances visible). Quiet, mono keys as kbd-style chips with
+   faint action labels. */
+.browse-keyhint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 18px 10px;
+  font-size: 11px;
+  color: var(--sky-text-faint);
+  flex-wrap: wrap;
+}
+.browse-key {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--sky-text-tertiary);
+  background: rgba(58, 56, 51, 0.05);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+.browse-keyhint-label {
+  margin-right: 8px;
+}
