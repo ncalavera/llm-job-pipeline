@@ -190,16 +190,33 @@ FETCH_STATS_PATH = PUBLIC_DIR.parent / "vacancies" / "fetch_stats.json"
 def _write_fetch_stats(stats: dict) -> None:
     """Persist per-run fetch telemetry for the driver's publish gate.
 
-    Best-effort: a failed stats write must never abort the real fetch (the gate
-    treats a missing file as "no gone-archive signal", i.e. it does not block on
-    telemetry it cannot read)."""
+    A failed stats write must never abort the real fetch — but it must not
+    pretend success either. On failure we log loudly to stderr AND delete any
+    stale fetch_stats.json left by a prior run, so the gate reads an honest
+    "absent" (no gone-archive signal) rather than a previous run's numbers
+    dressed up as this run's. (The gate treats a missing file as "no signal";
+    a stale file would let this run's truncation slip past unseen.)"""
     try:
         FETCH_STATS_PATH.parent.mkdir(parents=True, exist_ok=True)
         tmp = FETCH_STATS_PATH.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(FETCH_STATS_PATH)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(
+            f"  WARNING: could not write fetch telemetry to {FETCH_STATS_PATH}: {exc}. "
+            "Removing any stale copy so the publish gate does not read a prior run's numbers.",
+            file=sys.stderr,
+            flush=True,
+        )
+        try:
+            FETCH_STATS_PATH.unlink(missing_ok=True)
+        except Exception as unlink_exc:
+            print(
+                f"  WARNING: could not remove stale fetch telemetry at "
+                f"{FETCH_STATS_PATH}: {unlink_exc}",
+                file=sys.stderr,
+                flush=True,
+            )
 
 
 def _load_enrichment_tiers() -> dict[str, str]:

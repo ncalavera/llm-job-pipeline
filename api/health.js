@@ -1,36 +1,40 @@
-import { getSupabase, getSupabaseUrlPrefix, validateConfig } from "./_supabase.js";
+import { getSupabase, validateConfig } from "./_supabase.js";
+import { authNotConfigured } from "./_handler.js";
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
+  // Fail closed like the PII readers: without the Basic Auth gate configured the
+  // dashboard is open, so this probe (which reaches the DB) must refuse rather
+  // than expose backend reachability to the public internet.
+  if (authNotConfigured(res, "health")) return;
+
   const warnings = validateConfig();
   if (warnings.length) {
     console.warn("health: config warnings —", warnings.join("; "));
   }
 
-  const env = {};
-  for (const key of ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "AUTH_USER", "AUTH_PASS"]) {
-    env[key] = process.env[key] ? "set" : "MISSING";
-  }
-
-  const supabaseInfo = { url_prefix: getSupabaseUrlPrefix(), connected: false };
-
+  let connected = false;
   if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
     try {
-      const { count, error } = await getSupabase()
+      const { error } = await getSupabase()
         .from("vacancy")
         .select("*", { count: "exact", head: true });
-
       if (error) throw error;
-      supabaseInfo.connected = true;
-      supabaseInfo.vacancy_count = count;
+      connected = true;
     } catch (err) {
-      supabaseInfo.error = err.message;
+      console.error("health: backend probe failed —", err.message);
     }
   }
 
-  const ok = supabaseInfo.connected && warnings.length === 0;
-  return res.status(200).json({ ok, ts: new Date().toISOString(), supabase: supabaseInfo, env, warnings });
+  const ok = connected && warnings.length === 0;
+  // Minimal by design: a health check needs liveness + backend kind, nothing
+  // more. The Supabase project prefix, env-presence flags, row count and error
+  // text the old response carried leaked deployment shape — dropped here (and
+  // logged server-side above), not exposed.
+  return res
+    .status(200)
+    .json({ ok, ts: new Date().toISOString(), backend: "supabase" });
 }
