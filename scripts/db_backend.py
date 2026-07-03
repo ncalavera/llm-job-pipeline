@@ -144,15 +144,17 @@ def print_backend_banner(stream=None) -> None:
 
 
 def _warn_backend_mismatch(out) -> None:
-    """Loudly flag when a filled ``.env`` and the resolved backend disagree.
+    """Loudly flag when the resolved backend didn't come from ``.env``.
 
     Silent full->simple degradation is the bug this guards: a ``.env`` set up
-    for Supabase that still lands on SQLite, or an empty ``.env`` that lands on a
-    Postgres URL inherited from the shell. Only fires when a ``.env`` file
-    exists — a bare default run (no file) has nothing to contradict.
+    for Supabase that still lands on SQLite, or a Postgres URL that isn't
+    declared by ``.env`` — including the common case of NO ``.env`` file at
+    all, where an ambient ``SUPABASE_DB_URL`` (exported by another project,
+    or left over in the shell) silently drives the pipeline against Postgres
+    with nothing on disk to show for it. A bare default run (no ``.env``,
+    no ambient var, SQLite selected) has nothing to contradict and stays
+    silent.
     """
-    if not _DOTENV_VALUES:
-        return
     env_declares_supabase = bool(
         _DOTENV_VALUES.get("SUPABASE_DB_URL") or _DOTENV_VALUES.get("SUPABASE_DIRECT_URL")
     )

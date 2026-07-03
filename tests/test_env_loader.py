@@ -207,9 +207,13 @@ def test_banner_names_sqlite(monkeypatch):
 
 
 def test_banner_names_postgres(monkeypatch):
+    # No .env file at all is a hazard, not a clean bill of health: the URL
+    # must have come from an ambient shell var, so the mismatch warning below
+    # is expected to fire (see test_warns_ambient_supabase_url_with_no_dotenv_
+    # file_at_all for the dedicated assertions).
     out = _banner(monkeypatch, is_sqlite=False, dotenv={})
     assert "Backend: Postgres (Supabase)" in out
-    assert "WARNING" not in out  # no .env file -> nothing to contradict
+    assert "WARNING" in out
 
 
 # --- mismatch warning ------------------------------------------------------
@@ -249,6 +253,26 @@ def test_no_warning_when_supabase_env_matches_postgres(monkeypatch):
 
 def test_no_warning_when_sqlite_and_env_has_no_supabase(monkeypatch):
     out = _banner(monkeypatch, is_sqlite=True, dotenv={"AUTH_USER": "admin"})
+    assert "WARNING" not in out
+
+
+def test_warns_ambient_supabase_url_with_no_dotenv_file_at_all(monkeypatch):
+    """Regression: an ambient SUPABASE_DB_URL with NO .env file used to slip
+    past the early-return guard (``if not _DOTENV_VALUES: return``) and drive
+    Postgres with zero warning — the exact hazard INSTALL-EASY.md documents
+    but the runtime never enforced."""
+    out = _banner(monkeypatch, is_sqlite=False, dotenv={})
+    assert "WARNING" in out
+    assert "inherited" in out
+    assert "unset SUPABASE_DB_URL" in out
+
+
+def test_no_warning_when_postgres_url_comes_from_dotenv(monkeypatch):
+    out = _banner(
+        monkeypatch,
+        is_sqlite=False,
+        dotenv={"SUPABASE_DB_URL": "postgresql://real/db"},
+    )
     assert "WARNING" not in out
 
 
