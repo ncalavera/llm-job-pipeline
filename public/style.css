@@ -10,6 +10,13 @@
   --orange: #ff8c42;
   --text: #1a1612;
   --muted: #6b6460;
+  /* Restored in U18 review (DHA-402): still consumed from JS, not just CSS —
+     state.js's TRIAGE_COLUMNS sets the Liked column's color to this token,
+     which pipeline.js interpolates into inline styles (move-button accents,
+     the column header dot). Not just unreferenced CSS like its siblings
+     below were; belongs to the same warm-palette follow-up migration as the
+     other kept-with-reason tokens above — do not re-point state.js here. */
+  --gold: #ffd166;
   /* Light tints for backgrounds */
   --emerald-tint: #ecfdf5;
   --amber-tint: #fffbeb;
@@ -27,9 +34,11 @@
 
   /* --- Sky redesign token layer (DHA-385, U1) ---
      Single source for the new look. U18 (DHA-402) retired every token that
-     had gone unreferenced (--gold, --mint, --coral-tint, --lavender-tint,
-     --warm-tint, --text-xl). The tokens above this block are NOT fully
-     retired: a real slice of the app still renders in the old warm palette
+     had gone unreferenced in CSS AND JS (--mint, --coral-tint,
+     --lavender-tint, --warm-tint, --text-xl — --gold looked unreferenced by
+     a CSS-only grep but is still set from state.js, see above). The tokens
+     above this block are NOT fully retired: a real slice of the app still
+     renders in the old warm palette
      (location chips, deadline/freshness badges, monitoring chips, toasts,
      the scroll-to-top button, the company sort-chip bar, the company
      enrichment-stat cards, and the markdown renderer used for descriptions/
