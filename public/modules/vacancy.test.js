@@ -167,6 +167,39 @@ test("buildFactsRail: Source omitted for a manual_check company", () => {
   assert.ok(!labels.includes("Source"));
 });
 
+// --- application entity signal (relocated from the retired Browse card's
+// "✉ applied" badge, U5 parity — its own richer lifecycle isn't representable
+// by the header status chip, e.g. "interview"/"offer" have no chip label) ---
+
+test("buildFactsRail: an application entity adds an Application row with status + date", () => {
+  const withApp = {
+    ...fullGroup,
+    application: { status: "interview", applied_at: "2026-06-15" },
+  };
+  const { facts } = buildFactsRail(withApp, company, opts);
+  const row = facts.find((f) => f.label === "Application");
+  assert.ok(row, "no Application row rendered");
+  assert.ok(row.value.includes("interview"));
+  assert.ok(row.value.includes("Jun"));
+});
+
+test("buildFactsRail: an application with no applied_at shows just the status", () => {
+  const withApp = {
+    ...fullGroup,
+    application: { status: "draft", applied_at: null },
+  };
+  const { facts } = buildFactsRail(withApp, company, opts);
+  const row = facts.find((f) => f.label === "Application");
+  assert.equal(row.value, "draft");
+});
+
+test("buildFactsRail: no application entity -> no Application row (AE1)", () => {
+  const labels = buildFactsRail(fullGroup, company, opts).facts.map(
+    (f) => f.label,
+  );
+  assert.ok(!labels.includes("Application"));
+});
+
 // --- nextUnreviewedId (auto-advance / AE5) ----------------------------------
 
 test("nextUnreviewedId advances to the next still-unreviewed id", () => {
@@ -250,6 +283,32 @@ test("vacancyPageHtml: null score renders a neutral tile, not a crimson one", ()
   assert.ok(!html.includes("q-weak-bg"));
 });
 
+// --- source-freshness badge (relocated from the retired Browse card, U5
+// parity: "relocation counts as parity, dropping does not") -------------------
+
+const DAY_MS = 86400000;
+const daysAgoIso = (days) => new Date(Date.now() - days * DAY_MS).toISOString();
+
+test("vacancyPageHtml: a stale source (14d+ unconfirmed) shows the badge (AE1)", () => {
+  const stale = { ...fullGroup, last_seen: daysAgoIso(20) };
+  const html = vacancyPageHtml(stale, company, "unseen", opts);
+  assert.ok(html.includes("vac-badge--stale"));
+  assert.ok(html.includes("stale, likely closed"));
+});
+
+test("vacancyPageHtml: a freshly-confirmed source shows no badge (AE1)", () => {
+  const fresh = { ...fullGroup, last_seen: daysAgoIso(2) };
+  const html = vacancyPageHtml(fresh, company, "unseen", opts);
+  assert.ok(!html.includes("vac-badge--stale"));
+  assert.ok(!html.includes("stale, likely closed"));
+});
+
+test("vacancyPageHtml: no last_seen at all -> no stale badge", () => {
+  const noLastSeen = { ...fullGroup, last_seen: null };
+  const html = vacancyPageHtml(noLastSeen, company, "unseen", opts);
+  assert.ok(!html.includes("vac-badge--stale"));
+});
+
 // --- escaping regression (R14) ----------------------------------------------
 
 test("vacancyPageHtml escapes every externally-sourced string", () => {
@@ -288,6 +347,20 @@ test("vacancyPageHtml escapes every externally-sourced string", () => {
   assert.ok(!/href="javascript:/i.test(html), "javascript: href leaked");
   // Content is still present, just escaped.
   assert.ok(html.includes("&lt;script&gt;"), "payload not rendered escaped");
+});
+
+test("buildFactsRail escapes the application status/date (R14)", () => {
+  const xssApp = {
+    ...fullGroup,
+    application: {
+      status: "<script>alert('app')</script>",
+      applied_at: "2026-06-15",
+    },
+  };
+  const { facts } = buildFactsRail(xssApp, company, opts);
+  const row = facts.find((f) => f.label === "Application");
+  assert.ok(!row.value.includes("<script>"), "raw <script> leaked");
+  assert.ok(row.value.includes("&lt;script&gt;"), "payload not escaped");
 });
 
 test("vacancyPageHtml escapes a quote-breakout URL in href attributes (R14)", () => {

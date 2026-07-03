@@ -3333,7 +3333,8 @@ body[data-dashboard-style="minimal"] .loading-illus {
   padding: 2px 9px;
 }
 .vac-badge--expiring,
-.vac-badge--expired {
+.vac-badge--expired,
+.vac-badge--stale {
   color: var(--q-weak);
   background: var(--q-weak-bg);
 }
