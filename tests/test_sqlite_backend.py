@@ -68,6 +68,42 @@ def test_schema_autocreated(dal):
     assert {"company", "vacancy", "archived_hash"} <= tables
 
 
+def test_cursor_factory_survives_a_stale_class_reference(dal):
+    """Regression: dict rows must not depend on RealDictCursor identity.
+
+    Tests that reload the backend chain via ``importlib.reload(db_backend)``
+    (several do, to point at a fresh temp SQLite file) mint a brand-new
+    ``RealDictCursor`` class object every time. A caller holding an OLDER
+    reference to ``RealDictCursor`` — e.g. a module that got left behind, stale,
+    in ``sys.modules`` by an earlier test's incomplete cleanup — used to fail
+    ``cursor_factory is RealDictCursor`` against the CURRENT connection's own
+    (different) class object and silently degrade to tuple rows, crashing far
+    away with ``TypeError: tuple indices must be integers or slices, not str``.
+    Any non-None cursor_factory must yield dict rows, regardless of its
+    identity relative to the connection's own RealDictCursor.
+    """
+    import importlib
+
+    import db_backend
+
+    stale_real_dict_cursor = db_backend.RealDictCursor
+
+    importlib.reload(db_backend)
+    assert db_backend.RealDictCursor is not stale_real_dict_cursor, (
+        "test setup: reload must mint a new class object"
+    )
+
+    dal.ensure_company("Acme Robotics", status="active")
+    dal.get_conn().commit()
+
+    conn = db_backend.get_conn()
+    cur = conn.cursor(cursor_factory=stale_real_dict_cursor)
+    cur.execute("SELECT canonical_name FROM company WHERE canonical_name = %s", ("Acme Robotics",))
+    row = cur.fetchone()
+    cur.close()
+    assert row["canonical_name"] == "Acme Robotics"
+
+
 # ---------------------------------------------------------------------------
 # Company ensure / resolve
 # ---------------------------------------------------------------------------

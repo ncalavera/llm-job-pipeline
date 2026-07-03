@@ -519,7 +519,15 @@ class _SqliteConn:
         self.closed = 0
 
     def cursor(self, cursor_factory=None):
-        as_dict = cursor_factory is RealDictCursor
+        # Any explicit cursor_factory means "give me dict rows" — the only value
+        # ever passed at any call site is RealDictCursor. Comparing by identity
+        # (`is RealDictCursor`) is fragile: tests that reload db_backend via
+        # importlib.reload()/sys.modules surgery mint a NEW RealDictCursor class
+        # object each time, so a caller holding a stale reference to an OLDER
+        # RealDictCursor would fail the identity check and silently fall back to
+        # tuple rows — the caller crashes on ``row["col"]`` far from the real
+        # cause. Truthiness is enough and survives a reload.
+        as_dict = cursor_factory is not None
         return _SqliteCursor(self._conn.cursor(), as_dict)
 
     def commit(self):
