@@ -21,6 +21,10 @@ import prompts  # noqa: E402
 def test_example_fallback_warns(monkeypatch, tmp_path, capsys):
     """No env override + no real profile + example present → stderr warning."""
     monkeypatch.delenv("USER_PROFILE_PATH", raising=False)
+    # Neutralize the linked-worktree fallback: this test simulates "no real
+    # profile anywhere", so the main-checkout source must also come up empty
+    # (the test process itself runs inside a worktree with a real main profile).
+    monkeypatch.setattr(prompts, "_worktree_main_profile", lambda: None)
     missing = tmp_path / "user_profile.md"  # does NOT exist
     example = tmp_path / "user_profile.example.md"
     example.write_text("## USER_PROFILE\n\nExample person.\n", encoding="utf-8")
@@ -65,6 +69,8 @@ def test_no_profile_at_all_raises(monkeypatch, tmp_path):
     """Neither real nor example present → explicit FileNotFoundError, not a
     silent empty profile."""
     monkeypatch.delenv("USER_PROFILE_PATH", raising=False)
+    # No profile ANYWHERE — including the main checkout (the worktree fallback).
+    monkeypatch.setattr(prompts, "_worktree_main_profile", lambda: None)
     monkeypatch.setattr(prompts, "DEFAULT_PROFILE_PATH", tmp_path / "nope.md")
     monkeypatch.setattr(prompts, "EXAMPLE_PROFILE_PATH", tmp_path / "nope.example.md")
     with pytest.raises(FileNotFoundError):

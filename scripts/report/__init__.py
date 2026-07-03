@@ -111,12 +111,55 @@ def _resolve_show_mpa() -> bool:
         return False
 
 
+def _guard_shared_snapshot_profile() -> None:
+    """Refuse to bake example/default settings into the SHARED production snapshot.
+
+    The linked-worktree trap: ``config/user_profile.md`` is gitignored, so a run
+    launched from a git worktree that lacks it — and cannot reach the main
+    checkout's copy — resolves the bundled EXAMPLE profile. On the
+    Postgres/Supabase backend that payload (settings, language, thresholds) is
+    upserted into the SINGLE shared ``dashboard_snapshot`` row, overwriting the
+    owner's real configuration (e.g. flipping the dashboard language to English).
+    ``prompts`` first tries the main checkout's profile; if that ALSO fails and
+    we are on Postgres, stop here rather than corrupt shared state.
+
+    SQLite/local stays permissive so fresh installs (the onboarding path) and the
+    offline test suite keep working. An explicit ``USER_PROFILE_PATH`` (how the
+    test suite pins the example) counts as a real profile and is never blocked.
+    """
+    import db_backend
+
+    if db_backend.IS_SQLITE:
+        return
+    try:
+        import prompts
+
+        if prompts.has_real_profile():
+            return
+    except Exception:
+        return  # never block a healthy prod render on a resolver hiccup
+    raise RuntimeError(
+        "Refusing to write the shared production dashboard snapshot: no real "
+        "config/user_profile.md was found, so the bundled EXAMPLE profile would "
+        "be baked into shared state (settings, language, thresholds), "
+        "overwriting the owner's real configuration. This is the linked-worktree "
+        "trap — user_profile.md is gitignored and does not travel with a git "
+        "worktree. Re-run from the MAIN checkout (where config/user_profile.md "
+        "exists), or set USER_PROFILE_PATH to your real profile. Nothing was "
+        "written."
+    )
+
+
 def generate_dashboard(db: dict = None) -> None:
     """Generate the vacancy dashboard data file: ``public/data.js``.
 
     Loads all data from Supabase. db param is accepted but ignored (backward compat).
     The ``index.html`` shell is static and intentionally NOT written here.
     """
+    # Fail fast before any DB read: never bake the EXAMPLE profile into the
+    # shared production snapshot (the linked-worktree trap). SQLite is permissive.
+    _guard_shared_snapshot_profile()
+
     data = prepare_report_data()
     groups = data["groups"]
     stats = data["stats"]
