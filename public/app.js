@@ -65,6 +65,7 @@ import { initBoards, renderBoards } from "./modules/boards.js";
 import {
   initApplications,
   renderApplications,
+  openApplicationRow,
 } from "./modules/applications.js";
 import { initSettings, renderSettings } from "./modules/settings.js";
 import {
@@ -633,6 +634,7 @@ window.catalogThumbAction = catalogThumbAction;
 window.todayAction = todayAction;
 window.openTodayRow = openTodayRow;
 window.openCatalogRow = openCatalogRow;
+window.openApplicationRow = openApplicationRow;
 window.renderCatalog = renderCatalog;
 window.renderCompanies = renderCompanies;
 window.initCompanies = initCompanies;
