@@ -63,7 +63,11 @@ import {
   renderApplications,
 } from "./modules/applications.js";
 import { initSettings, renderSettings } from "./modules/settings.js";
-import { sectionForMode, isVacancyView } from "./modules/nav.js";
+import {
+  sectionForMode,
+  isVacancyView,
+  isApplicationsView,
+} from "./modules/nav.js";
 
 // ---------------------------------------------------------------------------
 // Initialize UI elements (toast, scroll-to-top)
@@ -166,8 +170,10 @@ function switchMode(mode) {
   }
 
   state.currentMode = mode;
-  // Remember the Vacancies sub-view so re-opening Vacancies returns to it.
+  // Remember the Vacancies/Applications sub-view so re-opening the section
+  // returns to it.
   if (isVacancyView(mode)) state.vacancyView = mode;
+  if (isApplicationsView(mode)) state.applicationsView = mode;
   var section = sectionForMode(mode);
 
   // DOM section per leaf mode (each is a sibling under .container).
@@ -208,12 +214,25 @@ function switchMode(mode) {
   if (subNav) subNav.style.display = section === "vacancies" ? "" : "none";
   var subBtns = {
     catalog: "vsubBrowse",
-    pipeline: "vsubTriage",
     stats: "vsubGeo",
     archive: "vsubArchive",
   };
   Object.keys(subBtns).forEach(function (leaf) {
     var btn = document.getElementById(subBtns[leaf]);
+    if (btn) btn.classList.toggle("active", leaf === mode);
+  });
+
+  // Applications sub-nav: visible only inside the Applications section; the
+  // active sub-tab tracks the leaf.
+  var appsSubNav = document.getElementById("applicationsSubNav");
+  if (appsSubNav)
+    appsSubNav.style.display = section === "applications" ? "" : "none";
+  var appsSubBtns = {
+    applications: "asubApplications",
+    pipeline: "asubTriage",
+  };
+  Object.keys(appsSubBtns).forEach(function (leaf) {
+    var btn = document.getElementById(appsSubBtns[leaf]);
     if (btn) btn.classList.toggle("active", leaf === mode);
   });
 
@@ -250,6 +269,12 @@ function switchMode(mode) {
 // The Vacancies top-nav button opens the remembered sub-view (default Browse).
 function switchVacancies() {
   switchMode(state.vacancyView || "catalog");
+}
+
+// The Applications top-nav button opens the remembered sub-view (default
+// Applications).
+function switchApplications() {
+  switchMode(state.applicationsView || "applications");
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +330,7 @@ window.addEventListener("popstate", function () {
 
 window.switchMode = switchMode;
 window.switchVacancies = switchVacancies;
+window.switchApplications = switchApplications;
 window.switchBasket = switchBasket;
 window.toggleCatalogLoc = toggleCatalogLoc;
 window.toggleCatalogSort = toggleCatalogSort;

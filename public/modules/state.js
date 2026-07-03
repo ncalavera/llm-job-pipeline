@@ -147,9 +147,12 @@ export const state = {
   // The active LEAF view (render dispatch keys on this). Today is the default
   // entry (DHA-348). The six-section chrome derives from it via nav.js.
   currentMode: "today",
-  // Remembered Vacancies sub-view (Browse/Triage/Geo/Archive) so re-opening the
+  // Remembered Vacancies sub-view (Browse/Geo/Archive) so re-opening the
   // Vacancies section returns to where the user was.
   vacancyView: "catalog",
+  // Remembered Applications sub-view (Applications/Triage) so re-opening the
+  // Applications section returns to where the user was.
+  applicationsView: "applications",
   // Applications section status filter ("all" | applied | interview | …).
   appStatusFilter: "all",
   companyStatuses: {},
