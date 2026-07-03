@@ -5046,3 +5046,107 @@ a.pipe-grp-role-title:hover {
   font-size: 12px;
   margin: 0 0 12px;
 }
+
+/* === U10 Geo (redesign) ===================================================
+   Geo (`#statsSection`) reuses the shared `.company-table` / `.ct-*` classes
+   from the not-yet-reskinned Companies table (U8), so every rule below is
+   scoped under `#statsSection` — it restyles Geo only and never edits the
+   base selectors Companies still relies on. `.geo-table-wrap`,
+   `.geo-score-dash` are Geo-only classes (stats.js). Sheet seating for
+   `.stats-section` itself already landed in U2.
+   =========================================================================== */
+
+#statsSection .stats-help {
+  font-size: var(--text-xs);
+  color: var(--sky-text-faint);
+  margin-bottom: 14px;
+}
+
+/* Scroll-guard (AE4): table clamps to a floor so the city column can't be
+   crushed on real mobile widths; on the 900px sidebar-collapse test width
+   Geo's five narrow columns still fit, so no scrollbar appears there — the
+   guard exists for genuinely narrow viewports. */
+#statsSection .geo-table-wrap {
+  overflow-x: auto;
+}
+
+#statsSection .company-table {
+  min-width: 440px;
+  background: transparent;
+  box-shadow: none;
+}
+
+#statsSection .ct-header-row {
+  background: transparent;
+}
+
+#statsSection .ct-th {
+  padding: 6px 14px 10px;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--sky-text-faint);
+}
+
+#statsSection .ct-th-active {
+  color: var(--cobalt);
+}
+
+#statsSection .ct-col-name {
+  width: 28%;
+}
+#statsSection .ct-col-country {
+  width: 24%;
+}
+#statsSection .ct-col-vac,
+#statsSection .ct-col-liked,
+#statsSection .ct-col-fit {
+  width: 16%;
+  text-align: center;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 13px;
+}
+
+/* Whitespace + hover tint replace the rule/stripe the shared .ct-row and
+   .ct-td carry today (protocol §2: no 1px borders, no left-border accent
+   stripe — the "AI slop" tell called out in §1). */
+#statsSection .ct-row {
+  border-left: none;
+}
+#statsSection .ct-row:hover {
+  background: var(--sky-row-hover);
+}
+#statsSection .ct-row--remote .ct-name-text {
+  color: var(--sky-text-tertiary);
+  font-weight: 500;
+}
+
+#statsSection .ct-td {
+  padding: 10px 14px;
+  border-bottom: none;
+  color: var(--sky-text-secondary);
+}
+#statsSection .ct-name-text {
+  font-family: "Onest", sans-serif;
+  color: var(--sky-text);
+}
+
+#statsSection .ct-liked-nonzero {
+  color: var(--q-good);
+}
+#statsSection .ct-liked-zero {
+  color: var(--sky-text-faint);
+  font-weight: 400;
+}
+
+#statsSection .geo-score-dash {
+  color: var(--sky-text-faint);
+}
+#statsSection .q-good,
+#statsSection .q-moderate,
+#statsSection .q-weak {
+  font-weight: 700;
+}
+
+#statsSection .company-empty {
+  color: var(--sky-text-faint);
+}
