@@ -64,6 +64,24 @@ def _prompt_files() -> list[Path]:
     return sorted(PROMPTS.glob("*.md"))
 
 
+def _runbook_files() -> list[Path]:
+    """The agent runbooks under .claude/commands/ — the shipped, step-by-step
+    operational docs (jobs-new, jobs-add, …). Like the prompt templates they are
+    owner-agnostic by contract: a personal anchor (salary figure, worldview
+    frame, target sector) belongs in the user profile at runtime, never baked
+    into a shipped runbook."""
+    d = CLAUDE / "commands"
+    if not d.exists():
+        return []
+    return sorted(d.glob("*.md"))
+
+
+def _anchor_surfaces() -> list[Path]:
+    """Every shipped surface an LLM/agent reads verbatim that must stay
+    anchor-free: the scoring prompt templates AND the operational runbooks."""
+    return _prompt_files() + _runbook_files()
+
+
 def _text_files() -> list[Path]:
     """Python + the LLM prompt templates + the public dashboard HTML + .claude
     command markdown."""
@@ -406,16 +424,18 @@ def test_no_geo_proper_noun_in_branch_literals():
 
 
 # ---------------------------------------------------------------------------
-# 8b. No literal money amount in the LLM prompt templates.
+# 8b. No literal money amount in the LLM prompt templates OR the runbooks.
 #
 # The scoring rubric must take the candidate's salary benchmark and every other
-# money anchor FROM THE USER PROFILE, never from a figure baked into the shipped
-# template (the leak was a "€7k/month benchmark" welded into company-scoring.md).
-# A currency-symbol-plus-digit, a currency-code-plus-digit (either order), or a
-# "<n>k/month"-style pay figure (with "/", "per", or "a" as the connector) in a
-# prompt is therefore always a regression. Score bands ("85–100"), runway
-# durations ("18–24 months") and a bare "$X" placeholder carry no currency+digit
-# pairing, so they do not trip this guard.
+# money anchor FROM THE USER PROFILE, never from a figure baked into a shipped
+# prompt template (the leak was a currency-tagged monthly benchmark welded into
+# company-scoring.md) or a shipped runbook (a currency-tagged salary range in a
+# compensation example in jobs-add.md). A currency-symbol-plus-digit, a
+# currency-code-plus-digit (either order), or a "<n>k/month"-style pay figure
+# (with "/", "per", or "a" as the connector) on either surface is therefore
+# always a regression. Score bands ("85–100"), runway durations ("18–24 months")
+# and a bare "$X" placeholder carry no currency+digit pairing, so they do not
+# trip this guard.
 # ---------------------------------------------------------------------------
 
 MONEY_LITERAL = re.compile(
@@ -428,12 +448,12 @@ MONEY_LITERAL = re.compile(
 )
 
 
-def test_no_money_amount_in_prompt_templates():
-    hits = _scan(_prompt_files(), MONEY_LITERAL)
+def test_no_money_amount_in_prompts_or_runbooks():
+    hits = _scan(_anchor_surfaces(), MONEY_LITERAL)
     assert not hits, (
-        "A literal money amount leaked into an LLM prompt template — the salary "
-        "benchmark and every money anchor must come from the user profile, not a "
-        "figure baked into the shipped prompt:\n" + "\n".join(hits)
+        "A literal money amount leaked into a shipped prompt template or runbook — "
+        "the salary benchmark and every money anchor must come from the user "
+        "profile, not a figure baked into shipped code:\n" + "\n".join(hits)
     )
 
 
@@ -479,7 +499,7 @@ def test_money_literal_regex_ignores_non_money(text):
 
 # ---------------------------------------------------------------------------
 # 8c. No impact-sector / social-good worldview language in the LLM prompt
-# templates.
+# templates OR the runbooks.
 #
 # The seven WANT dimensions in company-scoring.md must be defined relative to
 # the CANDIDATE's own stated mission / values / domain interests (injected
@@ -489,9 +509,10 @@ def test_money_literal_regex_ignores_non_money(text):
 # grantmaking/CSR/"traditional-NGO" vocabulary throughout). A devtools company
 # scored against an engineer profile must be able to score high on
 # mission_authenticity without the template implying charity work is the
-# reference point. Tokens are tuned to avoid legitimate false positives (e.g.
-# "root cause", "CSRF", "grants", "nonprofit" as a funding-structure label are
-# all still allowed).
+# reference point. The same frame must not sneak into a shipped runbook either.
+# Tokens are tuned to avoid legitimate false positives (e.g. "root cause",
+# "CSRF", "grants", "nonprofit" as a funding-structure label are all still
+# allowed).
 # ---------------------------------------------------------------------------
 
 WORLDVIEW_TOKEN = re.compile(
@@ -506,14 +527,25 @@ WORLDVIEW_TOKEN = re.compile(
 )
 
 
-def test_no_worldview_frame_in_prompt_templates():
-    hits = _scan(_prompt_files(), WORLDVIEW_TOKEN)
+def test_no_worldview_frame_in_prompts_or_runbooks():
+    hits = _scan(_anchor_surfaces(), WORLDVIEW_TOKEN)
     assert not hits, (
-        "Impact-sector/social-good worldview language leaked into an LLM prompt "
-        "template — the WANT dimensions must be defined relative to the "
+        "Impact-sector/social-good worldview language leaked into a shipped prompt "
+        "template or runbook — the WANT dimensions must be defined relative to the "
         "candidate's own stated mission/values from the profile, not a baked-in "
         "sector frame:\n" + "\n".join(hits)
     )
+
+
+def test_anchor_surfaces_include_runbooks():
+    """The money/worldview anchor guards must scan the runbooks, not just the
+    prompt templates — pins the coverage so it cannot silently regress to
+    prompts-only."""
+    runbooks = _runbook_files()
+    assert runbooks, "no .claude/commands/*.md runbooks found to scan for anchors"
+    surfaces = set(_anchor_surfaces())
+    assert set(_prompt_files()) <= surfaces
+    assert set(runbooks) <= surfaces
 
 
 # ---------------------------------------------------------------------------
