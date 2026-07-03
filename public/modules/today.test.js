@@ -78,12 +78,12 @@ test("todayRowHtml renders a tinted score tile, title, org, and opens the vacanc
   );
 });
 
-test("todayRowHtml: row is keyboard-reachable and Enter opens it only when the row itself has focus (R12)", () => {
+test("todayRowHtml: row is keyboard-reachable and Enter/Space open it only when the row itself has focus (R12, WAI-ARIA button pattern)", () => {
   const html = todayRowHtml(baseGroup, null, []);
   assert.match(html, /role="button" tabindex="0"/);
   assert.match(
     html,
-    /onkeydown="if\(event\.key==='Enter'&&event\.target===event\.currentTarget\)\{openTodayRow\('g1'\)\}"/,
+    /onkeydown="if\(\(event\.key==='Enter'\|\|event\.key===' '\)&&event\.target===event\.currentTarget\)\{event\.preventDefault\(\);openTodayRow\('g1'\)\}"/,
   );
 });
 

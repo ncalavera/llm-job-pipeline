@@ -1957,17 +1957,21 @@ body[data-dashboard-style="minimal"] .loading-illus {
   color: #fff;
   background: var(--tier-s);
 }
-/* A/B badge text is dark, not white (AA, R12): white-on-tier-a is 4.25:1 and
-   white-on-tier-b is 2.58:1, both below the 4.5:1 floor for this 9px/800
-   weight text. The app's standard dark-text token clears both (4.95:1,
-   4.54:1) without touching the tier-a/tier-b background hex the design
-   protocol documents as fixed brand colors. */
+/* A/B badge text is black, not white (AA, R12): white-on-tier-a is 4.25:1
+   and white-on-tier-b is 2.58:1, both below the 4.5:1 floor for this
+   9px/800 weight text. The app's standard dark-text token (--sky-text,
+   #3a3833) does NOT fix this — it's only 2.76:1 on tier-a and 4.54:1 on
+   tier-b (review caught this: an earlier version of this comment wrongly
+   quoted the black-on-tier-a ratio for --sky-text). Pure black clears both
+   comfortably (4.95:1 on tier-a, 8.14:1 on tier-b) without touching the
+   tier-a/tier-b background hex the design protocol documents as fixed
+   brand colors. */
 .tier-a {
-  color: var(--sky-text);
+  color: #000;
   background: var(--tier-a);
 }
 .tier-b {
-  color: var(--sky-text);
+  color: #000;
   background: var(--tier-b);
 }
 .tier-c {

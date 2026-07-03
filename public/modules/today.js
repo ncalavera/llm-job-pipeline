@@ -150,7 +150,7 @@ export function todayRowHtml(g, extra, actions) {
     escHtml(g.id) +
     '" role="button" tabindex="0" onclick="openTodayRow(\'' +
     jsAttr(g.id) +
-    "')\" onkeydown=\"if(event.key==='Enter'&&event.target===event.currentTarget){openTodayRow('" +
+    "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openTodayRow('" +
     jsAttr(g.id) +
     "')}\">" +
     '<div class="today-row-score ' +

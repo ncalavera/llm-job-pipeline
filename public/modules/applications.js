@@ -202,7 +202,7 @@ export function applicationRowHtml(a, opts) {
   const rowClick = a.live
     ? ' role="button" tabindex="0" onclick="openApplicationRow(\'' +
       jsAttr(a.id) +
-      "')\" onkeydown=\"if(event.key==='Enter'&&event.target===event.currentTarget){openApplicationRow('" +
+      "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openApplicationRow('" +
       jsAttr(a.id) +
       "')}\""
     : "";

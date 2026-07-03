@@ -163,11 +163,11 @@ test("a linked row (live vacancy) opens the vacancy page on click", () => {
   assert.doesNotMatch(html, /apl-row-unlinked/);
 });
 
-test("a linked row is keyboard-reachable and Enter opens it only when the row itself has focus (R12)", () => {
+test("a linked row is keyboard-reachable and Enter/Space open it only when the row itself has focus (R12, WAI-ARIA button pattern)", () => {
   const html = applicationRowHtml(baseApp);
   assert.match(
     html,
-    /onkeydown="if\(event\.key==='Enter'&&event\.target===event\.currentTarget\)\{openApplicationRow\('v1'\)\}"/,
+    /onkeydown="if\(\(event\.key==='Enter'\|\|event\.key===' '\)&&event\.target===event\.currentTarget\)\{event\.preventDefault\(\);openApplicationRow\('v1'\)\}"/,
   );
 });
 

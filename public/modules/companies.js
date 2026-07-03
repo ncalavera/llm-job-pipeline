@@ -1929,7 +1929,7 @@ function companyRoleRowHtml(r, t) {
   return (
     '<div class="cp-role-row" role="button" tabindex="0" onclick="openVacancyRoute(\'' +
     jsAttr(r.id) +
-    "',{context:'company'})\" onkeydown=\"if(event.key==='Enter'){openVacancyRoute('" +
+    "',{context:'company'})\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openVacancyRoute('" +
     jsAttr(r.id) +
     "',{context:'company'})}\">" +
     '<div class="cp-role-score ' +
@@ -2064,7 +2064,7 @@ function companyRolesBlockHtml(c, roles, counts, t) {
     "</div>" +
     '<span class="cp-view-all-link" role="button" tabindex="0" onclick="viewOrgInCatalog(\'' +
     jsAttr(c.name) +
-    "')\" onkeydown=\"if(event.key==='Enter'){viewOrgInCatalog('" +
+    "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();viewOrgInCatalog('" +
     jsAttr(c.name) +
     "')}\">" +
     escHtml(t("cp_view_all_browse", "View all in Browse")) +

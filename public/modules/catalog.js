@@ -480,7 +480,7 @@ export function catalogRowHtml(g, basket, opts) {
     escHtml(g.id) +
     '" role="button" tabindex="0" onclick="openCatalogRow(\'' +
     idAttr +
-    "')\" onkeydown=\"if(event.key==='Enter'&&event.target===event.currentTarget){openCatalogRow('" +
+    "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openCatalogRow('" +
     idAttr +
     "')}\">" +
     '<div class="catalog-row-score ' +

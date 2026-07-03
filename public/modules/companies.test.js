@@ -250,7 +250,7 @@ test("companyProfileHtml (scored): open-role rows route via the U4/U6 contract",
   );
 });
 
-test("companyProfileHtml: open-role rows and the 'view all' link are keyboard-reachable (R12)", () => {
+test("companyProfileHtml: open-role rows and the 'view all' link are keyboard-reachable via Enter/Space (R12, WAI-ARIA button pattern)", () => {
   const html = companyProfileHtml(scoredCompany, roles, {
     t,
     reviewStatus: "approved",
@@ -258,12 +258,12 @@ test("companyProfileHtml: open-role rows and the 'view all' link are keyboard-re
   });
   assert.ok(
     html.includes(
-      "class=\"cp-role-row\" role=\"button\" tabindex=\"0\" onclick=\"openVacancyRoute('r1',{context:'company'})\" onkeydown=\"if(event.key==='Enter'){openVacancyRoute('r1',{context:'company'})}\"",
+      "class=\"cp-role-row\" role=\"button\" tabindex=\"0\" onclick=\"openVacancyRoute('r1',{context:'company'})\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openVacancyRoute('r1',{context:'company'})}\"",
     ),
   );
   assert.ok(
     html.includes(
-      'class="cp-view-all-link" role="button" tabindex="0" onclick="viewOrgInCatalog(\'GiveWell\')" onkeydown="if(event.key===\'Enter\'){viewOrgInCatalog(\'GiveWell\')}"',
+      'class="cp-view-all-link" role="button" tabindex="0" onclick="viewOrgInCatalog(\'GiveWell\')" onkeydown="if((event.key===\'Enter\'||event.key===\' \')&&event.target===event.currentTarget){event.preventDefault();viewOrgInCatalog(\'GiveWell\')}"',
     ),
   );
 });

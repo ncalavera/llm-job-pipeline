@@ -237,7 +237,7 @@ export function vacancyPageHtml(g, company, status, opts) {
   const orgHtml = g.company_slug
     ? '<span class="vac-org vac-org--link" role="button" tabindex="0" onclick="openCompanyProfile(\'' +
       jsAttr(g.company_slug) +
-      "')\" onkeydown=\"if(event.key==='Enter'){openCompanyProfile('" +
+      "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openCompanyProfile('" +
       jsAttr(g.company_slug) +
       "')}\">" +
       orgName +
@@ -480,7 +480,7 @@ export function vacancyPageHtml(g, company, status, opts) {
     railParts.push(
       '<div class="vac-company-card" role="button" tabindex="0" onclick="openCompanyProfile(\'' +
         jsAttr(company.slug) +
-        "')\" onkeydown=\"if(event.key==='Enter'){openCompanyProfile('" +
+        "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openCompanyProfile('" +
         jsAttr(company.slug) +
         "')}\">" +
         '<div class="vac-company-top">' +

@@ -108,12 +108,12 @@ test("row click opens the vacancy via openCatalogRow with the row's id", () => {
   assert.match(html, /onclick="openCatalogRow\('g1'\)"/);
 });
 
-test("row is keyboard-reachable and Enter opens it only when the row itself has focus (R12)", () => {
+test("row is keyboard-reachable and Enter/Space open it only when the row itself has focus (R12, WAI-ARIA button pattern)", () => {
   const html = catalogRowHtml(baseGroup, "unseen", opts);
   assert.match(html, /role="button" tabindex="0"/);
   assert.match(
     html,
-    /onkeydown="if\(event\.key==='Enter'&&event\.target===event\.currentTarget\)\{openCatalogRow\('g1'\)\}"/,
+    /onkeydown="if\(\(event\.key==='Enter'\|\|event\.key===' '\)&&event\.target===event\.currentTarget\)\{event\.preventDefault\(\);openCatalogRow\('g1'\)\}"/,
   );
 });
 
