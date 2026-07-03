@@ -3007,27 +3007,11 @@ body[data-dashboard-style="minimal"] .loading-illus {
   display: block;
   position: relative;
 }
-.settings-intro {
-  margin: 8px 0 16px;
-}
-.settings-h2 {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--text);
-  margin: 0 0 4px;
-}
-.settings-sub {
-  color: var(--muted);
-  margin: 0;
-}
-.settings-empty {
-  color: var(--muted);
-  padding: 24px 0;
-  text-align: center;
-}
-/* Applied's own header/filter/table styling moved to the U13 redesign block
-   at EOF (a fresh `.apl-*` namespace — Settings never used `.apps-*`, so
-   nothing above needs to stay for its sake). */
+/* .settings-intro/.settings-h2/.settings-sub/.settings-empty (pre-redesign)
+   removed here — settings.js (U14) now emits .settings-header/-header-title/
+   -header-sub and .stg-empty instead (EOF block). The display/.active toggle
+   above stays: Settings' new markup still lives in the same #settingsSection
+   element, and it's still shared with Applications. */
 
 /* === U10 Geo (redesign) ===================================================
    Geo (`#statsSection`) reuses the shared `.company-table` / `.ct-*` classes
@@ -4748,7 +4732,6 @@ a.pipe-grp-role-title:hover {
   border-radius: 4px;
   font-size: 11px;
 }
-
 
 /* === U13 Applied (redesign) ================================================
    Flat grid table in the new look (DHA-397): header on the material, rows in
