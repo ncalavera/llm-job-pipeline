@@ -1040,6 +1040,30 @@ def _gate_job(job: dict) -> tuple[str, str | None, bool]:
     return title, None, boilerplate_gated
 
 
+def _refresh_gated_last_seen(cur, org: str, title: str, today: str) -> bool:
+    """Refresh last_seen on an ALREADY-KNOWN role that the source still lists but
+    the import gate drops (a junk/blacklisted/thin title — e.g. a "talent pool"
+    posting the user already liked).
+
+    The quality gate exists to stop us IMPORTING such a posting as a NEW row, not
+    to declare an existing one closed. When a gated job's exact org+title still
+    matches a stored row, the source is plainly still listing that role, so bump
+    its last_seen — otherwise a role we keep filtering out drifts stale and shows
+    as "expired" in triage while it is openly live at source. Deliberately narrow:
+    matches only the exact dedup_hash and never resurrects, re-imports or
+    rescores. A title we don't already track updates zero rows (the gate still
+    blocks a brand-new junk import); an archived tombstone is left untouched.
+    Returns True when a row was refreshed.
+    """
+    if not title.strip():
+        return False
+    cur.execute(
+        "UPDATE vacancy SET last_seen = %s WHERE dedup_hash = %s AND status != 'archived'",
+        (today, make_vacancy_id(org, title)),
+    )
+    return cur.rowcount > 0
+
+
 def _loc_key(loc: dict) -> str:
     """Stable key for a location entry: city, else country, else work_mode."""
     return loc.get("city") or loc.get("country") or loc.get("work_mode") or ""
@@ -1061,6 +1085,7 @@ def _print_merge_summary(
     skipped_boilerplate: int,
     skipped_junk: int,
     resurrected: int,
+    refreshed_gated: int = 0,
 ) -> None:
     """Print the per-source merge counters shared by both save paths."""
     if skipped_archived:
@@ -1074,6 +1099,11 @@ def _print_merge_summary(
         print(f"  [{label}] skipped {skipped_junk} junk content", flush=True)
     if resurrected:
         print(f"  [{label}] resurrected: {resurrected}", flush=True)
+    if refreshed_gated:
+        print(
+            f"  [{label}] refreshed last_seen on {refreshed_gated} still-listed gated role(s)",
+            flush=True,
+        )
 
 
 def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
@@ -1109,6 +1139,7 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     skipped_junk = 0
     skipped_boilerplate = 0
     resurrected = 0
+    refreshed_gated = 0
 
     for job in jobs:
         title, skip_reason, boilerplate_gated = _gate_job(job)
@@ -1119,6 +1150,12 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
         elif skip_reason == "empty_title":
             print(f"  [{org_name}] skipped a fetched row with a missing/empty title", flush=True)
         if skip_reason is not None:
+            # A gated title we ALREADY track is still being listed by the source:
+            # refresh its last_seen so it isn't shown stale/expired while live.
+            if skip_reason != "empty_title" and _refresh_gated_last_seen(
+                cur, org_name, title, today
+            ):
+                refreshed_gated += 1
             continue
 
         dedup_hash = make_vacancy_id(org_name, title)
@@ -1230,6 +1267,7 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
         skipped_boilerplate=skipped_boilerplate,
         skipped_junk=skipped_junk,
         resurrected=resurrected,
+        refreshed_gated=refreshed_gated,
     )
     return new_count
 
@@ -1270,6 +1308,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
     skipped_junk = 0
     skipped_boilerplate = 0
     resurrected = 0
+    refreshed_gated = 0
     skipped_inactive: dict[str, int] = {}
 
     for job in jobs:
@@ -1281,6 +1320,15 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
         elif skip_reason == "empty_title":
             print(f"  [{board_name}] skipped a board row with a missing/empty title", flush=True)
         if skip_reason is not None:
+            # A gated title we ALREADY track is still being listed by the board:
+            # refresh its last_seen so it isn't shown stale/expired while live.
+            if skip_reason != "empty_title" and _refresh_gated_last_seen(
+                cur,
+                resolve_canonical_name(job.get("org_override") or board_cfg["name"]),
+                title,
+                today,
+            ):
+                refreshed_gated += 1
             continue
 
         ext_id = job.get("external_id", "")
@@ -1409,6 +1457,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
         skipped_boilerplate=skipped_boilerplate,
         skipped_junk=skipped_junk,
         resurrected=resurrected,
+        refreshed_gated=refreshed_gated,
     )
     if skipped_inactive:
         total_skipped = sum(skipped_inactive.values())
