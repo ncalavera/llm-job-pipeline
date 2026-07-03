@@ -27,12 +27,23 @@ import {
   safeUrl,
 } from "./helpers.js";
 import { T } from "./i18n.js";
+import { VISIBLE_MIN_SCORE, basketCounts, groupsInBasket } from "./derive.js";
 
-// Default catalog score floor (mirrors CATALOG_MIN_SCORE in scripts/config.py).
-// Roles below this — and unscored roles — are hidden until "show all".
-const CATALOG_MIN_SCORE = 40;
 // UI-only toggle: when true, the score floor is lifted and everything shows.
 let catalogShowAll = false;
+
+// The shared visibility options the basket badge AND the basket list both read,
+// so a count can never disagree with its list (DHA-374). The score floor is
+// VISIBLE_MIN_SCORE unless "show all" lifts it.
+function visOpts() {
+  return {
+    isApproved: isGroupCompanyApproved,
+    getStatus: getGroupStatus,
+    isExpired: isVacancyExpired,
+    basketMap: STATUS_BASKET,
+    minScore: catalogShowAll ? null : VISIBLE_MIN_SCORE,
+  };
+}
 
 // Source-freshness label from a role's last_seen date. Null when unknown.
 // STALE_SOURCE_DAYS + the age math are shared with the Triage "Expired" column.
@@ -62,18 +73,9 @@ function catalogFreshness(lastSeen) {
 // ---------------------------------------------------------------------------
 
 export function updateBasketCounts() {
-  const counts = { liked: 0, unseen: 0, passed: 0 };
-  groups.forEach((g) => {
-    if (!isGroupCompanyApproved(g)) return;
-    const s = getGroupStatus(g);
-    const basket = STATUS_BASKET[s] || "unseen";
-    // Expired liked vacancies count towards passed, not liked
-    if (basket === "liked" && isVacancyExpired(g)) {
-      counts.passed = (counts.passed || 0) + 1;
-    } else {
-      counts[basket] = (counts[basket] || 0) + 1;
-    }
-  });
+  // Same visibility filter + expiry re-bucketing the basket LIST uses, so the
+  // badge is always the count of the rows the list renders (DHA-374).
+  const counts = basketCounts(groups, visOpts());
   document.getElementById("countLiked").textContent = counts.liked;
   document.getElementById("countUnseen").textContent = counts.unseen;
   document.getElementById("countPassed").textContent = counts.passed;
@@ -108,13 +110,15 @@ export function toggleCatalogSort(btn) {
   renderCatalog();
 }
 
-// Lift / restore the default score floor (CATALOG_MIN_SCORE). UI state only.
+// Lift / restore the default score floor (VISIBLE_MIN_SCORE). UI state only.
+// Toggling the floor changes the visible set, so the badges refresh with it.
 export function toggleCatalogShowAll(btn) {
   catalogShowAll = !catalogShowAll;
   btn.classList.toggle("active", catalogShowAll);
   btn.textContent = catalogShowAll
     ? T("catalog_show_top", "Top only")
     : T("catalog_show_all", "Show all");
+  updateBasketCounts();
   renderCatalog();
 }
 
@@ -182,23 +186,12 @@ export function renderCatalog() {
 
   _renderCatalogHiddenNote(grid);
 
-  const visible = groups.filter((g) => isGroupCompanyApproved(g));
-  const inBasket = visible.filter((g) => {
-    const basket = STATUS_BASKET[getGroupStatus(g)] || "unseen";
-    // Expired liked vacancies are excluded from the liked basket
-    // and shown in the passed basket instead
-    if (basket === "liked" && isVacancyExpired(g)) {
-      return state.currentBasket === "passed";
-    }
-    return basket === state.currentBasket;
-  });
+  // The visible rows in the current basket — the SAME set the badge counts, so
+  // the "N of M" denominator always matches the badge (DHA-374). The score
+  // floor + expiry re-bucketing live in the shared filter; only the org/
+  // location/search refinements below are catalog-specific.
+  const inBasket = groupsInBasket(groups, state.currentBasket, visOpts());
   const filtered = inBasket.filter((g) => {
-    // Default score floor: hide low- and unscored roles unless "show all".
-    if (
-      !catalogShowAll &&
-      (g.llm_score == null || g.llm_score < CATALOG_MIN_SCORE)
-    )
-      return false;
     if (orgFilter && g.org !== orgFilter) return false;
     if (
       state.activeCatalogLocs.size > 0 &&

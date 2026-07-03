@@ -30,6 +30,7 @@ import {
   safeUrl,
 } from "./helpers.js";
 import { T } from "./i18n.js";
+import { selectTodayRoles } from "./derive.js";
 
 const SOON_DAYS = 7; // a deadline this close is "decide now"
 const NEW_HIGH_FIT = 70; // the rarest, loudest tier
@@ -309,56 +310,24 @@ export function renderToday() {
   if (!root) return;
   _captureVisit();
 
-  const visible = groups.filter((g) => isGroupCompanyApproved(g));
-
-  // Collect role objects first so each list can be urgency-sorted before render.
-  const expiringRows = []; // { g, extra, sort } — sort < 0 = protected, else days-left
-  const readyRows = [];
-  const newRows = [];
-
-  for (const g of visible) {
-    const status = getGroupStatus(g);
-    const basket = STATUS_BASKET[status] || "unseen";
-
-    if (status === "expiring") {
-      expiringRows.push({
-        g,
-        extra: T("today_protected", "protected, decide"),
-        sort: -1,
-      });
-    } else if (basket === "liked" && _isLiveRole(g)) {
-      const dleft = _daysUntil(g.deadline);
-      if (dleft != null && dleft >= 0 && dleft <= SOON_DAYS) {
-        expiringRows.push({
-          g,
-          extra: T("today_deadline_in", "deadline in") + " " + dleft + "d",
-          sort: dleft,
-        });
-      }
-    }
-
-    if (status === "to_apply" && _isLiveRole(g)) {
-      readyRows.push({ g });
-    }
-
-    if (
-      status === "unseen" &&
-      g.llm_score != null &&
-      g.llm_score >= NEW_HIGH_FIT &&
-      g.first_seen &&
-      (!_prevVisit || g.first_seen > _prevVisit.slice(0, 10)) &&
-      _isLiveRole(g)
-    ) {
-      newRows.push({ g });
-    }
-  }
-
-  // Urgency order: Expiring — protected first, then soonest deadline; the rest
-  // by best fit (score descending).
-  const byScoreDesc = (a, b) => (b.g.llm_score || 0) - (a.g.llm_score || 0);
-  expiringRows.sort((a, b) => a.sort - b.sort);
-  readyRows.sort(byScoreDesc);
-  newRows.sort(byScoreDesc);
+  // Membership + urgency ordering are a pure derivation of (approved roles +
+  // live statuses + today's date) — see derive.js. Today is deliberately NOT
+  // score-floored: a role the user has liked/queued must surface regardless of
+  // score. The lists react to likes/passes and today's expiry with no run.
+  const {
+    expiring: expiringRows,
+    ready: readyRows,
+    newHighFit: newRows,
+  } = selectTodayRoles(groups, {
+    isApproved: isGroupCompanyApproved,
+    getStatus: getGroupStatus,
+    basketMap: STATUS_BASKET,
+    isLiveRole: _isLiveRole,
+    daysUntil: _daysUntil,
+    soonDays: SOON_DAYS,
+    newHighFit: NEW_HIGH_FIT,
+    prevVisit: _prevVisit,
+  });
 
   const passAction = {
     action: "pass",
@@ -387,10 +356,18 @@ export function renderToday() {
     { ...passAction, glyph: "👎" },
   ];
 
-  const expiring = expiringRows.map((r) => _row(r.g, r.extra, expiringActions));
-  const ready = readyRows.map((r) => _row(r.g, null, readyActions));
-  const newHighFit = newRows.map((r) =>
-    _row(r.g, "🎯 " + r.g.llm_score, newActions),
+  const expiring = expiringRows.map((r) =>
+    _row(
+      r.g,
+      r.kind === "protected"
+        ? T("today_protected", "protected, decide")
+        : T("today_deadline_in", "deadline in") + " " + r.daysLeft + "d",
+      expiringActions,
+    ),
+  );
+  const ready = readyRows.map((g) => _row(g, null, readyActions));
+  const newHighFit = newRows.map((g) =>
+    _row(g, "🎯 " + g.llm_score, newActions),
   );
 
   root.innerHTML =
