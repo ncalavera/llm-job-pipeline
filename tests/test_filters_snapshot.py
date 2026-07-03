@@ -434,7 +434,10 @@ GOLDEN_MERGE_ATS = {
     ("Initech", "UX Designer"): "INSERTED",
     ("Umbrella Corp", "Operations Lead"): "SKIPPED_archived",
     ("Hooli", "Site Reliability Engineer"): "UPDATED_resurrected",
-    ("Pied Piper", "Talent Pool — General Application"): "SKIPPED_blacklist",
+    # A blacklisted title we ALREADY track (liked) that the source still lists is
+    # NOT imported (gate holds) but its last_seen IS refreshed — otherwise a live
+    # role drifts stale and shows as "expired" in triage (last_seen bump = UPDATE).
+    ("Pied Piper", "Talent Pool — General Application"): "UPDATED",
 }
 
 GOLDEN_MERGE_BOARD = {
@@ -447,7 +450,9 @@ GOLDEN_MERGE_BOARD = {
     ("Initech", "UX Designer"): "INSERTED",
     ("Umbrella Corp", "Operations Lead"): "SKIPPED_archived",
     ("Hooli", "Site Reliability Engineer"): "SKIPPED_archived",
-    ("Pied Piper", "Talent Pool — General Application"): "SKIPPED_blacklist",
+    # Same as the ATS path: a still-listed blacklisted role we already track has
+    # its last_seen refreshed rather than left to age into a false "expired".
+    ("Pied Piper", "Talent Pool — General Application"): "UPDATED",
 }
 
 GOLDEN_CLASSIFY = {
