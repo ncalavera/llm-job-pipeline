@@ -34,7 +34,12 @@ function fakeRes() {
 }
 
 function withEnv(env, fn) {
-  const keys = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"];
+  const keys = [
+    "AUTH_USER",
+    "AUTH_PASS",
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+  ];
   const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
   for (const k of keys) delete process.env[k];
   Object.assign(process.env, env);
@@ -46,7 +51,12 @@ function withEnv(env, fn) {
   });
 }
 
-const CONFIGURED = { SUPABASE_URL: "x", SUPABASE_SERVICE_ROLE_KEY: "y" };
+const CONFIGURED = {
+  AUTH_USER: "u",
+  AUTH_PASS: "p",
+  SUPABASE_URL: "x",
+  SUPABASE_SERVICE_ROLE_KEY: "y",
+};
 
 test("OPTIONS preflight short-circuits with 204 and no body, business logic never runs", async () => {
   await withEnv({}, async () => {
@@ -100,8 +110,27 @@ test("rejects a mismatched method with 405 before touching business logic", asyn
   });
 });
 
-test("returns 500 (not the payload) when Supabase env is missing", async () => {
-  await withEnv({}, async () => {
+test("fails closed with 503 (not the payload) when AUTH_USER/AUTH_PASS are unset", async () => {
+  // Supabase is configured but the Basic Auth gate is not — an open deployment.
+  // The wrapper must refuse before any business logic or DB access runs.
+  await withEnv(
+    { SUPABASE_URL: "x", SUPABASE_SERVICE_ROLE_KEY: "y" },
+    async () => {
+      let ran = false;
+      const handler = withHandler({ method: "GET", label: "t" }, async () => {
+        ran = true;
+      });
+      const res = fakeRes();
+      await handler({ method: "GET" }, res);
+      assert.equal(res.statusCode, 503);
+      assert.deepEqual(res.body, { error: "Auth not configured" });
+      assert.equal(ran, false);
+    },
+  );
+});
+
+test("returns 500 (not the payload) when Supabase env is missing but auth is set", async () => {
+  await withEnv({ AUTH_USER: "u", AUTH_PASS: "p" }, async () => {
     let ran = false;
     const handler = withHandler({ method: "GET", label: "t" }, async () => {
       ran = true;

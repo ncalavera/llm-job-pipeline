@@ -198,6 +198,18 @@ def _opts_from_state(state: dict) -> Opts:
     )
 
 
+def _ignored_resume_flags(args: argparse.Namespace) -> list[str]:
+    """CLI flags whose effect a resume cannot honour: options are frozen at the
+    checkpoint, not re-read from the CLI, so ``--boards`` / ``--full-rescore``
+    have no effect on a resumed run."""
+    flags = []
+    if args.boards is not None:
+        flags.append("--boards")
+    if args.full_rescore:
+        flags.append("--full-rescore")
+    return flags
+
+
 def _warn_ignored_resume_flags(args: argparse.Namespace) -> None:
     """Resuming replays the options frozen in the checkpoint, not the CLI's.
 
@@ -205,18 +217,69 @@ def _warn_ignored_resume_flags(args: argparse.Namespace) -> None:
     say so — a user re-running with ``--full-rescore`` to lift the scoring cap
     would otherwise get a normal-cap run with no indication anything changed.
     """
-    flags = []
-    if args.boards is not None:
-        flags.append("--boards")
-    if args.full_rescore:
-        flags.append("--full-rescore")
-    for flag in flags:
+    for flag in _ignored_resume_flags(args):
         print(
             f"⚠  {flag} is IGNORED on resume: this run's options are locked in "
             "at the checkpoint, not re-read from the CLI. To apply it, finish "
             "or discard the current run (--new) and start over.",
             flush=True,
         )
+
+
+def _age_str(ts: str | None) -> str:
+    """Human age of an ISO timestamp written by ``_now()`` (naive local)."""
+    if not ts:
+        return "unknown"
+    try:
+        secs = int((datetime.now() - datetime.fromisoformat(ts)).total_seconds())
+    except Exception:
+        return "unknown"
+    secs = max(secs, 0)
+    days, rem = divmod(secs, 86400)
+    hours, rem = divmod(rem, 3600)
+    mins = rem // 60
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {mins}m"
+    return f"{mins}m"
+
+
+def _resume_stage_name(state: dict) -> str:
+    """The stage a resume will pick up at (the cursor position)."""
+    idx = state.get("cursor", 0)
+    if isinstance(idx, int) and 0 <= idx < len(STAGE_ORDER):
+        return STAGE_ORDER[idx]
+    return "done"
+
+
+def _print_resume_banner(state: dict) -> None:
+    """Loud, unmissable banner when a BARE invocation auto-resumes an unfinished
+    run, so a resume is never mistaken for a fresh start.
+
+    Wrapped so a banner failure can never abort the run (STRATEGY goal 1)."""
+    try:
+        bar = "=" * 70
+        run_id = state.get("run_id", "?")
+        print(f"\n{bar}", flush=True)
+        print("  ⏯  RESUMING AN UNFINISHED RUN — this is NOT a fresh start.", flush=True)
+        print(bar, flush=True)
+        print(f"  run:      {run_id}", flush=True)
+        print(
+            f"  age:      started {_age_str(state.get('created_at'))} ago; "
+            f"last progress {_age_str(state.get('updated_at'))} ago",
+            flush=True,
+        )
+        print(f"  picks up: at stage '{_resume_stage_name(state)}'", flush=True)
+        print(
+            "  To DISCARD this run and start fresh instead: "
+            "python3 scripts/run_daily.py --new",
+            flush=True,
+        )
+        print(bar, flush=True)
+    except Exception:
+        # A banner is informational; never let it break the run.
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -252,8 +315,18 @@ def _registry_load_failed() -> bool:
         from company_registry import registry_load_failed
 
         return bool(registry_load_failed())
-    except Exception:
-        return False
+    except Exception as exc:
+        # An unexpected failure here means we CANNOT confirm the registry loaded.
+        # Fail toward the preflight abort (return True) rather than reporting
+        # "registry OK" and letting destructive first-run onboarding proceed
+        # against what might be a DB outage. Surface the cause.
+        print(
+            f"  registry-load check failed unexpectedly ({type(exc).__name__}: {exc}); "
+            "treating as a load failure to be safe.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return True
 
 
 def _company_count() -> int:
@@ -1534,10 +1607,27 @@ def main(argv: list[str] | None = None) -> int:
             if args.no_publish:
                 opts.no_publish = True
         elif existing and not existing.get("finished"):
-            print(f"Resuming interrupted run {existing.get('run_id')} …", flush=True)
+            # A bare invocation auto-resumes (by design). But --boards /
+            # --full-rescore cannot be honoured on a resume, and silently
+            # ignoring them is the trap: a user who meant "fresh run with these
+            # flags" would get a stale resume with none of them. Refuse to guess.
+            ignored = _ignored_resume_flags(args)
+            if ignored:
+                print(
+                    f"\n✗ An unfinished run ({existing.get('run_id')}) is on disk. A bare "
+                    f"invocation would RESUME it and silently ignore {', '.join(ignored)} "
+                    "(a resume replays the options frozen at the checkpoint, not the CLI's). "
+                    "Refusing to guess your intent — choose one:\n"
+                    "  • resume that run, dropping those flags:  python3 scripts/run_daily.py --resume\n"
+                    "  • discard it and start fresh with them:   "
+                    "python3 scripts/run_daily.py --new <your flags>",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return EXIT_ABORT
+            _print_resume_banner(existing)
             state = existing
             opts = _opts_from_state(state)
-            _warn_ignored_resume_flags(args)
             if args.no_publish:
                 opts.no_publish = True
         else:

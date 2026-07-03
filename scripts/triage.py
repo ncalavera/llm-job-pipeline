@@ -5,6 +5,7 @@ from datetime import date, datetime
 
 from config import (
     COMPANIES,
+    DASHBOARD_TZ,
     PROJECT_ROOT,
     resolve_canonical_name,
 )
@@ -137,7 +138,11 @@ def is_deadline_passed(v: dict) -> bool:
         return False
     try:
         d = date.fromisoformat(deadline)
-        return d < date.today()
+        # Use the same dashboard clock (DASHBOARD_TZ, UTC by default) every other
+        # expiry surface uses — report/data_prep.py, filter_vacancies.py,
+        # database_supabase.py — so a role never reads "expired" here while it is
+        # still "live" in the report during the local-midnight-to-UTC window.
+        return d < datetime.now(DASHBOARD_TZ).date()
     except ValueError:
         return False
 

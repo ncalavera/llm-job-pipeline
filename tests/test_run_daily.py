@@ -849,3 +849,129 @@ def test_missing_state_still_reads_as_no_run(rd):
     reports "No run to resume" as before."""
     assert not rd.STATE_PATH.exists()
     assert rd._state_file_corrupt() is False
+
+
+# ---------------------------------------------------------------------------
+# 8. Registry-load preflight fails TOWARD the abort on an unexpected error
+# ---------------------------------------------------------------------------
+
+
+def test_registry_load_check_reports_ok_when_underlying_says_ok(rd, monkeypatch):
+    """Happy path is unchanged: the wrapper passes through the real answer."""
+    import company_registry
+
+    monkeypatch.setattr(company_registry, "registry_load_failed", lambda: False)
+    assert rd._registry_load_failed() is False
+    monkeypatch.setattr(company_registry, "registry_load_failed", lambda: True)
+    assert rd._registry_load_failed() is True
+
+
+def test_registry_load_check_fails_toward_abort_on_unexpected_error(rd, monkeypatch, capsys):
+    """An unexpected failure in the check must NOT be read as "registry OK"
+    (which would let destructive first-run onboarding run during a DB outage).
+    It counts as a load failure, with the cause surfaced on stderr."""
+    import company_registry
+
+    def _boom():
+        raise RuntimeError("connection reset mid-check")
+
+    monkeypatch.setattr(company_registry, "registry_load_failed", _boom)
+
+    assert rd._registry_load_failed() is True
+    err = capsys.readouterr().err.lower()
+    assert "registry-load check failed" in err
+    assert "connection reset mid-check" in err
+
+
+def test_preflight_aborts_when_registry_check_errors(rd, monkeypatch):
+    """End to end: an erroring registry check drives preflight to abort, not to
+    advance into onboarding."""
+    monkeypatch.setattr(rd, "_registry_load_failed", lambda: True)
+    state = rd._new_state(rd.Opts())
+    kind, msg = rd._h_preflight(state, rd._stage(state, "preflight"), rd.Opts())
+    assert kind == "abort"
+    assert "unreachable" in msg.lower()
+
+
+# ---------------------------------------------------------------------------
+# 9. A bare invocation that auto-resumes must be LOUD, and must not silently
+#    swallow flags that only a fresh run could honour.
+# ---------------------------------------------------------------------------
+
+
+def _unfinished_run_on_disk(rd):
+    state = rd._new_state(rd.Opts(job_boards="idealist"))
+    rd._save_state(state)
+    return state
+
+
+def test_resume_banner_shows_run_id_stage_and_age(rd, capsys):
+    state = rd._new_state(rd.Opts())
+    state["cursor"] = rd.STAGE_ORDER.index("filter")
+    rd._print_resume_banner(state)
+    out = capsys.readouterr().out
+    assert "RESUMING" in out
+    assert state["run_id"] in out
+    assert "filter" in out
+    assert "ago" in out  # the age line rendered
+
+
+def test_bare_run_auto_resumes_with_a_loud_banner(rd, monkeypatch, capsys):
+    """A bare invocation over an unfinished run still resumes (by design) — but
+    now announces it unmissably instead of a one-line whisper."""
+    state = _unfinished_run_on_disk(rd)
+    seen = {}
+
+    def fake_drive(s, o):
+        seen["state"] = s
+        return rd.EXIT_DONE
+
+    monkeypatch.setattr(rd, "drive", fake_drive)
+    monkeypatch.setattr(rd, "_print_summary", lambda s: None)
+
+    rc = rd.main([])
+    out = capsys.readouterr().out
+    assert rc == rd.EXIT_DONE
+    assert seen["state"]["run_id"] == state["run_id"]  # the SAME run, resumed
+    assert "RESUMING" in out
+    assert state["run_id"] in out
+
+
+def test_bare_run_with_full_rescore_aborts_instead_of_silently_ignoring(rd, monkeypatch, capsys):
+    """Passing --full-rescore to a bare invocation that would auto-resume is a
+    contradiction (resume can't honour it). Refuse loudly instead of running a
+    stale resume with the flag silently dropped."""
+    state = _unfinished_run_on_disk(rd)
+    ran = {"drive": False}
+    monkeypatch.setattr(rd, "drive", lambda s, o: ran.__setitem__("drive", True) or rd.EXIT_DONE)
+
+    rc = rd.main(["--full-rescore"])
+    out = capsys.readouterr()
+    assert rc == rd.EXIT_ABORT
+    assert ran["drive"] is False  # no work started
+    assert "--full-rescore" in (out.out + out.err)
+    # The checkpoint is left exactly as it was — neither resumed nor clobbered.
+    assert rd._load_state()["run_id"] == state["run_id"]
+
+
+def test_bare_run_with_boards_aborts_instead_of_silently_ignoring(rd, monkeypatch, capsys):
+    _unfinished_run_on_disk(rd)
+    monkeypatch.setattr(rd, "drive", lambda s, o: rd.EXIT_DONE)
+
+    rc = rd.main(["--boards", "80k_hours"])
+    out = capsys.readouterr()
+    assert rc == rd.EXIT_ABORT
+    assert "--boards" in (out.out + out.err)
+
+
+def test_bare_run_no_publish_still_auto_resumes(rd, monkeypatch, capsys):
+    """--no-publish IS honoured on resume, so it must NOT trip the abort — the
+    run resumes and applies it."""
+    _unfinished_run_on_disk(rd)
+    captured = {}
+    monkeypatch.setattr(rd, "drive", lambda s, o: captured.__setitem__("opts", o) or rd.EXIT_DONE)
+    monkeypatch.setattr(rd, "_print_summary", lambda s: None)
+
+    rc = rd.main(["--no-publish"])
+    assert rc == rd.EXIT_DONE
+    assert captured["opts"].no_publish is True
