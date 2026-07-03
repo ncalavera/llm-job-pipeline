@@ -168,6 +168,9 @@ export const state = {
   companyCardFilter: null,
   companyMonitorFilters: new Set(),
   currentProfileSlug: null,
+  // Routed vacancy detail page open over the list (?vacancy=<group-id>), or
+  // null. Mirror of currentProfileSlug for the second detail surface (U4).
+  currentVacancyId: null,
   // Live company rows from /api/companies (null until loaded → snapshot used).
   liveCompanies: null,
   // Sidebar footer sync status (nav.js state machine). bootstrap.js's boot()

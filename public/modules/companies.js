@@ -1333,9 +1333,19 @@ export function getCompanySlugFromUrl() {
 export function openCompanyProfile(slug) {
   var c = getCompanyBySlug(slug);
   if (!c) return;
+  // Exclusive with the vacancy detail overlay (U4 review): drop it before
+  // showing the profile so the two can never stack (e.g. the vacancy page's
+  // "link to parent company"). renderProfileForSlug also enforces this.
+  state.currentVacancyId = null;
+  var vd = document.getElementById("vacancyDetail");
+  if (vd) {
+    vd.classList.remove("active");
+    vd.innerHTML = "";
+  }
   state.currentProfileSlug = slug;
   var url = new URL(window.location);
   url.searchParams.set("company", slug);
+  url.searchParams.delete("vacancy");
   history.pushState({ company: slug }, "", url);
   renderProfileForSlug(slug);
 }
@@ -1352,9 +1362,18 @@ export function renderProfileForSlug(slug) {
   var c = getCompanyBySlug(slug);
   if (!c) return;
   state.currentProfileSlug = slug;
+  // The company profile and the vacancy detail are mutually exclusive overlays
+  // (U4 review): showing one always drops the other, so the on("render") loop
+  // can never paint both and a reload can't resolve to a stacked state.
+  state.currentVacancyId = null;
 
   document.getElementById("catalogSection").classList.remove("active");
   document.getElementById("companiesSection").classList.remove("active");
+  var vacancyEl = document.getElementById("vacancyDetail");
+  if (vacancyEl) {
+    vacancyEl.classList.remove("active");
+    vacancyEl.innerHTML = "";
+  }
 
   var statsPanel = document.getElementById("statsPanel");
   if (statsPanel) statsPanel.style.display = "none";

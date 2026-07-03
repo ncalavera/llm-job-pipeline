@@ -35,7 +35,12 @@ export const APPLICATIONS_VIEWS = ["applications", "pipeline"];
 // view.
 export const DEFAULT_APPLICATIONS_VIEW = "applications";
 
-// Every leaf mode → the top-nav section that owns it.
+// Every leaf mode → the top-nav section that owns it. The last two entries are
+// not leaf modes but the deep-link DETAIL screens (route.js's route.screen
+// values): a routed vacancy detail belongs to Vacancies, a company profile to
+// Companies. Mapping them here lets app.js's routing highlight the owning
+// section through this one function (fixing the cold-deep-link nav gap, AE6)
+// instead of hardcoding the parent in the router.
 const MODE_TO_SECTION = {
   today: "today",
   catalog: "vacancies",
@@ -46,6 +51,9 @@ const MODE_TO_SECTION = {
   pipeline: "applications",
   boards: "boards",
   settings: "settings",
+  // Detail-overlay screens (route.js).
+  vacancy: "vacancies",
+  company: "companies",
 };
 
 /** The top-nav section that owns a leaf mode. Unknown → "today" (safe home). */

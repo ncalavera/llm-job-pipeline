@@ -55,9 +55,7 @@ import {
   viewOrgInCatalog,
   openCompanyProfile,
   closeCompanyProfile,
-  getCompanySlugFromUrl,
   renderProfileForSlug,
-  hideProfile,
 } from "./modules/companies.js";
 import { renderPipeline } from "./modules/pipeline.js";
 import { renderToday, todayAction } from "./modules/today.js";
@@ -74,7 +72,9 @@ import {
   isVacancyView,
   isApplicationsView,
   syncStatusLabelKey,
+  DEFAULT_VACANCY_VIEW,
 } from "./modules/nav.js";
+import { parse, build } from "./modules/route.js";
 
 // ---------------------------------------------------------------------------
 // Initialize UI elements (toast, scroll-to-top)
@@ -240,6 +240,7 @@ on("render", () => {
   if (state.currentMode === "settings") renderSettings();
   if (state.currentMode === "boards") renderBoards();
   if (state.currentProfileSlug) renderProfileForSlug(state.currentProfileSlug);
+  if (state.currentVacancyId) renderVacancyDetail(state.currentVacancyId);
 });
 
 on("switchToCatalog", ({ orgFilter }) => {
@@ -263,24 +264,226 @@ on("sync", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Routing (U4) — deep-linkable detail pages + back/forward.
+//
+// Two detail surfaces overlay the section list views: the company profile
+// (#companyProfile, ?company=<slug>) and the vacancy detail page
+// (#vacancyDetail, ?vacancy=<group-id>). route.js is the single URL parser;
+// this block is the thin DOM shell that reconciles the visible overlay/section
+// to the URL. Opening a detail pushState()s (browser back returns); switching
+// sections replaceState()s a bare URL (KTD1). Back/forward only toggles
+// `.active` — it never re-renders a list, so the list DOM and whole-window
+// scroll survive (the browser restores the position).
+// ---------------------------------------------------------------------------
+
+// Leaf mode → its section element id (each is a sibling under .container).
+var LEAF_SECTION_ID = {
+  today: "todaySection",
+  catalog: "catalogSection",
+  companies: "companiesSection",
+  pipeline: "pipelineSection",
+  stats: "statsSection",
+  archive: "archiveSection",
+  boards: "boardsSection",
+  applications: "applicationsSection",
+  settings: "settingsSection",
+};
+
+// Top-nav section → its sidebar button id (desktop sidebar + narrow icon rail
+// share the same elements).
+var NAV_BTNS = {
+  today: "navToday",
+  vacancies: "navVacancies",
+  companies: "navCompanies",
+  applications: "navApplications",
+  boards: "navBoards",
+  settings: "navSettings",
+};
+
+// Highlight one top-nav section (parent-active model, nav.js). Used by both
+// switchMode and the router so a cold ?vacancy=/?company= deep link lights up
+// the owning section (AE6).
+function setNavActiveSection(section) {
+  Object.keys(NAV_BTNS).forEach(function (sec) {
+    var btn = document.getElementById(NAV_BTNS[sec]);
+    if (btn) btn.classList.toggle("active", sec === section);
+  });
+}
+
+function hideAllLeafSections() {
+  Object.keys(LEAF_SECTION_ID).forEach(function (mode) {
+    var el = document.getElementById(LEAF_SECTION_ID[mode]);
+    if (el) el.classList.remove("active");
+  });
+}
+
+// Reveal the current mode's leaf section by display toggle only — NO re-render,
+// so returning from a detail keeps the list DOM and scroll intact (KTD1).
+function showCurrentLeafSection() {
+  var el = document.getElementById(LEAF_SECTION_ID[state.currentMode]);
+  if (el) el.classList.add("active");
+}
+
+function clearCompanyOverlay() {
+  state.currentProfileSlug = null;
+  var el = document.getElementById("companyProfile");
+  if (el) {
+    el.classList.remove("active");
+    el.innerHTML = "";
+  }
+  var statsPanel = document.getElementById("statsPanel");
+  if (statsPanel) statsPanel.style.display = "";
+}
+
+function clearVacancyOverlay() {
+  state.currentVacancyId = null;
+  var el = document.getElementById("vacancyDetail");
+  if (el) {
+    el.classList.remove("active");
+    el.innerHTML = "";
+  }
+}
+
+// Drop any open detail overlay and strip its URL param. Called at the top of
+// switchMode: a section switch always returns to a list. replaceState (not
+// push) so the section itself adds no history entry; only touch the URL when an
+// overlay was actually showing, matching the previous profile-close behavior.
+function closeDetailOverlays() {
+  var cp = document.getElementById("companyProfile");
+  var vd = document.getElementById("vacancyDetail");
+  var wasOpen =
+    (cp && cp.classList.contains("active")) ||
+    (vd && vd.classList.contains("active"));
+  clearCompanyOverlay();
+  clearVacancyOverlay();
+  if (wasOpen) {
+    var url = new URL(window.location);
+    url.searchParams.delete("company");
+    url.searchParams.delete("vacancy");
+    history.replaceState({}, "", url);
+  }
+}
+
+// Fixed, parameter-free not-found / placeholder panel. The raw URL value is
+// NEVER interpolated (security + AE6 constraint) — copy is i18n-only, and the
+// back button routes to the owning section's default entry.
+function notFoundPanelHtml(section) {
+  var backOnclick =
+    section === "companies" ? "switchMode('companies')" : "switchVacancies()";
+  return (
+    '<div class="catalog-empty">' +
+    '<div class="catalog-empty-icon">🔍</div>' +
+    "<strong>" +
+    T("route_not_found", "Not found") +
+    "</strong>" +
+    '<div class="catalog-empty-hint">' +
+    T("route_not_found_hint", "This page doesn’t exist or hasn’t loaded.") +
+    "</div>" +
+    '<div style="margin-top:16px"><button class="cp-back-btn" onclick="' +
+    backOnclick +
+    '">' +
+    T("route_back", "Go back") +
+    "</button></div>" +
+    "</div>"
+  );
+}
+
+// Render the vacancy detail into #vacancyDetail. U4 ships the fixed placeholder;
+// U6's page module (public/modules/vacancy.js) replaces this body. `id` is the
+// group id — deliberately NOT written into the markup here.
+function renderVacancyDetail(id) {
+  var host = document.getElementById("vacancyDetail");
+  if (!host) return;
+  host.innerHTML = notFoundPanelHtml("vacancies");
+}
+
+// Show the vacancy detail overlay (used by openVacancyRoute, popstate, and the
+// cold-deep-link path). Hides the company overlay + all leaf sections first.
+function showVacancyDetail(id) {
+  state.currentVacancyId = id;
+  var cp = document.getElementById("companyProfile");
+  if (cp) {
+    cp.classList.remove("active");
+    cp.innerHTML = "";
+  }
+  state.currentProfileSlug = null;
+  hideAllLeafSections();
+  renderVacancyDetail(id);
+  var host = document.getElementById("vacancyDetail");
+  if (host) host.classList.add("active");
+}
+
+// Open a vacancy detail page from a row/action (pushState so back returns to
+// the originating list). Exposed on window for U6's rows + actions to call.
+function openVacancyRoute(id) {
+  if (!id) return;
+  var url = new URL(window.location);
+  url.search = build({ screen: "vacancy", id: id });
+  // inApp marks that a list entry sits beneath this one, so closeDetail can
+  // step back (history.back) instead of pushing a bare entry that browser Back
+  // would then reopen the detail from.
+  history.pushState({ vacancy: id, inApp: true }, "", url);
+  showVacancyDetail(id);
+  setNavActiveSection(sectionForMode("vacancy"));
+}
+
+// Close the vacancy detail (U6's back button). If this entry was pushed in-app
+// (a list sits beneath), step back so popstate restores it and no forward entry
+// lingers to reopen the detail. On a cold deep link (no in-app entry beneath)
+// there is nothing to go back to, so replace the URL with a bare one in place.
+function closeDetail() {
+  if (history.state && history.state.inApp) {
+    history.back();
+    return;
+  }
+  var url = new URL(window.location);
+  url.searchParams.delete("vacancy");
+  url.searchParams.delete("company");
+  history.pushState({}, "", url);
+  clearCompanyOverlay();
+  clearVacancyOverlay();
+  showCurrentLeafSection();
+  setNavActiveSection(sectionForMode(state.currentMode));
+}
+
+// Reconcile the visible overlay/section to the current URL. Drives popstate.
+function applyRouteFromUrl() {
+  var route = parse(window.location.search);
+  if (route.screen === "vacancy") {
+    showVacancyDetail(route.id);
+    setNavActiveSection(sectionForMode("vacancy"));
+  } else if (route.screen === "company" && companiesBySlug.has(route.id)) {
+    clearVacancyOverlay();
+    renderProfileForSlug(route.id);
+    setNavActiveSection(sectionForMode("company"));
+  } else if (route.screen === "company") {
+    // Unknown slug — fixed, parameter-free not-found in the company overlay.
+    clearVacancyOverlay();
+    state.currentProfileSlug = null;
+    hideAllLeafSections();
+    var cp = document.getElementById("companyProfile");
+    if (cp) {
+      cp.innerHTML = notFoundPanelHtml("companies");
+      cp.classList.add("active");
+    }
+    setNavActiveSection(sectionForMode("company"));
+  } else {
+    // Bare URL — drop any overlay, reveal the current leaf list (no re-render).
+    clearCompanyOverlay();
+    clearVacancyOverlay();
+    showCurrentLeafSection();
+    setNavActiveSection(sectionForMode(state.currentMode));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Mode switching
 // ---------------------------------------------------------------------------
 
 function switchMode(mode) {
-  // Close profile page if open
-  if (state.currentProfileSlug) {
-    state.currentProfileSlug = null;
-    var profileEl = document.getElementById("companyProfile");
-    if (profileEl) {
-      profileEl.classList.remove("active");
-      profileEl.innerHTML = "";
-    }
-    var statsPanel = document.getElementById("statsPanel");
-    if (statsPanel) statsPanel.style.display = "";
-    var url = new URL(window.location);
-    url.searchParams.delete("company");
-    history.replaceState({}, "", url);
-  }
+  // A section switch always drops any open detail overlay (company profile or
+  // vacancy detail / not-found) and returns to a list.
+  closeDetailOverlays();
 
   state.currentMode = mode;
   // Remember the Vacancies/Applications sub-view so re-opening the section
@@ -290,37 +493,15 @@ function switchMode(mode) {
   var section = sectionForMode(mode);
 
   // DOM section per leaf mode (each is a sibling under .container).
-  var sectionMap = {
-    today: document.getElementById("todaySection"),
-    catalog: document.getElementById("catalogSection"),
-    companies: document.getElementById("companiesSection"),
-    pipeline: document.getElementById("pipelineSection"),
-    stats: document.getElementById("statsSection"),
-    archive: document.getElementById("archiveSection"),
-    boards: document.getElementById("boardsSection"),
-    applications: document.getElementById("applicationsSection"),
-    settings: document.getElementById("settingsSection"),
-  };
-  Object.keys(sectionMap).forEach(function (leaf) {
-    var el = sectionMap[leaf];
+  Object.keys(LEAF_SECTION_ID).forEach(function (leaf) {
+    var el = document.getElementById(LEAF_SECTION_ID[leaf]);
     if (el) el.classList.toggle("active", leaf === mode);
   });
 
   // Sidebar section active state follows the SECTION, not the leaf (so the
   // whole Vacancies/Applications hub stays highlighted across its sub-views).
   // Shared by the desktop sidebar and the narrow icon rail (same elements).
-  var navBtns = {
-    today: "navToday",
-    vacancies: "navVacancies",
-    companies: "navCompanies",
-    applications: "navApplications",
-    boards: "navBoards",
-    settings: "navSettings",
-  };
-  Object.keys(navBtns).forEach(function (sec) {
-    var btn = document.getElementById(navBtns[sec]);
-    if (btn) btn.classList.toggle("active", sec === section);
-  });
+  setNavActiveSection(section);
 
   // Sidebar sub-items are always expanded inline (Linear-style, protocol
   // section 4) — no visibility toggle, just the active state tracking the
@@ -368,7 +549,7 @@ function switchMode(mode) {
   updateNavCounts();
 
   // Lazy-load images for the activated section.
-  var activeSection = sectionMap[mode];
+  var activeSection = document.getElementById(LEAF_SECTION_ID[mode]);
   if (activeSection) {
     activeSection.querySelectorAll("img[data-src]").forEach(function (img) {
       img.src = img.dataset.src;
@@ -409,17 +590,10 @@ function switchApplications() {
 }
 
 // ---------------------------------------------------------------------------
-// Browser back/forward for company profile
+// Browser back/forward — reconcile both detail surfaces to the URL (U4).
 // ---------------------------------------------------------------------------
 
-window.addEventListener("popstate", function () {
-  var slug = getCompanySlugFromUrl();
-  if (slug) {
-    renderProfileForSlug(slug);
-  } else if (state.currentProfileSlug) {
-    hideProfile();
-  }
-});
+window.addEventListener("popstate", applyRouteFromUrl);
 
 // ---------------------------------------------------------------------------
 // Expose functions to window for inline onclick (temporary — step 4 removes)
@@ -448,6 +622,10 @@ window.reviewCompany = reviewCompany;
 window.viewOrgInCatalog = viewOrgInCatalog;
 window.openCompanyProfile = openCompanyProfile;
 window.closeCompanyProfile = closeCompanyProfile;
+// Vacancy detail routing (U4) — U6's rows/actions call openVacancyRoute(id);
+// its back button calls closeDetail().
+window.openVacancyRoute = openVacancyRoute;
+window.closeDetail = closeDetail;
 window.renderPipeline = renderPipeline;
 window.renderToday = renderToday;
 window.renderArchive = renderArchive;
@@ -475,12 +653,32 @@ function initDefault() {
     setTimeout(removeLoader, 500);
   }
 
-  var initSlug = getCompanySlugFromUrl();
-  if (initSlug && companiesBySlug.has(initSlug)) {
+  // Cold deep link — resolve the URL through the same route parser popstate
+  // uses. For a detail route, render the underlying list first (so back/close
+  // lands on a real list and the sidebar highlights the owning section — AE6),
+  // then overlay the detail.
+  var route = parse(window.location.search);
+  if (route.screen === "vacancy") {
+    state.currentMode = state.vacancyView || DEFAULT_VACANCY_VIEW;
+    switchMode(state.currentMode);
+    showVacancyDetail(route.id);
+    setNavActiveSection(sectionForMode("vacancy"));
+  } else if (route.screen === "company" && companiesBySlug.has(route.id)) {
     state.currentMode = "companies";
-    renderProfileForSlug(initSlug);
+    renderProfileForSlug(route.id);
+    setNavActiveSection(sectionForMode("company"));
+  } else if (route.screen === "company") {
+    // Unknown slug — fixed not-found over the Companies list.
+    state.currentMode = "companies";
+    switchMode("companies");
+    hideAllLeafSections();
+    var cp = document.getElementById("companyProfile");
+    if (cp) {
+      cp.innerHTML = notFoundPanelHtml("companies");
+      cp.classList.add("active");
+    }
+    setNavActiveSection(sectionForMode("company"));
   } else {
-    // Default mode: companies (company-first pipeline)
     switchMode(state.currentMode);
   }
 }

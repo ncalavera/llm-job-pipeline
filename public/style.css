@@ -3164,6 +3164,22 @@ body[data-dashboard-style="minimal"] .loading-illus {
   display: block;
 }
 
+/* Vacancy detail page (routed, ?vacancy=). U4 ships routing + a fixed
+   placeholder seated on a sheet; U6 replaces the content and owns its full
+   layout (reading column + facts rail). */
+.vacancy-detail-page {
+  display: none;
+}
+.vacancy-detail-page.active {
+  display: block;
+  background: var(--sky-sheet);
+  border-radius: var(--radius-sheet);
+  box-shadow:
+    inset 0 0 0 1px var(--sky-hairline),
+    0 1px 3px rgba(58, 56, 51, 0.05);
+  padding: 24px;
+}
+
 .company-profile {
   max-width: 780px;
   margin: 0 auto;
