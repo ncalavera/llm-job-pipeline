@@ -26,6 +26,8 @@ the maintainer's private strings while the maintainer can still scan locally.
 
 import json
 import re
+import subprocess
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -52,8 +54,33 @@ SELF = Path(__file__).name
 _SKIP_DIR_NAMES = {"__pycache__", "worktrees"}
 
 
+@lru_cache(maxsize=1)
+def _tracked_files() -> frozenset:
+    """Everything git tracks (committed or staged). "Public file" means
+    shipped content — a file git does not track (agent orchestration state,
+    .claude/settings.local.json, scratch scripts) can never reach the public
+    repo, so the guards must not scan it: same false-red class as DHA-351.
+    Outside a git checkout (e.g. an sdist) fall back to scanning everything."""
+    proc = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return frozenset()
+    return frozenset(REPO / name for name in proc.stdout.split("\0") if name)
+
+
 def _is_skipped(path: Path) -> bool:
-    return any(part in _SKIP_DIR_NAMES for part in path.parts)
+    if any(part in _SKIP_DIR_NAMES for part in path.parts):
+        return True
+    tracked = _tracked_files()
+    if not tracked:
+        return False
+    resolved = path if path.is_absolute() else REPO / path
+    return resolved.is_file() and resolved not in tracked
 
 
 def _py_files(*roots: Path) -> list[Path]:
@@ -122,6 +149,21 @@ def test_claude_worktrees_are_skipped():
     assert _is_skipped(Path(".claude/worktrees/agent-xxx/public/app.js"))
     assert not _is_skipped(Path(".claude/commands/jobs-new.md"))
     assert not _is_skipped(Path("scripts/prompts/company-scoring.md"))
+
+
+def test_untracked_local_files_are_skipped():
+    """Regression for the .claude/settings.local.json false red: git-untracked
+    local files (harness permissions, agent state, scratch scripts) are not
+    shipped content — they can never reach the public repo, so no guard scan
+    may go red over them."""
+    probe = CLAUDE / "guard-selftest-untracked.md"
+    probe.parent.mkdir(exist_ok=True)
+    probe.write_text("/Users/someowner/private/path\n", encoding="utf-8")
+    try:
+        assert _is_skipped(probe)
+        assert probe not in _owner_trace_files()
+    finally:
+        probe.unlink()
 
 
 def _scan(files, pattern: re.Pattern) -> list[str]:
