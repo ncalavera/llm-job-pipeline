@@ -1847,6 +1847,23 @@ body::after {
 .vac-btn--link:hover {
   text-decoration: underline;
 }
+/* Research / Network dispositions — the two triage-column accent colors
+   (--amber, --lavender). Amber takes dark text for contrast; lavender keeps
+   white, matching the like button's white-on-color treatment. */
+.vac-btn--research {
+  background: var(--amber);
+  color: #2b2200;
+}
+.vac-btn--research:hover {
+  filter: brightness(1.05);
+}
+.vac-btn--network {
+  background: var(--lavender);
+  color: #fff;
+}
+.vac-btn--network:hover {
+  filter: brightness(1.08);
+}
 
 /* Keyboard-nav hint (post-ship fast fix) — same quiet mono-chip recipe as
    Browse's .browse-keyhint, namespaced for the vacancy page. .vac-page's flex
@@ -3213,9 +3230,45 @@ body::after {
   margin: 0 8px;
   border-radius: var(--radius-row);
   opacity: 0.78;
+  cursor: pointer;
 }
 .archive-row:hover {
   background: var(--sky-row-hover);
+  opacity: 1;
+}
+.archive-row:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: -2px;
+}
+/* Un-archive control — quiet by default, revealed on row hover/focus (same
+   restraint as the row's own opacity lift). */
+.archive-row-restore {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-tile);
+  background: transparent;
+  color: var(--sky-text-faint);
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0.55;
+  transition:
+    opacity 0.12s,
+    background 0.12s,
+    color 0.12s;
+}
+.archive-row:hover .archive-row-restore,
+.archive-row:focus-within .archive-row-restore {
+  opacity: 1;
+}
+.archive-row-restore:hover {
+  background: var(--sky-row-hover);
+  color: var(--cobalt);
+}
+.archive-row-restore:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
   opacity: 1;
 }
 .archive-row-score {

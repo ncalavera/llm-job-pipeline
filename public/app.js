@@ -54,7 +54,6 @@ import {
   toggleCompanySort,
   switchCompanySubTab,
   toggleMonitoringChip,
-  companyVacancyAction,
   reviewCompany,
   viewOrgInCatalog,
   openCompanyProfile,
@@ -84,6 +83,8 @@ import {
   renderVacancyDetail,
   vacancyLike,
   vacancyPass,
+  vacancyResearch,
+  vacancyNetwork,
   vacancyMoveToApply,
 } from "./modules/vacancy.js";
 import {
@@ -250,13 +251,22 @@ on("render", () => {
   if (state.currentVacancyId) renderVacancyDetail(state.currentVacancyId);
 });
 
-on("switchToCatalog", ({ orgFilter }) => {
+on("switchToCatalog", ({ orgFilter, locSearch }) => {
   switchMode("catalog");
-  const sel = document.getElementById("catalogOrgFilter");
-  if (sel) {
-    sel.value = orgFilter;
-    renderCatalog();
+  // Two independent entry points share this seam: the company profile's
+  // "view roles in Browse" passes orgFilter; the Geo table's row click passes
+  // locSearch (a city/country term dropped into Browse's search box, which
+  // already matches location text). Each key is applied only when present so
+  // one caller never clobbers the other's field.
+  if (orgFilter !== undefined) {
+    const sel = document.getElementById("catalogOrgFilter");
+    if (sel) sel.value = orgFilter;
   }
+  if (locSearch !== undefined) {
+    const search = document.getElementById("catalogSearch");
+    if (search) search.value = locSearch;
+  }
+  renderCatalog();
 });
 
 // Lightweight repaint for every poll outcome (bootstrap.js's applyPollResult,
@@ -629,7 +639,6 @@ window.sortCompanyTable = sortCompanyTable;
 window.toggleCompanySort = toggleCompanySort;
 window.switchCompanySubTab = switchCompanySubTab;
 window.toggleMonitoringChip = toggleMonitoringChip;
-window.companyVacancyAction = companyVacancyAction;
 window.reviewCompany = reviewCompany;
 window.viewOrgInCatalog = viewOrgInCatalog;
 window.openCompanyProfile = openCompanyProfile;
@@ -641,6 +650,8 @@ window.closeDetail = closeDetail;
 // Vacancy detail page actions (U6) — inline onclick on the page's buttons.
 window.vacancyLike = vacancyLike;
 window.vacancyPass = vacancyPass;
+window.vacancyResearch = vacancyResearch;
+window.vacancyNetwork = vacancyNetwork;
 window.vacancyMoveToApply = vacancyMoveToApply;
 window.renderPipeline = renderPipeline;
 window.renderToday = renderToday;

@@ -14,7 +14,6 @@ import {
   CHIP_TO_COL,
   getGroupStatus,
   getCompanyStatusCounts,
-  updateStatus,
   emit,
   scheduleRender,
 } from "./state.js";
@@ -1346,10 +1345,6 @@ export function reviewCompany(companyId, action) {
       }
     }
   });
-}
-
-export function companyVacancyAction(canonId, memberIds, newStatus) {
-  updateStatus(canonId, memberIds, newStatus);
 }
 
 export function viewOrgInCatalog(orgName) {

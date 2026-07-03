@@ -91,21 +91,27 @@ test("sourceLabel maps known strategies and omits manual/absent", () => {
 
 // --- vacancyActions ---------------------------------------------------------
 
-test("vacancyActions mirror the catalog basket gating + apply CTA", () => {
+test("vacancyActions mirror the catalog basket gating + apply CTA + research/network", () => {
   assert.deepEqual(vacancyActions("unseen"), {
     canLike: true,
     canPass: true,
     canApply: true,
+    canResearch: true,
+    canNetwork: true,
   });
   assert.deepEqual(vacancyActions("liked"), {
     canLike: false,
     canPass: true,
     canApply: true,
+    canResearch: true,
+    canNetwork: true,
   });
   assert.deepEqual(vacancyActions("passed"), {
     canLike: true,
     canPass: false,
     canApply: true,
+    canResearch: true,
+    canNetwork: true,
   });
   // to_apply (basket=liked) and applied hide the apply CTA so it can't
   // contradict the status chip.
@@ -113,11 +119,39 @@ test("vacancyActions mirror the catalog basket gating + apply CTA", () => {
     canLike: false,
     canPass: true,
     canApply: false,
+    canResearch: true,
+    canNetwork: true,
   });
   assert.deepEqual(vacancyActions("applied"), {
     canLike: false,
     canPass: true,
     canApply: false,
+    // Applied is terminal enough that redirecting to research/networking would
+    // contradict the status chip — both hidden, like the apply CTA.
+    canResearch: false,
+    canNetwork: false,
+  });
+});
+
+test("vacancyActions hide the disposition already held (research/network)", () => {
+  // A role already in to_research hides only its own button; the others stay.
+  const research = vacancyActions("to_research");
+  assert.equal(research.canResearch, false);
+  assert.equal(research.canNetwork, true);
+  assert.equal(research.canApply, true);
+  const network = vacancyActions("to_network");
+  assert.equal(network.canNetwork, false);
+  assert.equal(network.canResearch, true);
+  assert.equal(network.canApply, true);
+});
+
+test("vacancyActions: an archived role is read-only — every action hidden", () => {
+  assert.deepEqual(vacancyActions("archived"), {
+    canLike: false,
+    canPass: false,
+    canApply: false,
+    canResearch: false,
+    canNetwork: false,
   });
 });
 
@@ -287,6 +321,44 @@ test("vacancyPageHtml renders score tile, reading column, rail, actions", () => 
   assert.ok(html.includes("vacancyLike")); // unseen → like shown
   assert.ok(html.includes("openCompanyProfile")); // company mini-card
   assert.ok(html.includes("Open posting")); // outbound link present
+});
+
+test("vacancyPageHtml surfaces Research + Network actions for a live role", () => {
+  const html = vacancyPageHtml(fullGroup, company, "unseen", opts);
+  assert.ok(
+    html.includes("vacancyResearch('g1')"),
+    "Research button wired to the status path",
+  );
+  assert.ok(
+    html.includes("vacancyNetwork('g1')"),
+    "Network button wired to the status path",
+  );
+  assert.ok(html.includes("vac-btn--research"));
+  assert.ok(html.includes("vac-btn--network"));
+});
+
+test("vacancyPageHtml hides the disposition a role already holds", () => {
+  const research = vacancyPageHtml(fullGroup, company, "to_research", opts);
+  assert.ok(!research.includes("vacancyResearch("), "own button hidden");
+  assert.ok(research.includes("vacancyNetwork("), "the other still shown");
+});
+
+test("vacancyPageHtml: an archived role is a read-only page (no decision buttons, Archived chip)", () => {
+  const html = vacancyPageHtml(fullGroup, company, "archived", opts);
+  assert.ok(!html.includes("vacancyMoveToApply"), "no apply CTA");
+  assert.ok(!html.includes("vacancyLike"), "no like");
+  assert.ok(!html.includes("vacancyPass"), "no pass");
+  assert.ok(!html.includes("vacancyResearch"), "no research");
+  assert.ok(!html.includes("vacancyNetwork"), "no network");
+  // The status chip names it Archived so the read-only page reads honestly.
+  assert.ok(html.includes("vac-status-chip"));
+  assert.ok(html.includes("Archived"));
+  // The outbound posting link is still one click away.
+  assert.ok(html.includes("Open posting"));
+});
+
+test("statusChipLabel names the archived status (read-only vacancy page)", () => {
+  assert.equal(statusChipLabel("archived", t), "Archived");
 });
 
 test("vacancyPageHtml renders the keyboard-nav hint row (post-ship fast fix)", () => {
