@@ -34,6 +34,7 @@ import {
   qualityBand,
   tierClass,
   isVacancyExpired,
+  isVacancyStale,
 } from "./helpers.js";
 import { T, dateLocale } from "./i18n.js";
 
@@ -148,6 +149,25 @@ export function buildFactsRail(g, company, opts) {
   if (src)
     facts.push({ label: t("vac_source", "Source"), value: escHtml(src) });
 
+  // The application entity's own status (draft/applied/interview/offer/
+  // rejected/withdrawn — scripts/applications.py VALID_STATUSES) is a finer
+  // lifecycle than the vacancy's coarse review status (STATUS_CHIP_KEYS has no
+  // entry for interview/offer/rejected/withdrawn/draft at all), so the header
+  // status chip alone can't show it. Relocated from the retired Browse card's
+  // "✉ applied" badge (U5 parity) — same raw status text, applied_at now
+  // formatted via fmtDate instead of a hover-only tooltip.
+  if (g.application && g.application.status) {
+    const appliedDate = g.application.applied_at
+      ? fmtDate(g.application.applied_at, locale)
+      : "";
+    facts.push({
+      label: t("application_marker", "Application"),
+      value:
+        escHtml(g.application.status) +
+        (appliedDate ? " · " + escHtml(appliedDate) : ""),
+    });
+  }
+
   // safeUrl validates the scheme but does NOT escape quotes; escHtml here so the
   // value is safe to drop straight into href="…" (R14 — matches catalog.js:299,
   // today.js:142). "" (unsafe/absent) stays falsy for the link/plain branch.
@@ -259,6 +279,22 @@ export function vacancyPageHtml(g, company, status, opts) {
       escHtml(t("vac_status_expired", "Expired")) +
       "</span>";
   }
+  // Source-freshness warning (relocated from the retired Browse card, U5
+  // parity): the source hasn't confirmed this role in STALE_SOURCE_DAYS+ days
+  // (same isVacancyStale derivation Triage's "Expired" column uses). Only the
+  // negative case is worth a badge (AE1) — a fresh role needs no callout.
+  const staleBadge = isVacancyStale(g)
+    ? '<span class="vac-badge vac-badge--stale" title="' +
+      escHtml(
+        t(
+          "freshness_stale_hint",
+          "based on the last time the source confirmed the role; direct ATS is exact, aggregators approximate",
+        ),
+      ) +
+      '">' +
+      escHtml(t("freshness_stale", "stale, likely closed")) +
+      "</span>"
+    : "";
   const chipText = statusChipLabel(status, t);
   const statusChip = chipText
     ? '<span class="vac-status-chip">' + escHtml(chipText) + "</span>"
@@ -313,6 +349,7 @@ export function vacancyPageHtml(g, company, status, opts) {
     escHtml(g.title) +
     "</h1>" +
     stateBadge +
+    staleBadge +
     statusChip +
     "</div>" +
     '<div class="vac-meta">' +

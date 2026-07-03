@@ -431,9 +431,10 @@ body::after {
 /* Sky sheet seating (DHA-386, U2): each dashboard section's own wrapper div
    already is its natural container, so it becomes the sheet directly — no
    new markup. The company profile page is excluded; U7 gives it its own
-   reading-column + rail sheet split (design-protocol.md #2, #6). */
+   reading-column + rail sheet split (design-protocol.md #2, #6). Browse is
+   excluded too (U5): its header now sits on the material and only the table
+   is seated — see `.catalog-sheet` near the catalog rules below. */
 .today-section,
-.catalog-section,
 .companies-section,
 .stats-section,
 .archive-section,
@@ -447,6 +448,13 @@ body::after {
     inset 0 0 0 1px var(--sky-hairline),
     0 1px 3px rgba(58, 56, 51, 0.05);
   padding: 24px;
+}
+
+/* Browse (U5, DHA-389) keeps its own padding: the header lives directly on
+   the material (no sheet padding), so .catalog-section only needs enough to
+   match its siblings' outer rhythm; the table's seating is `.catalog-sheet`. */
+.catalog-section {
+  padding: 4px 0 0;
 }
 
 /* --- Filters --- */
@@ -634,19 +642,6 @@ body::after {
   background: var(--emerald);
 }
 
-.region-europe::before {
-  background: var(--lavender);
-}
-.region-us::before {
-  background: var(--amber);
-}
-.region-remote::before {
-  background: var(--emerald);
-}
-.region-other::before {
-  background: var(--muted);
-}
-
 .card-title {
   font-family: "Onest", sans-serif;
   font-size: var(--text-lg);
@@ -746,16 +741,6 @@ body::after {
   flex-wrap: wrap;
 }
 
-.card-comp {
-  font-family: "JetBrains Mono", monospace;
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--emerald);
-  background: #ecfdf5;
-  padding: 2px 10px;
-  border-radius: 9999px;
-}
-
 .card-deadline {
   font-size: var(--text-sm);
   font-weight: 500;
@@ -829,23 +814,6 @@ body::after {
 
 .card-full-desc.expanded {
   display: block;
-}
-
-.expand-btn {
-  background: none;
-  border: none;
-  color: var(--coral);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  font-family: "Onest", sans-serif;
-  cursor: pointer;
-  padding: 4px 0;
-  margin-bottom: 8px;
-  transition: color 0.15s;
-}
-
-.expand-btn:hover {
-  color: var(--terracotta);
 }
 
 .card-actions {
@@ -1240,98 +1208,165 @@ body[data-dashboard-style="minimal"] .loading-illus {
   display: none;
 }
 
-/* --- Basket tabs --- */
-.basket-tabs {
+/* --- Browse header (U5, DHA-389): title + basket tabs + location pills +
+   search/sort/show-all, all on the material (design-protocol.md #6). Not
+   sticky — only the sidebar is (key decision: whole-window scroll stays). --*/
+.browse-header {
   display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 10px 12px;
   flex-wrap: wrap;
-  position: sticky;
-  top: 0;
-  z-index: 11;
-  background: var(--bg);
-  padding: 12px 0;
-  margin-top: -12px;
+}
+.browse-title {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--sky-text);
+}
+.browse-header-right {
+  margin-left: auto;
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.browse-search {
+  border: none;
+  padding: 7px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--sky-text);
+  font-size: 12px;
+  width: 190px;
+  font-family: "Onest", sans-serif;
+}
+.browse-search:focus {
+  outline: 2px solid var(--cobalt);
+  outline-offset: -1px;
+}
+.browse-org-filter {
+  border: none;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--sky-text);
+  font-size: 12px;
+  font-family: "Onest", sans-serif;
+  cursor: pointer;
+}
+.browse-org-filter:focus {
+  outline: 2px solid var(--cobalt);
+  outline-offset: -1px;
+}
+.browse-sort-btn,
+.browse-showall-btn {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sky-text-secondary);
+  cursor: pointer;
+  font-family: "Onest", sans-serif;
+}
+.browse-sort-btn:hover,
+.browse-showall-btn:hover {
+  background: rgba(255, 255, 255, 0.8);
+}
+.browse-showall-btn.active {
+  background: var(--cobalt-tint);
+  color: var(--cobalt);
+}
+.browse-sort-btn:focus-visible,
+.browse-showall-btn:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
 }
 
+/* --- Basket tabs (U5): segmented pill control, cobalt = active (protocol
+   §1 — cobalt marks interaction/selection, never quality). --- */
+.basket-tabs {
+  display: flex;
+  gap: 2px;
+  background: rgba(58, 56, 51, 0.06);
+  border-radius: 10px;
+  padding: 2.5px;
+}
 .basket-tab {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 20px;
-  border-radius: 12px;
-  border: 2px solid transparent;
-  background: var(--card);
-  font-size: var(--text-base);
+  gap: 6px;
+  padding: 6px 13px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  font-size: 12.5px;
   font-weight: 600;
   font-family: "Onest", sans-serif;
-  color: var(--muted);
+  color: var(--sky-text-secondary);
   cursor: pointer;
-  transition: all 0.18s;
-  box-shadow: var(--shadow-sm);
 }
-
 .basket-tab:hover {
-  border-color: var(--surface);
-  color: var(--text);
+  color: var(--sky-text);
 }
 .basket-tab.active {
-  color: var(--text);
+  background: #fff;
+  color: var(--sky-text);
+  box-shadow: 0 1px 2px rgba(58, 56, 51, 0.08);
 }
-.basket-tab[data-basket="liked"].active {
-  border-color: var(--emerald);
-  color: var(--emerald);
+.basket-tab:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 1px;
 }
-.basket-tab[data-basket="unseen"].active {
-  border-color: var(--amber);
-  color: var(--amber);
-}
-.basket-tab[data-basket="passed"] {
-  opacity: 0.6;
-}
-.basket-tab[data-basket="passed"]:hover {
-  opacity: 0.85;
-}
-.basket-tab[data-basket="passed"].active {
-  border-color: var(--muted);
-  color: var(--muted);
-  opacity: 1;
-}
-
-.basket-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-  flex-shrink: 0;
-}
-
-.basket-tab[data-basket="liked"] .basket-dot {
-  background: var(--emerald);
-}
-.basket-tab[data-basket="unseen"] .basket-dot {
-  background: var(--amber);
-}
-.basket-tab[data-basket="passed"] .basket-dot {
-  background: var(--muted);
-}
-
 .basket-count {
-  font-size: var(--text-sm);
-  font-weight: 700;
-  padding: 1px 8px;
-  border-radius: 9999px;
-  background: var(--surface);
-  color: var(--muted);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--sky-text-tertiary);
+}
+.basket-tab[data-basket="unseen"] .basket-count {
+  color: var(--cobalt);
 }
 
-.basket-tab[data-basket="liked"].active .basket-count {
-  background: #ecfdf5;
-  color: var(--emerald);
+/* --- Browse location pills (U5): removable-pill language (design-protocol
+   Key Decision) — active pills show a trailing ✕, inactive ones stay
+   clickable to add. Cobalt fill = the only "active" signal (never quality). */
+.browse-loc-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }
-.basket-tab[data-basket="unseen"].active .basket-count {
-  background: #fffbeb;
-  color: var(--amber);
+.browse-loc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3.5px 10px;
+  border-radius: 9999px;
+  border: none;
+  background: rgba(58, 56, 51, 0.06);
+  color: var(--sky-text-secondary);
+  cursor: pointer;
+  font-family: "Onest", sans-serif;
+}
+.browse-loc-chip:hover {
+  background: rgba(58, 56, 51, 0.1);
+}
+.browse-loc-chip.active {
+  background: var(--cobalt-tint);
+  color: var(--cobalt);
+}
+.browse-loc-chip.active::after {
+  content: " ✕";
+}
+.browse-loc-chip:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 1px;
 }
 
 /* --- Catalog filters --- */
@@ -1419,32 +1454,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
   border-color: var(--coral);
 }
 
-.catalog-loc-chips {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.catalog-sort-btn {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  padding: 6px 18px;
-  border-radius: 9999px;
-  border: 1px solid var(--surface);
-  background: var(--bg);
-  color: var(--muted);
-  cursor: pointer;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-
-.catalog-sort-btn.active {
-  border-color: var(--coral);
-  color: var(--coral);
-  background: var(--coral-tint);
-}
-
 .catalog-results-count {
   text-align: center;
   font-size: var(--text-sm);
@@ -1452,25 +1461,205 @@ body[data-dashboard-style="minimal"] .loading-illus {
   margin-bottom: 14px;
 }
 
-/* --- Catalog grid --- */
+/* ===========================================================================
+   BROWSE — dense table (U5, DHA-389). Row anatomy per design-protocol.md #6:
+   tinted score tile · title + one grey subline · company + tier badge · facts
+   in mono · quiet actions on the right. The 7-column template is shared by
+   the header labels and every data row so they stay aligned.
+   =========================================================================== */
+.catalog-sheet {
+  background: var(--sky-sheet);
+  border-radius: var(--radius-sheet);
+  box-shadow:
+    inset 0 0 0 1px var(--sky-hairline),
+    0 1px 3px rgba(58, 56, 51, 0.05);
+  overflow-x: auto;
+}
+/* min-width guard (AE4): below 920px the table scrolls inside this sheet —
+   body-level overflow-x: hidden (near the top of this file) keeps the page
+   itself from ever scrolling sideways. */
+.catalog-table {
+  min-width: 920px;
+  display: flex;
+  flex-direction: column;
+}
+.catalog-row-head,
+.catalog-row {
+  display: grid;
+  grid-template-columns: 48px minmax(240px, 1fr) 150px 140px 100px 64px 74px;
+  gap: 12px;
+  align-items: center;
+}
+.catalog-row-head {
+  padding: 14px 20px 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sky-text-faint);
+}
+.catalog-row {
+  padding: 10px 20px;
+  margin: 0 8px;
+  border-radius: var(--radius-row);
+  cursor: pointer;
+}
+.catalog-row:hover {
+  background: var(--sky-row-hover);
+}
+.catalog-row:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: -2px;
+}
+.catalog-row.dismissing {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.catalog-row-score {
+  width: 40px;
+  height: 30px;
+  border-radius: var(--radius-tile-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.catalog-row-role {
+  min-width: 0;
+}
+.catalog-row-title-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.catalog-row-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--sky-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.catalog-row-title-line .card-deadline {
+  flex: none;
+}
+.catalog-row-sub {
+  font-size: 11.5px;
+  color: var(--sky-text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.catalog-row-company {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  min-width: 0;
+}
+.catalog-row-org {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--sky-text);
+}
+.catalog-row-tier {
+  flex: none;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #fff;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.catalog-row-loc {
+  font-size: 12px;
+  color: var(--sky-text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.catalog-row-comp {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11.5px;
+  color: var(--sky-text-secondary);
+}
+
+.catalog-row-seen {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11.5px;
+  color: var(--sky-text-faint);
+}
+
+.catalog-row-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.catalog-row-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.catalog-row-btn.like {
+  background: var(--q-good);
+  color: #fff;
+}
+.catalog-row-btn.like:hover {
+  background: #094a35;
+}
+.catalog-row-btn.pass {
+  background: rgba(58, 56, 51, 0.06);
+  color: var(--sky-text-faint);
+}
+.catalog-row-btn.pass:hover {
+  background: var(--q-weak-bg);
+  color: var(--q-weak);
+}
+.catalog-row-btn:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 1px;
+}
+
+.browse-rows .catalog-empty {
+  padding: 48px 20px;
+}
+.browse-results-count {
+  padding: 12px 20px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  color: var(--sky-text-faint);
+  text-align: right;
+}
+
+/* --- Catalog grid (Archive's read-only cards — U5 retired Browse's own
+   instance; this stays for Archive until U11) --- */
 .catalog-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 14px;
 }
 
-@keyframes cardFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* --- Compact card --- */
+/* --- Compact card (archive.js's read-only cards reuse it — U5 retired
+   Browse's own instance; the CSS stays for Archive until U11) --- */
 .catalog-card {
   background: var(--card);
   border-radius: 14px;
@@ -1487,36 +1676,9 @@ body[data-dashboard-style="minimal"] .loading-illus {
   opacity: 0;
 }
 
-.catalog-card.card-visible {
-  animation: cardFadeIn 0.28s ease both;
-  animation-delay: var(--stagger-delay, 0ms);
-}
-
 .catalog-card:hover {
   transform: scale(1.02);
   box-shadow: var(--shadow-lg);
-}
-
-/* Featured card — high-score vacancies (≥65): subtle accent, same grid size */
-.catalog-card.card-featured {
-  border-left: 3px solid var(--coral);
-  background: linear-gradient(135deg, #ffffff 0%, var(--coral-tint) 100%);
-}
-
-@keyframes catalogCardDismiss {
-  from {
-    opacity: 1;
-    transform: scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: scale(0.92);
-  }
-}
-
-.catalog-card.dismissing {
-  animation: catalogCardDismiss 0.2s ease forwards;
-  pointer-events: none;
 }
 
 .catalog-card-header {
@@ -1548,24 +1710,10 @@ body[data-dashboard-style="minimal"] .loading-illus {
   flex-shrink: 1;
 }
 
-.catalog-org-link {
-  cursor: pointer;
-  transition: opacity 0.15s;
-}
-.catalog-org-link:hover {
-  opacity: 0.75;
-}
-
 .catalog-header-right {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-shrink: 0;
-}
-
-.catalog-thumb-btns {
-  display: flex;
-  gap: 4px;
   flex-shrink: 0;
 }
 
@@ -1676,64 +1824,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
   gap: 4px;
 }
 
-.catalog-badges {
-  display: flex;
-  gap: 5px;
-  flex-wrap: wrap;
-}
-
-.catalog-card .card-comp {
-  font-size: var(--text-sm);
-}
-.catalog-card .card-deadline {
-  font-size: var(--text-xs);
-}
-
-.catalog-full-desc {
-  max-height: 0;
-  overflow: hidden;
-  font-size: var(--text-sm);
-  color: var(--text);
-  line-height: 1.6;
-  padding: 0 12px;
-  background: var(--warm-tint);
-  border-radius: 8px;
-  border-top: 0px solid var(--terracotta);
-  white-space: pre-wrap;
-  word-break: break-word;
-  opacity: 0;
-  margin-top: 4px;
-  transition:
-    max-height 0.3s ease,
-    opacity 0.2s ease,
-    padding 0.3s ease,
-    border-top-width 0.15s ease;
-}
-
-.catalog-full-desc.expanded {
-  max-height: 300px;
-  overflow-y: auto;
-  opacity: 1;
-  padding: 10px 12px;
-  border-top-width: 2px;
-}
-
-.expand-reasoning {
-  margin-bottom: 10px;
-  padding: 8px 10px;
-  background: #f0ede6;
-  border-radius: 6px;
-  border-left: 3px solid var(--terracotta);
-  font-style: italic;
-  color: var(--text);
-}
-
-.expand-reasoning-label {
-  font-weight: 600;
-  font-style: normal;
-  color: var(--terracotta);
-}
-
 .catalog-empty {
   text-align: center;
   padding: 48px 24px;
@@ -1764,10 +1854,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
 @media (max-width: 768px) {
   .catalog-grid {
     grid-template-columns: 1fr;
-  }
-  .basket-tab {
-    padding: 8px 14px;
-    font-size: var(--text-sm);
   }
 }
 
@@ -3247,7 +3333,8 @@ body[data-dashboard-style="minimal"] .loading-illus {
   padding: 2px 9px;
 }
 .vac-badge--expiring,
-.vac-badge--expired {
+.vac-badge--expired,
+.vac-badge--stale {
   color: var(--q-weak);
   background: var(--q-weak-bg);
 }
@@ -4586,13 +4673,8 @@ a.pipe-grp-role-title:hover {
   color: #991b1b;
 }
 
-/* Applications & research — small blocks inside the existing catalog
-   card and company profile. Full standalone Applications section is later. */
-.app-badge {
-  background: #ecfdf5;
-  color: #047857;
-  border: 1px solid #a7f3d0;
-}
+/* Applications & research — small blocks in the company profile. Full
+   standalone Applications section is later. */
 .cp-app-list {
   display: flex;
   flex-direction: column;
