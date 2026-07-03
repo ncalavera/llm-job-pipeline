@@ -27,6 +27,25 @@ export function jsAttr(str) {
 }
 
 // ---------------------------------------------------------------------------
+// URL sanitization — every href built from vacancy/company data must go
+// through this. Only http(s)/mailto become live links; anything else
+// (javascript:, data:, vbscript:, ...) renders as plain text instead.
+// ---------------------------------------------------------------------------
+
+const SAFE_URL_SCHEME = /^(https?|mailto):/i;
+
+// Mirrors the two WHATWG URL-parser steps browsers apply before reading the
+// scheme, so a scheme check can't be bypassed with leading control chars or
+// a tab/newline spliced into the middle of the scheme (e.g. "java\tscript:").
+export function safeUrl(url) {
+  if (!url) return "";
+  const cleaned = String(url)
+    .replace(/^[\x00-\x20]+|[\x00-\x20]+$/g, "")
+    .replace(/[\t\n\r]/g, "");
+  return SAFE_URL_SCHEME.test(cleaned) ? cleaned : "";
+}
+
+// ---------------------------------------------------------------------------
 // Time formatting
 // ---------------------------------------------------------------------------
 
@@ -639,10 +658,11 @@ export function renderLocationChips(chips, opts) {
       (extraCls || "");
     const flag = getFlagForChip(chip);
     const text = (flag ? flag + " " : "") + escHtml(chip.text);
-    if (chip.url) {
+    const href = safeUrl(chip.url);
+    if (href) {
       return (
         '<a href="' +
-        escHtml(chip.url) +
+        escHtml(href) +
         '" target="_blank" rel="noopener" class="' +
         cls +
         '">' +
@@ -918,10 +938,19 @@ export function inlineFormat(text) {
   text = text.replace(/(?<!\w)\*([^\*]+?)\*(?!\w)/g, "<em>$1</em>");
   text = text.replace(/(?<!\w)_([^_]+?)_(?!\w)/g, "<em>$1</em>");
   text = text.replace(/`([^`]+?)`/g, "<code>$1</code>");
-  text = text.replace(
-    /\[([^\]]+?)\]\(([^)]+?)\)/g,
-    '<a href="$2" target="_blank" rel="noopener">$1</a>',
-  );
+  text = text.replace(/\[([^\]]+?)\]\(([^)]+?)\)/g, function (m, label, url) {
+    // `text` was already escHtml'd by mdToHtml before inlineFormat runs, so
+    // `url` here is HTML-escaped, not raw — safeUrl still works (the scheme
+    // itself has no HTML-special chars) but it must not be escHtml'd again.
+    const href = safeUrl(url);
+    return href
+      ? '<a href="' +
+          href +
+          '" target="_blank" rel="noopener">' +
+          label +
+          "</a>"
+      : label;
+  });
   return text;
 }
 

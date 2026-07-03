@@ -31,6 +31,7 @@ import {
   getFlagForChip,
   formatDeadlineHtml,
   isVacancyExpired,
+  safeUrl,
 } from "./helpers.js";
 import { saveCompanyReview, showSyncStatus } from "./api.js";
 import { T } from "./i18n.js";
@@ -1495,6 +1496,7 @@ function buildVacancyListHtml(c, opts) {
       }
     }
     if (!firstUrl) firstUrl = g.org_url || "";
+    firstUrl = safeUrl(firstUrl);
     var titleHtml = firstUrl
       ? '<a href="' +
         escHtml(firstUrl) +
@@ -1611,10 +1613,11 @@ function buildAboutSection(c) {
       '<div class="cp-about-news"><div class="cp-facts-label" style="margin-bottom:6px">Recent News</div>';
     for (var ni = 0; ni < c.recent_news.length; ni++) {
       var news = c.recent_news[ni];
-      if (news.url) {
+      var newsUrl = safeUrl(news.url);
+      if (newsUrl) {
         newsHtml +=
           '<div style="padding:2px 0"><a href="' +
-          escHtml(news.url) +
+          escHtml(newsUrl) +
           '" target="_blank" rel="noopener" class="cp-facts-link">' +
           escHtml(news.title) +
           "</a></div>";
@@ -1904,6 +1907,7 @@ function buildVacanciesSection(c) {
         }
       }
       if (!firstUrl) firstUrl = g.org_url || "";
+      firstUrl = safeUrl(firstUrl);
       var titleHtml = firstUrl
         ? '<a href="' +
           escHtml(firstUrl) +
@@ -2010,9 +2014,10 @@ function buildApplicationsSection(c) {
     var researchRows = research
       .map(function (r) {
         var label = escHtml(r.source || "research");
-        var body = r.url
+        var researchUrl = safeUrl(r.url);
+        var body = researchUrl
           ? '<a href="' +
-            escHtml(r.url) +
+            escHtml(researchUrl) +
             '" target="_blank" rel="noopener">' +
             escHtml(r.url) +
             "</a>"
@@ -2056,16 +2061,18 @@ function buildCompanyProfilePage(c) {
   var tierLabel = c.calculated_tier || "\u2014";
 
   var linksHtml = "";
-  if (c.website) {
+  var websiteUrl = safeUrl(c.website);
+  if (websiteUrl) {
     linksHtml +=
       '<a href="' +
-      escHtml(c.website) +
+      escHtml(websiteUrl) +
       '" target="_blank" rel="noopener" class="cp-hero-link">Website</a>';
   }
-  if (c.careers_url) {
+  var careersUrl = safeUrl(c.careers_url);
+  if (careersUrl) {
     linksHtml +=
       '<a href="' +
-      escHtml(c.careers_url) +
+      escHtml(careersUrl) +
       '" target="_blank" rel="noopener" class="cp-hero-link">Careers</a>';
   }
 

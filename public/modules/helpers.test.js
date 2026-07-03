@@ -15,6 +15,9 @@ import {
   triageColumnFor,
   dedupeTriageEntries,
   screenScoreBadge,
+  safeUrl,
+  renderLocationChips,
+  mdToHtml,
 } from "./helpers.js";
 
 const DAY = 86400000;
@@ -185,4 +188,64 @@ test("screenScoreBadge: renders a marker when screen_only_score is true", () => 
   const html = screenScoreBadge({ screen_only_score: true });
   assert.match(html, /screen-score-badge/);
   assert.match(html, /not yet confirmed by the main model/);
+});
+
+// --- safeUrl / XSS guard (DHA-363) ------------------------------------------
+
+test("safeUrl: allows http, https, mailto", () => {
+  assert.equal(safeUrl("https://example.org/job"), "https://example.org/job");
+  assert.equal(safeUrl("http://example.org/job"), "http://example.org/job");
+  assert.equal(safeUrl("mailto:jobs@example.org"), "mailto:jobs@example.org");
+});
+
+test("safeUrl: rejects javascript: and other dangerous schemes", () => {
+  assert.equal(safeUrl("javascript:alert(1)"), "");
+  assert.equal(safeUrl("JavaScript:alert(1)"), "");
+  assert.equal(safeUrl("data:text/html,<script>alert(1)</script>"), "");
+  assert.equal(safeUrl("vbscript:msgbox(1)"), "");
+});
+
+test("safeUrl: rejects javascript: obfuscated with leading/embedded whitespace", () => {
+  assert.equal(safeUrl("  javascript:alert(1)"), "");
+  assert.equal(safeUrl("\n\tjavascript:alert(1)"), "");
+  // Browsers strip tabs/newlines from anywhere in the URL before parsing the
+  // scheme, so "java\tscript:" is a live bypass of a naive prefix check.
+  assert.equal(safeUrl("java\tscript:alert(1)"), "");
+  assert.equal(safeUrl("java\nscript:alert(1)"), "");
+});
+
+test("safeUrl: rejects blank/missing input", () => {
+  assert.equal(safeUrl(""), "");
+  assert.equal(safeUrl(null), "");
+  assert.equal(safeUrl(undefined), "");
+});
+
+test("renderLocationChips: a javascript: chip URL renders inert, not a link", () => {
+  const chips = [
+    { text: "Remote", region: "remote", url: "javascript:alert(1)" },
+  ];
+  const html = renderLocationChips(chips, {});
+  assert.doesNotMatch(html, /<a /);
+  assert.doesNotMatch(html, /javascript:/i);
+  assert.match(html, /<span class="loc-chip[^"]*">/);
+});
+
+test("renderLocationChips: a normal https chip URL still renders as a link", () => {
+  const chips = [
+    { text: "Remote", region: "remote", url: "https://example.org/role" },
+  ];
+  const html = renderLocationChips(chips, {});
+  assert.match(html, /<a href="https:\/\/example\.org\/role"/);
+});
+
+test("mdToHtml: a javascript: markdown link renders inert, not a link", () => {
+  const html = mdToHtml("[click me](javascript:alert(1))");
+  assert.doesNotMatch(html, /<a /);
+  assert.doesNotMatch(html, /javascript:/i);
+  assert.match(html, /click me/);
+});
+
+test("mdToHtml: a normal https markdown link still renders as a link", () => {
+  const html = mdToHtml("[click me](https://example.org)");
+  assert.match(html, /<a href="https:\/\/example\.org"/);
 });

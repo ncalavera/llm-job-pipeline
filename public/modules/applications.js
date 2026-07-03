@@ -8,7 +8,7 @@
 // =============================================================================
 
 import { state, groups, archivedGroups } from "./state.js";
-import { escHtml, relativeTime } from "./helpers.js";
+import { escHtml, relativeTime, safeUrl } from "./helpers.js";
 import { T } from "./i18n.js";
 
 // Lifecycle statuses an application row can carry (applications.py
@@ -128,9 +128,10 @@ function _filterChips(byStatus, active) {
 }
 
 function _appRow(a) {
-  const roleHtml = a.url
+  const roleUrl = safeUrl(a.url);
+  const roleHtml = roleUrl
     ? '<a href="' +
-      escHtml(a.url) +
+      escHtml(roleUrl) +
       '" target="_blank" rel="noopener">' +
       escHtml(a.title) +
       "</a>"

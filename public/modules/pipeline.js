@@ -23,6 +23,7 @@ import {
   isVacancyStale,
   sourceAgeDays,
   triageColumnFor,
+  safeUrl,
 } from "./helpers.js";
 import { T } from "./i18n.js";
 import Sortable from "../vendor/sortable.esm.js";
@@ -235,12 +236,13 @@ function buildTriageFreshness(g) {
 }
 
 function buildTriageCard(g, col, review) {
-  const firstUrl =
+  const firstUrl = safeUrl(
     (g.locations || []).find(function (l) {
       return !!l.url;
     })?.url ||
-    g.org_url ||
-    "";
+      g.org_url ||
+      "",
+  );
   const locs = (g.locations || [])
     .map(function (l) {
       return l.location;
@@ -350,12 +352,13 @@ function buildTriageGroupCard(entries, col) {
 
   const rolesHtml = roles
     .map(function (g) {
-      const firstUrl =
+      const firstUrl = safeUrl(
         (g.locations || []).find(function (l) {
           return !!l.url;
         })?.url ||
-        g.org_url ||
-        "";
+          g.org_url ||
+          "",
+      );
       const locs = (g.locations || [])
         .map(function (l) {
           return l.location;
