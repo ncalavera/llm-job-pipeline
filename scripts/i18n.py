@@ -110,6 +110,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "time_month_ago": "{n}mo ago",
         "time_year_ago": "{n}y ago",
         # Today cockpit (U10/U11)
+        "today_subtitle": "The few things that need a decision today.",
         "today_expiring": "Expiring, needs a decision",
         "today_ready": "Ready to send",
         "today_new": "New 70+ since last visit",
@@ -451,6 +452,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "time_month_ago": "{n} мес назад",
         "time_year_ago": "{n} г назад",
         # Today cockpit (U10/U11)
+        "today_subtitle": "То немногое, что требует решения сегодня.",
         "today_expiring": "Истекает, нужно решение",
         "today_ready": "Готово к отправке",
         "today_new": "Новое 70+ с прошлого захода",

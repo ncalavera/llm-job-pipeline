@@ -433,8 +433,9 @@ body::after {
    new markup. The company profile page is excluded; U7 gives it its own
    reading-column + rail sheet split (design-protocol.md #2, #6). Browse is
    excluded too (U5): its header now sits on the material and only the table
-   is seated — see `.catalog-sheet` near the catalog rules below. */
-.today-section,
+   is seated — see `.catalog-sheet` near the catalog rules below. Today is
+   excluded too (U9): its header sits on the material and only the inner
+   `.today-sheet` is seated — see the U9 block at the end of this file. */
 .companies-section,
 .stats-section,
 .archive-section,
@@ -1102,96 +1103,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
 .today-section.active {
   display: block;
   position: relative;
-}
-.today-block {
-  margin-bottom: 28px;
-}
-.today-block h3 {
-  font-size: var(--text-md);
-  margin-bottom: 10px;
-}
-.today-count {
-  display: inline-block;
-  min-width: 20px;
-  padding: 0 7px;
-  border-radius: 10px;
-  background: var(--surface-2, rgba(127, 127, 127, 0.15));
-  font-size: var(--text-xs);
-  color: var(--muted);
-}
-.today-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.today-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--border, rgba(127, 127, 127, 0.15));
-  font-size: var(--text-sm);
-}
-.today-lead {
-  flex: 1;
-  min-width: 0;
-}
-.today-why {
-  color: var(--muted);
-  font-size: var(--text-xs);
-}
-.today-actions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-.today-act {
-  padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid var(--surface);
-  background: var(--bg);
-  font-size: var(--text-xs);
-  line-height: 1.4;
-  cursor: pointer;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-.today-act:hover {
-  box-shadow: var(--shadow-sm);
-}
-.today-act.act-apply:hover,
-.today-act.act-like:hover {
-  border-color: var(--emerald);
-  background: var(--emerald-tint);
-}
-.today-act.act-pass:hover {
-  border-color: var(--terracotta);
-  background: var(--rose-tint);
-}
-.today-item.dismissing {
-  animation: catalogCardDismiss 0.2s ease forwards;
-  pointer-events: none;
-}
-.today-empty {
-  color: var(--muted);
-  font-size: var(--text-sm);
-  font-style: italic;
-}
-.today-sla {
-  border-top: 2px solid var(--border, rgba(127, 127, 127, 0.2));
-  padding-top: 16px;
-}
-.today-sla-hint {
-  color: var(--muted);
-  font-size: var(--text-xs);
-  margin-bottom: 8px;
-}
-.today-leakage {
-  font-size: var(--text-sm);
-  margin-top: 10px;
-}
-.today-leakage.warn {
-  color: var(--coral);
 }
 .stats-section {
   display: none;
@@ -4780,15 +4691,6 @@ a.pipe-grp-role-title:hover {
   background: var(--cobalt-tint);
 }
 
-/* Today — pending-companies + learning-cycle nudges. */
-.today-pending-cta {
-  margin: 6px 0 0;
-}
-.today-learning-line {
-  color: var(--muted);
-  margin: 4px 0 0;
-}
-
 /* Applications section. */
 .applications-section,
 .settings-section {
@@ -5149,4 +5051,279 @@ a.pipe-grp-role-title:hover {
 
 #statsSection .company-empty {
   color: var(--sky-text-faint);
+}
+/* === U9 Today (redesign) === */
+/* Today (DHA-393, U9): material header (title + subtitle) above a sheet split
+   into a main column (the three grouped action lists) and a quiet rail
+   (decision discipline, pending-company approvals, learning cycle) —
+   design-protocol.md #6's detail-screen split adapted for a list-of-lists
+   page. Rows open the vacancy detail page (U6, R6); inline quick actions
+   keep stopPropagation so they don't also trigger that navigation. */
+
+.today-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 2px 10px 12px;
+  flex-wrap: wrap;
+}
+.today-title {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--sky-text);
+}
+.today-subtitle {
+  font-size: 12.5px;
+  color: var(--sky-text-tertiary);
+}
+
+.today-sheet {
+  background: var(--sky-sheet);
+  border-radius: var(--radius-sheet);
+  box-shadow:
+    inset 0 0 0 1px var(--sky-hairline),
+    0 1px 3px rgba(58, 56, 51, 0.05);
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+.today-main {
+  flex: 1;
+  min-width: 360px;
+  padding: 26px 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.today-rail {
+  width: 296px;
+  flex: none;
+  padding: 26px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+@media (max-width: 900px) {
+  .today-rail {
+    width: 100%;
+  }
+}
+
+/* Section-label rhythm shared by the three main groups and every rail block. */
+.today-section-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--sky-text-tertiary);
+}
+.today-rail-block .today-section-label {
+  color: #c4c0b6;
+  margin-bottom: 10px;
+}
+.today-section-count {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  color: var(--sky-text-faint);
+}
+
+.today-rows {
+  display: flex;
+  flex-direction: column;
+}
+.today-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 12px;
+  margin: 0 -12px;
+  border-radius: 11px;
+  cursor: pointer;
+}
+.today-row:hover {
+  background: var(--sky-row-hover);
+}
+.today-row:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: -2px;
+}
+.today-row.dismissing {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+.today-row-score {
+  flex: none;
+  width: 36px;
+  height: 26px;
+  border-radius: var(--radius-tile);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.today-row-body {
+  min-width: 0;
+  flex: 1;
+}
+.today-row-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--sky-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.today-row-sub {
+  font-size: 11.5px;
+  color: var(--sky-text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.today-actions {
+  flex: none;
+  display: flex;
+  gap: 6px;
+}
+.today-act {
+  height: 24px;
+  padding: 0 9px;
+  border-radius: var(--radius-pill);
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  font-family: "Onest", sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.today-act:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 1px;
+}
+.today-act.act-apply {
+  background: var(--cobalt);
+  color: #fff;
+}
+.today-act.act-apply:hover {
+  background: #1d38b2;
+}
+.today-act.act-like {
+  background: var(--q-good);
+  color: #fff;
+}
+.today-act.act-like:hover {
+  background: #094a35;
+}
+.today-act.act-pass {
+  background: rgba(58, 56, 51, 0.06);
+  color: var(--sky-text-faint);
+}
+.today-act.act-pass:hover {
+  background: var(--q-weak-bg);
+  color: var(--q-weak);
+}
+
+.today-empty {
+  padding: 9px 12px;
+  font-size: 12.5px;
+  color: var(--sky-text-faint);
+}
+
+/* Rail — Decision discipline, Companies awaiting approval, Learning cycle. */
+.today-rail-block {
+  display: flex;
+  flex-direction: column;
+}
+.today-sla-hint {
+  font-size: 11.5px;
+  color: var(--sky-text-tertiary);
+  margin-bottom: 10px;
+}
+.today-stuck-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.today-stuck-row {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+.today-stuck-score {
+  flex: none;
+  width: 20px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-align: right;
+}
+.today-stuck-body {
+  min-width: 0;
+  flex: 1;
+}
+.today-stuck-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sky-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.today-stuck-meta {
+  font-size: 11px;
+  color: var(--sky-text-faint);
+}
+.today-leakage {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--sky-row-hover);
+  color: var(--sky-text-secondary);
+  font-size: 12px;
+}
+.today-leakage.warn {
+  background: var(--q-weak-bg);
+  color: var(--q-weak);
+}
+.today-leakage strong {
+  font-family: "JetBrains Mono", monospace;
+}
+
+.today-pending-cta {
+  align-self: flex-start;
+  margin-top: 8px;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--cobalt);
+  cursor: pointer;
+}
+.today-pending-cta:hover {
+  text-decoration: underline;
+}
+.today-pending-cta:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+}
+
+.today-learning-line {
+  font-size: 12px;
+  color: var(--sky-text-secondary);
+  line-height: 1.6;
+}
+.today-learning-line strong {
+  font-family: "JetBrains Mono", monospace;
 }

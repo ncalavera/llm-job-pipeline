@@ -27,7 +27,8 @@ import {
   STALE_SOURCE_DAYS,
   sourceAgeDays,
   screenScoreBadge,
-  safeUrl,
+  qualityBand,
+  jsAttr,
 } from "./helpers.js";
 import { T } from "./i18n.js";
 import { selectTodayRoles } from "./derive.js";
@@ -84,23 +85,20 @@ function _isLiveRole(g) {
   return true;
 }
 
-function _vacUrl(g) {
-  const loc = (g.locations || []).find((l) => l && l.url);
-  return safeUrl((loc && loc.url) || g.org_url || "");
-}
-
 // One inline-action button per entry. `glyph` → icon button (title carries the
 // label); otherwise a text button. Mirrors catalog.js thumb-btn wiring: the
-// member ids are JSON-encoded into the attribute and the canonical id is passed
-// raw (it's a hash). All copy comes from T() with English fallbacks.
+// member ids are JSON-encoded into the attribute; the canonical id is
+// jsAttr-escaped for the same reason catalogRowHtml escapes it (R14) — ids are
+// hash-shaped in practice, but the onclick string shouldn't trust that.
 function _actionBtns(g, actions) {
   if (!actions || !actions.length) return "";
+  const idAttr = jsAttr(g.id);
   const mids = JSON.stringify(g.member_ids || []).replace(/"/g, "&quot;");
   const btns = actions
     .map(function (a) {
       const onclick =
         "onclick=\"event.stopPropagation();todayAction('" +
-        g.id +
+        idAttr +
         "'," +
         mids +
         ",'" +
@@ -134,32 +132,49 @@ function _actionBtns(g, actions) {
   return '<span class="today-actions">' + btns + "</span>";
 }
 
-function _row(g, extra, actions) {
-  const url = _vacUrl(g);
-  const head = escHtml(g.org || "") + " — " + escHtml(g.title || "");
-  const link = url
-    ? '<a href="' +
-      escHtml(url) +
-      '" target="_blank" rel="noopener">' +
-      head +
-      "</a>"
-    : head;
-  const score =
-    g.llm_score != null ? " · 🎯 " + g.llm_score + screenScoreBadge(g) : "";
-  const tail = extra
-    ? ' · <span class="today-why">' + escHtml(extra) + "</span>"
-    : "";
+// Row anatomy (design-protocol.md #6): tinted score tile · title + org/why
+// subline · quiet actions. Pure (no DOM read) so the escaping-regression suite
+// can assert on it directly, same shape as catalogRowHtml/vacancyPageHtml.
+// Clicking anywhere on the row opens the vacancy page (U6); the outbound
+// posting link that used to live here moved there too (R6) — actions keep
+// stopPropagation so they don't also trigger the navigation.
+export function todayRowHtml(g, extra, actions) {
+  const score = g.llm_score;
+  const scoreCls =
+    score == null ? "vac-score--none" : "q-" + qualityBand(score) + "-bg";
+  const scoreTxt = score == null ? "—" : String(score);
+  const subParts = [escHtml(g.org || "")];
+  if (extra) subParts.push(escHtml(extra));
   return (
-    '<li class="today-item" data-id="' +
+    '<div class="today-row" data-id="' +
     escHtml(g.id) +
-    '"><span class="today-lead">' +
-    link +
-    score +
-    tail +
-    "</span>" +
+    '" onclick="openTodayRow(\'' +
+    jsAttr(g.id) +
+    "')\">" +
+    '<div class="today-row-score ' +
+    scoreCls +
+    '">' +
+    escHtml(scoreTxt) +
+    "</div>" +
+    screenScoreBadge(g) +
+    '<div class="today-row-body">' +
+    '<div class="today-row-title">' +
+    escHtml(g.title || "") +
+    "</div>" +
+    '<div class="today-row-sub">' +
+    subParts.join(" · ") +
+    "</div>" +
+    "</div>" +
     _actionBtns(g, actions) +
-    "</li>"
+    "</div>"
   );
+}
+
+// Open a row's vacancy detail page. Non-"browse" context: vacancyMoveToApply
+// confirms in place instead of auto-advancing (F3) — Today has no queue to
+// advance through. Exposed on window (app.js) for the row's onclick.
+export function openTodayRow(id) {
+  window.openVacancyRoute(id, { context: "today" });
 }
 
 // Inline triage: flip a role's status through the same optimistic-update chain
@@ -176,7 +191,7 @@ export function todayAction(canonId, memberIds, action) {
           : action === "applied"
             ? "applied"
             : "unseen";
-  const row = document.querySelector('.today-item[data-id="' + canonId + '"]');
+  const row = document.querySelector('.today-row[data-id="' + canonId + '"]');
   if (row) {
     row.classList.add("dismissing");
     setTimeout(function () {
@@ -187,18 +202,46 @@ export function todayAction(canonId, memberIds, action) {
   }
 }
 
-function _list(title, items, emptyMsg) {
+// Section-label rhythm shared by the three main groups and every rail block
+// (design-protocol.md #6): uppercase tracked title + quiet mono count. `count`
+// is omitted (no digit shown) when null, for rail blocks that don't carry one.
+function _sectionLabel(title, count) {
+  const countHtml =
+    count != null
+      ? '<span class="today-section-count">' + count + "</span>"
+      : "";
+  return (
+    '<div class="today-section-label"><span>' +
+    escHtml(title) +
+    "</span>" +
+    countHtml +
+    "</div>"
+  );
+}
+
+// One of the three main groups: label + rows, or label + the (always-shown)
+// empty note — a group never disappears, so its count stays visible even at
+// zero (current behavior, preserved).
+export function todayGroupHtml(title, items, emptyMsg) {
   const body = items.length
-    ? '<ul class="today-list">' + items.join("") + "</ul>"
+    ? '<div class="today-rows">' + items.join("") + "</div>"
     : '<p class="today-empty">' + escHtml(emptyMsg) + "</p>";
   return (
-    '<section class="today-block"><h3>' +
-    escHtml(title) +
-    ' <span class="today-count">' +
-    items.length +
-    "</span></h3>" +
+    '<div class="today-group">' +
+    _sectionLabel(title, items.length) +
     body +
-    "</section>"
+    "</div>"
+  );
+}
+
+// Rail block wrapper: a section label (with an optional mono count, same
+// helper the main groups use) followed by its body.
+function _railBlock(label, count, bodyHtml) {
+  return (
+    '<div class="today-rail-block">' +
+    _sectionLabel(label, count) +
+    bodyHtml +
+    "</div>"
   );
 }
 
@@ -208,20 +251,22 @@ function _metricsPanel() {
   if (!m) return "";
   const stuckItems = (m.stuck || []).map(
     (s) =>
-      '<li class="today-item">' +
+      '<div class="today-stuck-row"><span class="today-stuck-score q-' +
+      qualityBand(s.llm_score) +
+      '">' +
+      escHtml(String(s.llm_score)) +
+      '</span><div class="today-stuck-body"><div class="today-stuck-title">' +
       escHtml(s.org + " — " + s.title) +
-      " · 🎯 " +
-      s.llm_score +
-      ' · <span class="today-why">' +
+      '</div><div class="today-stuck-meta">' +
       s.days_stuck +
       " " +
-      T("today_days_stuck", "d without movement") +
+      escHtml(T("today_days_stuck", "d without movement")) +
       " (" +
       escHtml(s.status) +
-      ")</span></li>",
+      ")</div></div></div>",
   );
   const stuckBody = stuckItems.length
-    ? '<ul class="today-list">' + stuckItems.join("") + "</ul>"
+    ? '<div class="today-stuck-rows">' + stuckItems.join("") + "</div>"
     : '<p class="today-empty">' +
       escHtml(T("today_nothing_stuck", "nothing stuck")) +
       "</p>";
@@ -236,29 +281,25 @@ function _metricsPanel() {
     "+: <strong>" +
     leak +
     "</strong></p>";
-  return (
-    '<section class="today-block today-sla"><h3>' +
-    escHtml(T("today_sla", "Decision discipline")) +
-    ' <span class="today-count">' +
-    (m.stuck_count || 0) +
-    "</span></h3>" +
+  const hint =
     '<p class="today-sla-hint">' +
     escHtml(T("today_stuck_hint", "stuck (>=")) +
     String(m.sla_score) +
     ", >" +
     String(m.sla_days) +
     escHtml(T("today_stuck_hint_tail", " d):")) +
-    "</p>" +
-    stuckBody +
-    leakLine +
-    "</section>"
+    "</p>";
+  return _railBlock(
+    T("today_sla", "Decision discipline"),
+    m.stuck_count || 0,
+    hint + stuckBody + leakLine,
   );
 }
 
 // Companies still awaiting the user's approve/reject decision. Honors any live
 // approval the user just made this session (state.companyStatuses, keyed by
 // company_id) over the baked snapshot's review_status. A one-line nudge with a
-// button that jumps straight to the Companies → Pending Review sub-tab.
+// cobalt text link that jumps straight to the Companies → Pending Review tab.
 function _pendingCompaniesBlock() {
   const pending = (companiesList || []).filter(function (c) {
     const live = state.companyStatuses && state.companyStatuses[c.company_id];
@@ -268,16 +309,13 @@ function _pendingCompaniesBlock() {
   if (!pending.length) return "";
   const label = T("today_pending_companies", "Companies awaiting approval");
   const cta = T("today_pending_companies_cta", "Review");
-  return (
-    '<section class="today-block today-pending"><h3>' +
-    escHtml(label) +
-    ' <span class="today-count">' +
-    pending.length +
-    "</span></h3>" +
-    '<p class="today-pending-cta"><button type="button" class="today-act act-apply" ' +
-    "onclick=\"switchMode('companies');switchCompanySubTab('pending')\">" +
-    escHtml(cta) +
-    "</button></p></section>"
+  return _railBlock(
+    label,
+    pending.length,
+    '<button type="button" class="today-pending-cta" ' +
+      "onclick=\"switchMode('companies');switchCompanySubTab('pending')\">" +
+      escHtml(cta) +
+      " →</button>",
   );
 }
 
@@ -291,24 +329,27 @@ function _learningBlock() {
   const parts = [];
   if (l.verdicts) {
     parts.push(
-      l.verdicts +
-        " " +
-        T("today_learning_pending", "verdicts to review on the next run"),
+      "<strong>" +
+        escHtml(String(l.verdicts)) +
+        "</strong> " +
+        escHtml(
+          T("today_learning_pending", "verdicts to review on the next run"),
+        ),
     );
   }
   if (l.proposals) {
     parts.push(
-      l.proposals + " " + T("today_learning_proposals", "proposals ready"),
+      "<strong>" +
+        escHtml(String(l.proposals)) +
+        "</strong> " +
+        escHtml(T("today_learning_proposals", "proposals ready")),
     );
   }
   if (!parts.length) return "";
-  return (
-    '<section class="today-block today-learning"><h3>' +
-    escHtml(T("today_learning", "Learning cycle")) +
-    "</h3>" +
-    '<p class="today-learning-line">' +
-    escHtml(parts.join(" · ")) +
-    "</p></section>"
+  return _railBlock(
+    T("today_learning", "Learning cycle"),
+    null,
+    '<p class="today-learning-line">' + parts.join(" · ") + "</p>",
   );
 }
 
@@ -364,7 +405,7 @@ export function renderToday() {
   ];
 
   const expiring = expiringRows.map((r) =>
-    _row(
+    todayRowHtml(
       r.g,
       r.kind === "protected"
         ? T("today_protected", "protected, decide")
@@ -372,28 +413,44 @@ export function renderToday() {
       expiringActions,
     ),
   );
-  const ready = readyRows.map((g) => _row(g, null, readyActions));
-  const newHighFit = newRows.map((g) =>
-    _row(g, "🎯 " + g.llm_score, newActions),
-  );
+  const ready = readyRows.map((g) => todayRowHtml(g, null, readyActions));
+  // The score is already visible on the tile, so unlike the other two groups
+  // this one has no extra "why" text to add — surfacing here at all IS the why.
+  const newHighFit = newRows.map((g) => todayRowHtml(g, null, newActions));
 
-  root.innerHTML =
-    _pendingCompaniesBlock() +
-    _learningBlock() +
-    _list(
+  const main =
+    todayGroupHtml(
       T("today_expiring", "Expiring, needs a decision"),
       expiring,
       T("today_none_action", "nothing needs action"),
     ) +
-    _list(
+    todayGroupHtml(
       T("today_ready", "Ready to send"),
       ready,
       T("today_none_ready", "nothing ready to send"),
     ) +
-    _list(
+    todayGroupHtml(
       T("today_new", "New 70+ since last visit"),
       newHighFit,
       T("today_none_new", "nothing new"),
-    ) +
-    _metricsPanel();
+    );
+  const rail = _metricsPanel() + _pendingCompaniesBlock() + _learningBlock();
+
+  root.innerHTML =
+    '<div class="today-header">' +
+    '<span class="today-title">' +
+    escHtml(T("tab_today", "Today")) +
+    "</span>" +
+    '<span class="today-subtitle">' +
+    escHtml(T("today_subtitle", "The few things that need a decision today.")) +
+    "</span>" +
+    "</div>" +
+    '<div class="today-sheet">' +
+    '<div class="today-main">' +
+    main +
+    "</div>" +
+    '<div class="today-rail">' +
+    rail +
+    "</div>" +
+    "</div>";
 }
