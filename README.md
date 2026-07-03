@@ -288,6 +288,7 @@ there is nothing pending, it prints "Up to date" and exits.
 - [AGENTS.md](AGENTS.md) — the runbooks / slash commands, for any coding agent
 - [CONCEPTS.md](CONCEPTS.md) — domain vocabulary (entities, statuses, processes)
 - [sql/schema.sql](sql/schema.sql) — the database schema (Postgres; SQLite variant alongside)
+- [docs/manual-trial-protocol.md](docs/manual-trial-protocol.md) — pre-release manual QA checklist (~30 min) + live user retest guide
 
 ## License
 
