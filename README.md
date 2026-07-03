@@ -40,14 +40,15 @@ and asks you only for the things it can't do itself.
 
 ## What's inside
 
-- **Fetching:** native ATS integrations — Greenhouse, Lever, Ashby, Workable,
-  Workday, Recruitee, Teamtailor, BambooHR, Personio, PageUp, Wagtail — plus a
-  local scraper for everything else. Optional Firecrawl enrichment for JS-heavy
-  career pages. A set of opt-in job boards, all free APIs/feeds — impact,
-  remote-first, European-tech, startup and general boards, plus LinkedIn's guest
-  API (queries derived from your profile). All off by default; enable the ones
-  that fit you and they persist across runs. Full list, per-board audience and
-  how to enable: [`docs/job-boards-catalogue.md`](docs/job-boards-catalogue.md).
+- **Fetching:** native ATS integrations — Greenhouse, Lever, Ashby, Workday and
+  more — see the full, auto-verified list:
+  [`docs/fetch-engines.md`](docs/fetch-engines.md). Optional Firecrawl
+  enrichment for JS-heavy career pages. A set of opt-in job boards, all free
+  APIs/feeds — impact, remote-first, European-tech, startup and general
+  boards, plus LinkedIn's guest API (queries derived from your profile). All
+  off by default; enable the ones that fit you and they persist across runs.
+  Full list, per-board audience and how to enable:
+  [`docs/job-boards-catalogue.md`](docs/job-boards-catalogue.md).
 - **Quality gate:** every job description passes a single validation layer
   (`scripts/quality.py`) that strips cookie banners, navigation junk and
   non-vacancy pages before they reach your database.

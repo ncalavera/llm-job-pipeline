@@ -9,6 +9,10 @@ Scope: only local links are checked. External URLs (`http`, `https`, `mailto`,
 `tel`), pure in-page anchors (`#section`) and template placeholders (`{{...}}`)
 are skipped. A `path#anchor` link is checked for the FILE only (the anchor
 fragment is not verified — headings move; files should not vanish).
+
+`.html` docs have no Markdown links, so they are scanned with a second regex
+for `href="..."`/`src="..."` attributes instead — same normalisation, same
+skip rules.
 """
 
 import re
@@ -24,13 +28,20 @@ SCANNED_DOCS = [
     "INSTALL.md",
     "INSTALL-EASY.md",
     "AGENTS.md",
+    "CONTRIBUTING.md",
+    "CONCEPTS.md",
     "docs/ARCHITECTURE.md",
     "docs/fetch-engines.md",
     "docs/job-boards-catalogue.md",
+    "docs/manual-trial-protocol.md",
+    "docs/index.html",
 ]
 
 # Inline Markdown link target: the `(...)` half of `[text](target)`.
 _LINK = re.compile(r"\]\(([^)]+)\)")
+
+# HTML attribute link target: the `"..."` half of `href="..."`/`src="..."`.
+_HTML_LINK = re.compile(r'(?:href|src)="([^"]*)"')
 
 _SKIP_PREFIXES = ("http://", "https://", "mailto:", "tel:", "#", "{{")
 
@@ -56,8 +67,9 @@ def _iter_links():
         doc = REPO / name
         if not doc.exists():
             continue
+        pattern = _HTML_LINK if doc.suffix == ".html" else _LINK
         for i, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
-            for m in _LINK.finditer(line):
+            for m in pattern.finditer(line):
                 yield name, i, m.group(1)
 
 
@@ -92,6 +104,13 @@ def test_link_target_extracts_local_paths():
     assert _link_target("docs/ARCHITECTURE.md") == "docs/ARCHITECTURE.md"
     assert _link_target("INSTALL.md#9-telegram-digest-optional") == "INSTALL.md"
     assert _link_target("<sql/schema.sql>") == "sql/schema.sql"
+
+
+def test_html_link_regex_extracts_attrs():
+    assert _HTML_LINK.findall('<img src="assets/robot-courier.jpg" alt="x">') == [
+        "assets/robot-courier.jpg"
+    ]
+    assert _HTML_LINK.findall('<link rel="icon" href="favicon.svg">') == ["favicon.svg"]
 
 
 def test_checker_would_flag_a_missing_file(tmp_path):

@@ -728,3 +728,32 @@ def test_persona_token_guard_actually_matches():
     assert PERSONA_TOKENS.search("Senior PM at Example Foundation")
     assert PERSONA_TOKENS.search("AI safety research roles (cap at 35)")
     assert not PERSONA_TOKENS.search("climate, fintech, developer tools")
+
+
+# ---------------------------------------------------------------------------
+# 12. The questionnaire's "Start — N questions" CTA must be DERIVED from
+# QUESTIONS.length, never a hardcoded literal (STRATEGY guardrail 9, "derive,
+# never bake"). The array grew from 11 to 12 questions while the CTA string
+# stayed "11 questions" / "11 вопросов" — a doc/UI claim that drifted from the
+# code it describes.
+# ---------------------------------------------------------------------------
+
+_START_IS_A_FUNCTION = re.compile(r"start:\s*\(n\)\s*=>")
+_START_HAS_A_BAKED_NUMBER = re.compile(r'start:\s*"[^"]*\d+[^"]*"')
+
+
+def test_questionnaire_start_count_is_derived_not_hardcoded():
+    text = DOCS_INDEX.read_text(encoding="utf-8")
+    assert len(_START_IS_A_FUNCTION.findall(text)) == 2, (
+        "docs/index.html 'start' i18n entry (EN + RU) must be a function of the "
+        "live question count, e.g. `start: (n) => ...`, not a literal string — "
+        "call sites render it as I18N[l].start(QUESTIONS.length)"
+    )
+    assert not _START_HAS_A_BAKED_NUMBER.search(text), (
+        "docs/index.html 'start' i18n entry has a hardcoded question count — it "
+        "must read QUESTIONS.length instead so the CTA can never drift from the "
+        "actual number of questions"
+    )
+    assert "I18N[l].start(QUESTIONS.length)" in text, (
+        "the 'start' CTA must be rendered from QUESTIONS.length at render time"
+    )
