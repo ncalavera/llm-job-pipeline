@@ -235,7 +235,10 @@ function buildTriageFreshness(g) {
   return "";
 }
 
-function buildTriageCard(g, col, review) {
+// Exported for unit tests (pipeline.test.js) — the private triage fields it
+// renders must stay HTML-escaped (DHA-373). Not part of the module's runtime
+// surface; renderPipeline is the only caller in the app.
+export function buildTriageCard(g, col, review) {
   const firstUrl = safeUrl(
     (g.locations || []).find(function (l) {
       return !!l.url;
@@ -252,24 +255,37 @@ function buildTriageCard(g, col, review) {
 
   let meta = "";
   if (!isCompact && review) {
+    // Private triage fields are free-text the user types; escape every one
+    // before it reaches innerHTML (a cv_note like "<img onerror=...>" must
+    // render inert, not execute). See DHA-373.
     if (review.deadline)
       meta +=
-        '<div class="pipe-card-deadline">\u23F0 ' + review.deadline + "</div>";
+        '<div class="pipe-card-deadline">\u23F0 ' +
+        escHtml(review.deadline) +
+        "</div>";
     if (review.cv_notes)
-      meta += '<div class="pipe-card-note">' + review.cv_notes + "</div>";
+      meta +=
+        '<div class="pipe-card-note">' + escHtml(review.cv_notes) + "</div>";
     if (review.research_question)
       meta +=
-        '<div class="pipe-card-note">' + review.research_question + "</div>";
+        '<div class="pipe-card-note">' +
+        escHtml(review.research_question) +
+        "</div>";
     if (review.network_contact)
       meta +=
         '<div class="pipe-card-note">\uD83D\uDC64 ' +
-        review.network_contact +
+        escHtml(review.network_contact) +
         "</div>";
     if (review.skip_reason)
       meta +=
-        '<div class="pipe-card-note muted">' + review.skip_reason + "</div>";
+        '<div class="pipe-card-note muted">' +
+        escHtml(review.skip_reason) +
+        "</div>";
     if (review.github_issue)
-      meta += '<div class="pipe-card-issue">#' + review.github_issue + "</div>";
+      meta +=
+        '<div class="pipe-card-issue">#' +
+        escHtml(review.github_issue) +
+        "</div>";
   }
 
   const orgHtml = g.company_slug
