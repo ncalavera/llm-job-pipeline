@@ -77,6 +77,22 @@ def _applyable_for(name):
     raise AssertionError(f"company {name!r} not in company data")
 
 
+def _today():
+    """Production's notion of 'today' for the deadline check.
+
+    ``data_prep._is_applyable_vacancy`` compares a deadline against
+    ``datetime.now(DASHBOARD_TZ).date()`` (DASHBOARD_TZ defaults to UTC), NOT the
+    runner's local date. Building fixture deadlines from ``date.today()`` instead
+    makes "yesterday" collide with production's "today" whenever the runner's
+    zone is ahead of DASHBOARD_TZ (e.g. TZ=+04 after 20:00 UTC) — the past
+    deadline then reads as still-open and the role stays applyable. Reading the
+    same clock production reads keeps these tests deterministic in every zone.
+    """
+    from config import DASHBOARD_TZ
+
+    return datetime.datetime.now(DASHBOARD_TZ).date()
+
+
 # ---------------------------------------------------------------------------
 # 21 vacancies, 2 clear the bar → applyable_count == 2
 # ---------------------------------------------------------------------------
@@ -120,7 +136,7 @@ def test_expiring_high_scores_are_not_applyable(dal):
     )
     _commit(dal)
 
-    yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+    yesterday = (_today() - datetime.timedelta(days=1)).isoformat()
     for title in ("Hot Lead", "Hot Manager"):
         vid = _id_by_title(dal, title)
         dal.update_vacancy_fields(vid, llm_score=80, deadline=yesterday)
@@ -174,8 +190,8 @@ def test_past_deadline_excluded_future_included(dal):
     )
     _commit(dal)
 
-    yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
-    tomorrow = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
+    yesterday = (_today() - datetime.timedelta(days=1)).isoformat()
+    tomorrow = (_today() + datetime.timedelta(days=30)).isoformat()
     dal.update_vacancy_fields(_id_by_title(dal, "Past Role"), llm_score=90, deadline=yesterday)
     dal.update_vacancy_fields(_id_by_title(dal, "Future Role"), llm_score=90, deadline=tomorrow)
     _commit(dal)
