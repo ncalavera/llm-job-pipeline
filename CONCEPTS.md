@@ -41,6 +41,18 @@ The per-database record of which migration versions are resolved for that databa
 ### Tombstone
 A record that keeps a deliberately removed vacancy from coming back. Written when a vacancy is archived for scoring below threshold or for disappearing from its source; on re-encounter, the save layer sees the tombstone and skips the row instead of resurrecting, re-scoring, and re-archiving it. A renamed variant of a buried role inherits the block, so retitling does not resurrect it. Distinct from Expiring: an expiring role is protected and awaits a decision; a tombstoned role has been decided against or dropped.
 
+## Fetching & save layer
+
+### Silent zero
+The failure class this project's guards exist to kill: a fetch or pipeline stage that fails but reports a successful empty result, indistinguishable from "genuinely nothing there". A blocked endpoint, an unregistered strategy, or a fallback value that a downstream gate rejects can all produce one; the required behavior is an explicit recorded error instead. The dishonesty often lives in the composition of healthy components, so it is hunted at the end-to-end level, not per unit.
+*Avoid:* healthy zero, empty-but-ok (same concept).
+
+### Junk gate
+The save layer's content classification: descriptions that are boilerplate (cookie walls, error pages, navigation chrome) or too short to be a real posting are rejected or blanked before a vacancy row is stored. An empty description with a live URL deliberately passes the gate — that produces a blind vacancy — while a short one does not; the two bands have opposite outcomes, which is what makes a wrong fallback value dangerous.
+
+### Blind vacancy
+A saved vacancy with no usable description — the listing was real but the detail content could not be obtained. Blind rows keep their title, company, location, and link, remain visible and scoreable in degraded form, and are queued for an enrichment sweep that tries to fetch the missing description; hosts the scraper provably cannot reach are excluded from the sweep. A blind row heals when a later fetch supplies the description, or ages out after staying blind past its window.
+
 ## Learning cycle
 
 ### Factor strength
