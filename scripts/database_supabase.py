@@ -1064,6 +1064,47 @@ def _refresh_gated_last_seen(cur, org: str, title: str, today: str) -> bool:
     return cur.rowcount > 0
 
 
+def refresh_unchanged_company_last_seen(org_name: str, today: str | None = None) -> int:
+    """Bump last_seen on a firecrawl-scraped company's own live rows when its
+    careers page is byte-identical to the last scrape (Firecrawl change-tracking
+    ``changeStatus == "same"``).
+
+    An unchanged page means every role it listed last time is STILL listed, yet
+    change-tracking hands the scraper nothing to diff, so it returns an empty
+    ``UnchangedListing`` and ``save_vacancies`` touches no row. Left alone the
+    company's whole roster freezes and falsely ages into Triage's "Expired"
+    column (derived from ``last_seen >= STALE_SOURCE_DAYS``). This is the
+    company-level analogue of ``_refresh_gated_last_seen``: a narrow "still
+    listed at source" touch that never resurrects a tombstone, never rescores and
+    never inserts.
+
+    Provenance: the vacancy table has no per-row source column, so ``company_id``
+    is the only provenance signal available — this refreshes every non-archived
+    row of the firecrawl company, exactly the set a changed-page scrape would
+    have re-touched via ``save_vacancies``. (A board-sourced row for the SAME
+    tracked employer is indistinguishable and thus also bumped; such a row is
+    independently refreshed by its own board run, so the touch is at worst
+    redundant and never resurrects — see the PR body.)
+
+    Does NOT commit — mirrors the other DAL writes; the fetch driver commits
+    per-company. Returns the number of rows refreshed.
+    """
+    company_id = resolve_company_id(org_name)
+    if company_id is None:
+        return 0
+    if today is None:
+        today = datetime.now(DASHBOARD_TZ).date().isoformat()
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE vacancy SET last_seen = %s WHERE company_id = %s AND status != 'archived'",
+        (today, company_id),
+    )
+    refreshed = cur.rowcount
+    cur.close()
+    return refreshed
+
+
 def _loc_key(loc: dict) -> str:
     """Stable key for a location entry: city, else country, else work_mode."""
     return loc.get("city") or loc.get("country") or loc.get("work_mode") or ""
