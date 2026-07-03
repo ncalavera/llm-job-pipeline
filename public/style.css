@@ -4403,7 +4403,7 @@ a.pipe-grp-role-title:hover {
 }
 .boards-table {
   width: 100%;
-  min-width: 860px;
+  min-width: 1000px;
   background: var(--sky-sheet);
   border-radius: var(--radius-sheet);
   box-shadow:
@@ -4554,6 +4554,67 @@ a.pipe-grp-role-title:hover {
   margin: 12px 8px 0;
   font-size: 11px;
   color: var(--sky-text-faint);
+}
+
+/* --- Per-board yield funnel (scored → fit → liked), derived in the browser --- */
+.brd-th-yield {
+  text-align: left;
+}
+.brd-yield {
+  white-space: nowrap;
+}
+.brd-yield-funnel {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.brd-yield-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+}
+.brd-yield-stat b {
+  font-family: "JetBrains Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--sky-text);
+}
+.brd-yield-stat i {
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--sky-text-faint);
+}
+.brd-yield-liked b {
+  color: var(--gold);
+}
+.brd-yield-arrow {
+  color: var(--sky-text-faint);
+  font-size: 11px;
+}
+.brd-yield-empty {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--sky-text-faint);
+}
+.boards-yield-note {
+  margin: 12px 8px 0;
+  font-size: 11px;
+  color: var(--sky-text-faint);
+}
+.boards-suggest {
+  margin: 10px 8px 0;
+  font-size: 12px;
+}
+.boards-suggest a {
+  color: var(--cobalt);
+  text-decoration: none;
+  font-weight: 600;
+}
+.boards-suggest a:hover {
+  text-decoration: underline;
 }
 
 /* --- Settings grouped rows --- */

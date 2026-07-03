@@ -19,6 +19,7 @@ import {
   HOT_MIN_SCORE,
   isApplyable,
   companyRollup,
+  boardYield,
 } from "./derive.js";
 
 // Mirror of STATUS_BASKET in state.js (kept inline so the test imports nothing
@@ -666,4 +667,70 @@ test("companyRollup: empty company → all-zero rollup, never a crash", () => {
     avg_llm_score: null,
     hot: null,
   });
+});
+
+// ---------------------------------------------------------------------------
+// boardYield — per-board funnel (scored → fit → liked) over the user's history.
+// ---------------------------------------------------------------------------
+
+// boardYield needs getStatus + isExpired + basketMap (like the app wires it).
+function yieldOpts(statuses, { today = TODAY } = {}) {
+  return { ...rollupOpts(statuses, { today }), basketMap: STATUS_BASKET };
+}
+
+test("boardYield: buckets roles by source_board and counts scored/fit/liked", () => {
+  const groups = [
+    { id: "a1", source_board: "Alpha", llm_score: 80 }, // fit
+    { id: "a2", source_board: "Alpha", llm_score: 40 }, // scored, not fit
+    { id: "a3", source_board: "Alpha", llm_score: 62 }, // fit + liked
+    { id: "b1", source_board: "Beta", llm_score: 70 }, // fit
+  ];
+  const y = boardYield(groups, yieldOpts({ a3: "liked" }));
+  assert.deepEqual(y.Alpha, { scored: 3, fit: 2, liked: 1, hasData: true });
+  assert.deepEqual(y.Beta, { scored: 1, fit: 1, liked: 0, hasData: true });
+});
+
+test("boardYield: fit uses the ≥60 apply bar (APPLYABLE_MIN_SCORE)", () => {
+  const groups = [
+    { id: "x1", source_board: "Board", llm_score: 59 }, // just under
+    { id: "x2", source_board: "Board", llm_score: 60 }, // exactly the bar
+  ];
+  const y = boardYield(groups, yieldOpts({}));
+  assert.equal(y.Board.scored, 2);
+  assert.equal(y.Board.fit, 1); // only the 60 clears the bar
+});
+
+test("boardYield: direct-ATS roles (no source_board) belong to no board", () => {
+  const groups = [
+    { id: "d1", source_board: "", llm_score: 90 },
+    { id: "d2", llm_score: 90 }, // field absent entirely
+    { id: "d3", source_board: "Board", llm_score: 90 },
+  ];
+  const y = boardYield(groups, yieldOpts({}));
+  assert.deepEqual(Object.keys(y), ["Board"]);
+  assert.equal(y.Board.scored, 1);
+});
+
+test("boardYield: an expired like has lapsed — it no longer counts as liked", () => {
+  const groups = [
+    { id: "e1", source_board: "Board", llm_score: 80, deadline: "2026-06-01" },
+  ];
+  // Status is liked, but the deadline is in the past (< TODAY) → effectiveBasket
+  // rebuckets it to passed, so liked must be 0 (mirrors the badge/list rule).
+  const y = boardYield(groups, yieldOpts({ e1: "liked" }));
+  assert.equal(y.Board.scored, 1);
+  assert.equal(y.Board.liked, 0);
+});
+
+test("boardYield: a board with no shipped roles is simply absent (renders no-data)", () => {
+  const y = boardYield(
+    [{ id: "z", source_board: "Other", llm_score: 70 }],
+    yieldOpts({}),
+  );
+  assert.equal(y.Empty, undefined); // caller shows "no data yet" for absent boards
+  assert.equal(y.Other.hasData, true);
+});
+
+test("boardYield: empty group set → empty map, never a crash", () => {
+  assert.deepEqual(boardYield([], yieldOpts({})), {});
 });

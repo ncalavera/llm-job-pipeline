@@ -15,6 +15,10 @@ const grid = { innerHTML: "" };
 const byId = { boardsGrid: grid };
 
 const catalog = [];
+// state.js destructures `groups` from window.VACANCY_DATA once at import and
+// boards.js reads that same reference, so mutate this array IN PLACE (never
+// reassign) to feed synthetic roles into the browser-derived yield funnel.
+const catalogGroups = [];
 
 globalThis.document = {
   getElementById: (id) => byId[id] || null,
@@ -24,7 +28,7 @@ globalThis.window = {
     config: { i18n: {}, i18n_all: null, language: "en" },
     stats: {},
     vacancy_ids: [],
-    groups: [],
+    groups: catalogGroups,
     companies: [],
     triage_reviews: [],
     archived_groups: [],
@@ -35,6 +39,11 @@ globalThis.location = { protocol: "file:", origin: "" };
 globalThis.localStorage = { getItem: () => null, setItem: () => {} };
 
 const { renderBoards, toggleBoard } = await import("./boards.js");
+
+function setGroups(next) {
+  catalogGroups.length = 0;
+  catalogGroups.push(...next);
+}
 
 function boardRow(overrides = {}) {
   return Object.assign(
@@ -208,6 +217,7 @@ test("an unsafe URL scheme never reaches an href", () => {
   setCatalog([
     boardRow({ id: "unsafe", name: "UnsafeBoard", url: "javascript:alert(1)" }),
   ]);
+  setGroups([]);
   renderBoards();
 
   const html = grid.innerHTML;
@@ -215,8 +225,73 @@ test("an unsafe URL scheme never reaches an href", () => {
     !html.includes("javascript:"),
     "unsafe scheme never reaches the DOM",
   );
+  // The board NAME must not be wrapped in a link when its URL is unsafe. (The
+  // always-present, hardcoded "suggest a board" link is a separate safe anchor,
+  // so we scope the check to the board name rather than the whole table.)
+  assert.ok(html.includes("UnsafeBoard"), "the board name still renders");
   assert.ok(
-    !html.includes("<a "),
-    "no link renders when the only URL is unsafe",
+    !html.includes(">UnsafeBoard</a>"),
+    "no link renders around a board whose only URL is unsafe",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Per-board yield (scored → fit → liked) — DERIVED in the browser, so it renders
+// in this baked-only (file://) test with no live API.
+// ---------------------------------------------------------------------------
+
+test("the yield column renders in simple mode (derived, not live-gated)", () => {
+  setCatalog([boardRow({ id: "y", name: "YieldBoard" })]);
+  setGroups([]);
+  renderBoards();
+  const html = grid.innerHTML;
+  assert.ok(
+    html.includes("brd-th-yield"),
+    "the yield header column is present",
+  );
+  // It is NOT a live-only column, so it survives even with no /api reachable.
+  assert.ok(!html.includes("brd-th num"), "live count columns still omitted");
+});
+
+test("a board with matching scored roles shows its funnel numbers", () => {
+  setCatalog([boardRow({ id: "alpha", name: "Alpha" })]);
+  setGroups([
+    { id: "a1", source_board: "Alpha", llm_score: 80, member_ids: [] }, // fit
+    { id: "a2", source_board: "Alpha", llm_score: 40, member_ids: [] }, // scored, not fit
+    { id: "b1", source_board: "Other", llm_score: 70, member_ids: [] }, // different board
+  ]);
+  renderBoards();
+  const html = grid.innerHTML;
+  assert.ok(html.includes("brd-yield-funnel"), "the funnel renders");
+  assert.ok(
+    !html.includes("brd-yield-empty"),
+    "no empty state when data exists",
+  );
+  // 2 scored / 1 fit; the numbers ride in <b> tags.
+  assert.ok(html.includes("<b>2</b>"), "scored count is shown");
+  assert.ok(html.includes("<b>1</b>"), "fit count is shown");
+});
+
+test("a board with no matching roles shows an honest 'no data yet', not 0/0/0", () => {
+  setCatalog([boardRow({ id: "cold", name: "ColdBoard" })]);
+  setGroups([
+    { id: "x", source_board: "SomeOtherBoard", llm_score: 90, member_ids: [] },
+  ]);
+  renderBoards();
+  const html = grid.innerHTML;
+  assert.ok(
+    html.includes("brd-yield-empty"),
+    "cold board gets the no-data state",
+  );
+  assert.ok(!html.includes("brd-yield-funnel"), "and not a 0/0/0 funnel");
+});
+
+test("the Boards section links to the suggest-a-board issue form", () => {
+  setCatalog([boardRow({})]);
+  setGroups([]);
+  renderBoards();
+  assert.ok(
+    grid.innerHTML.includes("issues/new?template=suggest-a-board.yml"),
+    "a link to the GitHub issue form is present",
   );
 });

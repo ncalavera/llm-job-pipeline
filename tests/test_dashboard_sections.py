@@ -199,6 +199,34 @@ def test_project_application_passthrough_none(tmp_path, monkeypatch):
     assert _project_application(None) is None
 
 
+def test_build_group_ships_raw_source_board(tmp_path, monkeypatch):
+    """Each group carries the RAW source_board (== board.name, "" for direct
+    ATS) so the browser can DERIVE per-board yield — the one payload change for
+    a raw provenance field, never a pre-computed aggregate."""
+    _force_sqlite(monkeypatch, tmp_path / "jobsearch.db")
+    from report.data_prep import _build_group
+
+    vac = {
+        "id": "v1",
+        "org": "Acme",
+        "title": "Engineer",
+        "llm_score": 72,
+        "source_board": "80,000 Hours",
+        "locations": [],
+    }
+    g = _build_group(vac, org_colors={}, company_hq={})
+    assert g["source_board"] == "80,000 Hours"
+
+    # A direct-ATS role (no board) ships "" — never null, so the browser's
+    # `(g.source_board || "").trim()` join is always a string.
+    direct = _build_group(
+        {"id": "v2", "org": "Acme", "title": "Nurse", "llm_score": 50, "locations": []},
+        org_colors={},
+        company_hq={},
+    )
+    assert direct["source_board"] == ""
+
+
 # ---------------------------------------------------------------------------
 # End-to-end: the baked data.js carries the three new keys
 # ---------------------------------------------------------------------------

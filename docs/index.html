@@ -621,6 +621,50 @@
         margin-bottom: 7px;
         color: var(--mono-muted);
       }
+      .boardpick {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        max-height: 360px;
+        overflow-y: auto;
+      }
+      .boardpick-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 11px;
+        border: 1px solid var(--sec-border);
+        border-radius: 10px;
+        background: var(--page);
+        padding: 11px 14px;
+        cursor: pointer;
+        transition:
+          border-color 0.12s,
+          background 0.12s;
+      }
+      .boardpick-row:hover {
+        border-color: var(--mono-muted);
+      }
+      .boardpick-cb {
+        margin-top: 3px;
+        flex: none;
+        width: 16px;
+        height: 16px;
+        accent-color: var(--green-bright);
+        cursor: pointer;
+      }
+      .boardpick-info {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      .boardpick-name {
+        font: 700 14px/1.3 var(--onest);
+      }
+      .boardpick-aud {
+        font-size: 12.5px;
+        color: var(--muted);
+      }
       .nav {
         display: flex;
         justify-content: space-between;
@@ -1085,6 +1129,30 @@
         },
       };
 
+      // The built-in job boards, generated from config/defaults.toml [boards.*]
+      // by scripts/gen_board_table.py (do not hand-edit — run it with --write).
+      // Each carries EN + RU audience so the boards question reads in either
+      // language; tests/test_board_catalogue_matches_config.py guards the sync.
+      // BEGIN AUTO-GENERATED BOARD CATALOG (scripts/gen_board_table.py)
+      // prettier-ignore
+      const BOARD_CATALOG = [
+        { id: "80k_hours", name: "80,000 Hours", url: "https://jobs.80000hours.org", en: "Effective altruism, AI safety, global-priorities policy and research.", ru: "Эффективный альтруизм, безопасность ИИ, политика и исследования глобальных приоритетов." },
+        { id: "reliefweb", name: "ReliefWeb", url: "https://reliefweb.int/jobs", en: "Humanitarian relief and international-development NGOs.", ru: "Гуманитарная помощь и НКО международного развития." },
+        { id: "arbeitnow", name: "Arbeitnow", url: "https://www.arbeitnow.com", en: "European tech; remote roles and (when listed) visa-sponsorship jobs.", ru: "Европейский тех: удалёнка и (где указано) вакансии со спонсорством визы." },
+        { id: "remotive", name: "Remotive", url: "https://remotive.com", en: "Remote-first roles across engineering, product, design, marketing, support.", ru: "Удалённые роли в разработке, продукте, дизайне, маркетинге и поддержке." },
+        { id: "weworkremotely", name: "We Work Remotely", url: "https://weworkremotely.com", en: "Remote jobs across programming, design, ops, marketing, sales, support.", ru: "Удалёнка в программировании, дизайне, операциях, маркетинге, продажах и поддержке." },
+        { id: "hn_whoishiring", name: "HN Who is hiring", url: "https://news.ycombinator.com/submitted?id=whoishiring", en: "Startups, engineering-heavy; the monthly Hacker News hiring thread.", ru: "Стартапы, много инженерных ролей; ежемесячная ветка найма на Hacker News." },
+        { id: "impactpool", name: "Impactpool", url: "https://www.impactpool.org/search", en: "Nonprofit, UN and multilateral / international-organisation roles.", ru: "НКО, ООН и роли в международных организациях." },
+        { id: "datadotorg", name: "data.org", url: "https://data.org/jobs/", en: "Data-for-social-impact and AI-for-good: data science / analytics roles.", ru: "Данные для социального эффекта и ИИ во благо: data science и аналитика." },
+        { id: "idealist", name: "Idealist", url: "https://www.idealist.org/en/jobs", en: "Nonprofit and social-impact jobs: programmes, advocacy, community, ops.", ru: "НКО и социальный эффект: программы, адвокация, комьюнити, операции." },
+        { id: "fast_forward", name: "Fast Forward", url: "https://jobs.ffwd.org/jobs", en: "Tech-nonprofits: engineering, product and ops at mission-driven startups.", ru: "Тех-НКО: инженерия, продукт и операции в миссионных стартапах." },
+        { id: "linkedin", name: "LinkedIn", url: "https://www.linkedin.com/jobs", en: "Any field — queries are built from your profile's target roles + geography.", ru: "Любая сфера — запросы строятся из целевых ролей и географии твоего профиля." },
+        { id: "a16z", name: "a16z Portfolio", url: "https://jobs.a16z.com", en: "Venture-backed startup roles (a16z portfolio): engineering, product, GTM.", ru: "Роли в стартапах портфеля a16z: инженерия, продукт, GTM." },
+        { id: "sequoia", name: "Sequoia Portfolio", url: "https://jobs.sequoiacap.com", en: "Venture-backed startup roles (Sequoia portfolio): engineering, product, GTM.", ru: "Роли в стартапах портфеля Sequoia: инженерия, продукт, GTM." },
+        { id: "consultants_for_impact", name: "Consultants for Impact", url: "https://www.consultantsforimpact.org/job-board", en: "Strategy / management consultants moving into social-impact work.", ru: "Стратегические/управленческие консультанты, переходящие в социальный сектор." },
+      ];
+      // END AUTO-GENERATED BOARD CATALOG
+
       // ---------------------------------------------------------------- questions
       const QUESTIONS = [
         {
@@ -1384,6 +1452,24 @@
             ph: "цель ~€5,500/мес гросс, минимум €4,000",
           },
         },
+        {
+          // The board catalogue (from config/defaults.toml [boards.*], generated
+          // into BOARD_CATALOG above). All boards are free and off by default —
+          // the user opts in knowingly here and the chosen ids land in the setup
+          // prompt as `sources.py enable-board` steps (DHA-360). Optional: leave
+          // all unchecked to decide later via `sources.py recommend`.
+          id: "boards",
+          type: "boards",
+          req: false,
+          en: {
+            t: "Which job boards should it search?",
+            h: "Optional — every board is free and off by default. Tick the ones that fit your field; leave all unchecked to decide later with sources.py recommend. LinkedIn searches any field from your profile.",
+          },
+          ru: {
+            t: "Какие доски вакансий искать?",
+            h: "Необязательно — все доски бесплатны и по умолчанию выключены. Отметь подходящие твоей сфере; оставь пустым, чтобы выбрать позже через sources.py recommend. LinkedIn ищет по любой сфере из твоего профиля.",
+          },
+        },
       ];
 
       // ---------------------------------------------------------------- state
@@ -1432,6 +1518,10 @@
         if (q.type === "mode") {
           // saved on click; default to easy
           answers.mode = answers.mode || "easy";
+        } else if (q.type === "boards") {
+          answers.boards = Array.from(
+            document.querySelectorAll(".boardpick-cb:checked"),
+          ).map((el) => el.value);
         } else if (q.type === "pair" || q.type === "selects") {
           answers[q.id] = { a: val("w_a"), b: val("w_b") };
         } else {
@@ -1513,6 +1603,17 @@
         <h4>${esc(m.name)}</h4><span class="tagline">${esc(m.tag)}</span><ul>${items}</ul></div>`;
           };
           body.innerHTML = `<div class="modecards">${card("easy", L.easy)}${card("full", L.full)}</div>`;
+        } else if (q.type === "boards") {
+          const picked = new Set(Array.isArray(saved) ? saved : []);
+          const rows = BOARD_CATALOG.map((b) => {
+            const aud = lang === "ru" ? b.ru : b.en;
+            const on = picked.has(b.id) ? " checked" : "";
+            return `<label class="boardpick-row">
+        <input type="checkbox" class="boardpick-cb" value="${esc(b.id)}"${on}>
+        <span class="boardpick-info"><span class="boardpick-name">${esc(b.name)}</span><span class="boardpick-aud">${esc(aud)}</span></span>
+      </label>`;
+          }).join("");
+          body.innerHTML = `<div class="boardpick">${rows}</div>`;
         }
 
         document.getElementById("backBtn").style.visibility =
@@ -1770,13 +1871,42 @@ If you are not Claude Code and don't support slash commands, the same workflows 
 
 Here is my profile:`;
         const intro = lang === "ru" ? introRu : introEn;
+        // Splice the chosen-boards instruction in ahead of the profile hand-off
+        // so the agent enables exactly the boards the user picked here — the same
+        // CLI path (`sources.py enable-board` / `recommend`) the repo already
+        // documents, never a forked list (DHA-360).
+        const profileLine =
+          lang === "ru" ? "Вот мой профиль:" : "Here is my profile:";
+        const withBoards = intro.replace(
+          profileLine,
+          boardsInstruction(lang) + profileLine,
+        );
 
-        return `${intro}
+        return `${withBoards}
 
 --- BEGIN config/user_profile.md ---
 ${buildProfile()}
 --- END config/user_profile.md ---
 `;
+      }
+
+      // The setup step that turns the user's board picks into concrete CLI
+      // actions. Chosen ids → one `enable-board` line; none chosen → point at
+      // `recommend` (identical to what CLI onboarding tells you). Names come from
+      // BOARD_CATALOG so the instruction reads with human labels, not just ids.
+      function boardsInstruction(lang) {
+        const picks = Array.isArray(answers.boards) ? answers.boards : [];
+        if (!picks.length) {
+          return lang === "ru"
+            ? "Доски вакансий я выберу позже — покажи `python3 scripts/sources.py recommend`, чтобы увидеть подходящие моему профилю, и включи те, что я одобрю.\n\n"
+            : "I'll choose job boards later — run `python3 scripts/sources.py recommend` to show the ones that fit my profile, then enable the ones I approve.\n\n";
+        }
+        const byId = {};
+        BOARD_CATALOG.forEach((b) => (byId[b.id] = b.name));
+        const list = picks.map((id) => `${byId[id] || id} (${id})`).join(", ");
+        return lang === "ru"
+          ? `Включи выбранные мной доски вакансий — для каждой выполни \`python3 scripts/sources.py enable-board <id>\`: ${list}.\n\n`
+          : `Enable the job boards I picked — run \`python3 scripts/sources.py enable-board <id>\` for each: ${list}.\n\n`;
       }
 
       document

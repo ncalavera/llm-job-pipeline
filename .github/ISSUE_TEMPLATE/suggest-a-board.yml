@@ -1,0 +1,52 @@
+name: Suggest a job board
+description: Propose a job board worth adding to the built-in catalogue.
+title: "[board] "
+labels: ["board-suggestion"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a board! This pipeline runs on each person's own
+        machine — it is **not a hosted service**, so nothing here phones home.
+        A maintainer reads this issue and, if the board has a public feed/API,
+        adds it to `config/defaults.toml [boards.*]` (see
+        [`docs/job-boards-catalogue.md`](../../blob/main/docs/job-boards-catalogue.md)).
+        Three facts make a board addable:
+  - type: input
+    id: url
+    attributes:
+      label: Board URL
+      description: The public job-listing page (or API/feed endpoint if you know it).
+      placeholder: https://example.org/jobs
+    validations:
+      required: true
+  - type: textarea
+    id: audience
+    attributes:
+      label: Who it serves
+      description: >
+        Which candidates / fields / regions does this board fit? One or two
+        sentences — this becomes the board's neutral `audience` line.
+      placeholder: Humanitarian and international-development NGO roles, mostly remote.
+    validations:
+      required: true
+  - type: textarea
+    id: feed
+    attributes:
+      label: What feeds it (how to fetch it)
+      description: >
+        How would the pipeline read it without a login? A public JSON/REST API,
+        an RSS feed, an embedded Algolia/search key, or plain server-rendered
+        HTML? Paste an example API/feed URL if you have one. A board with no
+        free, no-login way in usually cannot be added.
+      placeholder: "Public REST API: https://example.org/api/jobs?page=1 (no key needed)"
+    validations:
+      required: true
+  - type: input
+    id: volume
+    attributes:
+      label: Rough volume & refresh (optional)
+      description: Roughly how many roles, and how often it updates.
+      placeholder: ~500 live roles, refreshed daily
+    validations:
+      required: false

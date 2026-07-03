@@ -51,3 +51,34 @@ def test_every_board_row_is_present_and_stated_count_matches():
     assert f"**{len(boards)} built-in job boards**" in block
     for board_id in boards:
         assert f"| `{board_id}` |" in block, f"{board_id} missing from the table"
+
+
+# --- docs/index.html onboarding board picker (BOARD_CATALOG JS block) -------
+
+
+def test_no_generated_doc_is_stale():
+    """BOTH generated docs (the .md table AND the docs/index.html board picker)
+    must match config — a new/renamed [boards.*] block that wasn't regenerated
+    fails CI instead of silently drifting."""
+    stale = gen_board_table.stale_targets()
+    assert not stale, (
+        "Generated board doc(s) out of sync with config/defaults.toml [boards.*]: "
+        + ", ".join(p.name for p in stale)
+        + " — run `python3 scripts/gen_board_table.py --write` and commit."
+    )
+
+
+def test_onboarding_catalog_carries_every_board_with_both_languages():
+    """The onboarding picker (docs/index.html BOARD_CATALOG) lists every board
+    and — because a new user may run the questionnaire in either language — a
+    non-empty EN (`audience`) and RU (`audience_ru`) line for each."""
+    import settings
+
+    boards = settings.boards()
+    block = gen_board_table.render_board_catalog_js()
+    for board_id, cfg in boards.items():
+        assert f'id: "{board_id}"' in block, f"{board_id} missing from BOARD_CATALOG"
+        assert cfg.get("audience"), f"{board_id} has no EN audience in config"
+        assert cfg.get("audience_ru"), f"{board_id} has no RU audience in config"
+    # One object per board, no more (the picker shows exactly the config set).
+    assert block.count("{ id:") == len(boards)
