@@ -52,6 +52,19 @@ export function shouldApplyPollResponse(status) {
 }
 
 /**
+ * Classify a poll response status for the sidebar sync-status footer (see
+ * nav.js's state machine). 304 confirms the endpoint is live even though
+ * there's nothing new to apply; any other non-2xx during a poll is a real
+ * failure worth surfacing, not silently swallowed like shouldApplyPollResponse
+ * does for rendering purposes. Pure — unit-tested without a browser.
+ * @returns {"ok"|"hard_fail"}
+ */
+export function pollOutcome(status) {
+  if (status === 304) return "ok";
+  return shouldApplyPollResponse(status) ? "ok" : "hard_fail";
+}
+
+/**
  * Poll /api/vacancies for a changed snapshot and hot-swap it in when found.
  * No-ops outside full mode (no endpoint) — callers only invoke this after a
  * "live" initial load. Exported for tests; real use is the `boot()` call below.
@@ -60,6 +73,20 @@ export function shouldApplyPollResponse(status) {
 export function startPolling(initialETag) {
   let etag = initialETag || null;
   let timer = null;
+
+  // Feed a poll outcome into the shared sync-status state machine (nav.js)
+  // and repaint the footer. Dynamically imported like state.js below — a
+  // background poll must never disrupt the visible dashboard, so a missing
+  // module here is swallowed, same as every other tick() failure path.
+  async function recordOutcome(outcome) {
+    try {
+      const { recordSyncOutcome, scheduleRender } = await import("./state.js");
+      recordSyncOutcome(outcome);
+      scheduleRender();
+    } catch {
+      /* state module unavailable — nothing safe to do, next tick retries */
+    }
+  }
 
   async function tick() {
     let res;
@@ -70,20 +97,32 @@ export function startPolling(initialETag) {
           : { Accept: "application/json" },
       });
     } catch {
-      return; // offline blip — next tick retries
+      await recordOutcome("soft_fail"); // offline blip — next tick retries
+      return;
     }
-    if (!shouldApplyPollResponse(res.status)) return; // 304 or a poll-time error
+    if (pollOutcome(res.status) === "hard_fail") {
+      await recordOutcome("hard_fail"); // endpoint answered with a real error
+      return;
+    }
+    if (!shouldApplyPollResponse(res.status)) {
+      await recordOutcome("ok"); // 304 — unchanged, but confirms we're live
+      return;
+    }
     const nextETag = res.headers.get("ETag");
     let payload;
     try {
       payload = await res.json();
     } catch {
+      await recordOutcome("hard_fail");
       return;
     }
     if (nextETag) etag = nextETag;
     try {
-      const { applySnapshot, scheduleRender } = await import("./state.js");
-      if (applySnapshot(payload)) scheduleRender();
+      const { applySnapshot, scheduleRender, recordSyncOutcome } =
+        await import("./state.js");
+      recordSyncOutcome("ok");
+      applySnapshot(payload);
+      scheduleRender(); // repaint even when unchanged, so the footer reflects "ok"
     } catch {
       return; // a background poll must never disrupt the visible dashboard
     }
@@ -190,6 +229,12 @@ export async function boot() {
       return;
     }
   }
+
+  // Seed the sidebar's sync-status footer before state.js evaluates: "live"
+  // starts confirmed-ok; "fallback" (simple/local mode, baked data.js, no
+  // /api/vacancies to poll) is honestly labeled a stale snapshot rather than
+  // silently rendering as live — see nav.js's sync-status state machine.
+  window.__DASHBOARD_SYNC_SOURCE__ = source;
 
   await import("../app.js"); // app.js lives at public/app.js, one level up
 

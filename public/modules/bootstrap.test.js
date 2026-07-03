@@ -5,7 +5,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { resolveSource, shouldApplyPollResponse } from "./bootstrap.js";
+import {
+  resolveSource,
+  shouldApplyPollResponse,
+  pollOutcome,
+} from "./bootstrap.js";
 
 test("200 OK → live payload from the endpoint", () => {
   assert.equal(resolveSource({ ok: true, status: 200 }), "live");
@@ -43,4 +47,22 @@ test("poll: 401/500/503 → skip (a background poll failure never disrupts the o
   assert.equal(shouldApplyPollResponse(401), false);
   assert.equal(shouldApplyPollResponse(500), false);
   assert.equal(shouldApplyPollResponse(503), false);
+});
+
+// U3 — pollOutcome() feeds the sidebar sync-status footer (nav.js's state
+// machine). Unlike shouldApplyPollResponse, it must tell 304 (fine, just
+// unchanged) apart from a real error status (a hard failure worth surfacing).
+
+test("pollOutcome: 200 → ok", () => {
+  assert.equal(pollOutcome(200), "ok");
+});
+
+test("pollOutcome: 304 → ok (unchanged, but confirms the endpoint is live)", () => {
+  assert.equal(pollOutcome(304), "ok");
+});
+
+test("pollOutcome: 401/500/503 → hard_fail (a real error, not a silent no-op)", () => {
+  assert.equal(pollOutcome(401), "hard_fail");
+  assert.equal(pollOutcome(500), "hard_fail");
+  assert.equal(pollOutcome(503), "hard_fail");
 });

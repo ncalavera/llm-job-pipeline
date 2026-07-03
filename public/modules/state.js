@@ -2,6 +2,8 @@
 // state.js — Centralized state, pub/sub events, constants
 // =============================================================================
 
+import { initialSyncState, nextSyncState } from "./nav.js";
+
 // Contract: data.js must load before this module
 if (!window.VACANCY_DATA) {
   throw new Error("data.js must load before app.js");
@@ -168,7 +170,24 @@ export const state = {
   currentProfileSlug: null,
   // Live company rows from /api/companies (null until loaded → snapshot used).
   liveCompanies: null,
+  // Sidebar footer sync status (nav.js state machine). bootstrap.js's boot()
+  // stashes how the initial payload was sourced on window before importing
+  // this module: "live" starts already confirmed ok; "fallback" (simple/local
+  // mode, baked data.js, no /api/vacancies to poll) is honestly shown as a
+  // stale snapshot rather than silently rendering as live. Anything else
+  // (e.g. no window, under a test runner) starts "checking".
+  sync:
+    window.__DASHBOARD_SYNC_SOURCE__ === "live"
+      ? nextSyncState(initialSyncState(), "ok")
+      : window.__DASHBOARD_SYNC_SOURCE__ === "fallback"
+        ? { status: "stale", consecutiveFailures: 0 }
+        : initialSyncState(),
 };
+
+/** Feed one poll outcome into the sidebar sync-status state machine. */
+export function recordSyncOutcome(outcome) {
+  state.sync = nextSyncState(state.sync, outcome);
+}
 
 // Initialize dbData — all vacancies start as "unseen", real statuses come from API
 for (const g of groups) {

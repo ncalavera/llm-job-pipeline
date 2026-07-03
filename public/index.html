@@ -16,444 +16,742 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <nav class="top-nav">
-      <div class="top-nav-brand">Job Search Pipeline</div>
-      <div class="mode-toggle">
-        <button class="mode-btn" id="modeToday" onclick="switchMode('today')">
-          &#9728; <span data-i18n="tab_today">Today</span>
-        </button>
-        <button class="mode-btn" id="modeVacancies" onclick="switchVacancies()">
-          &#9636; <span data-i18n="tab_vacancies">Vacancies</span>
-        </button>
-        <button
-          class="mode-btn"
-          id="modeCompanies"
-          onclick="switchMode('companies')"
-        >
-          &#9881; <span data-i18n="tab_companies">Companies</span>
-        </button>
-        <button
-          class="mode-btn"
-          id="modeApplications"
-          onclick="switchApplications()"
-        >
-          &#9993; <span data-i18n="tab_applications">Applications</span>
-        </button>
-        <button class="mode-btn" id="modeBoards" onclick="switchMode('boards')">
-          &#128202; <span data-i18n="tab_boards">Boards</span>
-        </button>
-        <button
-          class="mode-btn"
-          id="modeSettings"
-          onclick="switchMode('settings')"
-        >
-          &#9965; <span data-i18n="tab_settings">Settings</span>
-        </button>
-      </div>
-      <div class="top-nav-right">
-        <span class="hero-date" id="heroDate"></span>
-      </div>
-    </nav>
-
-    <div class="container">
-      <div id="syncIndicator" class="sync-indicator"></div>
-
-      <!-- === VACANCIES SUB-NAV (Browse / Geo / Archive) ===
-           Shown only while the Vacancies section is active. These leaf views
-           used to be top-level tabs; they now live under Vacancies so the top
-           nav stays at six sections. Triage used to be a fourth tab here; it
-           now lives under Applications (see applicationsSubNav below). -->
-      <div class="vacancy-sub-nav" id="vacancySubNav" style="display: none">
-        <button
-          class="vacancy-sub-tab"
-          id="vsubBrowse"
-          onclick="switchMode('catalog')"
-        >
-          <span data-i18n="vsub_browse">Browse</span>
-        </button>
-        <button
-          class="vacancy-sub-tab"
-          id="vsubGeo"
-          onclick="switchMode('stats')"
-        >
-          <span data-i18n="tab_geo">Geo</span>
-        </button>
-        <button
-          class="vacancy-sub-tab"
-          id="vsubArchive"
-          onclick="switchMode('archive')"
-        >
-          <span data-i18n="tab_archive">Archive</span>
-        </button>
-      </div>
-
-      <!-- === APPLICATIONS SUB-NAV (Applications / Triage) ===
-           Shown only while the Applications section is active. Triage was
-           previously a leaf under the Vacancies sub-nav; it moved here
-           because triaging is the step that turns a liked vacancy into an
-           application. -->
-      <div
-        class="applications-sub-nav"
-        id="applicationsSubNav"
-        style="display: none"
-      >
-        <button
-          class="applications-sub-tab"
-          id="asubApplications"
-          onclick="switchMode('applications')"
-        >
-          <span data-i18n="tab_applications">Applications</span>
-        </button>
-        <button
-          class="applications-sub-tab"
-          id="asubTriage"
-          onclick="switchMode('pipeline')"
-        >
-          <span data-i18n="tab_triage">Triage</span>
-        </button>
-      </div>
-
-      <!-- === TODAY MODE === -->
-      <div class="today-section" id="todaySection"></div>
-      <!-- /today-section -->
-
-      <!-- === CATALOG MODE === -->
-      <div class="catalog-section active" id="catalogSection">
-        <div class="catalog-loading" id="catalogLoading">
-          <img
-            src="images/illus-catalog.png"
-            data-img="illus-catalog"
-            alt="Illustration of a figure reviewing job listings"
-            class="loading-illus"
-          />
-          <p class="loading-text" data-i18n="loading_vacancies">
-            Sorting vacancies…
-          </p>
+    <div class="app-shell">
+      <!-- ============ SIDEBAR (U3, DHA-387) ============
+           Desktop (>=900px): full sidebar, sub-items expanded inline.
+           Narrow (<900px): collapses to an icon rail via CSS; the active
+           section's sub-items appear instead as the pill row below
+           (vacancySubNav / applicationsSubNav), same as before U3. -->
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+          <div class="sidebar-brand-mark">JP</div>
+          <div class="nav-label sidebar-brand-name">Job Pipeline</div>
         </div>
 
-        <div class="gf-companion">
-          <img
-            src="images/illus-catalog.png"
-            data-img="illus-catalog"
-            alt="Illustration of a figure reviewing job listings"
-          />
-        </div>
-        <div class="gf-accent">
-          <img
-            src="images/accent-catalog.png"
-            data-img="accent-catalog"
-            alt=""
-          />
-        </div>
-
-        <div class="basket-tabs">
-          <button
-            class="basket-tab"
-            data-basket="liked"
-            onclick="switchBasket(this)"
-          >
-            <span class="basket-dot"></span>
-            <span data-i18n="basket_liked">Liked</span>
-            <span class="basket-count" id="countLiked">0</span>
-          </button>
-          <button
-            class="basket-tab active"
-            data-basket="unseen"
-            onclick="switchBasket(this)"
-          >
-            <span class="basket-dot"></span>
-            <span data-i18n="basket_unreviewed">Unreviewed</span>
-            <span class="basket-count" id="countUnseen">0</span>
-          </button>
-          <button
-            class="basket-tab"
-            data-basket="passed"
-            onclick="switchBasket(this)"
-          >
-            <span class="basket-dot"></span>
-            <span data-i18n="basket_passed">Passed</span>
-            <span class="basket-count" id="countPassed">0</span>
-          </button>
-        </div>
-
-        <div class="catalog-filters">
+        <div class="sidebar-search-wrap">
+          <span class="sidebar-search-icon" aria-hidden="true"
+            ><svg width="12" height="12" viewBox="0 0 12 12">
+              <circle
+                cx="5"
+                cy="5"
+                r="3.5"
+                fill="none"
+                stroke="#8A867C"
+                stroke-width="1.4"
+              ></circle>
+              <line
+                x1="8"
+                y1="8"
+                x2="11"
+                y2="11"
+                stroke="#8A867C"
+                stroke-width="1.4"
+              ></line></svg
+          ></span>
           <input
             type="text"
-            class="catalog-search"
-            id="catalogSearch"
-            placeholder="Search by title, organization, location..."
-            data-i18n-ph="search_vacancies_ph"
-            oninput="renderCatalog()"
+            class="sidebar-search"
+            id="sidebarSearch"
+            readonly
+            data-i18n-ph="nav_search"
+            placeholder="Search"
           />
-          <select
-            class="catalog-org-filter"
-            id="catalogOrgFilter"
-            onchange="renderCatalog()"
+          <span class="sidebar-search-kbd" aria-hidden="true">&#8984;K</span>
+        </div>
+
+        <nav class="sidebar-nav">
+          <button
+            type="button"
+            class="nav-item"
+            id="navToday"
+            data-section="today"
+            onclick="switchMode('today')"
           >
-            <option value="" data-i18n="all_companies">All companies</option>
-          </select>
-          <div class="catalog-loc-chips">
+            <span class="nav-icon" aria-hidden="true"
+              ><svg width="15" height="15" viewBox="0 0 14 14">
+                <circle cx="7" cy="7" r="3.2" fill="#C99A2C"></circle>
+                <line
+                  x1="7"
+                  y1="0.8"
+                  x2="7"
+                  y2="2.6"
+                  stroke="#C99A2C"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                ></line>
+                <line
+                  x1="7"
+                  y1="11.4"
+                  x2="7"
+                  y2="13.2"
+                  stroke="#C99A2C"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                ></line>
+                <line
+                  x1="0.8"
+                  y1="7"
+                  x2="2.6"
+                  y2="7"
+                  stroke="#C99A2C"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                ></line>
+                <line
+                  x1="11.4"
+                  y1="7"
+                  x2="13.2"
+                  y2="7"
+                  stroke="#C99A2C"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                ></line></svg
+            ></span>
+            <span class="nav-label" data-i18n="tab_today">Today</span>
+          </button>
+
+          <button
+            type="button"
+            class="nav-item"
+            id="navVacancies"
+            data-section="vacancies"
+            onclick="switchVacancies()"
+          >
+            <span class="nav-icon" aria-hidden="true"
+              ><svg width="15" height="15" viewBox="0 0 14 14">
+                <rect
+                  x="1.5"
+                  y="2"
+                  width="11"
+                  height="2.6"
+                  rx="1.3"
+                  fill="#2545D3"
+                ></rect>
+                <rect
+                  x="1.5"
+                  y="6"
+                  width="11"
+                  height="2.6"
+                  rx="1.3"
+                  fill="#2545D3"
+                  opacity=".6"
+                ></rect>
+                <rect
+                  x="1.5"
+                  y="10"
+                  width="7"
+                  height="2.6"
+                  rx="1.3"
+                  fill="#2545D3"
+                  opacity=".35"
+                ></rect></svg
+            ></span>
+            <span class="nav-label" data-i18n="tab_vacancies">Vacancies</span>
+            <span
+              class="nav-count nav-count--cobalt"
+              id="navCountVacancies"
+            ></span>
+          </button>
+          <div class="nav-subitems" id="navSubVacancies">
             <button
-              class="chip"
-              data-cloc="europe"
-              onclick="toggleCatalogLoc(this)"
-              data-i18n="loc_europe"
+              type="button"
+              class="nav-subitem"
+              id="navSubBrowse"
+              onclick="switchMode('catalog')"
             >
-              Europe
+              <span class="nav-label" data-i18n="vsub_browse">Browse</span>
             </button>
             <button
-              class="chip"
-              data-cloc="us"
-              onclick="toggleCatalogLoc(this)"
-              data-i18n="loc_us"
+              type="button"
+              class="nav-subitem"
+              id="navSubGeo"
+              onclick="switchMode('stats')"
             >
-              US
+              <span class="nav-label" data-i18n="tab_geo">Geo</span>
             </button>
             <button
-              class="chip"
-              data-cloc="remote"
-              onclick="toggleCatalogLoc(this)"
-              data-i18n="loc_remote"
+              type="button"
+              class="nav-subitem"
+              id="navSubArchive"
+              onclick="switchMode('archive')"
             >
-              Remote
-            </button>
-            <button
-              class="chip"
-              data-cloc="other"
-              onclick="toggleCatalogLoc(this)"
-              data-i18n="loc_other"
-            >
-              Other
+              <span class="nav-label" data-i18n="tab_archive">Archive</span>
             </button>
           </div>
-          <button
-            class="chip catalog-sort-btn active"
-            onclick="toggleCatalogSort(this)"
-          >
-            <span data-i18n="sort_score">Score</span>&#160;&#8595;
-          </button>
-          <button
-            class="chip catalog-showall-btn"
-            onclick="toggleCatalogShowAll(this)"
-            data-i18n="catalog_show_all"
-          >
-            Show all
-          </button>
-        </div>
 
-        <div class="catalog-results-count" id="catalogResultsCount"></div>
-        <div class="catalog-grid" id="catalogGrid"></div>
-      </div>
-      <!-- /catalog-section -->
+          <button
+            type="button"
+            class="nav-item"
+            id="navCompanies"
+            data-section="companies"
+            onclick="switchMode('companies')"
+          >
+            <span class="nav-icon" aria-hidden="true"
+              ><svg width="15" height="15" viewBox="0 0 14 14">
+                <rect
+                  x="1.8"
+                  y="4"
+                  width="4.6"
+                  height="8.5"
+                  rx="1.3"
+                  fill="#0E7A55"
+                  opacity=".85"
+                ></rect>
+                <rect
+                  x="7.6"
+                  y="1.5"
+                  width="4.6"
+                  height="11"
+                  rx="1.3"
+                  fill="#0E7A55"
+                ></rect></svg
+            ></span>
+            <span class="nav-label" data-i18n="tab_companies">Companies</span>
+            <span class="nav-count" id="navCountCompanies"></span>
+          </button>
 
-      <!-- === COMPANIES MODE === -->
-      <div class="companies-section" id="companiesSection">
-        <div class="gf-companion">
-          <img
-            src="images/illus-companies.png"
-            data-img="illus-companies"
-            alt="Illustration of companies being reviewed"
-          />
-        </div>
-        <div class="gf-accent">
-          <img
-            src="images/accent-companies.png"
-            data-img="accent-companies"
-            alt=""
-          />
-        </div>
-        <div class="company-sub-tabs" id="companySubTabs">
           <button
-            class="company-sub-tab active"
-            data-subtab="approved"
-            onclick="switchCompanySubTab('approved')"
-            data-i18n="subtab_approved"
+            type="button"
+            class="nav-item"
+            id="navApplications"
+            data-section="applications"
+            onclick="switchApplications()"
           >
-            Approved
-          </button>
-          <button
-            class="company-sub-tab"
-            data-subtab="pending"
-            onclick="switchCompanySubTab('pending')"
-            data-i18n="subtab_pending"
-          >
-            Pending Review
-          </button>
-          <button
-            class="company-sub-tab"
-            data-subtab="archived"
-            onclick="switchCompanySubTab('archived')"
-            data-i18n="subtab_archived"
-          >
-            Archived
-          </button>
-        </div>
-        <div class="companies-filters">
-          <input
-            type="text"
-            class="catalog-search"
-            id="companySearch"
-            placeholder="Search by company, description, location..."
-            data-i18n-ph="search_companies_ph"
-            oninput="renderCompanies()"
-          />
-          <select
-            class="catalog-org-filter"
-            id="companyTierFilter"
-            onchange="renderCompanies()"
-          >
-            <option value="" data-i18n="all_tiers">All tiers</option>
-            <option value="S" data-i18n="tier_s">S — Strategic</option>
-            <option value="A" data-i18n="tier_a">A — Strong Fit</option>
-            <option value="B" data-i18n="tier_b">B — Monitor</option>
-            <option value="C" data-i18n="tier_c">C — Low Priority</option>
-            <option value="__unscored" data-i18n="tier_unscored">
-              — Unscored
-            </option>
-          </select>
-          <div class="company-sort-chips">
-            <button
-              class="chip chip-sort active"
-              data-csort="applyable"
-              onclick="toggleCompanySort(this)"
+            <span class="nav-icon" aria-hidden="true"
+              ><svg width="15" height="15" viewBox="0 0 14 14">
+                <path
+                  d="M1.5 3.5h11v7.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z"
+                  fill="#B3262E"
+                  opacity=".85"
+                ></path>
+                <path
+                  d="M1.5 3.5L7 8l5.5-4.5"
+                  fill="none"
+                  stroke="#fff"
+                  stroke-width="1.2"
+                ></path></svg
+            ></span>
+            <span class="nav-label" data-i18n="tab_applications"
+              >Applications</span
             >
-              <span data-i18n="csort_applyable">Applyable</span> &#8595;
+          </button>
+          <div class="nav-subitems" id="navSubApplications">
+            <button
+              type="button"
+              class="nav-subitem"
+              id="navSubApplied"
+              onclick="switchMode('applications')"
+            >
+              <span class="nav-label" data-i18n="app_status_applied"
+                >Applied</span
+              >
             </button>
             <button
-              class="chip chip-sort"
-              data-csort="liked"
-              onclick="toggleCompanySort(this)"
+              type="button"
+              class="nav-subitem"
+              id="navSubTriage"
+              onclick="switchMode('pipeline')"
             >
-              <span data-i18n="csort_liked">Liked</span>
-            </button>
-            <button
-              class="chip chip-sort"
-              data-csort="score"
-              onclick="toggleCompanySort(this)"
-              data-i18n="csort_score"
-            >
-              Score
-            </button>
-            <button
-              class="chip chip-sort"
-              data-csort="interest"
-              onclick="toggleCompanySort(this)"
-              data-i18n="csort_interest"
-            >
-              Interest
+              <span class="nav-label" data-i18n="tab_triage">Triage</span>
             </button>
           </div>
-        </div>
-        <div class="company-enrichment-stats" id="companyEnrichmentStats"></div>
-        <div class="ces-shown" id="companyShownCount"></div>
-        <div class="companies-grid" id="companiesGrid"></div>
-      </div>
-      <!-- /companies-section -->
 
-      <!-- === STATS MODE === -->
-      <div class="stats-section" id="statsSection"></div>
-
-      <!-- === ARCHIVE MODE === -->
-      <div class="archive-section" id="archiveSection">
-        <div class="gf-companion">
-          <img
-            src="images/illus-archive.png"
-            data-img="illus-archive"
-            alt="Illustration of the vacancy archive"
-          />
-        </div>
-        <div class="gf-accent">
-          <img
-            src="images/accent-archive.png"
-            data-img="accent-archive"
-            alt=""
-          />
-        </div>
-        <div class="archive-intro">
-          <h2 class="archive-title">
-            &#128230; <span data-i18n="archive_title">Vacancy archive</span>
-          </h2>
-          <p class="archive-sub" data-i18n="archive_sub">
-            Vacancies archived from earlier runs. View only.
-          </p>
-        </div>
-        <div class="catalog-filters">
-          <input
-            type="text"
-            class="catalog-search"
-            id="archiveSearch"
-            placeholder="Search by title, organization, location..."
-            data-i18n-ph="search_vacancies_ph"
-            oninput="renderArchive()"
-          />
-          <select
-            class="catalog-org-filter"
-            id="archiveOrgFilter"
-            autocomplete="off"
-            onchange="renderArchive()"
+          <button
+            type="button"
+            class="nav-item"
+            id="navBoards"
+            data-section="boards"
+            onclick="switchMode('boards')"
           >
-            <option value="" data-i18n="all_companies">All companies</option>
-          </select>
-        </div>
-        <div class="catalog-results-count" id="archiveResultsCount"></div>
-        <div class="catalog-grid" id="archiveGrid"></div>
-      </div>
-      <!-- /archive-section -->
+            <span class="nav-icon" aria-hidden="true"
+              ><svg width="15" height="15" viewBox="0 0 14 14">
+                <rect
+                  x="1.5"
+                  y="7"
+                  width="2.8"
+                  height="5.5"
+                  rx="1"
+                  fill="#7C5CE0"
+                  opacity=".55"
+                ></rect>
+                <rect
+                  x="5.6"
+                  y="4"
+                  width="2.8"
+                  height="8.5"
+                  rx="1"
+                  fill="#7C5CE0"
+                  opacity=".75"
+                ></rect>
+                <rect
+                  x="9.7"
+                  y="1.5"
+                  width="2.8"
+                  height="11"
+                  rx="1"
+                  fill="#7C5CE0"
+                ></rect></svg
+            ></span>
+            <span class="nav-label" data-i18n="tab_boards">Boards</span>
+          </button>
+        </nav>
 
-      <!-- === BOARDS MODE === -->
-      <div class="boards-section" id="boardsSection">
-        <div class="boards-intro">
-          <h2 class="boards-title">
-            &#128202; <span data-i18n="boards_title">Job boards</span>
-          </h2>
-          <p class="boards-sub" data-i18n="boards_sub">
-            Live status of the aggregators feeding the pipeline.
-          </p>
+        <div class="sidebar-footer">
+          <button
+            type="button"
+            class="nav-item"
+            id="navSettings"
+            data-section="settings"
+            onclick="switchMode('settings')"
+          >
+            <span class="nav-icon" aria-hidden="true"
+              ><svg width="14" height="14" viewBox="0 0 14 14">
+                <line
+                  x1="2"
+                  y1="4"
+                  x2="12"
+                  y2="4"
+                  stroke="#8A867C"
+                  stroke-width="1.4"
+                ></line>
+                <circle
+                  cx="9"
+                  cy="4"
+                  r="1.9"
+                  fill="#fff"
+                  stroke="#8A867C"
+                  stroke-width="1.4"
+                ></circle>
+                <line
+                  x1="2"
+                  y1="10"
+                  x2="12"
+                  y2="10"
+                  stroke="#8A867C"
+                  stroke-width="1.4"
+                ></line>
+                <circle
+                  cx="5"
+                  cy="10"
+                  r="1.9"
+                  fill="#fff"
+                  stroke="#8A867C"
+                  stroke-width="1.4"
+                ></circle></svg
+            ></span>
+            <span class="nav-label" data-i18n="tab_settings">Settings</span>
+          </button>
+          <div class="sidebar-lang" id="sidebarLangHost"></div>
+          <div class="sidebar-sync" id="sidebarSync">
+            <span class="sync-dot" id="syncDot"></span>
+            <span class="nav-label sync-label" id="syncLabel"></span>
+          </div>
         </div>
-        <div class="boards-grid" id="boardsGrid"></div>
-      </div>
-      <!-- /boards-section -->
+      </aside>
 
-      <!-- === APPLICATIONS MODE ===
+      <div class="main-area">
+        <div class="container">
+          <div id="syncIndicator" class="sync-indicator"></div>
+
+          <!-- === VACANCIES SUB-NAV (Browse / Geo / Archive) ===
+               Narrow widths (<900px) only: the sidebar's inline sub-items
+               collapse with it, so this pill row takes over as the way to
+               reach them while the Vacancies section is active. Hidden at
+               desktop widths (style.css) where the sidebar shows them inline. -->
+          <div class="vacancy-sub-nav" id="vacancySubNav">
+            <button
+              class="vacancy-sub-tab"
+              id="vsubBrowse"
+              onclick="switchMode('catalog')"
+            >
+              <span data-i18n="vsub_browse">Browse</span>
+            </button>
+            <button
+              class="vacancy-sub-tab"
+              id="vsubGeo"
+              onclick="switchMode('stats')"
+            >
+              <span data-i18n="tab_geo">Geo</span>
+            </button>
+            <button
+              class="vacancy-sub-tab"
+              id="vsubArchive"
+              onclick="switchMode('archive')"
+            >
+              <span data-i18n="tab_archive">Archive</span>
+            </button>
+          </div>
+
+          <!-- === APPLICATIONS SUB-NAV (Applications / Triage) ===
+               Same narrow-width role as vacancySubNav above, for the
+               Applications section. -->
+          <div class="applications-sub-nav" id="applicationsSubNav">
+            <button
+              class="applications-sub-tab"
+              id="asubApplications"
+              onclick="switchMode('applications')"
+            >
+              <span data-i18n="tab_applications">Applications</span>
+            </button>
+            <button
+              class="applications-sub-tab"
+              id="asubTriage"
+              onclick="switchMode('pipeline')"
+            >
+              <span data-i18n="tab_triage">Triage</span>
+            </button>
+          </div>
+
+          <!-- === TODAY MODE === -->
+          <div class="today-section" id="todaySection"></div>
+          <!-- /today-section -->
+
+          <!-- === CATALOG MODE === -->
+          <div class="catalog-section active" id="catalogSection">
+            <div class="catalog-loading" id="catalogLoading">
+              <img
+                src="images/illus-catalog.png"
+                data-img="illus-catalog"
+                alt="Illustration of a figure reviewing job listings"
+                class="loading-illus"
+              />
+              <p class="loading-text" data-i18n="loading_vacancies">
+                Sorting vacancies…
+              </p>
+            </div>
+
+            <div class="gf-companion">
+              <img
+                src="images/illus-catalog.png"
+                data-img="illus-catalog"
+                alt="Illustration of a figure reviewing job listings"
+              />
+            </div>
+            <div class="gf-accent">
+              <img
+                src="images/accent-catalog.png"
+                data-img="accent-catalog"
+                alt=""
+              />
+            </div>
+
+            <div class="basket-tabs">
+              <button
+                class="basket-tab"
+                data-basket="liked"
+                onclick="switchBasket(this)"
+              >
+                <span class="basket-dot"></span>
+                <span data-i18n="basket_liked">Liked</span>
+                <span class="basket-count" id="countLiked">0</span>
+              </button>
+              <button
+                class="basket-tab active"
+                data-basket="unseen"
+                onclick="switchBasket(this)"
+              >
+                <span class="basket-dot"></span>
+                <span data-i18n="basket_unreviewed">Unreviewed</span>
+                <span class="basket-count" id="countUnseen">0</span>
+              </button>
+              <button
+                class="basket-tab"
+                data-basket="passed"
+                onclick="switchBasket(this)"
+              >
+                <span class="basket-dot"></span>
+                <span data-i18n="basket_passed">Passed</span>
+                <span class="basket-count" id="countPassed">0</span>
+              </button>
+            </div>
+
+            <div class="catalog-filters">
+              <input
+                type="text"
+                class="catalog-search"
+                id="catalogSearch"
+                placeholder="Search by title, organization, location..."
+                data-i18n-ph="search_vacancies_ph"
+                oninput="renderCatalog()"
+              />
+              <select
+                class="catalog-org-filter"
+                id="catalogOrgFilter"
+                onchange="renderCatalog()"
+              >
+                <option value="" data-i18n="all_companies">
+                  All companies
+                </option>
+              </select>
+              <div class="catalog-loc-chips">
+                <button
+                  class="chip"
+                  data-cloc="europe"
+                  onclick="toggleCatalogLoc(this)"
+                  data-i18n="loc_europe"
+                >
+                  Europe
+                </button>
+                <button
+                  class="chip"
+                  data-cloc="us"
+                  onclick="toggleCatalogLoc(this)"
+                  data-i18n="loc_us"
+                >
+                  US
+                </button>
+                <button
+                  class="chip"
+                  data-cloc="remote"
+                  onclick="toggleCatalogLoc(this)"
+                  data-i18n="loc_remote"
+                >
+                  Remote
+                </button>
+                <button
+                  class="chip"
+                  data-cloc="other"
+                  onclick="toggleCatalogLoc(this)"
+                  data-i18n="loc_other"
+                >
+                  Other
+                </button>
+              </div>
+              <button
+                class="chip catalog-sort-btn active"
+                onclick="toggleCatalogSort(this)"
+              >
+                <span data-i18n="sort_score">Score</span>&#160;&#8595;
+              </button>
+              <button
+                class="chip catalog-showall-btn"
+                onclick="toggleCatalogShowAll(this)"
+                data-i18n="catalog_show_all"
+              >
+                Show all
+              </button>
+            </div>
+
+            <div class="catalog-results-count" id="catalogResultsCount"></div>
+            <div class="catalog-grid" id="catalogGrid"></div>
+          </div>
+          <!-- /catalog-section -->
+
+          <!-- === COMPANIES MODE === -->
+          <div class="companies-section" id="companiesSection">
+            <div class="gf-companion">
+              <img
+                src="images/illus-companies.png"
+                data-img="illus-companies"
+                alt="Illustration of companies being reviewed"
+              />
+            </div>
+            <div class="gf-accent">
+              <img
+                src="images/accent-companies.png"
+                data-img="accent-companies"
+                alt=""
+              />
+            </div>
+            <div class="company-sub-tabs" id="companySubTabs">
+              <button
+                class="company-sub-tab active"
+                data-subtab="approved"
+                onclick="switchCompanySubTab('approved')"
+                data-i18n="subtab_approved"
+              >
+                Approved
+              </button>
+              <button
+                class="company-sub-tab"
+                data-subtab="pending"
+                onclick="switchCompanySubTab('pending')"
+                data-i18n="subtab_pending"
+              >
+                Pending Review
+              </button>
+              <button
+                class="company-sub-tab"
+                data-subtab="archived"
+                onclick="switchCompanySubTab('archived')"
+                data-i18n="subtab_archived"
+              >
+                Archived
+              </button>
+            </div>
+            <div class="companies-filters">
+              <input
+                type="text"
+                class="catalog-search"
+                id="companySearch"
+                placeholder="Search by company, description, location..."
+                data-i18n-ph="search_companies_ph"
+                oninput="renderCompanies()"
+              />
+              <select
+                class="catalog-org-filter"
+                id="companyTierFilter"
+                onchange="renderCompanies()"
+              >
+                <option value="" data-i18n="all_tiers">All tiers</option>
+                <option value="S" data-i18n="tier_s">S — Strategic</option>
+                <option value="A" data-i18n="tier_a">A — Strong Fit</option>
+                <option value="B" data-i18n="tier_b">B — Monitor</option>
+                <option value="C" data-i18n="tier_c">C — Low Priority</option>
+                <option value="__unscored" data-i18n="tier_unscored">
+                  — Unscored
+                </option>
+              </select>
+              <div class="company-sort-chips">
+                <button
+                  class="chip chip-sort active"
+                  data-csort="applyable"
+                  onclick="toggleCompanySort(this)"
+                >
+                  <span data-i18n="csort_applyable">Applyable</span> &#8595;
+                </button>
+                <button
+                  class="chip chip-sort"
+                  data-csort="liked"
+                  onclick="toggleCompanySort(this)"
+                >
+                  <span data-i18n="csort_liked">Liked</span>
+                </button>
+                <button
+                  class="chip chip-sort"
+                  data-csort="score"
+                  onclick="toggleCompanySort(this)"
+                  data-i18n="csort_score"
+                >
+                  Score
+                </button>
+                <button
+                  class="chip chip-sort"
+                  data-csort="interest"
+                  onclick="toggleCompanySort(this)"
+                  data-i18n="csort_interest"
+                >
+                  Interest
+                </button>
+              </div>
+            </div>
+            <div
+              class="company-enrichment-stats"
+              id="companyEnrichmentStats"
+            ></div>
+            <div class="ces-shown" id="companyShownCount"></div>
+            <div class="companies-grid" id="companiesGrid"></div>
+          </div>
+          <!-- /companies-section -->
+
+          <!-- === STATS MODE === -->
+          <div class="stats-section" id="statsSection"></div>
+
+          <!-- === ARCHIVE MODE === -->
+          <div class="archive-section" id="archiveSection">
+            <div class="gf-companion">
+              <img
+                src="images/illus-archive.png"
+                data-img="illus-archive"
+                alt="Illustration of the vacancy archive"
+              />
+            </div>
+            <div class="gf-accent">
+              <img
+                src="images/accent-archive.png"
+                data-img="accent-archive"
+                alt=""
+              />
+            </div>
+            <div class="archive-intro">
+              <h2 class="archive-title">
+                &#128230; <span data-i18n="archive_title">Vacancy archive</span>
+              </h2>
+              <p class="archive-sub" data-i18n="archive_sub">
+                Vacancies archived from earlier runs. View only.
+              </p>
+            </div>
+            <div class="catalog-filters">
+              <input
+                type="text"
+                class="catalog-search"
+                id="archiveSearch"
+                placeholder="Search by title, organization, location..."
+                data-i18n-ph="search_vacancies_ph"
+                oninput="renderArchive()"
+              />
+              <select
+                class="catalog-org-filter"
+                id="archiveOrgFilter"
+                autocomplete="off"
+                onchange="renderArchive()"
+              >
+                <option value="" data-i18n="all_companies">
+                  All companies
+                </option>
+              </select>
+            </div>
+            <div class="catalog-results-count" id="archiveResultsCount"></div>
+            <div class="catalog-grid" id="archiveGrid"></div>
+          </div>
+          <!-- /archive-section -->
+
+          <!-- === BOARDS MODE === -->
+          <div class="boards-section" id="boardsSection">
+            <div class="boards-intro">
+              <h2 class="boards-title">
+                &#128202; <span data-i18n="boards_title">Job boards</span>
+              </h2>
+              <p class="boards-sub" data-i18n="boards_sub">
+                Live status of the aggregators feeding the pipeline.
+              </p>
+            </div>
+            <div class="boards-grid" id="boardsGrid"></div>
+          </div>
+          <!-- /boards-section -->
+
+          <!-- === APPLICATIONS MODE ===
            Roles you've applied to, grouped by company. Rendered from the baked
            payload (groups[].application) — status + channel + date + artifact
            KEYS only, never private values. -->
-      <div class="applications-section" id="applicationsSection"></div>
-      <!-- /applications-section -->
+          <div class="applications-section" id="applicationsSection"></div>
+          <!-- /applications-section -->
 
-      <!-- === PIPELINE MODE (Triage sub-tab under Applications) ===
+          <!-- === PIPELINE MODE (Triage sub-tab under Applications) ===
            Used to be a sub-tab under Vacancies; moved here because triaging
            is the step that turns a liked vacancy into an application. -->
-      <div class="pipeline-section" id="pipelineSection">
-        <div class="gf-companion">
-          <img
-            src="images/illus-pipeline.png"
-            data-img="illus-pipeline"
-            alt="Illustration of the triage pipeline"
-          />
-        </div>
-        <div class="gf-accent">
-          <img
-            src="images/accent-pipeline.png"
-            data-img="accent-pipeline"
-            alt=""
-          />
-        </div>
-        <div class="triage-funnel" id="triageFunnel"></div>
-        <div class="triage-board-controls" id="triageBoardControls"></div>
-        <div class="pipeline-board" id="pipelineBoard"></div>
-      </div>
-      <!-- /pipeline-section -->
+          <div class="pipeline-section" id="pipelineSection">
+            <div class="gf-companion">
+              <img
+                src="images/illus-pipeline.png"
+                data-img="illus-pipeline"
+                alt="Illustration of the triage pipeline"
+              />
+            </div>
+            <div class="gf-accent">
+              <img
+                src="images/accent-pipeline.png"
+                data-img="accent-pipeline"
+                alt=""
+              />
+            </div>
+            <div class="triage-funnel" id="triageFunnel"></div>
+            <div class="triage-board-controls" id="triageBoardControls"></div>
+            <div class="pipeline-board" id="pipelineBoard"></div>
+          </div>
+          <!-- /pipeline-section -->
 
-      <!-- === SETTINGS MODE ===
+          <!-- === SETTINGS MODE ===
            Read-only display of the RESOLVED dials baked by the generator
            (volume, scoring model tier, thresholds), each with the one line to
            change it. No editing UI. -->
-      <div class="settings-section" id="settingsSection"></div>
-      <!-- /settings-section -->
+          <div class="settings-section" id="settingsSection"></div>
+          <!-- /settings-section -->
 
-      <!-- === COMPANY PROFILE PAGE === -->
-      <div class="company-profile-page" id="companyProfile"></div>
+          <!-- === COMPANY PROFILE PAGE === -->
+          <div class="company-profile-page" id="companyProfile"></div>
+        </div>
+      </div>
     </div>
 
     <!-- bootstrap.js fetches /api/vacancies (live, full mode), falls back to a

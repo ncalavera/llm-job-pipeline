@@ -35,6 +35,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "tab_archive": "Archive",
         "vsub_browse": "Browse",
         "updated_prefix": "Updated:",
+        # Sidebar (U3): search affordance + sync-status footer
+        "nav_search": "Search",
+        "sync_checking": "Checking…",
+        "sync_live": "Live",
+        "sync_stale": "Stale snapshot",
+        "sync_error": "Sync error",
         # Applyable-roles count (U6)
         "col_applyable": "Applyable / Total",
         "badge_applyable": "applyable",
@@ -320,6 +326,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "tab_archive": "Архив",
         "vsub_browse": "Список",
         "updated_prefix": "Обновлено:",
+        # Sidebar (U3): search affordance + sync-status footer
+        "nav_search": "Поиск",
+        "sync_checking": "Проверка…",
+        "sync_live": "Актуально",
+        "sync_stale": "Устаревший снимок",
+        "sync_error": "Ошибка синхронизации",
         # Applyable-roles count (U6)
         "col_applyable": "Годные / Всего",
         "badge_applyable": "годных",

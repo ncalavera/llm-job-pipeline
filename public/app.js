@@ -7,11 +7,16 @@ import {
   API_BASE,
   config,
   companiesBySlug,
+  groups,
+  STATUS_BASKET,
+  getGroupStatus,
+  isGroupCompanyApproved,
+  getCompanies,
   on,
   emit,
   scheduleRender,
 } from "./modules/state.js";
-import { initUI, showToast } from "./modules/helpers.js";
+import { initUI, showToast, isVacancyExpired } from "./modules/helpers.js";
 import {
   applyI18n,
   T,
@@ -25,6 +30,7 @@ import {
   loadCompanyStatuses,
   loadCompanies,
 } from "./modules/api.js";
+import { VISIBLE_MIN_SCORE, basketCounts } from "./modules/derive.js";
 import {
   initCatalog,
   updateBasketCounts,
@@ -67,6 +73,7 @@ import {
   sectionForMode,
   isVacancyView,
   isApplicationsView,
+  syncStatusLabelKey,
 } from "./modules/nav.js";
 
 // ---------------------------------------------------------------------------
@@ -82,13 +89,21 @@ initUI();
 
 applyI18n();
 renderLanguageSwitch();
+// Nav counts/sync footer don't depend on statuses/companies finishing their
+// load (groups/companies are already available — state.js destructures them
+// synchronously from VACANCY_DATA), so paint them once immediately. This also
+// covers the cold-deep-link-to-a-company path in initDefault() below, which
+// renders the profile directly without going through switchMode().
+updateNavCounts();
+renderSyncFooter();
 
-// Render an EN/RU toggle into the top nav. Hidden when only one language is
-// baked. Clicking persists the choice and reloads so every view re-renders.
+// Render an EN/RU toggle into the sidebar footer. Hidden when only one
+// language is baked. Clicking persists the choice and reloads so every view
+// re-renders.
 function renderLanguageSwitch() {
   var langs = availableLanguages();
   if (langs.length < 2) return;
-  var host = document.querySelector(".top-nav-right");
+  var host = document.getElementById("sidebarLangHost");
   if (!host) return;
 
   var wrap = document.createElement("div");
@@ -118,6 +133,91 @@ function renderLanguageSwitch() {
 })();
 
 // ---------------------------------------------------------------------------
+// Sidebar nav counts (U3) — quiet mono counts derived client-side from live
+// state. The Vacancies count reuses derive.js's basketCounts with the exact
+// same visibility options catalog.js's own "Unreviewed" badge uses, so the
+// sidebar can never disagree with what Browse shows (badge==list, DHA-374).
+// Today's and Triage's counts are deliberately NOT shown yet: computing them
+// correctly needs private, stateful helpers inside today.js/pipeline.js
+// (today.js's "since last visit" cursor, pipeline.js's board bucketing) that
+// aren't exported — pipeline's derivation is U12's job. Showing an
+// approximate number that could disagree with those screens' own lists would
+// violate the same badge==list invariant this reuses.
+// ---------------------------------------------------------------------------
+
+function navVisOpts() {
+  return {
+    isApproved: isGroupCompanyApproved,
+    getStatus: getGroupStatus,
+    isExpired: isVacancyExpired,
+    basketMap: STATUS_BASKET,
+    minScore: state.catalogShowAll ? null : VISIBLE_MIN_SCORE,
+  };
+}
+
+function updateNavCounts() {
+  var vacEl = document.getElementById("navCountVacancies");
+  if (vacEl) vacEl.textContent = basketCounts(groups, navVisOpts()).unseen;
+  var compEl = document.getElementById("navCountCompanies");
+  if (compEl) compEl.textContent = getCompanies().length;
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar sync-status footer (U3) — reads state.sync (advanced by
+// bootstrap.js on every poll outcome, see nav.js's state machine) and renders
+// a fixed, translated label plus the existing "last updated" date. The label
+// is ALWAYS one of the four fixed words below — never raw exception detail.
+// ---------------------------------------------------------------------------
+
+// Locale-aware "last updated" date (R16) — previously the top-nav's
+// #heroDate; now folds into the sync line ("Live · 3 July 2026"),
+// matching the design mock's "Synced · Jul 3" footer pattern.
+function formattedUpdatedDate() {
+  var raw = (config && config.last_updated) || "";
+  if (!raw) return "";
+  var locale = (config && config.language) === "ru" ? "ru-RU" : "en-US";
+  try {
+    var d = new Date(raw);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString(locale, {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      });
+    }
+  } catch (e) {
+    /* ignore parse errors */
+  }
+  return "";
+}
+
+// Called at top-level on load (before this module's own const bindings below
+// would be safe to touch, per JS's temporal dead zone) and again on every
+// "render" — kept function-scoped so there's no module-level const for that
+// early call to trip over.
+function renderSyncFooter() {
+  var SYNC_FALLBACK = {
+    checking: "Checking…",
+    ok: "Live",
+    stale: "Stale snapshot",
+    error: "Sync error",
+  };
+  var dot = document.getElementById("syncDot");
+  var label = document.getElementById("syncLabel");
+  if (!dot || !label) return;
+  var status = (state.sync && state.sync.status) || "checking";
+  dot.className = "sync-dot " + status;
+  label.className = "nav-label sync-label " + status;
+  var word = T(
+    syncStatusLabelKey(status),
+    SYNC_FALLBACK[status] || SYNC_FALLBACK.checking,
+  );
+  var date =
+    status === "ok" || status === "stale" ? formattedUpdatedDate() : "";
+  label.textContent = date ? word + " · " + date : word;
+}
+
+// ---------------------------------------------------------------------------
 // Event wiring — statusChanged triggers save, toast, re-render
 // ---------------------------------------------------------------------------
 
@@ -129,6 +229,8 @@ on("statusChanged", ({ status }) => {
 
 on("render", () => {
   updateBasketCounts();
+  updateNavCounts();
+  renderSyncFooter();
   renderCatalog();
   if (state.currentMode === "today") renderToday();
   if (state.currentMode === "companies") renderCompanies();
@@ -193,48 +295,66 @@ function switchMode(mode) {
     if (el) el.classList.toggle("active", leaf === mode);
   });
 
-  // Top-nav active state follows the SECTION, not the leaf (so the whole
-  // Vacancies hub stays highlighted across its sub-views).
+  // Sidebar section active state follows the SECTION, not the leaf (so the
+  // whole Vacancies/Applications hub stays highlighted across its sub-views).
+  // Shared by the desktop sidebar and the narrow icon rail (same elements).
   var navBtns = {
-    today: "modeToday",
-    vacancies: "modeVacancies",
-    companies: "modeCompanies",
-    applications: "modeApplications",
-    boards: "modeBoards",
-    settings: "modeSettings",
+    today: "navToday",
+    vacancies: "navVacancies",
+    companies: "navCompanies",
+    applications: "navApplications",
+    boards: "navBoards",
+    settings: "navSettings",
   };
   Object.keys(navBtns).forEach(function (sec) {
     var btn = document.getElementById(navBtns[sec]);
     if (btn) btn.classList.toggle("active", sec === section);
   });
 
-  // Vacancies sub-nav: visible only inside the Vacancies section; the active
-  // sub-tab tracks the leaf.
-  var subNav = document.getElementById("vacancySubNav");
-  if (subNav) subNav.style.display = section === "vacancies" ? "" : "none";
+  // Sidebar sub-items are always expanded inline (Linear-style, protocol
+  // section 4) — no visibility toggle, just the active state tracking the
+  // leaf.
   var subBtns = {
-    catalog: "vsubBrowse",
-    stats: "vsubGeo",
-    archive: "vsubArchive",
+    catalog: "navSubBrowse",
+    stats: "navSubGeo",
+    archive: "navSubArchive",
+    applications: "navSubApplied",
+    pipeline: "navSubTriage",
   };
   Object.keys(subBtns).forEach(function (leaf) {
     var btn = document.getElementById(subBtns[leaf]);
     if (btn) btn.classList.toggle("active", leaf === mode);
   });
 
-  // Applications sub-nav: visible only inside the Applications section; the
-  // active sub-tab tracks the leaf.
+  // Narrow-width (<900px) pill row: the sidebar collapses to an icon rail
+  // there, so this becomes the way to reach a hub's sub-views. CSS hides both
+  // rows entirely at desktop widths, where the sidebar's inline sub-items
+  // above already cover this — only one row is ever "active" at a time.
+  var subNav = document.getElementById("vacancySubNav");
+  if (subNav) subNav.classList.toggle("active", section === "vacancies");
+  var vsubBtns = {
+    catalog: "vsubBrowse",
+    stats: "vsubGeo",
+    archive: "vsubArchive",
+  };
+  Object.keys(vsubBtns).forEach(function (leaf) {
+    var btn = document.getElementById(vsubBtns[leaf]);
+    if (btn) btn.classList.toggle("active", leaf === mode);
+  });
+
   var appsSubNav = document.getElementById("applicationsSubNav");
   if (appsSubNav)
-    appsSubNav.style.display = section === "applications" ? "" : "none";
-  var appsSubBtns = {
+    appsSubNav.classList.toggle("active", section === "applications");
+  var asubBtns = {
     applications: "asubApplications",
     pipeline: "asubTriage",
   };
-  Object.keys(appsSubBtns).forEach(function (leaf) {
-    var btn = document.getElementById(appsSubBtns[leaf]);
+  Object.keys(asubBtns).forEach(function (leaf) {
+    var btn = document.getElementById(asubBtns[leaf]);
     if (btn) btn.classList.toggle("active", leaf === mode);
   });
+
+  updateNavCounts();
 
   // Lazy-load images for the activated section.
   var activeSection = sectionMap[mode];
@@ -276,40 +396,6 @@ function switchVacancies() {
 function switchApplications() {
   switchMode(state.applicationsView || "applications");
 }
-
-// ---------------------------------------------------------------------------
-// Dynamic hero date formatting
-// ---------------------------------------------------------------------------
-
-(function updateHeroDate() {
-  var el = document.getElementById("heroDate");
-  if (!el) return;
-  var prefix = T("updated_prefix", "Updated:");
-  // Date source: any text already in the span, else the baked config timestamp.
-  var raw = el.textContent.replace(prefix, "").replace("Updated:", "").trim();
-  if (!raw || raw === "\u2014") {
-    raw = (config && config.last_updated) || "";
-  }
-  if (!raw) return;
-  var locale = (config && config.language) === "ru" ? "ru-RU" : "en-US";
-  try {
-    var d = new Date(raw);
-    if (!isNaN(d.getTime())) {
-      el.textContent =
-        prefix +
-        " " +
-        d.toLocaleDateString(locale, {
-          day: "numeric",
-          month: "long",
-          year: "numeric",
-        }) +
-        ", " +
-        d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
-    }
-  } catch (e) {
-    /* ignore parse errors */
-  }
-})();
 
 // ---------------------------------------------------------------------------
 // Browser back/forward for company profile
