@@ -751,6 +751,15 @@ function buildPaletteDom() {
     renderPaletteResults(true); // a new query resets the highlight to the top
   });
   _paletteDialog.addEventListener("keydown", paletteKeydown);
+  // Pin focus to the input: a mousedown on any non-input chrome (padding, group
+  // labels, an option, the empty state) would otherwise blur the input, after
+  // which Esc (the keydown listener is on the dialog, and focus jumps to body)
+  // and the Tab trap both stop working. Prevent that default focus shift; an
+  // option's click still fires (click is separate from mousedown), so choosing
+  // a result is unaffected.
+  _paletteDialog.addEventListener("mousedown", function (e) {
+    if (e.target !== _paletteInput) e.preventDefault();
+  });
   // Backdrop click (outside the dialog) closes.
   _paletteOverlay.addEventListener("click", function (e) {
     if (e.target === _paletteOverlay) closePalette();
@@ -942,14 +951,15 @@ document.addEventListener("keydown", function (e) {
   }
 });
 
-// The sidebar search input is now a real palette trigger (its readonly hack is
-// dropped here, keeping index.html untouched). Focusing or clicking it opens
-// the palette and forwards focus to the palette input; the _restoringFocus
-// guard stops the close-time focus-return from reopening it.
+// The sidebar search input is now a real palette trigger. It stays `readonly`
+// (kept in index.html): a readonly input still receives focus/click, so it can
+// open the palette, and readonly stops the dead-typing state after Esc-close
+// returns focus to it. Focusing or clicking it opens the palette and forwards
+// focus to the palette input; the _restoringFocus guard stops the close-time
+// focus-return from reopening it.
 (function wireSidebarSearch() {
   var input = document.getElementById("sidebarSearch");
   if (!input) return;
-  input.removeAttribute("readonly");
   input.setAttribute("role", "button");
   input.setAttribute("aria-haspopup", "dialog");
   input.setAttribute("aria-keyshortcuts", "Meta+K Control+K");
