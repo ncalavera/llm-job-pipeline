@@ -1,14 +1,16 @@
 // =============================================================================
-// applications.js — Applications section: everything you've applied to, grouped
-// by company. Data comes straight from the baked payload (works offline): each
-// vacancy group carries an `application` projection (status + channel + date +
-// artifact KEYS only — no private values; see scripts/report/data_prep.py
-// _project_application). Archived vacancies carry it too, so a role you applied
-// to that later left the active list is not lost here.
+// applications.js — Applications section: everything you've applied to, as a
+// flat grid table (fit · role · company · stage · sent). Data comes straight
+// from the baked payload (works offline): each vacancy group carries an
+// `application` projection (status + channel + date + artifact KEYS only —
+// no private values; see scripts/report/data_prep.py _project_application).
+// Archived vacancies carry it too, so a role you applied to that later left
+// the active list is not lost here — it just renders without a link (its
+// vacancy page would 404, same reasoning as archive.js).
 // =============================================================================
 
-import { state, groups, archivedGroups } from "./state.js";
-import { escHtml, relativeTime, safeUrl } from "./helpers.js";
+import { state, groups, archivedGroups, groupsById } from "./state.js";
+import { escHtml, relativeTime, qualityBand, jsAttr } from "./helpers.js";
 import { T } from "./i18n.js";
 
 // Lifecycle statuses an application row can carry (applications.py
@@ -22,16 +24,13 @@ const STATUS_ORDER = [
   "withdrawn",
 ];
 
-function _vacUrl(g) {
-  const loc = (g.locations || []).find((l) => l && l.url);
-  return (loc && loc.url) || g.org_url || "";
-}
-
 // ---------------------------------------------------------------------------
 // Pure: collect applications from vacancy groups, grouped by company.
 // Deduplicated by vacancy id (a role may appear in both live + archived sets).
 // Returns [{ key, org, company_slug, org_color, apps:[{...}] }] sorted with the
 // most-recently-applied company first; apps within a company newest-first.
+// Kept grouped-by-company (rather than flattened) so its existing tests and
+// shape stay untouched; renderApplications flattens it for the grid table.
 // ---------------------------------------------------------------------------
 export function collectApplications(groupsArr, archivedArr) {
   const byCompany = new Map();
@@ -55,7 +54,6 @@ export function collectApplications(groupsArr, archivedArr) {
     byCompany.get(key).apps.push({
       id: g.id,
       title: g.title || "",
-      url: _vacUrl(g),
       status: a.status || "",
       channel: a.channel || "",
       applied_at: a.applied_at || "",
@@ -93,16 +91,39 @@ export function summarizeApplications(companies) {
 }
 
 // ---------------------------------------------------------------------------
-// Render
+// Render — grid table (U13, DHA-397, design-protocol.md #6).
 // ---------------------------------------------------------------------------
 
-function _statusLabel(status) {
-  return T("app_status_" + status, status || "—");
+function _statusLabel(status, t) {
+  const tf = t || T;
+  return tf("app_status_" + status, status || "—");
+}
+
+// Stage → chip color (design-protocol.md #1: colour = meaning). The lifecycle
+// has 6 statuses but only 4 genuinely distinct states worth a color:
+//   offer                -> good (a positive terminal outcome)
+//   applied / interview  -> moderate (in play, awaiting a response — the same
+//                           ochre the sidebar's sync-status already uses for
+//                           "pending/not-yet-resolved", not a quality score)
+//   rejected / withdrawn -> weak (a negative terminal outcome)
+//   draft                -> neutral (not sent yet, no outcome to signal)
+// None of this touches cobalt — cobalt stays reserved for interaction/selection.
+const STAGE_CHIP_CLASS = {
+  offer: "apl-stage-good",
+  applied: "apl-stage-moderate",
+  interview: "apl-stage-moderate",
+  rejected: "apl-stage-weak",
+  withdrawn: "apl-stage-weak",
+  draft: "apl-stage-neutral",
+};
+
+export function stageChipClass(status) {
+  return STAGE_CHIP_CLASS[status] || "apl-stage-neutral";
 }
 
 function _filterChips(byStatus, active) {
   const chips = [
-    '<button class="apps-chip' +
+    '<button class="apl-chip' +
       (active === "all" ? " active" : "") +
       '" data-app-status="all">' +
       escHtml(T("apps_filter_all", "All")) +
@@ -112,117 +133,137 @@ function _filterChips(byStatus, active) {
     const n = byStatus[s] || 0;
     if (!n) continue;
     chips.push(
-      '<button class="apps-chip apps-chip-' +
-        escHtml(s) +
+      '<button class="apl-chip' +
         (active === s ? " active" : "") +
         '" data-app-status="' +
         escHtml(s) +
         '">' +
         escHtml(_statusLabel(s)) +
-        ' <span class="apps-chip-count">' +
+        ' <span class="apl-chip-count">' +
         n +
         "</span></button>",
     );
   }
-  return '<div class="apps-filter">' + chips.join("") + "</div>";
+  return '<div class="apl-filter">' + chips.join("") + "</div>";
 }
 
-function _appRow(a) {
-  const roleUrl = safeUrl(a.url);
-  const roleHtml = roleUrl
-    ? '<a href="' +
-      escHtml(roleUrl) +
-      '" target="_blank" rel="noopener">' +
-      escHtml(a.title) +
-      "</a>"
-    : escHtml(a.title);
-  const artifacts = a.artifacts.length
-    ? '<span class="apps-artifacts">' +
-      a.artifacts
-        .map((k) => '<span class="apps-artifact">' + escHtml(k) + "</span>")
-        .join("") +
-      "</span>"
-    : '<span class="apps-artifact-none">—</span>';
-  const when = a.applied_at ? escHtml(relativeTime(a.applied_at, T)) : "—";
+// One grid row: tinted fit tile · role · company (linked when the company has
+// a slug) · stage chip · sent date. Pure (no DOM read) so the escaping and
+// linked/unlinked tests can assert on it directly, same shape as
+// todayRowHtml/buildArchiveRow. `a.live` decides the row's own click — an
+// application whose vacancy is no longer in the live payload renders with no
+// route (its vacancy page would just 404, same call archive.js already made).
+export function applicationRowHtml(a, opts) {
+  const t = (opts && opts.t) || ((key, fallback) => fallback);
+  const scoreCls =
+    a.score == null ? "vac-score--none" : "q-" + qualityBand(a.score) + "-bg";
+  const scoreTxt = a.score == null ? "—" : String(a.score);
+  const stageLabel = _statusLabel(a.status, t);
+  const companyHtml = a.company_slug
+    ? '<button type="button" class="apl-company-link" onclick="event.stopPropagation();openCompanyProfile(\'' +
+      jsAttr(a.company_slug) +
+      '\')" title="' +
+      escHtml(t("apps_open_company", "Open company card")) +
+      '">' +
+      escHtml(a.org) +
+      "</button>"
+    : escHtml(a.org);
+  const sentText = a.applied_at ? escHtml(relativeTime(a.applied_at, t)) : "—";
+  const rowCls = "apl-row" + (a.live ? "" : " apl-row-unlinked");
+  const rowClick = a.live
+    ? " onclick=\"openApplicationRow('" + jsAttr(a.id) + "')\""
+    : "";
   return (
-    '<tr class="apps-row">' +
-    '<td class="apps-td apps-td-role">' +
-    roleHtml +
-    (a.score != null
-      ? ' <span class="apps-score">' + a.score + "</span>"
-      : "") +
-    "</td>" +
-    '<td class="apps-td"><span class="apps-status apps-status-' +
-    escHtml(a.status) +
+    '<div class="' +
+    rowCls +
+    '" data-id="' +
+    escHtml(a.id) +
+    '"' +
+    rowClick +
+    ">" +
+    '<div class="apl-score ' +
+    scoreCls +
     '">' +
-    escHtml(_statusLabel(a.status)) +
-    "</span></td>" +
-    '<td class="apps-td">' +
-    (a.channel ? escHtml(a.channel) : "—") +
-    "</td>" +
-    '<td class="apps-td">' +
-    when +
-    "</td>" +
-    '<td class="apps-td">' +
-    artifacts +
-    "</td>" +
-    "</tr>"
+    scoreTxt +
+    "</div>" +
+    '<div class="apl-role">' +
+    escHtml(a.title) +
+    "</div>" +
+    '<div class="apl-company">' +
+    companyHtml +
+    "</div>" +
+    '<div><span class="apl-stage ' +
+    stageChipClass(a.status) +
+    '">' +
+    escHtml(stageLabel) +
+    "</span></div>" +
+    '<div class="apl-sent">' +
+    sentText +
+    "</div>" +
+    "</div>"
   );
 }
 
-function _companyBlock(c) {
-  const [fg, bg] = c.org_color || ["#F97316", "#FFF7ED"];
-  const orgHtml = c.company_slug
-    ? '<button type="button" class="apps-company-name apps-company-link" ' +
-      'style="color:' +
-      fg +
-      ";background:" +
-      bg +
-      '" data-company-slug="' +
-      escHtml(c.company_slug) +
-      '" title="' +
-      escHtml(T("apps_open_company", "Open company card")) +
-      '">' +
-      escHtml(c.org) +
-      "</button>"
-    : '<span class="apps-company-name" style="color:' +
-      fg +
-      ";background:" +
-      bg +
-      '">' +
-      escHtml(c.org) +
-      "</span>";
-  const head =
-    "<thead><tr>" +
-    "<th>" +
-    escHtml(T("apps_col_role", "Role")) +
-    "</th>" +
-    "<th>" +
-    escHtml(T("apps_col_status", "Status")) +
-    "</th>" +
-    "<th>" +
-    escHtml(T("apps_col_channel", "Channel")) +
-    "</th>" +
-    "<th>" +
-    escHtml(T("apps_col_date", "Applied")) +
-    "</th>" +
-    "<th>" +
-    escHtml(T("apps_col_artifacts", "Artifacts")) +
-    "</th>" +
-    "</tr></thead>";
+// Thin DOM shell: forwards a row click to the U4 router with the "applied"
+// context, so vacancyMoveToApply confirms in place instead of auto-advancing
+// (F3's auto-advance is Browse-only) — Applied has no unreviewed queue to
+// advance through. Exposed on window (app.js) for the row's onclick.
+export function openApplicationRow(id) {
+  window.openVacancyRoute(id, { context: "applied" });
+}
+
+// Built fresh per render (not a static data-i18n element) since renderApplications
+// re-runs on every poll/filter change and applyI18n() only sweeps the DOM once
+// at startup — matching how the rest of this file resolves strings via T().
+function _tableHeadHtml() {
   return (
-    '<section class="apps-company">' +
-    '<div class="apps-company-head">' +
-    orgHtml +
-    '<span class="apps-company-count">' +
-    c.apps.length +
-    "</span></div>" +
-    '<table class="apps-table">' +
-    head +
-    "<tbody>" +
-    c.apps.map(_appRow).join("") +
-    "</tbody></table>" +
-    "</section>"
+    '<div class="apl-row apl-row-head">' +
+    "<div>" +
+    escHtml(T("apps_col_fit", "Fit")) +
+    "</div>" +
+    "<div>" +
+    escHtml(T("apps_col_role", "Role")) +
+    "</div>" +
+    "<div>" +
+    escHtml(T("apps_col_company", "Company")) +
+    "</div>" +
+    "<div>" +
+    escHtml(T("apps_col_stage", "Stage")) +
+    "</div>" +
+    "<div>" +
+    escHtml(T("apps_col_sent", "Sent")) +
+    "</div>" +
+    "</div>"
+  );
+}
+
+// Pure page states, exported so the empty/first-run view is testable without
+// a DOM — same convention as vacancy.js's vacancyNotFoundHtml.
+export function applicationsHeaderHtml(opts) {
+  const t = (opts && opts.t) || T;
+  return (
+    '<div class="apl-header">' +
+    '<span class="apl-title">' +
+    escHtml(t("apps_title", "Applications")) +
+    "</span>" +
+    '<span class="apl-hint">' +
+    escHtml(t("apps_sub", "Sent applications and where each one stands.")) +
+    "</span></div>"
+  );
+}
+
+export function applicationsEmptyHtml(opts) {
+  const t = (opts && opts.t) || T;
+  return (
+    '<div class="apl-sheet apl-empty-sheet"><div class="apl-empty">' +
+    '<div class="apl-empty-icon">✉️</div>' +
+    escHtml(
+      t(
+        "apps_empty",
+        "No applications yet. Mark a role applied in Triage or Today.",
+      ),
+    ) +
+    "</div></div>"
   );
 }
 
@@ -234,72 +275,52 @@ export function renderApplications() {
   const { total, byStatus } = summarizeApplications(companies);
   const active = state.appStatusFilter || "all";
 
-  const intro =
-    '<div class="apps-intro">' +
-    '<h2 class="apps-h2">✉️ <span>' +
-    escHtml(T("apps_title", "Applications")) +
-    "</span></h2>" +
-    '<p class="apps-sub">' +
-    escHtml(
-      T(
-        "apps_sub",
-        "Roles you've applied to, grouped by company. Artifact keys only — no private content.",
-      ),
-    ) +
-    "</p></div>";
+  const header = applicationsHeaderHtml({ t: T });
 
   if (total === 0) {
-    root.innerHTML =
-      intro +
-      '<div class="apps-empty"><div class="apps-empty-icon">✉️</div>' +
-      escHtml(
-        T(
-          "apps_empty",
-          "No applications yet. Mark a role applied in Triage or Today.",
-        ),
-      ) +
-      "</div>";
+    root.innerHTML = header + applicationsEmptyHtml({ t: T });
     return;
   }
 
-  // Apply the status filter (a pure copy — never mutate the collected data).
-  let shown = companies;
-  if (active !== "all") {
-    shown = companies
-      .map((c) => ({ ...c, apps: c.apps.filter((a) => a.status === active) }))
-      .filter((c) => c.apps.length);
-  }
+  // Flatten to one row per application — company is a grid column now, not a
+  // section header — and sort by send date globally. collectApplications's
+  // per-company clustering (built for the old grouped view) would otherwise
+  // interleave an old app from a "recent" company ahead of a newer app from
+  // another, which reads as out of order in a single flat table.
+  const flat = companies
+    .flatMap((c) =>
+      c.apps.map((a) => ({
+        ...a,
+        org: c.org,
+        company_slug: c.company_slug,
+        live: groupsById.has(a.id),
+      })),
+    )
+    .sort((a, b) => (b.applied_at || "").localeCompare(a.applied_at || ""));
 
-  const body = shown.length
-    ? shown.map(_companyBlock).join("")
-    : '<div class="apps-empty">' +
+  const shown =
+    active === "all" ? flat : flat.filter((a) => a.status === active);
+
+  const rowsHtml = shown.length
+    ? shown.map((a) => applicationRowHtml(a, { t: T })).join("")
+    : '<div class="apl-empty">' +
       escHtml(T("apps_none_match", "Nothing matches this status.")) +
       "</div>";
 
   root.innerHTML =
-    intro +
+    header +
     _filterChips(byStatus, active) +
-    '<div class="apps-list">' +
-    body +
-    "</div>";
+    '<div class="apl-sheet"><div class="apl-table">' +
+    _tableHeadHtml() +
+    rowsHtml +
+    "</div></div>";
 
-  // Filter chips.
-  root.querySelectorAll(".apps-chip[data-app-status]").forEach(function (btn) {
+  root.querySelectorAll(".apl-chip[data-app-status]").forEach(function (btn) {
     btn.addEventListener("click", function () {
       state.appStatusFilter = btn.getAttribute("data-app-status");
       renderApplications();
     });
   });
-
-  // Company links open the profile page (same as elsewhere).
-  root
-    .querySelectorAll(".apps-company-link[data-company-slug]")
-    .forEach(function (el) {
-      el.addEventListener("click", function () {
-        const slug = el.getAttribute("data-company-slug");
-        if (slug && window.openCompanyProfile) window.openCompanyProfile(slug);
-      });
-    });
 }
 
 export function initApplications() {
