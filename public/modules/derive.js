@@ -222,6 +222,47 @@ export function companyRollup(roles, opts) {
 }
 
 // ---------------------------------------------------------------------------
+// Per-board yield — "is this board earning its place?" over the user's own
+// history. Each board's funnel (scored → fit → liked) is a pure function of the
+// raw shipped roles (each carries source_board + llm_score) plus live statuses,
+// so it needs no /api and reacts to a like/pass or a passing deadline with no
+// run — the same derive-never-bake path the company rollups take (DHA-360).
+//
+// The dashboard payload ships only SCORED roles, so "scored" here means
+// "reached your scored catalogue"; the total-saved and fresh-14d numbers (which
+// also count unscored/archived rows) stay on the live /api/board-statuses feed.
+// A board with zero shipped roles reports hasData:false so the renderer can show
+// an honest "no data yet" instead of 0/0/0 read as a verdict.
+// ---------------------------------------------------------------------------
+
+// Fold the shipped roles into a per-board funnel keyed by source_board (== the
+// board's display name / board.name). Returns { [boardName]: { scored, fit,
+// liked, hasData } }. `roles` with no source_board are skipped (direct ATS
+// fetches belong to no board). `fit` counts roles at/above APPLYABLE_MIN_SCORE;
+// `liked` counts roles whose effective basket is "liked" (an expired like has
+// already lapsed to "passed", see effectiveBasket), so the funnel narrows
+// honestly. `opts` injects getStatus + isExpired + basketMap, exactly like the
+// other derivations here.
+export function boardYield(groups, opts) {
+  const out = {};
+  for (const g of groups) {
+    const board = (g.source_board || "").trim();
+    if (!board) continue;
+    let row = out[board];
+    if (!row) {
+      row = { scored: 0, fit: 0, liked: 0, hasData: true };
+      out[board] = row;
+    }
+    row.scored += 1;
+    if (typeof g.llm_score === "number" && g.llm_score >= APPLYABLE_MIN_SCORE) {
+      row.fit += 1;
+    }
+    if (effectiveBasket(g, opts) === "liked") row.liked += 1;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Today cockpit — the few roles that need a decision now.
 // ---------------------------------------------------------------------------
 

@@ -14,7 +14,7 @@ Two docs embed generated blocks between AUTO-GENERATED markers, both guarded by
 * ``docs/index.html`` — the onboarding questionnaire's board picker, as a JS
   ``BOARD_CATALOG`` array carrying each board's EN + RU audience (``audience`` /
   ``audience_ru``) so a new user picks boards knowingly in either language and
-  the chosen set lands in the generated setup prompt (DHA-360).
+  the chosen set lands in the generated setup prompt.
 
 Usage::
 

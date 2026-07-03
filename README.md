@@ -48,7 +48,9 @@ and asks you only for the things it can't do itself.
   boards, plus LinkedIn's guest API (queries derived from your profile). All
   off by default; enable the ones that fit you and they persist across runs.
   Full list, per-board audience and how to enable:
-  [`docs/job-boards-catalogue.md`](docs/job-boards-catalogue.md).
+  [`docs/job-boards-catalogue.md`](docs/job-boards-catalogue.md). Know a board
+  worth adding? [Suggest one](https://github.com/ncalavera/llm-job-pipeline/issues/new?template=suggest-a-board.yml)
+  (URL · who it serves · what feeds it).
 - **Quality gate:** every job description passes a single validation layer
   (`scripts/quality.py`) that strips cookie banners, navigation junk and
   non-vacancy pages before they reach your database.

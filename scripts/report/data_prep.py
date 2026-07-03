@@ -381,6 +381,12 @@ def _build_group(
         "locations": entry_locations,
         "member_ids": [],
         "company_id": v.get("company_id", ""),
+        # RAW provenance field (not a pre-computed aggregate): the display name
+        # of the job board this role came from (== board.name), "" for a direct
+        # ATS fetch. Ships so the browser can DERIVE per-board yield (scored /
+        # fit / liked) in boards.js — the same "derive, never bake" path the
+        # company rollups and Geo table take (STRATEGY guardrail 9).
+        "source_board": v.get("source_board") or "",
         # The application attached to this vacancy (1:1), or None. Card shows a
         # small "applied · <status>" block; the full section is a later ticket.
         # Projected to the display shape — artifact values and notes stay private.
