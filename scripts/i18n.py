@@ -225,6 +225,11 @@ STRINGS: dict[str, dict[str, str]] = {
         "browse_col_comp": "Comp",
         "browse_col_seen": "Seen",
         "browse_results_count": "{shown} of {total} vacancies",
+        # Browse keyboard-triage hint row (U15)
+        "keys_move": "move",
+        "keys_like": "like",
+        "keys_pass": "pass",
+        "keys_open": "open",
         # Companies sub-tabs
         "subtab_approved": "Approved",
         "subtab_pending": "Pending Review",
@@ -613,6 +618,11 @@ STRINGS: dict[str, dict[str, str]] = {
         "browse_col_comp": "З/п",
         "browse_col_seen": "Замечена",
         "browse_results_count": "{shown} из {total} вакансий",
+        # Browse keyboard-triage hint row (U15)
+        "keys_move": "листать",
+        "keys_like": "в избранное",
+        "keys_pass": "пропустить",
+        "keys_open": "открыть",
         "subtab_approved": "Одобренные",
         "subtab_pending": "На ревью",
         "subtab_archived": "Архив",

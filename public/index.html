@@ -521,6 +521,28 @@
               </div>
             </div>
 
+            <!-- Keyboard-triage affordance (U15, DHA-399; design-protocol #4 —
+                 keep j/k/l/x/Enter visible). Keys are literal mono; the action
+                 words go through i18n (EN in markup, RU baked). -->
+            <div class="browse-keyhint">
+              <span class="browse-key">j</span><span class="browse-key">k</span>
+              <span class="browse-keyhint-label" data-i18n="keys_move"
+                >move</span
+              >
+              <span class="browse-key">l</span>
+              <span class="browse-keyhint-label" data-i18n="keys_like"
+                >like</span
+              >
+              <span class="browse-key">x</span>
+              <span class="browse-keyhint-label" data-i18n="keys_pass"
+                >pass</span
+              >
+              <span class="browse-key">&#8629;</span>
+              <span class="browse-keyhint-label" data-i18n="keys_open"
+                >open</span
+              >
+            </div>
+
             <!-- Data as a sheet (design-protocol.md #2, #6). min-width guards
                  the scroll (AE4): below 920px the table scrolls inside the
                  sheet, never the page body. -->
