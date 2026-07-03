@@ -40,6 +40,7 @@ if __name__ == "__main__" and wants_help():
     build_parser().parse_args()
 
 from config import (
+    DASHBOARD_TZ,
     VACANCIES_DIR,
     GLOBAL_BLACKLIST,
     GEO_BANNED_COUNTRIES,
@@ -479,7 +480,7 @@ def classify_vacancies(db: dict = None) -> dict:
         "reenrich_thin": [],
         "ready": [],
     }
-    today = date.today()
+    today = datetime.now(DASHBOARD_TZ).date()
     all_vacs = load_vacancies(unscored_only=True)
     archive_hashes = get_archived_hashes()
 

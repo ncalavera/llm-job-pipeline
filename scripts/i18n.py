@@ -48,6 +48,19 @@ STRINGS: dict[str, dict[str, str]] = {
         "freshness_stale_hint": "based on the last time the source confirmed the role; direct ATS is exact, aggregators approximate",
         # Triage "Expired" column staleness line
         "triage_stale_seen": "not seen at source for {n} days",
+        # Deadline label — Catalog + Triage vacancy cards
+        "deadline_prefix": "Deadline:",
+        "deadline_expired": "(expired)",
+        "deadline_today": "(today!)",
+        "deadline_tomorrow": "(tomorrow!)",
+        "deadline_in_days": "(in {n}d)",
+        # Relative time — Catalog/Boards/Companies/Applications/Archive
+        "time_just_now": "now",
+        "time_min_ago": "{n}m ago",
+        "time_hour_ago": "{n}h ago",
+        "time_day_ago": "{n}d ago",
+        "time_month_ago": "{n}mo ago",
+        "time_year_ago": "{n}y ago",
         # Today cockpit (U10/U11)
         "today_expiring": "Expiring, needs a decision",
         "today_ready": "Ready to send",
@@ -180,6 +193,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "col_company": "Company",
         "col_tier": "Tier",
         "col_fit": "Fit",
+        "col_want": "WANT",
         "col_vacancies": "Vacancies",
         "col_liked": "Liked",
         "col_new": "New",
@@ -215,6 +229,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "catalog_basket_empty": "no vacancies",
         "catalog_details": "Details",
         "catalog_collapse": "Collapse",
+        # Catalog card — attached-application badge tooltip prefix
+        "application_marker": "Application",
         "region_europe": "Europe",
         "region_americas": "Americas",
         "region_remote": "Remote",
@@ -317,6 +333,19 @@ STRINGS: dict[str, dict[str, str]] = {
         "freshness_stale_hint": "оценка по дате последнего показа в источнике; прямые ATS точны, агрегаторы приблизительны",
         # Triage "Expired" column staleness line
         "triage_stale_seen": "нет в источнике уже {n} дн.",
+        # Deadline label — Catalog + Triage vacancy cards
+        "deadline_prefix": "Дедлайн:",
+        "deadline_expired": "(истёк)",
+        "deadline_today": "(сегодня!)",
+        "deadline_tomorrow": "(завтра!)",
+        "deadline_in_days": "(через {n} дн.)",
+        # Relative time — Catalog/Boards/Companies/Applications/Archive
+        "time_just_now": "только что",
+        "time_min_ago": "{n} мин назад",
+        "time_hour_ago": "{n} ч назад",
+        "time_day_ago": "{n} дн назад",
+        "time_month_ago": "{n} мес назад",
+        "time_year_ago": "{n} г назад",
         # Today cockpit (U10/U11)
         "today_expiring": "Истекает, нужно решение",
         "today_ready": "Готово к отправке",
@@ -444,6 +473,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "col_company": "Компания",
         "col_tier": "Тир",
         "col_fit": "Фит",
+        "col_want": "WANT",
         "col_vacancies": "Вакансии",
         "col_liked": "Выбрано",
         "col_new": "Новые",
@@ -479,6 +509,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "catalog_basket_empty": "вакансий нет",
         "catalog_details": "Подробнее",
         "catalog_collapse": "Свернуть",
+        # Catalog card — attached-application badge tooltip prefix
+        "application_marker": "Отклик",
         "region_europe": "Европа",
         "region_americas": "Америка",
         "region_remote": "Remote",

@@ -45,6 +45,11 @@ export function getLanguage() {
   return pickLanguage(saved, config && config.language, ALL);
 }
 
+/** Intl locale for the active dashboard language (date/number formatting). */
+export function dateLocale() {
+  return getLanguage() === "ru" ? "ru-RU" : "en-US";
+}
+
 /** Persist a language choice and reload so every view re-renders in it. */
 export function setLanguage(lang) {
   if (lang === getLanguage()) return;

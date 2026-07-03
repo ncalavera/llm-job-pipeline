@@ -26,7 +26,7 @@ import {
   hardReqHtml,
   safeUrl,
 } from "./helpers.js";
-import { T } from "./i18n.js";
+import { T, dateLocale } from "./i18n.js";
 import { VISIBLE_MIN_SCORE, basketCounts, groupsInBasket } from "./derive.js";
 
 // The shared visibility options the basket badge AND the basket list both read,
@@ -330,13 +330,16 @@ function buildCatalogCard(g) {
         '<span class="card-comp">' + escHtml(g.compensation) + "</span>",
       );
     if (g.deadline) {
-      const dlHtml = formatDeadlineHtml(g.deadline, "card-deadline");
+      const dlHtml = formatDeadlineHtml(g.deadline, "card-deadline", {
+        t: T,
+        locale: dateLocale(),
+      });
       if (dlHtml) parts.push(dlHtml);
     }
     if (g.first_seen) {
       parts.push(
         '<span class="card-first-seen">' +
-          relativeTime(g.first_seen) +
+          relativeTime(g.first_seen, T) +
           "</span>",
       );
     }

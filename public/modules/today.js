@@ -53,11 +53,18 @@ function _captureVisit() {
   _visitCaptured = true;
 }
 
-function _daysUntil(dateStr) {
+// Whole calendar days from today to dateStr (0 = today, negative = past).
+// Exported + pure so the "deadline == today must count as 0, not -1" boundary
+// (DHA-369 #3) is unit-tested with no DOM. Diffs two date-only instants (both
+// anchored to UTC midnight) instead of dateStr's midnight vs Date.now()'s
+// exact instant — the old mix returned -1 for "today" any time after 00:00
+// UTC, which silently dropped a same-day deadline from the expiring list.
+export function daysUntil(dateStr) {
   if (!dateStr) return null;
-  const d = new Date(dateStr);
+  const d = new Date(String(dateStr).slice(0, 10));
   if (isNaN(d.getTime())) return null;
-  return Math.floor((d.getTime() - Date.now()) / 86400000);
+  const todayD = new Date(new Date().toISOString().slice(0, 10));
+  return Math.round((d.getTime() - todayD.getTime()) / 86400000);
 }
 
 // A role belongs in Today only while it's still active and open. Returns false
@@ -323,7 +330,7 @@ export function renderToday() {
     getStatus: getGroupStatus,
     basketMap: STATUS_BASKET,
     isLiveRole: _isLiveRole,
-    daysUntil: _daysUntil,
+    daysUntil,
     soonDays: SOON_DAYS,
     newHighFit: NEW_HIGH_FIT,
     prevVisit: _prevVisit,

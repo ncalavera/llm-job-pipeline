@@ -25,6 +25,7 @@ from config import (
     GEO_BANNED_REGIONS,
     GEO_KEEP_COUNTRIES_SET,
     GEO_BAN_US_ONLY,
+    DASHBOARD_TZ,
 )
 from geo import country_banned, is_remote_mode
 
@@ -1084,7 +1085,7 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     company_id = resolve_company_id(org_name)
     if company_id is None:
         company_id = ensure_company(org_name, status=_auto_discovery_status())
-    today = date.today().isoformat()
+    today = datetime.now(DASHBOARD_TZ).date().isoformat()
     new_count = 0
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -1239,7 +1240,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
     Unknown orgs → ensure_company(status=_auto_discovery_status()), "candidate"
     by default (see that function). Skips inactive companies.
     """
-    today = date.today().isoformat()
+    today = datetime.now(DASHBOARD_TZ).date().isoformat()
     tier = board_cfg.get("tier", "C")
     board_url = board_cfg["url"]
     board_name = board_cfg.get("name", "")

@@ -24,7 +24,7 @@ import {
   triageColumnFor,
   safeUrl,
 } from "./helpers.js";
-import { T } from "./i18n.js";
+import { T, dateLocale } from "./i18n.js";
 import Sortable from "../vendor/sortable.esm.js";
 
 // Live Sortable instances, one per column. Rebuilt on every render since the
@@ -210,7 +210,10 @@ function buildMoveBtns(curColKey) {
 // Deadline (urgency-coloured) or, when a role has no deadline but its source
 // went quiet, a staleness line reusing the Catalog freshness badge look.
 function buildTriageFreshness(g) {
-  const dl = formatDeadlineHtml(g.deadline, "pipe-deadline");
+  const dl = formatDeadlineHtml(g.deadline, "pipe-deadline", {
+    t: T,
+    locale: dateLocale(),
+  });
   if (dl) return '<div class="pipe-card-fresh">' + dl + "</div>";
   if (isVacancyStale(g)) {
     const age = sourceAgeDays(g.last_seen);
