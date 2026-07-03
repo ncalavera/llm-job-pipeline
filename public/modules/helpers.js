@@ -905,6 +905,33 @@ export function scoreLabel(score) {
 }
 
 // ---------------------------------------------------------------------------
+// Group → company resolution (post-ship fast fix, #6).
+//
+// A group never carries a working company_slug or calculated_tier —
+// scripts/report/data_prep.py's _build_group only sets company_id (the
+// vacancy row's real company.id FK, always populated: the vacancy table has
+// an INNER JOIN to company). The companies[] list carries the SAME id
+// (str(cid) from the company table's own id column) as its own company_id
+// field. That shared id — not org/name/slug, which can drift across ATS
+// board variants — is the one reliable join between a group and its company.
+// company_slug/calculated_tier being read straight off a group elsewhere
+// (vacancy.js, pipeline.js) is dead-field debt from before this resolver.
+// ---------------------------------------------------------------------------
+
+// The company a vacancy group belongs to, or null when it can't be resolved
+// (no company_id on the group, or no company in `companies` carries a
+// matching one — e.g. an org that's configured but never made it into the
+// company table). Callers render plain text, never a dead link, on null.
+export function resolveVacancyCompany(group, companies) {
+  if (!group || !group.company_id || !Array.isArray(companies)) return null;
+  return (
+    companies.find(function (c) {
+      return c && c.company_id === group.company_id;
+    }) || null
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Triage dedup helpers
 // ---------------------------------------------------------------------------
 

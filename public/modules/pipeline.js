@@ -13,6 +13,7 @@ import {
   getGroupStatus,
   isGroupCompanyApproved,
   updateStatus,
+  getCompanies,
 } from "./state.js";
 import {
   escHtml,
@@ -23,6 +24,7 @@ import {
   sourceAgeDays,
   qualityClass,
   safeUrl,
+  resolveVacancyCompany,
 } from "./helpers.js";
 import { T, dateLocale } from "./i18n.js";
 import Sortable from "../vendor/sortable.esm.js";
@@ -241,7 +243,10 @@ function buildTriageFreshness(g) {
 // Exported for unit tests (pipeline.test.js) — the private triage fields it
 // renders must stay HTML-escaped (DHA-373). Not part of the module's runtime
 // surface; renderPipeline is the only caller in the app.
-export function buildTriageCard(g, col, review) {
+// `companies` is optional (existing tests call this with 3 args): omitting it
+// just means resolveVacancyCompany finds no match, same as before this org
+// link had a real resolver behind it (post-ship fast fix #6).
+export function buildTriageCard(g, col, review, companies) {
   const firstUrl = safeUrl(
     (g.locations || []).find(function (l) {
       return !!l.url;
@@ -291,9 +296,10 @@ export function buildTriageCard(g, col, review) {
         "</div>";
   }
 
-  const orgHtml = g.company_slug
+  const orgCompany = resolveVacancyCompany(g, companies);
+  const orgHtml = orgCompany
     ? '<button type="button" class="pipe-card-org pipe-card-org-link" data-company-slug="' +
-      escHtml(g.company_slug) +
+      escHtml(orgCompany.slug) +
       '" title="Open company card">' +
       escHtml(g.org) +
       "</button>"
@@ -346,11 +352,12 @@ export function buildTriageCard(g, col, review) {
 
 // One card for a company with several roles in the SAME column. The column
 // already conveys the status, so no per-card status badge is needed.
-function buildTriageGroupCard(entries, col) {
+function buildTriageGroupCard(entries, col, companies) {
   const head = entries[0];
-  const orgHtml = head.company_slug
+  const headCompany = resolveVacancyCompany(head, companies);
+  const orgHtml = headCompany
     ? '<button type="button" class="pipe-card-org pipe-card-org-link" data-company-slug="' +
-      escHtml(head.company_slug) +
+      escHtml(headCompany.slug) +
       '" title="Open company card">' +
       escHtml(head.org) +
       "</button>"
@@ -426,7 +433,7 @@ function buildTriageGroupCard(entries, col) {
 
 // Build one column's cards. Ungrouped: one card per role. Grouped: a company
 // with 2+ roles in this column collapses into a single grouped card.
-function buildColumnCards(entries, col) {
+function buildColumnCards(entries, col, companies) {
   const sorted = entries.slice().sort(function (a, b) {
     return (b.llm_score || 0) - (a.llm_score || 0);
   });
@@ -439,8 +446,8 @@ function buildColumnCards(entries, col) {
   return Array.from(byOrg.values())
     .map(function (grp) {
       return grp.length > 1
-        ? buildTriageGroupCard(grp, col)
-        : buildTriageCard(grp[0], col, grp[0]._review);
+        ? buildTriageGroupCard(grp, col, companies)
+        : buildTriageCard(grp[0], col, grp[0]._review, companies);
     })
     .join("");
 }
@@ -462,6 +469,9 @@ export function renderPipeline() {
   reviews.forEach(function (r) {
     reviewByVid[r.vacancy_id] = r;
   });
+  // For resolving each card's org-name link (post-ship fast fix #6) —
+  // computed once per render, not per card.
+  const companies = getCompanies();
 
   // Tag every group with the two state.js-dependent facts the pure funnel
   // helper needs (status, company approval) plus its private review, then
@@ -501,7 +511,7 @@ export function renderPipeline() {
   }
 
   board.innerHTML = TRIAGE_COLUMNS.map(function (col) {
-    var cards = buildColumnCards(buckets[col.key], col);
+    var cards = buildColumnCards(buckets[col.key], col, companies);
 
     return (
       '<div class="pipe-col" id="triageCol-' +

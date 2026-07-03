@@ -37,12 +37,15 @@ const { toastMessage } = await import("./helpers.js");
 const t = (key, fallback) => fallback;
 const opts = { t, locale: "en-US" };
 
+// company_slug/calculated_tier are dead fields data_prep.py never sets on a
+// real group (post-ship fast fix #6) — vacancyPageHtml takes the resolved
+// `company` object below as its own parameter instead, so the group fixture
+// only needs company_id, the real join key resolveVacancyCompany uses.
 const fullGroup = {
   id: "g1",
   org: "GiveWell",
   company_name: "GiveWell",
-  company_slug: "givewell",
-  calculated_tier: "S",
+  company_id: "c1",
   title: "Research Analyst",
   llm_score: 82,
   llm_summary: "Short summary of the role.",
@@ -66,6 +69,7 @@ const fullGroup = {
 };
 
 const company = {
+  company_id: "c1",
   slug: "givewell",
   name: "GiveWell",
   strategy: "greenhouse",
@@ -327,6 +331,23 @@ test("vacancyPageHtml: null score renders a neutral tile, not a crimson one", ()
   assert.ok(!html.includes("q-weak-bg"));
 });
 
+// --- org link + tier badge driven by the resolved company (post-ship #6) ---
+
+test("vacancyPageHtml: org name and tier badge come from the resolved company, not the group", () => {
+  const html = vacancyPageHtml(fullGroup, company, "unseen", opts);
+  assert.ok(html.includes("vac-org--link"));
+  assert.ok(html.includes("openCompanyProfile('givewell')"));
+  assert.match(html, /class="vac-tier tier-s">S</);
+});
+
+test("vacancyPageHtml: an untracked org (no matching company) renders plain text, no dead link or tier badge", () => {
+  const html = vacancyPageHtml(fullGroup, null, "unseen", opts);
+  assert.ok(!html.includes("vac-org--link"));
+  assert.ok(!html.includes("openCompanyProfile"));
+  assert.ok(!html.includes("vac-tier"));
+  assert.ok(html.includes("GiveWell")); // org name still shown, just inert
+});
+
 // --- source-freshness badge (relocated from the retired Browse card, U5
 // parity: "relocation counts as parity, dropping does not") -------------------
 
@@ -360,7 +381,7 @@ test("vacancyPageHtml escapes every externally-sourced string", () => {
     id: "x1",
     org: "<script>alert('org')</script>",
     company_name: "<script>alert('org')</script>",
-    company_slug: "givewell",
+    company_id: "c1",
     title: "<script>alert('title')</script>",
     llm_score: 60,
     llm_summary: "<script>alert('sum')</script>",
@@ -416,7 +437,6 @@ test("vacancyPageHtml escapes a quote-breakout URL in href attributes (R14)", ()
     id: "b1",
     org: "Acme",
     company_name: "Acme",
-    company_slug: null,
     title: "Role",
     llm_score: 60,
     llm_summary: "s",

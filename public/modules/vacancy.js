@@ -19,7 +19,7 @@
 import {
   state,
   groupsById,
-  getCompanyBySlug,
+  getCompanies,
   getGroupStatus,
   STATUS_BASKET,
   updateStatus,
@@ -35,6 +35,7 @@ import {
   tierClass,
   isVacancyExpired,
   isVacancyStale,
+  resolveVacancyCompany,
 } from "./helpers.js";
 import { T, dateLocale } from "./i18n.js";
 
@@ -269,23 +270,28 @@ export function vacancyPageHtml(g, company, status, opts) {
   // --- Header band ---
   const [orgFg] = g.org_color || ["#8A867C", "#F6F8FA"];
   const orgName = escHtml(g.company_name || g.org);
-  const orgHtml = g.company_slug
+  // company (not g.company_slug, a dead field — see resolveVacancyCompany)
+  // decides both the header link and the tier badge below (post-ship fast
+  // fix #6): an org with no matching company entry renders as plain text,
+  // never a dead click target.
+  const orgHtml = company
     ? '<span class="vac-org vac-org--link" role="button" tabindex="0" onclick="openCompanyProfile(\'' +
-      jsAttr(g.company_slug) +
+      jsAttr(company.slug) +
       "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openCompanyProfile('" +
-      jsAttr(g.company_slug) +
+      jsAttr(company.slug) +
       "')}\">" +
       orgName +
       "</span>"
     : '<span class="vac-org">' + orgName + "</span>";
 
-  const tierHtml = g.calculated_tier
-    ? '<span class="vac-tier ' +
-      tierClass(g.calculated_tier) +
-      '">' +
-      escHtml(g.calculated_tier) +
-      "</span>"
-    : "";
+  const tierHtml =
+    company && company.calculated_tier
+      ? '<span class="vac-tier ' +
+        tierClass(company.calculated_tier) +
+        '">' +
+        escHtml(company.calculated_tier) +
+        "</span>"
+      : "";
 
   const primaryLoc = (g.locations || []).find((l) => l && l.location);
   const locHtml = primaryLoc
@@ -622,7 +628,9 @@ export function renderVacancyDetail(id) {
     host.innerHTML = vacancyNotFoundHtml(pageOpts());
     return;
   }
-  const company = g.company_slug ? getCompanyBySlug(g.company_slug) : null;
+  // g.company_slug is a dead field (data_prep.py never sets it) — resolve the
+  // parent company by the real shared key instead (post-ship fast fix #6).
+  const company = resolveVacancyCompany(g, getCompanies());
   host.innerHTML = vacancyPageHtml(g, company, getGroupStatus(g), pageOpts());
 }
 
