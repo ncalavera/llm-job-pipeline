@@ -480,15 +480,28 @@ def prepare_archived_data() -> list:
 
 
 def prepare_report_data(db: dict = None) -> dict:
-    """Group vacancies, compute stats, assign org colors.
+    """Group vacancies + org colors, plus the one non-derivable run-level fact.
 
     Loads from Supabase. The db param is accepted but ignored (backward compat).
-    Returns dict with keys: groups, stats.
+    Returns dict with keys: groups, org_colors, stats.
+
+    KISS derivation (phase 2): the payload ships RAW scored roles only; the
+    browser derives every dashboard number from ``groups`` through the one shared
+    visibility filter (see ``public/modules/derive.js``). So counts that were
+    baked here and drifted stale between runs — total_roles, total_postings,
+    new_today, with_comp, europe_count, "relevant" — are gone; the frontend
+    computes them live from ``groups`` (e.g. total_roles == ``groups.length``).
+
+    The single survivor is ``stats.unscored_count``: it counts fetched-but-unscored
+    vacancies, which are deliberately NOT shipped in ``groups`` (the dashboard only
+    shows scored roles). The browser therefore cannot derive it from the raw
+    payload — it is a genuine run-level fact about rows that never leave the DB,
+    so it stays as the smallest possible raw scalar (drives the "N fetched, none
+    scored yet — run scoring next" empty state instead of a blank screen).
     """
     from scoring_settings import scoring_model
     import applications
 
-    today = date.today().isoformat()
     all_vacs = load_vacancies(include_candidate_companies=True, status_exclude=["archived"])
     # Exclude unscored vacancies from dashboard — they appear after /score
     vacancies = [
@@ -496,9 +509,8 @@ def prepare_report_data(db: dict = None) -> dict:
         for v in all_vacs.values()
         if v.get("llm_score") is not None and v.get("llm_score", -1) >= 0
     ]
-    # Fetched-but-not-yet-scored vacancies. Used by the dashboard to show a
-    # "run scoring next" empty state instead of a blank, unexplained screen.
-    total_in_db = len(all_vacs)
+    # Fetched-but-not-yet-scored vacancies (rows NOT shipped in `groups`) — the one
+    # count the browser can't derive from the raw payload; see the docstring.
     unscored_count = _count_unscored(all_vacs)
 
     # --- Build org color map (needed before building groups) ---
@@ -512,15 +524,6 @@ def prepare_report_data(db: dict = None) -> dict:
     strong_model = scoring_model()
     apps_by_vac = applications.applications_by_vacancy()
     groups = [_build_group(v, org_colors, company_hq, strong_model, apps_by_vac) for v in vacancies]
-
-    # --- Stats ---
-    total_postings = len(vacancies)
-    total_roles = len(groups)
-    is_new = lambda v: v["first_seen"] == today
-    new_today = sum(1 for v in vacancies if is_new(v))
-    with_comp = sum(1 for g in groups if g.get("compensation"))
-    europe_count = sum(1 for g in groups if g["region"] in ("europe", "remote"))
-    relevant = sum(1 for g in groups if g["llm_score"] is not None and g["llm_score"] >= 40)
 
     # --- Sort ---
     def sort_key(g):
@@ -536,16 +539,9 @@ def prepare_report_data(db: dict = None) -> dict:
     return {
         "groups": groups,
         "org_colors": org_colors,
-        "stats": {
-            "total_postings": total_postings,
-            "total_roles": total_roles,
-            "new_today": new_today,
-            "with_comp": with_comp,
-            "europe_count": europe_count,
-            "relevant": relevant,
-            "total_in_db": total_in_db,
-            "unscored_count": unscored_count,
-        },
+        # Only the non-derivable run-level fact ships; every other dashboard number
+        # is derived in the browser from `groups` (KISS derivation, phase 2).
+        "stats": {"unscored_count": unscored_count},
     }
 
 

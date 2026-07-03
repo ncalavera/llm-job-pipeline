@@ -139,6 +139,11 @@ export const state = {
   apiHealthy: true,
   currentBasket: "unseen",
   activeCatalogLocs: new Set(),
+  // Discovery score-floor toggle. When true the VISIBLE_MIN_SCORE floor is
+  // lifted so sub-threshold roles show. Shared state (not a catalog-local flag)
+  // so the Geo table honours the SAME show-all as the Catalog — the two browse
+  // surfaces read one visible set and can't disagree (DHA-376 Nit B).
+  catalogShowAll: false,
   catalogSortDesc: true,
   companySortCol: "applyable",
   companySortAsc: false,

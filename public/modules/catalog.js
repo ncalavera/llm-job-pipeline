@@ -29,19 +29,17 @@ import {
 import { T } from "./i18n.js";
 import { VISIBLE_MIN_SCORE, basketCounts, groupsInBasket } from "./derive.js";
 
-// UI-only toggle: when true, the score floor is lifted and everything shows.
-let catalogShowAll = false;
-
 // The shared visibility options the basket badge AND the basket list both read,
 // so a count can never disagree with its list (DHA-374). The score floor is
-// VISIBLE_MIN_SCORE unless "show all" lifts it.
+// VISIBLE_MIN_SCORE unless "show all" (state.catalogShowAll, shared with Geo)
+// lifts it.
 function visOpts() {
   return {
     isApproved: isGroupCompanyApproved,
     getStatus: getGroupStatus,
     isExpired: isVacancyExpired,
     basketMap: STATUS_BASKET,
-    minScore: catalogShowAll ? null : VISIBLE_MIN_SCORE,
+    minScore: state.catalogShowAll ? null : VISIBLE_MIN_SCORE,
   };
 }
 
@@ -113,9 +111,9 @@ export function toggleCatalogSort(btn) {
 // Lift / restore the default score floor (VISIBLE_MIN_SCORE). UI state only.
 // Toggling the floor changes the visible set, so the badges refresh with it.
 export function toggleCatalogShowAll(btn) {
-  catalogShowAll = !catalogShowAll;
-  btn.classList.toggle("active", catalogShowAll);
-  btn.textContent = catalogShowAll
+  state.catalogShowAll = !state.catalogShowAll;
+  btn.classList.toggle("active", state.catalogShowAll);
+  btn.textContent = state.catalogShowAll
     ? T("catalog_show_top", "Top only")
     : T("catalog_show_all", "Show all");
   updateBasketCounts();
