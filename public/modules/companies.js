@@ -24,17 +24,21 @@ import {
   relativeTime,
   llmScoreBadge,
   screenScoreBadge,
-  ratingDotsHtml,
   parseLocationChips,
   renderLocationChips,
   mdToHtml,
   getFlagForChip,
   formatDeadlineHtml,
-  isVacancyExpired,
+  qualityBand,
+  tierClass,
   safeUrl,
 } from "./helpers.js";
 import { saveCompanyReview, showSyncStatus } from "./api.js";
 import { T } from "./i18n.js";
+// statusChipLabel is U6's vacancy-status pill vocabulary (Liked/Passed/To
+// apply/…) — reused here so an open role's status reads identically whether
+// you're on its own detail page or in this company's role list (U7).
+import { statusChipLabel } from "./vacancy.js";
 
 // MPA Prestige is a personal metric (MPA/MPP application strategy), off by
 // default. Opt in with DASHBOARD_MPA=1 / [dashboard] show_mpa_column = true.
@@ -1346,11 +1350,23 @@ export function openCompanyProfile(slug) {
   var url = new URL(window.location);
   url.searchParams.set("company", slug);
   url.searchParams.delete("vacancy");
-  history.pushState({ company: slug }, "", url);
+  // inApp mirrors U6's vacancy route (app.js openVacancyRoute): it marks that
+  // a list sits beneath this entry, so closeCompanyProfile can step back
+  // instead of pushing a bare entry that Back would then reopen the profile
+  // from (the history-pollution wart U4's review flagged).
+  history.pushState({ company: slug, inApp: true }, "", url);
   renderProfileForSlug(slug);
 }
 
 export function closeCompanyProfile() {
+  // Mirrors U6's closeDetail (app.js): step back through an in-app entry so
+  // popstate restores the underlying list with no forward entry left to
+  // reopen the profile; only a cold deep link (nothing beneath) gets a bare
+  // replace-in-place.
+  if (history.state && history.state.inApp) {
+    history.back();
+    return;
+  }
   state.currentProfileSlug = null;
   var url = new URL(window.location);
   url.searchParams.delete("company");
@@ -1402,605 +1418,327 @@ export function hideProfile() {
 }
 
 // ---------------------------------------------------------------------------
-// Shared helpers: score bar + vacancy list
+// Company profile page (U7 reorg, DHA-391)
+//
+// Reading order (design protocol §6 "Detail screens — Company"): header band
+// on the material (back, score tile, name, tier, meta) → optional review
+// banner (workflow actions) → sheet split into a reading column (about lede →
+// fit analysis → WANT breakdown → strengths → risks → evidence → approach →
+// experience match → deep analysis → verdict → applications & research → open
+// roles + strong/moderate/weak distribution) and a quiet rail (facts · status
+// · monitoring). A company with no WANT breakdown (never scored) renders the
+// lighter evidence-list variant instead of bars (AE2) — never fabricated
+// zeros. All score/tier coloring flows through the shared qualityBand/
+// tierClass helpers (R1/R8) — WANT bars, the fit score and the roles
+// distribution all use the SAME 70/50 bands, retiring this page's old private
+// 75/55 thresholds.
+//
+// Split per KTD2: companyProfileHtml is a pure, exported function (company +
+// pre-resolved roles + opts) that unit-tests under node --test; the DOM shell
+// (renderProfileForSlug) is thin and resolves roles/review/monitoring state
+// before calling it. Every externally-sourced string (about, evidence,
+// strengths/risks, verdict, role titles, news titles) goes through escHtml;
+// every href through safeUrl (R14).
 // ---------------------------------------------------------------------------
 
-function buildScoreBarHtml(c) {
-  if (!c.vacancy_ids || c.vacancy_ids.length === 0) return "";
-  var buckets = { excellent: 0, good: 0, partial: 0, weak: 0 };
-  var scoredTotal = 0;
-  for (var i = 0; i < c.vacancy_ids.length; i++) {
-    var g = groupsById.get(c.vacancy_ids[i]);
-    var score = g ? g.llm_score : null;
-    if (score != null) {
-      scoredTotal++;
-      if (score >= 75) buckets.excellent++;
-      else if (score >= 55) buckets.good++;
-      else if (score >= 35) buckets.partial++;
-      else buckets.weak++;
-    }
+// Strong/moderate/weak counts + percentages over a set of ALREADY-SCORED role
+// numbers (callers filter out null scores first — an unscored role is neither
+// strong nor weak, it's simply not counted). Uses the shared qualityBand so
+// the strip can never drift from the WANT breakdown's own bands.
+export function roleScoreDistribution(scores) {
+  var counts = { strong: 0, moderate: 0, weak: 0 };
+  for (var i = 0; i < scores.length; i++) {
+    var band = qualityBand(scores[i]);
+    if (band === "good") counts.strong++;
+    else if (band === "moderate") counts.moderate++;
+    else counts.weak++;
   }
-  if (scoredTotal === 0) return "";
+  var total = scores.length;
   var pct = function (n) {
-    return ((n / scoredTotal) * 100).toFixed(1) + "%";
+    return total ? (n / total) * 100 : 0;
   };
-  return (
-    '<div class="score-distribution-legend">' +
-    (buckets.excellent
-      ? '<span class="score-legend-item"><span class="score-legend-dot score-bar-excellent"></span>' +
-        buckets.excellent +
-        " excellent</span>"
-      : "") +
-    (buckets.good
-      ? '<span class="score-legend-item"><span class="score-legend-dot score-bar-good"></span>' +
-        buckets.good +
-        " good</span>"
-      : "") +
-    (buckets.partial
-      ? '<span class="score-legend-item"><span class="score-legend-dot score-bar-partial"></span>' +
-        buckets.partial +
-        " partial</span>"
-      : "") +
-    (buckets.weak
-      ? '<span class="score-legend-item"><span class="score-legend-dot score-bar-weak"></span>' +
-        buckets.weak +
-        " weak</span>"
-      : "") +
-    "</div>" +
-    '<div class="score-distribution">' +
-    (buckets.excellent
-      ? '<div class="score-bar-segment score-bar-excellent" style="width:' +
-        pct(buckets.excellent) +
-        '"></div>'
-      : "") +
-    (buckets.good
-      ? '<div class="score-bar-segment score-bar-good" style="width:' +
-        pct(buckets.good) +
-        '"></div>'
-      : "") +
-    (buckets.partial
-      ? '<div class="score-bar-segment score-bar-partial" style="width:' +
-        pct(buckets.partial) +
-        '"></div>'
-      : "") +
-    (buckets.weak
-      ? '<div class="score-bar-segment score-bar-weak" style="width:' +
-        pct(buckets.weak) +
-        '"></div>'
-      : "") +
-    "</div>"
-  );
+  return {
+    strong: counts.strong,
+    moderate: counts.moderate,
+    weak: counts.weak,
+    total: total,
+    strongPct: pct(counts.strong),
+    moderatePct: pct(counts.moderate),
+    weakPct: pct(counts.weak),
+  };
 }
 
-function buildVacancyListHtml(c, opts) {
-  opts = opts || {};
-  if (!c.vacancy_ids || c.vacancy_ids.length === 0) return "";
+// A CSS var() reference for a score's band — used for inline bar/dot fills so
+// the SAME three colors used by .q-good/.q-moderate/.q-weak text never drift
+// from the solid fills a text-color class can't provide.
+function _bandVar(score) {
+  return "var(--q-" + qualityBand(score) + ")";
+}
 
-  // Composite sort: status group first, then score DESC within group
-  var STATUS_GROUP = {
-    liked: 0,
-    to_apply: 0,
-    to_research: 0,
-    to_network: 0,
-    applied: 0,
-    unseen: 1,
-    passed: 2,
-    skipped: 2,
-  };
-  var sortedIds = c.vacancy_ids.slice().sort(function (a, b) {
-    var stA = (state.dbData[a] && state.dbData[a].status) || "unseen";
-    var stB = (state.dbData[b] && state.dbData[b].status) || "unseen";
-    var grpDiff = (STATUS_GROUP[stA] || 1) - (STATUS_GROUP[stB] || 1);
-    if (grpDiff !== 0) return grpDiff;
-    var ga = groupsById.get(a);
-    var gb = groupsById.get(b);
-    var sa = ga && ga.llm_score != null ? ga.llm_score : -1;
-    var sb = gb && gb.llm_score != null ? gb.llm_score : -1;
-    return sb - sa;
-  });
+// ---------------------------------------------------------------------------
+// Reading column — pure block builders. Each returns "" when its data is
+// absent so the caller can filter(Boolean) without a placeholder per field.
+// ---------------------------------------------------------------------------
 
-  var rows = [];
-  for (var i = 0; i < sortedIds.length; i++) {
-    var id = sortedIds[i];
-    var g = groupsById.get(id);
-    if (!g) continue;
-    var status = (state.dbData[id] && state.dbData[id].status) || "unseen";
-    var firstUrl = "";
-    if (g.locations) {
-      for (var j = 0; j < g.locations.length; j++) {
-        if (g.locations[j].url) {
-          firstUrl = g.locations[j].url;
-          break;
-        }
-      }
-    }
-    if (!firstUrl) firstUrl = g.org_url || "";
-    firstUrl = safeUrl(firstUrl);
-    var titleHtml = firstUrl
-      ? '<a href="' +
-        escHtml(firstUrl) +
-        '" target="_blank" rel="noopener">' +
-        escHtml(g.title) +
-        "</a>"
-      : escHtml(g.title);
-
-    var scoreBadge = llmScoreBadge(g.llm_score) + screenScoreBadge(g);
-    var actionBtn = "";
-
-    if (!opts.readOnly) {
-      var mids = JSON.stringify(g.member_ids).replace(/"/g, "&quot;");
-      if (status === "unseen") {
-        actionBtn =
-          '<button class="thumb-btn like" onclick="event.stopPropagation();companyVacancyAction(\'' +
-          id +
-          "'," +
-          mids +
-          ',\'liked\')" title="Like">\uD83D\uDC4D</button>' +
-          '<button class="thumb-btn pass" onclick="event.stopPropagation();companyVacancyAction(\'' +
-          id +
-          "'," +
-          mids +
-          ',\'passed\')" title="Pass">\uD83D\uDC4E</button>';
-      } else if (status === "liked") {
-        actionBtn =
-          '<button class="thumb-btn pass" onclick="event.stopPropagation();companyVacancyAction(\'' +
-          id +
-          "'," +
-          mids +
-          ',\'passed\')" title="Pass">\uD83D\uDC4E</button>';
-      } else {
-        actionBtn =
-          '<button class="thumb-btn like" onclick="event.stopPropagation();companyVacancyAction(\'' +
-          id +
-          "'," +
-          mids +
-          ',\'liked\')" title="Like">\uD83D\uDC4D</button>';
-      }
-    }
-
-    var rowClass = opts.readOnly ? "cp-vacancy-row" : "company-vacancy-row";
-    rows.push(
-      '<div class="' +
-        rowClass +
-        '">' +
-        '<span class="company-vacancy-status-dot dot-' +
-        status +
-        '"></span>' +
-        '<div class="company-vacancy-title">' +
-        titleHtml +
+function companyAboutLedeHtml(c, t) {
+  var parts = [];
+  if (c.description) {
+    parts.push('<div class="vac-desc">' + escHtml(c.description) + "</div>");
+  }
+  if (c.executive_summary && c.executive_summary !== c.description) {
+    parts.push(
+      '<div class="vac-desc">' + escHtml(c.executive_summary) + "</div>",
+    );
+  }
+  if (c.notes) {
+    parts.push('<div class="cp-note">“' + escHtml(c.notes) + "”</div>");
+  }
+  if (c.recent_news && c.recent_news.length) {
+    var newsRows = c.recent_news
+      .map(function (n) {
+        var u = safeUrl(n.url);
+        return u
+          ? '<a class="vac-loc vac-loc--link" href="' +
+              escHtml(u) +
+              '" target="_blank" rel="noopener">' +
+              escHtml(n.title) +
+              "</a>"
+          : '<div class="vac-loc">' + escHtml(n.title) + "</div>";
+      })
+      .join("");
+    parts.push(
+      '<div class="cp-block"><div class="vac-section-label">' +
+        escHtml(t("cp_recent_news", "Recent news")) +
         "</div>" +
-        scoreBadge +
-        (actionBtn
-          ? '<div class="company-vacancy-actions">' + actionBtn + "</div>"
-          : "") +
+        newsRows +
         "</div>",
     );
   }
-  return rows.length > 0
-    ? '<div class="company-vacancies-list">' + rows.join("") + "</div>"
-    : "";
+  if (!parts.length) return "";
+  return '<div class="cp-lede">' + parts.join("") + "</div>";
 }
 
-// ---------------------------------------------------------------------------
-// Company profile sections (MECE)
-// ---------------------------------------------------------------------------
-
-function buildAboutSection(c) {
-  var descHtml = "";
-  if (c.description) {
-    descHtml =
-      '<div class="cp-about-desc">' + escHtml(c.description) + "</div>";
-  }
-
-  var facts = [];
-  if (c.hq_location && c.hq_location !== "N/A")
-    facts.push({ label: "HQ", value: escHtml(c.hq_location) });
-  if (c.offices) facts.push({ label: "Offices", value: escHtml(c.offices) });
-  if (c.employee_count && c.employee_count !== "N/A")
-    facts.push({ label: "Size", value: escHtml(c.employee_count) });
-  if (c.founded_year && c.founded_year !== "N/A")
-    facts.push({ label: "Founded", value: escHtml(c.founded_year) });
-  if (c.funding_status && c.funding_status !== "N/A")
-    facts.push({ label: "Funding", value: escHtml(c.funding_status) });
-  if (c.sector && c.sector !== c.category)
-    facts.push({ label: "Sector", value: escHtml(c.sector) });
-  if (c.glassdoor_rating != null)
-    facts.push({ label: "Glassdoor", value: c.glassdoor_rating + "/5" });
-  if (c.linkedin_employees)
-    facts.push({
-      label: "LinkedIn",
-      value: escHtml(c.linkedin_employees) + " employees",
-    });
-
-  var factsHtml = "";
-  if (facts.length > 0) {
-    factsHtml = '<div class="cp-facts-grid">';
-    for (var i = 0; i < facts.length; i++) {
-      factsHtml +=
-        '<div class="cp-facts-item"><div class="cp-facts-label">' +
-        facts[i].label +
-        '</div><div class="cp-facts-value">' +
-        facts[i].value +
-        "</div></div>";
-    }
-    factsHtml += "</div>";
-  }
-
-  var newsHtml = "";
-  if (c.recent_news && c.recent_news.length) {
-    newsHtml =
-      '<div class="cp-about-news"><div class="cp-facts-label" style="margin-bottom:6px">Recent News</div>';
-    for (var ni = 0; ni < c.recent_news.length; ni++) {
-      var news = c.recent_news[ni];
-      var newsUrl = safeUrl(news.url);
-      if (newsUrl) {
-        newsHtml +=
-          '<div style="padding:2px 0"><a href="' +
-          escHtml(newsUrl) +
-          '" target="_blank" rel="noopener" class="cp-facts-link">' +
-          escHtml(news.title) +
-          "</a></div>";
-      } else {
-        newsHtml +=
-          '<div style="padding:2px 0;font-size:var(--text-sm);color:var(--text)">' +
-          escHtml(news.title) +
-          "</div>";
-      }
-    }
-    newsHtml += "</div>";
-  }
-
-  if (!descHtml && !factsHtml && !newsHtml) return "";
-
+function companyFitScoreHtml(c, t) {
+  if (c.alignment_score == null) return "";
+  var band = qualityBand(c.alignment_score);
   return (
-    '<div class="cp-section">' +
-    '<div class="cp-section-title"><span class="cp-section-icon">\uD83C\uDFE2</span> About</div>' +
-    descHtml +
-    factsHtml +
-    newsHtml +
+    '<div class="cp-block">' +
+    '<div class="vac-section-label">' +
+    escHtml(t("cp_fit_analysis", "Fit analysis")) +
+    "</div>" +
+    '<div class="cp-fit-row"><span class="cp-fit-score q-' +
+    band +
+    '">' +
+    c.alignment_score +
+    "</span>" +
+    (c.alignment_label
+      ? '<span class="cp-fit-label q-' +
+        band +
+        '">' +
+        escHtml(c.alignment_label) +
+        "</span>"
+      : "") +
+    "</div>" +
+    '<div class="cp-bar"><div class="cp-bar-fill" style="width:' +
+    c.alignment_score +
+    "%;background:" +
+    _bandVar(c.alignment_score) +
+    '"></div></div>' +
     "</div>"
   );
 }
 
-function buildFitSection(c) {
-  var hasEnrichment = c.is_enriched && c.alignment_score != null;
-  var hasRatings = c.experience_match != null || c.personal_interest != null;
-  var hasComment = !!c.notes;
-  var hasSummary = !!c.executive_summary;
-
-  if (!hasEnrichment && !hasRatings && !hasComment && !hasSummary) {
-    return (
-      '<div class="cp-placeholder">' +
-      '<div class="cp-section-title"><span class="cp-section-icon">\uD83C\uDFAF</span> Fit Analysis</div>' +
-      '<div class="cp-placeholder-text">Run /enrich to add mission fit data</div></div>'
-    );
-  }
-
-  var inner = "";
-
-  if (hasRatings) {
-    inner += '<div class="cp-ratings" style="margin-bottom:16px">';
-    if (c.experience_match != null) {
-      inner +=
-        '<div class="cp-rating-item"><span>Experience Match</span>' +
-        ratingDotsHtml(c.experience_match) +
-        "</div>";
-    }
-    if (c.personal_interest != null) {
-      inner +=
-        '<div class="cp-rating-item"><span>Personal Interest</span>' +
-        ratingDotsHtml(c.personal_interest) +
-        "</div>";
-    }
-    inner += "</div>";
-  }
-
-  if (hasEnrichment) {
-    var scoreColor =
-      c.alignment_score >= 75
-        ? "#059669"
-        : c.alignment_score >= 55
-          ? "#0284C7"
-          : c.alignment_score >= 35
-            ? "#D97706"
-            : "#DC2626";
-    inner +=
-      '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">' +
-      '<div style="font-size:28px;font-weight:700;color:' +
-      scoreColor +
+function companyWantBarsHtml(c, t) {
+  var fd = c.fit_dimensions;
+  if (!fd) return "";
+  var rows = "";
+  for (var i = 0; i < WANT_DIMS.length; i++) {
+    var dv = fd[WANT_DIMS[i][0]];
+    if (dv == null) continue;
+    var band = qualityBand(dv);
+    rows +=
+      '<div class="cp-bar-row">' +
+      '<span class="cp-bar-dim-label">' +
+      escHtml(WANT_DIMS[i][1]) +
+      "</span>" +
+      '<div class="cp-bar"><div class="cp-bar-fill" style="width:' +
+      dv +
+      "%;background:" +
+      _bandVar(dv) +
+      '"></div></div>' +
+      '<span class="cp-bar-value q-' +
+      band +
       '">' +
-      c.alignment_score +
-      "</div>" +
-      '<div style="flex:1">' +
-      '<div style="font-size:13px;color:#6B7280;margin-bottom:4px">' +
-      escHtml(c.alignment_label || "") +
-      "</div>" +
-      '<div style="background:#E5E7EB;border-radius:4px;height:8px;overflow:hidden">' +
-      '<div style="background:' +
-      scoreColor +
-      ";height:100%;width:" +
-      c.alignment_score +
-      '%;border-radius:4px"></div></div></div></div>';
-
-    if (c.fit_dimensions && Object.keys(c.fit_dimensions).length) {
-      // Derive the breakdown rows from the canonical factor set (WANT_DIMS) so
-      // the modal never drifts from the table/columns. [field, full label].
-      var DIMS = WANT_DIMS.map(function (d) {
-        return [d[0], d[1]];
-      });
-      inner +=
-        '<div style="margin-bottom:16px"><div style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">WANT breakdown</div>';
-      for (var di = 0; di < DIMS.length; di++) {
-        var dv = c.fit_dimensions[DIMS[di][0]];
-        if (dv == null) continue;
-        var dc =
-          dv >= 75
-            ? "#059669"
-            : dv >= 55
-              ? "#0284C7"
-              : dv >= 35
-                ? "#D97706"
-                : "#DC2626";
-        inner +=
-          '<div style="display:flex;align-items:center;gap:8px;margin:3px 0">' +
-          '<div style="width:78px;font-size:12px;color:#6B7280">' +
-          DIMS[di][1] +
-          "</div>" +
-          '<div style="flex:1;background:#E5E7EB;border-radius:4px;height:8px;overflow:hidden">' +
-          '<div style="background:' +
-          dc +
-          ";height:100%;width:" +
-          dv +
-          '%;border-radius:4px"></div></div>' +
-          '<div style="width:24px;font-size:12px;font-weight:600;color:' +
-          dc +
-          ';text-align:right">' +
-          dv +
-          "</div></div>";
-      }
-      inner += "</div>";
-    }
-
-    if (SHOW_MPA && c.mpa_prestige != null) {
-      inner +=
-        '<div style="display:flex;gap:24px;margin-bottom:16px;font-size:13px">' +
-        '<div><span style="color:#6B7280">MPA Prestige:</span> <strong>' +
-        c.mpa_prestige +
-        "</strong></div>" +
-        (c.composite_score != null
-          ? '<div><span style="color:#6B7280">Composite:</span> <strong>' +
-            Math.round(c.composite_score) +
-            "</strong></div>"
-          : "") +
-        "</div>";
-    }
-
-    if (c.fit_strengths && c.fit_strengths.length) {
-      inner +=
-        '<div style="margin-bottom:12px"><div style="font-size:12px;font-weight:600;color:#059669;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Strengths</div>';
-      for (var si = 0; si < c.fit_strengths.length; si++) {
-        inner +=
-          '<div style="font-size:13px;color:#374151;padding:4px 0;line-height:1.4">\u2022 ' +
-          escHtml(c.fit_strengths[si]) +
-          "</div>";
-      }
-      inner += "</div>";
-    }
-
-    if (c.fit_risks && c.fit_risks.length) {
-      inner +=
-        '<div style="margin-bottom:12px"><div style="font-size:12px;font-weight:600;color:#DC2626;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Risks</div>';
-      for (var ri = 0; ri < c.fit_risks.length; ri++) {
-        inner +=
-          '<div style="font-size:13px;color:#374151;padding:4px 0;line-height:1.4">\u2022 ' +
-          escHtml(c.fit_risks[ri]) +
-          "</div>";
-      }
-      inner += "</div>";
-    }
-
-    if (c.fit_evidence && c.fit_evidence.length) {
-      inner +=
-        '<details style="margin-bottom:12px"><summary style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;cursor:pointer">Evidence (' +
-        c.fit_evidence.length +
-        ")</summary>";
-      for (var evi = 0; evi < c.fit_evidence.length; evi++) {
-        var ev = c.fit_evidence[evi];
-        if (!ev) continue;
-        var q = ev.quote || "";
-        if (q.length > 240) q = q.slice(0, 240) + "…";
-        inner +=
-          '<div style="font-size:12px;padding:6px 0;border-bottom:1px solid #F3F4F6">' +
-          '<span style="background:#EEF2FF;color:#3730A3;font-size:11px;padding:1px 6px;border-radius:4px;margin-right:6px">' +
-          escHtml(ev.source || "") +
-          "</span>" +
-          '<strong style="color:#374151">' +
-          escHtml(ev.claim || "") +
-          "</strong>" +
-          (q
-            ? '<div style="color:#6B7280;font-style:italic;margin-top:2px">«' +
-              escHtml(q) +
-              "»</div>"
-            : "") +
-          "</div>";
-      }
-      inner += "</details>";
-    }
-
-    if (c.fit_approach) {
-      inner +=
-        '<div style="margin-bottom:12px"><div style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Approach</div>' +
-        '<div style="font-size:13px;color:#374151;line-height:1.4">' +
-        escHtml(c.fit_approach) +
-        "</div></div>";
-    }
-
-    if (c.experience_reasoning) {
-      inner +=
-        '<div style="margin-bottom:12px"><div style="font-size:12px;font-weight:600;color:#0284C7;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Experience Match</div>' +
-        '<div style="font-size:13px;color:#374151;line-height:1.4">' +
-        escHtml(c.experience_reasoning) +
-        "</div></div>";
-    }
-
-    if (c.mission_verdict) {
-      inner +=
-        '<div style="background:#FEF3C7;border-radius:8px;padding:12px 16px;margin-top:8px">' +
-        '<div style="font-size:13px;color:#92400E;line-height:1.5;font-style:italic">' +
-        escHtml(c.mission_verdict) +
-        "</div></div>";
-    }
-  }
-
-  if (hasSummary) {
-    inner +=
-      '<div class="company-detail-summary" style="margin-top:12px;margin-bottom:0">' +
-      escHtml(c.executive_summary) +
+      dv +
+      "</span>" +
       "</div>";
   }
-
-  if (hasComment) {
-    inner +=
-      '<div class="cp-comment" style="margin-top:12px">\u201C' +
-      escHtml(c.notes) +
-      "\u201D</div>";
+  if (!rows) return "";
+  var mpaNote = "";
+  if (SHOW_MPA && c.mpa_prestige != null) {
+    mpaNote =
+      '<div class="cp-mpa-note">MPA ' +
+      c.mpa_prestige +
+      (c.composite_score != null
+        ? " · composite " + Math.round(c.composite_score)
+        : "") +
+      "</div>";
   }
-
   return (
-    '<div class="cp-section">' +
-    '<div class="cp-section-title"><span class="cp-section-icon">\uD83C\uDFAF</span> Fit Analysis</div>' +
-    inner +
+    '<div class="cp-block">' +
+    '<div class="vac-section-label">' +
+    escHtml(t("cp_want_breakdown", "Want breakdown")) +
+    "</div>" +
+    rows +
+    mpaNote +
     "</div>"
   );
 }
 
-function buildVacanciesSection(c) {
-  var counts = getCompanyStatusCounts(c.vacancy_ids);
-  if (c.vacancy_count === 0) return "";
-
-  var inner = "";
-  inner +=
-    '<div class="cp-status-bar" style="margin-bottom:16px">' +
-    '<span class="cp-stat cp-stat-vacancies"><span class="cp-stat-icon">\uD83D\uDCBC</span> ' +
-    c.vacancy_count +
-    " vacancies</span>" +
-    (counts.liked > 0
-      ? '<span class="cp-stat cp-stat-liked"><span class="cp-stat-icon">\uD83D\uDC9A</span> ' +
-        counts.liked +
-        " liked</span>"
-      : "") +
-    (counts.passed > 0
-      ? '<span class="cp-stat cp-stat-passed"><span class="cp-stat-icon">\uD83D\uDC4E</span> ' +
-        counts.passed +
-        " passed</span>"
-      : "") +
-    (counts.unseen > 0
-      ? '<span class="cp-stat cp-stat-unseen"><span class="cp-stat-icon">\u2753</span> ' +
-        counts.unseen +
-        " unseen</span>"
-      : "") +
-    (c.avg_llm_score != null
-      ? '<span class="cp-stat">' +
-        llmScoreBadge(Math.round(c.avg_llm_score)) +
-        " avg</span>"
-      : "") +
-    "</div>";
-
-  if (counts.liked > 0 && c.vacancy_ids) {
-    var likedRows = [];
-    for (var i = 0; i < c.vacancy_ids.length; i++) {
-      var id = c.vacancy_ids[i];
-      var st = (state.dbData[id] && state.dbData[id].status) || "unseen";
-      if (st !== "liked") continue;
-      var g = groupsById.get(id);
-      if (!g) continue;
-      // Skip expired (closed) vacancies from the liked inline list
-      if (isVacancyExpired(g)) continue;
-      var firstUrl = "";
-      if (g.locations) {
-        for (var j = 0; j < g.locations.length; j++) {
-          if (g.locations[j].url) {
-            firstUrl = g.locations[j].url;
-            break;
-          }
-        }
-      }
-      if (!firstUrl) firstUrl = g.org_url || "";
-      firstUrl = safeUrl(firstUrl);
-      var titleHtml = firstUrl
-        ? '<a href="' +
-          escHtml(firstUrl) +
-          '" target="_blank" rel="noopener">' +
-          escHtml(g.title) +
-          "</a>"
-        : escHtml(g.title);
-      likedRows.push(
-        '<div class="cp-vacancy-row">' +
-          '<span class="company-vacancy-status-dot dot-liked"></span>' +
-          '<div class="company-vacancy-title">' +
-          titleHtml +
-          "</div>" +
-          llmScoreBadge(g.llm_score) +
-          screenScoreBadge(g) +
-          "</div>",
+// Strengths (band="good") / Risks (band="weak") — same shape, different
+// meaning color, matching the mock's green/crimson list blocks.
+function companyListBlock(title, items, band) {
+  if (!items || !items.length) return "";
+  var rows = items
+    .map(function (s) {
+      return (
+        '<div class="cp-list-item"><span class="cp-bullet cp-bullet--' +
+        band +
+        '"></span><div class="cp-list-text">' +
+        escHtml(s) +
+        "</div></div>"
       );
-    }
-    if (likedRows.length > 0) {
-      inner +=
-        '<div class="cp-liked-inline">' +
-        '<div class="cp-facts-label" style="margin-bottom:6px;color:var(--emerald)">\uD83D\uDC9A Liked</div>' +
-        '<div class="company-vacancies-list">' +
-        likedRows.join("") +
-        "</div></div>";
-    }
-  }
-
-  var scoreBar = buildScoreBarHtml(c);
-  if (scoreBar) {
-    inner +=
-      '<div style="margin:16px 0 12px"><div class="cp-facts-label" style="margin-bottom:8px">Score Distribution</div>' +
-      scoreBar +
-      "</div>";
-  }
-
-  var vacList = buildVacancyListHtml(c, { readOnly: true });
-  if (vacList) {
-    inner +=
-      '<div style="margin-top:8px"><div class="cp-facts-label" style="margin-bottom:8px">All Vacancies (' +
-      c.vacancy_count +
-      ")</div>" +
-      vacList +
-      "</div>";
-  }
-
+    })
+    .join("");
   return (
-    '<div class="cp-section">' +
-    '<div class="cp-section-title"><span class="cp-section-icon">\uD83D\uDCCB</span> Vacancies</div>' +
-    inner +
+    '<div class="cp-block"><div class="vac-section-label cp-block-title--' +
+    band +
+    '">' +
+    escHtml(title) +
+    "</div>" +
+    rows +
     "</div>"
   );
 }
 
-// Applications + research. A small block inside the EXISTING company
-// profile: applications you have made (with status + which artifacts were sent)
-// and the research collected in company_evidence. Nothing gets lost in folders.
-// The full standalone Applications section is a later ticket.
-function buildApplicationsSection(c) {
+// Collapsible sourced evidence, shown alongside a full WANT breakdown (not to
+// be confused with companyEvidenceListHtml's AE2 variant for a company with
+// NO breakdown at all).
+function companyEvidenceDetails(c, t) {
+  var ev = c.fit_evidence;
+  if (!ev || !ev.length) return "";
+  var items = ev
+    .map(function (e) {
+      if (!e) return "";
+      var q = e.quote || "";
+      if (q.length > 240) q = q.slice(0, 240) + "…";
+      return (
+        '<div class="cp-evidence-item">' +
+        (e.source
+          ? '<span class="cp-evidence-source">' + escHtml(e.source) + "</span>"
+          : "") +
+        '<strong class="cp-evidence-claim">' +
+        escHtml(e.claim || "") +
+        "</strong>" +
+        (q ? '<div class="cp-evidence-quote">«' + escHtml(q) + "»</div>" : "") +
+        "</div>"
+      );
+    })
+    .join("");
+  return (
+    '<details class="cp-evidence"><summary class="vac-section-label">' +
+    escHtml(t("cp_evidence", "Evidence")) +
+    " (" +
+    ev.length +
+    ")</summary>" +
+    items +
+    "</details>"
+  );
+}
+
+// AE2: a pending/never-scored company with raw evidence anchors but no
+// alignment_score/fit_dimensions gets this lighter list instead of bars.
+function companyEvidenceListHtml(c, t) {
+  var ev = c.fit_evidence;
+  if (!ev || !ev.length) return "";
+  var rows = ev
+    .map(function (e) {
+      if (!e) return "";
+      var text = e.claim || e.quote || "";
+      if (!text) return "";
+      return (
+        '<div class="cp-list-item"><span class="cp-bullet"></span>' +
+        '<div class="cp-list-text">' +
+        (e.source
+          ? '<span class="cp-evidence-source">' + escHtml(e.source) + "</span> "
+          : "") +
+        escHtml(text) +
+        "</div></div>"
+      );
+    })
+    .join("");
+  if (!rows) return "";
+  return (
+    '<div class="cp-block"><div class="vac-section-label">' +
+    escHtml(t("cp_why_tier", "Why this tier")) +
+    "</div>" +
+    rows +
+    "</div>"
+  );
+}
+
+function companyProseBlock(title, text) {
+  if (!text) return "";
+  return (
+    '<div class="cp-block"><div class="vac-section-label">' +
+    escHtml(title) +
+    '</div><div class="cp-prose">' +
+    escHtml(text) +
+    "</div></div>"
+  );
+}
+
+function companyDeepAnalysisHtml(c, t) {
+  if (!c.md_content) return "";
+  // .md-content (not .vac-desc) — this can be a full markdown document
+  // (headers, tables, blockquotes), and only .md-content styles those.
+  return (
+    '<details class="cp-deep"><summary class="vac-section-label">' +
+    escHtml(t("cp_deep_analysis", "Deep analysis")) +
+    '</summary><div class="md-content">' +
+    mdToHtml(c.md_content) +
+    "</div></details>"
+  );
+}
+
+function companyVerdictHtml(c) {
+  if (!c.mission_verdict) return "";
+  return (
+    '<div class="cp-verdict q-moderate-bg">' +
+    escHtml(c.mission_verdict) +
+    "</div>"
+  );
+}
+
+// Applications you've made + research collected in company_evidence. Content
+// unchanged from the pre-U7 profile (still gated on either list being
+// non-empty) — only the section's place in the reading order moves.
+function companyApplicationsHtml(c, t) {
   var apps = c.applications || [];
   var research = c.research || [];
   if (apps.length === 0 && research.length === 0) return "";
 
   var inner = "";
-
   if (apps.length > 0) {
-    var rows = apps
-      .map(function (a) {
-        var meta = [];
-        if (a.channel) meta.push(escHtml(a.channel));
-        if (a.applied_at) meta.push(escHtml(a.applied_at));
-        var artifactKeys = a.artifacts ? Object.keys(a.artifacts) : [];
-        var artifactsHtml =
-          artifactKeys.length > 0
+    inner +=
+      '<div class="cp-app-list">' +
+      apps
+        .map(function (a) {
+          var meta = [];
+          if (a.channel) meta.push(escHtml(a.channel));
+          if (a.applied_at) meta.push(escHtml(a.applied_at));
+          var artifactKeys = a.artifacts ? Object.keys(a.artifacts) : [];
+          var artifactsHtml = artifactKeys.length
             ? '<div class="cp-app-artifacts">' +
               artifactKeys
                 .map(function (k) {
@@ -2011,201 +1749,595 @@ function buildApplicationsSection(c) {
                 .join("") +
               "</div>"
             : "";
-        return (
-          '<div class="cp-app-item">' +
-          '<span class="cp-app-status cp-app-status-' +
-          escHtml(a.status) +
-          '">' +
-          escHtml(a.status) +
-          "</span>" +
-          (meta.length
-            ? '<span class="cp-app-meta">' + meta.join(" · ") + "</span>"
-            : "") +
-          artifactsHtml +
-          "</div>"
-        );
-      })
-      .join("");
-    inner += '<div class="cp-app-list">' + rows + "</div>";
+          return (
+            '<div class="cp-app-item">' +
+            '<span class="cp-app-status cp-app-status-' +
+            escHtml(a.status) +
+            '">' +
+            escHtml(t("app_status_" + a.status, a.status)) +
+            "</span>" +
+            (meta.length
+              ? '<span class="cp-app-meta">' + meta.join(" · ") + "</span>"
+              : "") +
+            artifactsHtml +
+            "</div>"
+          );
+        })
+        .join("") +
+      "</div>";
   }
-
   if (research.length > 0) {
-    var researchRows = research
-      .map(function (r) {
-        var label = escHtml(r.source || "research");
-        var researchUrl = safeUrl(r.url);
-        var body = researchUrl
-          ? '<a href="' +
-            escHtml(researchUrl) +
-            '" target="_blank" rel="noopener">' +
-            escHtml(r.url) +
-            "</a>"
-          : label;
-        var when = r.fetched_at
-          ? '<span class="cp-app-meta">' +
-            escHtml(String(r.fetched_at).slice(0, 10)) +
-            "</span>"
-          : "";
-        return (
-          '<div class="cp-app-item"><span class="cp-app-source">' +
-          label +
-          "</span>" +
-          body +
-          when +
-          "</div>"
-        );
-      })
-      .join("");
     inner +=
-      '<div class="cp-app-research-label">Research (' +
+      '<div class="cp-app-research-label">' +
+      escHtml(t("cp_research", "Research")) +
+      " (" +
       research.length +
       ")</div>" +
       '<div class="cp-app-list">' +
-      researchRows +
+      research
+        .map(function (r) {
+          var label = escHtml(r.source || "research");
+          var researchUrl = safeUrl(r.url);
+          var body = researchUrl
+            ? '<a href="' +
+              escHtml(researchUrl) +
+              '" target="_blank" rel="noopener">' +
+              escHtml(r.url) +
+              "</a>"
+            : label;
+          var when = r.fetched_at
+            ? '<span class="cp-app-meta">' +
+              escHtml(String(r.fetched_at).slice(0, 10)) +
+              "</span>"
+            : "";
+          return (
+            '<div class="cp-app-item"><span class="cp-app-source">' +
+            label +
+            "</span>" +
+            body +
+            when +
+            "</div>"
+          );
+        })
+        .join("") +
       "</div>";
   }
-
   return (
-    '<div class="cp-section">' +
-    '<div class="cp-section-title"><span class="cp-section-icon">✉️</span> Applications & Research</div>' +
+    '<div class="cp-block"><div class="vac-section-label">' +
+    escHtml(t("cp_applications_research", "Applications & research")) +
+    "</div>" +
     inner +
     "</div>"
   );
 }
 
-function buildCompanyProfilePage(c) {
-  var tierCls = c.calculated_tier
-    ? "ctier-" + c.calculated_tier.toLowerCase()
-    : "ctier-none";
-  var tierLabel = c.calculated_tier || "\u2014";
+// A single open-role row — the whole row routes to the vacancy detail page
+// (U4/U6 contract: context "company" so "Move to apply" never auto-advances
+// through the company's role list, mirroring vacancyMoveToApply's context
+// gate). The score tile and status chip reuse the SAME helpers the vacancy
+// page and its own header use, so a role never reads two different colors
+// depending on which screen you saw it from.
+function companyRoleRowHtml(r, t) {
+  var scoreCls =
+    r.score == null
+      ? "cp-role-score--none"
+      : "q-" + qualityBand(r.score) + "-bg";
+  var scoreTxt = r.score == null ? "—" : String(r.score);
+  var metaParts = [];
+  if (r.loc) metaParts.push(escHtml(r.loc));
+  if (r.seenRaw) {
+    metaParts.push(
+      escHtml(t("vac_seen_prefix", "seen")) +
+        " " +
+        escHtml(relativeTime(r.seenRaw, t)),
+    );
+  }
+  var chipText = statusChipLabel(r.status, t);
+  var chip = chipText
+    ? '<span class="vac-status-chip">' + escHtml(chipText) + "</span>"
+    : "";
+  var screenBadge = r.screenOnly
+    ? screenScoreBadge({ screen_only_score: true })
+    : "";
+  return (
+    '<div class="cp-role-row" onclick="openVacancyRoute(\'' +
+    jsAttr(r.id) +
+    "',{context:'company'})\">" +
+    '<div class="cp-role-score ' +
+    scoreCls +
+    '">' +
+    escHtml(scoreTxt) +
+    "</div>" +
+    '<div class="cp-role-body"><div class="cp-role-title-row">' +
+    '<span class="cp-role-title">' +
+    escHtml(r.title) +
+    "</span>" +
+    chip +
+    screenBadge +
+    "</div>" +
+    (metaParts.length
+      ? '<div class="cp-role-meta">' + metaParts.join(" · ") + "</div>"
+      : "") +
+    "</div>" +
+    '<span class="cp-role-arrow">›</span>' +
+    "</div>"
+  );
+}
 
-  var linksHtml = "";
+function companyRolesBlockHtml(c, roles, counts, t) {
+  if (!roles.length) return "";
+
+  var scored = [];
+  for (var i = 0; i < roles.length; i++) {
+    if (roles[i].score != null) scored.push(roles[i].score);
+  }
+  var distHtml = "";
+  if (scored.length) {
+    var d = roleScoreDistribution(scored);
+    distHtml =
+      '<div class="cp-dist"><div class="cp-dist-legend">' +
+      (d.strong
+        ? '<span class="cp-dist-legend-item"><span class="cp-dist-dot" style="background:var(--q-good)"></span>' +
+          d.strong +
+          " " +
+          escHtml(t("cp_dist_strong", "strong")) +
+          "</span>"
+        : "") +
+      (d.moderate
+        ? '<span class="cp-dist-legend-item"><span class="cp-dist-dot" style="background:var(--q-moderate)"></span>' +
+          d.moderate +
+          " " +
+          escHtml(t("cp_dist_moderate", "moderate")) +
+          "</span>"
+        : "") +
+      (d.weak
+        ? '<span class="cp-dist-legend-item"><span class="cp-dist-dot" style="background:var(--q-weak)"></span>' +
+          d.weak +
+          " " +
+          escHtml(t("cp_dist_weak", "weak")) +
+          "</span>"
+        : "") +
+      '</div><div class="cp-dist-bar">' +
+      (d.strong
+        ? '<div style="width:' +
+          d.strongPct +
+          '%;background:var(--q-good)"></div>'
+        : "") +
+      (d.moderate
+        ? '<div style="width:' +
+          d.moderatePct +
+          '%;background:var(--q-moderate)"></div>'
+        : "") +
+      (d.weak
+        ? '<div style="width:' +
+          d.weakPct +
+          '%;background:var(--q-weak)"></div>'
+        : "") +
+      "</div></div>";
+  }
+
+  var statsHtml =
+    '<div class="cp-status-bar">' +
+    '<span class="cp-stat cp-stat-vacancies"><span class="cp-stat-icon">💼</span> ' +
+    roles.length +
+    " " +
+    escHtml(t("cp_stat_vacancies_suffix", "vacancies")) +
+    "</span>" +
+    (counts.liked > 0
+      ? '<span class="cp-stat cp-stat-liked"><span class="cp-stat-icon">💚</span> ' +
+        counts.liked +
+        " " +
+        escHtml(t("cp_stat_liked_suffix", "liked")) +
+        "</span>"
+      : "") +
+    (counts.passed > 0
+      ? '<span class="cp-stat cp-stat-passed"><span class="cp-stat-icon">👎</span> ' +
+        counts.passed +
+        " " +
+        escHtml(t("cp_stat_passed_suffix", "passed")) +
+        "</span>"
+      : "") +
+    (counts.unseen > 0
+      ? '<span class="cp-stat cp-stat-unseen"><span class="cp-stat-icon">❓</span> ' +
+        counts.unseen +
+        " " +
+        escHtml(t("cp_stat_unseen_suffix", "unseen")) +
+        "</span>"
+      : "") +
+    (c.avg_llm_score != null
+      ? '<span class="cp-stat"><span class="q-' +
+        qualityBand(c.avg_llm_score) +
+        '">' +
+        Math.round(c.avg_llm_score) +
+        "</span> " +
+        escHtml(t("cp_stat_avg_suffix", "avg")) +
+        "</span>"
+      : "") +
+    "</div>";
+
+  var rows = roles
+    .map(function (r) {
+      return companyRoleRowHtml(r, t);
+    })
+    .join("");
+
+  return (
+    '<div class="cp-block">' +
+    '<div class="cp-roles-header"><span class="vac-section-label">' +
+    escHtml(t("cp_open_roles", "Open roles here")) +
+    '</span><span class="cp-roles-count">' +
+    roles.length +
+    "</span></div>" +
+    statsHtml +
+    distHtml +
+    '<div class="cp-roles-list">' +
+    rows +
+    "</div>" +
+    '<span class="cp-view-all-link" onclick="viewOrgInCatalog(\'' +
+    jsAttr(c.name) +
+    "')\">" +
+    escHtml(t("cp_view_all_browse", "View all in Browse")) +
+    " →</span>" +
+    "</div>"
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Rail — facts · status · monitoring (all pure).
+// ---------------------------------------------------------------------------
+
+function companyFactsHtml(c, t) {
+  var facts = [];
+  if (c.hq_location && c.hq_location !== "N/A")
+    facts.push([t("cp_hq", "HQ"), escHtml(c.hq_location)]);
+  if (c.offices) facts.push([t("cp_offices", "Offices"), escHtml(c.offices)]);
+  if (c.employee_count && c.employee_count !== "N/A")
+    facts.push([t("cp_size", "Size"), escHtml(c.employee_count)]);
+  if (c.founded_year && c.founded_year !== "N/A")
+    facts.push([t("cp_founded", "Founded"), escHtml(c.founded_year)]);
+  if (c.funding_status && c.funding_status !== "N/A")
+    facts.push([t("cp_funding", "Funding"), escHtml(c.funding_status)]);
+  if (c.sector && c.sector !== c.category)
+    facts.push([t("cp_sector", "Sector"), escHtml(c.sector)]);
+  if (c.glassdoor_rating != null)
+    facts.push(["Glassdoor", c.glassdoor_rating + "/5"]);
+  if (c.linkedin_employees)
+    facts.push([
+      "LinkedIn",
+      escHtml(c.linkedin_employees) +
+        " " +
+        escHtml(t("cp_employees_suffix", "employees")),
+    ]);
+  if (c.experience_match != null)
+    facts.push([
+      t("cp_exp_rating", "Experience rating"),
+      c.experience_match + "/10",
+    ]);
+  if (c.personal_interest != null)
+    facts.push([
+      t("cp_interest_rating", "Interest rating"),
+      c.personal_interest + "/10",
+    ]);
   var websiteUrl = safeUrl(c.website);
   if (websiteUrl) {
-    linksHtml +=
-      '<a href="' +
-      escHtml(websiteUrl) +
-      '" target="_blank" rel="noopener" class="cp-hero-link">Website</a>';
+    facts.push([
+      t("cp_website", "Website"),
+      '<a class="cp-fact-link" href="' +
+        escHtml(websiteUrl) +
+        '" target="_blank" rel="noopener">' +
+        escHtml(t("cp_visit", "Visit")) +
+        " ↗</a>",
+    ]);
   }
   var careersUrl = safeUrl(c.careers_url);
   if (careersUrl) {
-    linksHtml +=
-      '<a href="' +
-      escHtml(careersUrl) +
-      '" target="_blank" rel="noopener" class="cp-hero-link">Careers</a>';
+    facts.push([
+      t("cp_careers", "Careers"),
+      '<a class="cp-fact-link" href="' +
+        escHtml(careersUrl) +
+        '" target="_blank" rel="noopener">' +
+        escHtml(t("cp_visit", "Visit")) +
+        " ↗</a>",
+    ]);
   }
-
-  var atsHtml = "";
-  var atsItems = [];
-  if (c.strategy)
-    atsItems.push(
-      '<div class="cp-ats-item"><span class="cp-ats-label">Strategy</span><span class="cp-ats-value">' +
-        escHtml(c.strategy) +
-        "</span></div>",
-    );
-  if (c.last_fetched)
-    atsItems.push(
-      '<div class="cp-ats-item"><span class="cp-ats-label">Last Fetched</span><span class="cp-ats-value">' +
-        escHtml(c.last_fetched.slice(0, 10)) +
-        "</span></div>",
-    );
-  if (c.fetch_status)
-    atsItems.push(
-      '<div class="cp-ats-item"><span class="cp-ats-label">Fetch Status</span><span class="cp-ats-value">' +
-        escHtml(c.fetch_status) +
-        "</span></div>",
-    );
-  if (atsItems.length > 0) {
-    atsHtml =
-      '<div class="cp-section" style="opacity:0.7">' +
-      '<div class="cp-section-title"><span class="cp-section-icon">\u2699\uFE0F</span> Monitoring</div>' +
-      '<div class="cp-ats-grid">' +
-      atsItems.join("") +
-      "</div></div>";
-  }
-
-  var mdHtml = "";
-  if (c.md_content) {
-    mdHtml =
-      '<div class="cp-section">' +
-      '<div class="cp-section-title"><span class="cp-section-icon">\uD83D\uDD0D</span> Deep Analysis</div>' +
-      '<div class="md-content">' +
-      mdToHtml(c.md_content) +
-      "</div></div>";
-  }
-
-  var catalogBtn =
-    '<button class="company-view-catalog-btn" onclick="viewOrgInCatalog(\'' +
-    jsAttr(c.name) +
-    "')\">\u2192 Vacancies</button>";
-
-  // Review banner for pending companies
-  var reviewSt = _getReviewStatus(c);
-  var reviewBanner = "";
-  if (reviewSt === "pending" && c.company_id) {
-    var cid = escHtml(c.company_id);
-    reviewBanner =
-      '<div class="cp-review-banner">' +
-      '<span class="cp-review-label">Pending Review</span>' +
-      '<button class="cr-btn cr-approve cr-btn-lg" onclick="reviewCompany(\'' +
-      cid +
-      "','approve')\">\u2713 Approve</button>" +
-      '<button class="cr-btn cr-reject cr-btn-lg" onclick="reviewCompany(\'' +
-      cid +
-      "','reject')\">\u2717 Reject</button>" +
-      "</div>";
-  } else if (reviewSt === "approved" && c.company_id) {
-    var cidA = escHtml(c.company_id);
-    reviewBanner =
-      '<div class="cp-review-banner cp-review-approved">' +
-      '<span class="cp-review-label">\u2713 Approved</span>' +
-      '<button class="cr-btn cr-reject cr-btn-lg" onclick="reviewCompany(\'' +
-      cidA +
-      "','reject')\">\u2717 Archive</button>" +
-      "</div>";
-  } else if (reviewSt === "rejected" && c.company_id) {
-    var cidR = escHtml(c.company_id);
-    reviewBanner =
-      '<div class="cp-review-banner cp-review-rejected">' +
-      '<span class="cp-review-label">\u2717 Archived</span>' +
-      '<button class="cr-btn cr-approve cr-btn-lg" onclick="reviewCompany(\'' +
-      cidR +
-      "','approve')\">\u2713 Restore to active</button>" +
-      "</div>";
-  }
-
+  if (!facts.length) return "";
   return (
-    '<div class="company-profile">' +
-    '<button class="cp-back-btn" onclick="closeCompanyProfile()">\u2190 Back to Companies</button>' +
-    reviewBanner +
-    '<div class="cp-hero">' +
-    '<div class="cp-hero-top">' +
-    (c.logo_url
-      ? '<img class="cp-hero-logo" src="' +
-        escHtml(c.logo_url) +
-        '" alt="" onerror="this.style.display=\'none\'">'
-      : "") +
-    '<span class="company-tier-badge ' +
-    tierCls +
-    '">' +
-    tierLabel +
-    "</span>" +
-    '<span class="cp-hero-name">' +
-    escHtml(c.name) +
-    "</span>" +
+    '<div class="vac-rail-group"><div class="vac-section-label">' +
+    escHtml(t("vac_facts", "Facts")) +
     "</div>" +
-    (c.category
-      ? '<div class="cp-hero-category">' + escHtml(c.category) + "</div>"
-      : "") +
-    (linksHtml ? '<div class="cp-hero-links">' + linksHtml + "</div>" : "") +
-    "</div>" +
-    buildAboutSection(c) +
-    buildFitSection(c) +
-    buildVacanciesSection(c) +
-    buildApplicationsSection(c) +
-    mdHtml +
-    atsHtml +
-    catalogBtn +
+    facts
+      .map(function (f) {
+        return (
+          '<div class="vac-fact"><span class="vac-fact-k">' +
+          escHtml(f[0]) +
+          '</span><span class="vac-fact-v">' +
+          f[1] +
+          "</span></div>"
+        );
+      })
+      .join("") +
     "</div>"
   );
+}
+
+function companyStatusPillHtml(reviewStatus, t) {
+  var STATUS_MAP = {
+    approved: ["q-good-bg", t("cp_review_approved", "Approved")],
+    pending: ["q-moderate-bg", t("cp_review_pending", "Pending review")],
+    rejected: ["q-weak-bg", t("cp_review_archived", "Archived")],
+  };
+  var m = STATUS_MAP[reviewStatus] || STATUS_MAP.pending;
+  return (
+    '<div class="vac-rail-group"><div class="vac-section-label">' +
+    escHtml(t("apps_col_status", "Status")) +
+    '</div><span class="cp-status-pill ' +
+    m[0] +
+    '">' +
+    escHtml(m[1]) +
+    "</span></div>"
+  );
+}
+
+function companyMonitoringHtml(c, monStatus, t) {
+  var rows = "";
+  if (c.strategy) {
+    rows +=
+      '<div class="vac-fact"><span class="vac-fact-k">' +
+      escHtml(t("cp_strategy", "Strategy")) +
+      '</span><span class="vac-fact-v">' +
+      escHtml(c.strategy) +
+      "</span></div>";
+  }
+  if (c.last_fetched) {
+    rows +=
+      '<div class="vac-fact"><span class="vac-fact-k">' +
+      escHtml(t("cp_last_fetched", "Last fetched")) +
+      '</span><span class="vac-fact-v">' +
+      escHtml(c.last_fetched.slice(0, 10)) +
+      "</span></div>";
+  }
+  var statusRow = monStatus
+    ? '<div class="cp-mon-status" title="' +
+      escHtml(monStatus.tooltip || "") +
+      '"><span class="mon-dot ' +
+      monStatus.dotCls +
+      '"></span><span>' +
+      escHtml(monStatus.label) +
+      "</span></div>"
+    : "";
+  if (!rows && !statusRow) return "";
+  return (
+    '<div class="vac-rail-group"><div class="vac-section-label">' +
+    escHtml(t("col_monitoring", "Monitoring")) +
+    "</div>" +
+    rows +
+    statusRow +
+    "</div>"
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Page assembly (pure) — c + pre-resolved roles + opts. No DOM/state read, so
+// it renders identically in a test as in the browser.
+// ---------------------------------------------------------------------------
+
+export function companyProfileHtml(c, roles, opts) {
+  var o = opts || {};
+  var t =
+    o.t ||
+    function (k, fb) {
+      return fb !== undefined ? fb : k;
+    };
+  var reviewStatus = o.reviewStatus || "pending";
+  var monStatus = o.monStatus || null;
+  var counts = o.counts || { liked: 0, passed: 0, unseen: 0 };
+
+  var score = c.alignment_score;
+  var scoreCls =
+    score == null ? "vac-score--none" : "q-" + qualityBand(score) + "-bg";
+  var scoreTxt = score == null ? "—" : String(score);
+  var tierHtml = c.calculated_tier
+    ? '<span class="vac-tier ' +
+      tierClass(c.calculated_tier) +
+      '">' +
+      escHtml(c.calculated_tier) +
+      "</span>"
+    : "";
+  var subtitle = c.category
+    ? '<div class="cp-subtitle">' + escHtml(c.category) + "</div>"
+    : "";
+
+  var header =
+    '<button class="vac-back" onclick="closeCompanyProfile()">← ' +
+    escHtml(t("vac_back", "Back")) +
+    "</button>" +
+    '<div class="vac-header-main">' +
+    '<div class="vac-score-tile ' +
+    scoreCls +
+    '">' +
+    escHtml(scoreTxt) +
+    "</div>" +
+    '<div class="vac-header-text"><div class="vac-title-row">' +
+    '<h1 class="vac-title">' +
+    escHtml(c.name) +
+    "</h1>" +
+    tierHtml +
+    "</div>" +
+    subtitle +
+    "</div></div>";
+
+  var banner = "";
+  if (reviewStatus === "pending" && c.company_id) {
+    var cid = jsAttr(c.company_id);
+    banner =
+      '<div class="cp-review-banner q-moderate-bg">' +
+      '<span class="cp-review-label">' +
+      escHtml(t("cp_review_pending", "Pending review")) +
+      "</span>" +
+      '<button class="vac-btn vac-btn--like" onclick="reviewCompany(\'' +
+      cid +
+      "','approve')\">" +
+      escHtml(t("btn_approve", "Approve")) +
+      "</button>" +
+      '<button class="vac-btn vac-btn--pass" onclick="reviewCompany(\'' +
+      cid +
+      "','reject')\">" +
+      escHtml(t("btn_reject", "Reject")) +
+      "</button></div>";
+  } else if (reviewStatus === "approved" && c.company_id) {
+    var cidA = jsAttr(c.company_id);
+    banner =
+      '<div class="cp-review-banner q-good-bg">' +
+      '<span class="cp-review-label">' +
+      escHtml(t("cp_review_approved", "Approved")) +
+      "</span>" +
+      '<button class="vac-btn vac-btn--pass" onclick="reviewCompany(\'' +
+      cidA +
+      "','reject')\">" +
+      escHtml(t("cp_archive", "Archive")) +
+      "</button></div>";
+  } else if (reviewStatus === "rejected" && c.company_id) {
+    var cidR = jsAttr(c.company_id);
+    banner =
+      '<div class="cp-review-banner q-weak-bg">' +
+      '<span class="cp-review-label">' +
+      escHtml(t("cp_review_archived", "Archived")) +
+      "</span>" +
+      '<button class="vac-btn vac-btn--like" onclick="reviewCompany(\'' +
+      cidR +
+      "','approve')\">" +
+      escHtml(t("cp_restore", "Restore to active")) +
+      "</button></div>";
+  }
+
+  var hasDims = !!(
+    c.fit_dimensions &&
+    Object.keys(c.fit_dimensions).some(function (k) {
+      return c.fit_dimensions[k] != null;
+    })
+  );
+  var hasAnalysis = !!(c.is_enriched && c.alignment_score != null);
+  var hasEvidence = !hasAnalysis && !!(c.fit_evidence && c.fit_evidence.length);
+
+  var readParts = [companyAboutLedeHtml(c, t)];
+  if (hasAnalysis) {
+    readParts.push(companyFitScoreHtml(c, t));
+    if (hasDims) readParts.push(companyWantBarsHtml(c, t));
+    readParts.push(
+      companyListBlock(t("cp_strengths", "Strengths"), c.fit_strengths, "good"),
+    );
+    readParts.push(
+      companyListBlock(t("cp_risks", "Risks"), c.fit_risks, "weak"),
+    );
+    readParts.push(companyEvidenceDetails(c, t));
+    readParts.push(
+      companyProseBlock(t("cp_approach", "Approach"), c.fit_approach),
+    );
+    readParts.push(
+      companyProseBlock(
+        t("cp_experience_match", "Experience match"),
+        c.experience_reasoning,
+      ),
+    );
+    readParts.push(companyDeepAnalysisHtml(c, t));
+    readParts.push(companyVerdictHtml(c));
+  } else if (hasEvidence) {
+    readParts.push(companyEvidenceListHtml(c, t));
+  } else {
+    readParts.push(
+      '<div class="cp-empty-fit">' +
+        escHtml(t("cp_no_fit_data", "Run /enrich to add mission fit data")) +
+        "</div>",
+    );
+  }
+  readParts.push(companyApplicationsHtml(c, t));
+  readParts.push(companyRolesBlockHtml(c, roles, counts, t));
+
+  var reading =
+    '<div class="vac-reading">' + readParts.filter(Boolean).join("") + "</div>";
+
+  var railParts = [
+    companyFactsHtml(c, t),
+    companyStatusPillHtml(reviewStatus, t),
+    companyMonitoringHtml(c, monStatus, t),
+  ];
+  var rail =
+    '<aside class="vac-rail">' +
+    railParts.filter(Boolean).join("") +
+    "</aside>";
+
+  return (
+    '<div class="vac-page">' +
+    header +
+    banner +
+    '<div class="vac-sheet">' +
+    reading +
+    rail +
+    "</div></div>"
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DOM shell — thin: sort this company's roles from live state, resolve
+// review/monitoring status, call the pure builder above.
+// ---------------------------------------------------------------------------
+
+// Composite sort: status group first (liked/apply-track ahead of unseen ahead
+// of passed), then score DESC within group — unchanged from the pre-U7 list.
+var ROLE_STATUS_GROUP = {
+  liked: 0,
+  to_apply: 0,
+  to_research: 0,
+  to_network: 0,
+  applied: 0,
+  unseen: 1,
+  passed: 2,
+  skipped: 2,
+};
+
+function getCompanyRoles(c) {
+  if (!c.vacancy_ids || !c.vacancy_ids.length) return [];
+  var ids = c.vacancy_ids.slice().sort(function (a, b) {
+    var stA = (state.dbData[a] && state.dbData[a].status) || "unseen";
+    var stB = (state.dbData[b] && state.dbData[b].status) || "unseen";
+    var grpDiff =
+      (ROLE_STATUS_GROUP[stA] != null ? ROLE_STATUS_GROUP[stA] : 1) -
+      (ROLE_STATUS_GROUP[stB] != null ? ROLE_STATUS_GROUP[stB] : 1);
+    if (grpDiff !== 0) return grpDiff;
+    var ga = groupsById.get(a);
+    var gb = groupsById.get(b);
+    var sa = ga && ga.llm_score != null ? ga.llm_score : -1;
+    var sb = gb && gb.llm_score != null ? gb.llm_score : -1;
+    return sb - sa;
+  });
+
+  var roles = [];
+  for (var i = 0; i < ids.length; i++) {
+    var g = groupsById.get(ids[i]);
+    if (!g) continue;
+    var loc = (g.locations || []).find(function (l) {
+      return l && l.location;
+    });
+    roles.push({
+      id: g.id,
+      title: g.title,
+      score: g.llm_score,
+      screenOnly: !!g.screen_only_score,
+      status: (state.dbData[g.id] && state.dbData[g.id].status) || "unseen",
+      loc: loc ? loc.location : "",
+      seenRaw: g.last_seen || g.first_seen || "",
+    });
+  }
+  return roles;
+}
+
+function buildCompanyProfilePage(c) {
+  var roles = getCompanyRoles(c);
+  var counts = getCompanyStatusCounts(c.vacancy_ids);
+  return companyProfileHtml(c, roles, {
+    t: T,
+    reviewStatus: _getReviewStatus(c),
+    monStatus: _getMonitoringStatus(c),
+    counts: counts,
+  });
 }

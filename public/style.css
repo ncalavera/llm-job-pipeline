@@ -1685,34 +1685,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
   cursor: help;
 }
 
-.thumb-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 1px solid var(--surface);
-  background: var(--bg);
-  font-size: var(--text-sm);
-  cursor: pointer;
-  transition: all 0.15s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-}
-
-.thumb-btn:hover {
-  transform: scale(1.15);
-  box-shadow: var(--shadow-sm);
-}
-.thumb-btn.like:hover {
-  border-color: var(--emerald);
-  background: var(--emerald-tint);
-}
-.thumb-btn.pass:hover {
-  border-color: var(--terracotta);
-  background: var(--rose-tint);
-}
-
 .catalog-title {
   font-size: var(--text-base);
   font-weight: 700;
@@ -2400,159 +2372,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
   background: var(--bg);
 }
 
-.company-detail-summary {
-  font-size: var(--text-sm);
-  color: var(--muted);
-  line-height: 1.6;
-  padding: 12px 16px;
-  background: #faf8f3;
-  border-radius: 10px;
-  border-left: 3px solid var(--lavender);
-  margin-bottom: 16px;
-}
-
-.company-detail-comment {
-  font-size: var(--text-sm);
-  color: var(--text);
-  line-height: 1.5;
-  padding: 10px 14px;
-  background: var(--bg);
-  border-radius: 8px;
-  margin-bottom: 16px;
-  font-style: italic;
-}
-
-/* --- Score distribution bar --- */
-.score-distribution {
-  display: flex;
-  height: 8px;
-  border-radius: 4px;
-  overflow: hidden;
-  margin-bottom: 16px;
-  background: var(--surface);
-}
-
-.score-bar-segment {
-  height: 100%;
-  transition: width 0.3s ease;
-}
-
-.score-bar-excellent {
-  background: #059669;
-}
-.score-bar-good {
-  background: #2563eb;
-}
-.score-bar-partial {
-  background: #d97706;
-}
-.score-bar-weak {
-  background: #e11d48;
-}
-
-.score-distribution-legend {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-
-.score-legend-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--text-xs);
-  color: var(--muted);
-}
-
-.score-legend-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-}
-
-/* --- Company vacancies list --- */
-.company-vacancies-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.company-vacancy-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: var(--bg);
-  transition: background 0.15s;
-}
-
-.company-vacancy-row:hover {
-  background: var(--surface);
-}
-
-.company-vacancy-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.company-vacancy-status-dot.dot-liked {
-  background: var(--emerald);
-}
-.company-vacancy-status-dot.dot-passed {
-  background: var(--muted);
-}
-.company-vacancy-status-dot.dot-unseen {
-  background: var(--amber);
-}
-
-.company-vacancy-title {
-  flex: 1;
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--text);
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.company-vacancy-title a {
-  color: var(--text);
-  text-decoration: none;
-}
-.company-vacancy-title a:hover {
-  color: var(--coral);
-}
-
-.company-vacancy-actions {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.company-view-catalog-btn {
-  margin-top: 12px;
-  padding: 8px 20px;
-  border-radius: 9999px;
-  border: 1px solid var(--surface);
-  background: var(--bg);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  font-family: "Onest", sans-serif;
-  color: var(--coral);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.company-view-catalog-btn:hover {
-  border-color: var(--coral);
-  background: #fff7ed;
-}
-
 .company-empty {
   text-align: center;
   padding: 48px 24px;
@@ -2592,6 +2411,34 @@ body[data-dashboard-style="minimal"] .loading-illus {
   color: var(--coral);
   background: #fff7ed;
   transform: scale(1.1);
+}
+
+/* .cp-back-btn is NOT company-profile-exclusive (despite the "cp-" prefix) —
+   app.js's shared notFoundPanelHtml() also renders it for the vacancy/company
+   not-found panel. Restored here after U7 nearly deleted it as dead;
+   U18 (style retirement) should consider giving the not-found panel its own
+   class so this stops looking like leftover profile CSS. */
+.cp-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 9999px;
+  border: 1px solid var(--surface);
+  background: var(--card);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  font-family: "Onest", sans-serif;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  width: fit-content;
+}
+
+.cp-back-btn:hover {
+  border-color: var(--coral);
+  color: var(--text);
+  background: #fff7ed;
 }
 
 /* --- Company table --- */
@@ -3074,31 +2921,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
   color: #dc2626;
 }
 
-/* Company profile review banner */
-.cp-review-banner {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
-  border-radius: 10px;
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-}
-.cp-review-banner.cp-review-approved {
-  background: #ecfdf5;
-  border-color: #a7f3d0;
-}
-.cp-review-banner.cp-review-rejected {
-  background: #fef2f2;
-  border-color: #fecaca;
-}
-.cp-review-label {
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--text);
-}
-
 /* --- Responsive companies table --- */
 @media (max-width: 768px) {
   .companies-filters {
@@ -3561,94 +3383,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
   gap: 20px;
 }
 
-/* --- Back button --- */
-.cp-back-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border-radius: 9999px;
-  border: 1px solid var(--surface);
-  background: var(--card);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  font-family: "Onest", sans-serif;
-  color: var(--muted);
-  cursor: pointer;
-  transition: all 0.15s;
-  width: fit-content;
-}
-
-.cp-back-btn:hover {
-  border-color: var(--coral);
-  color: var(--text);
-  background: #fff7ed;
-}
-
-/* --- Hero card --- */
-.cp-hero {
-  background: var(--card);
-  border-radius: 16px;
-  padding: 28px 32px;
-  box-shadow: var(--shadow-md);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.cp-hero-top {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.cp-hero-logo {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  object-fit: contain;
-  background: var(--bg);
-  padding: 2px;
-}
-
-.cp-hero-name {
-  font-size: var(--text-xl);
-  font-weight: 800;
-  color: var(--text);
-  line-height: 1.2;
-}
-
-.cp-hero-links {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.cp-hero-link {
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--coral);
-  text-decoration: none;
-  padding: 4px 12px;
-  border-radius: 9999px;
-  border: 1px solid #fed7aa;
-  background: #fff7ed;
-  transition: all 0.15s;
-}
-
-.cp-hero-link:hover {
-  background: var(--coral);
-  color: white;
-  border-color: var(--coral);
-}
-
-.cp-hero-category {
-  font-size: var(--text-sm);
-  color: var(--muted);
-  font-weight: 500;
-}
-
 /* --- Status bar --- */
 .cp-status-bar {
   display: flex;
@@ -3683,107 +3417,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .cp-stat-unseen {
   color: var(--amber);
-}
-
-/* --- Ratings row --- */
-.cp-ratings {
-  display: flex;
-  gap: 24px;
-  align-items: center;
-}
-
-.cp-rating-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--text-sm);
-  color: var(--muted);
-  font-weight: 500;
-}
-
-/* --- Section card --- */
-.cp-section {
-  background: var(--card);
-  border-radius: 14px;
-  padding: 20px 24px;
-  box-shadow: var(--shadow-sm);
-}
-
-.cp-section-title {
-  font-size: var(--text-base);
-  font-weight: 700;
-  color: var(--text);
-  margin-bottom: 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.cp-section-icon {
-  font-size: 16px;
-}
-
-/* --- Liked vacancies section (prominent) --- */
-.cp-liked-section {
-  background: var(--card);
-  border-radius: 14px;
-  padding: 20px 24px;
-  box-shadow: var(--shadow-sm);
-  border-left: 4px solid var(--emerald);
-}
-
-/* --- ATS metadata grid --- */
-.cp-ats-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-.cp-ats-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.cp-ats-label {
-  font-size: var(--text-xs);
-  color: var(--muted);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.cp-ats-value {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--text);
-}
-
-/* --- Placeholder sections --- */
-.cp-placeholder {
-  background: var(--card);
-  border-radius: 14px;
-  padding: 20px 24px;
-  box-shadow: var(--shadow-sm);
-  border: 1px dashed var(--surface);
-  opacity: 0.6;
-}
-
-.cp-placeholder-text {
-  font-size: var(--text-sm);
-  color: var(--muted);
-  font-style: italic;
-}
-
-/* --- User comment --- */
-.cp-comment {
-  font-size: var(--text-sm);
-  color: var(--text);
-  line-height: 1.5;
-  padding: 12px 16px;
-  background: var(--bg);
-  border-radius: 10px;
-  font-style: italic;
 }
 
 /* --- Markdown rendered content --- */
@@ -3881,95 +3514,6 @@ body[data-dashboard-style="minimal"] .loading-illus {
 .md-content th {
   background: var(--bg);
   font-weight: 700;
-}
-
-/* --- Profile-specific vacancy list (read-only) --- */
-.cp-vacancy-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: var(--bg);
-  transition: background 0.15s;
-}
-
-.cp-vacancy-row:hover {
-  background: var(--surface);
-}
-
-/* --- About section --- */
-.cp-about-desc {
-  font-size: var(--text-sm);
-  color: var(--text);
-  line-height: 1.5;
-  margin-bottom: 14px;
-}
-
-.cp-about-news {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--surface);
-}
-
-.cp-liked-inline {
-  margin-bottom: 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--surface);
-}
-
-.cp-facts-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px 24px;
-}
-
-.cp-facts-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.cp-facts-label {
-  font-size: var(--text-xs);
-  color: var(--muted);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.cp-facts-value {
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--text);
-}
-
-.cp-facts-link {
-  color: var(--coral);
-  text-decoration: none;
-}
-
-.cp-facts-link:hover {
-  text-decoration: underline;
-}
-
-/* --- Responsive profile --- */
-@media (max-width: 768px) {
-  .cp-hero {
-    padding: 20px 18px;
-  }
-  .cp-hero-name {
-    font-size: var(--text-lg);
-  }
-  .cp-ats-grid,
-  .cp-facts-grid {
-    grid-template-columns: 1fr;
-  }
-  .cp-section,
-  .cp-liked-section,
-  .cp-placeholder {
-    padding: 16px 18px;
-  }
 }
 
 /* ===========================================================================
@@ -5326,4 +4870,355 @@ a.pipe-grp-role-title:hover {
 }
 .today-learning-line strong {
   font-family: "JetBrains Mono", monospace;
+}
+
+/* =============================================================================
+   === U7 company profile (redesign) ===
+   DHA-391. Reuses the shared page/sheet/rail/fact/section-label primitives
+   from U6's vacancy detail page (.vac-page/.vac-sheet/.vac-reading/.vac-rail/
+   .vac-rail-group/.vac-fact*/
+.vac-section-label/.vac-back/.vac-score-tile/
+   .vac-tier/.vac-status-chip/.vac-btn*) and the shared score/tier tokens
+   (.q-good/.q-moderate/.q-weak(+ -bg)/.tier-s/.tier-a/.tier-b/.tier-c) — the
+   design protocol treats "Detail screens (Vacancy, Company)" as one anatomy.
+   Everything below is specific to the profile: the review banner, the big fit
+   score, WANT/verdict/strengths/risks blocks, the roles list + distribution
+   strip, and a couple of rail-only widgets.
+   ============================================================================= */
+
+.cp-subtitle {
+  font-size: 12.5px;
+  color: var(--sky-text-tertiary);
+  margin-top: 2px;
+}
+
+/* --- Review banner (workflow actions) --- */
+.cp-review-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  margin-top: 4px;
+  border-radius: 12px;
+}
+.cp-review-label {
+  flex: 1;
+  font-weight: 700;
+  font-size: 12.5px;
+}
+
+/* --- Fit analysis (big score + bar) --- */
+.cp-fit-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.cp-fit-score {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+}
+.cp-fit-label {
+  font-size: 14px;
+  font-weight: 700;
+}
+.cp-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(58, 56, 51, 0.08);
+  overflow: hidden;
+}
+.cp-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+}
+
+/* --- WANT breakdown bars --- */
+.cp-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 7px;
+}
+.cp-bar-row .cp-bar {
+  flex: 1;
+  height: 7px;
+}
+.cp-bar-dim-label {
+  flex: none;
+  width: 74px;
+  font-size: 12px;
+  color: var(--sky-text-tertiary);
+}
+.cp-bar-value {
+  flex: none;
+  width: 24px;
+  text-align: right;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+.cp-mpa-note {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: var(--sky-text-faint);
+  margin-top: 4px;
+}
+
+/* --- Strengths / risks --- */
+.cp-block-title--good {
+  color: var(--q-good);
+}
+.cp-block-title--weak {
+  color: var(--q-weak);
+}
+.cp-list-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+.cp-bullet {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  margin-top: 7px;
+  background: var(--sky-text-faint);
+}
+.cp-bullet--good {
+  background: var(--q-good);
+}
+.cp-bullet--weak {
+  background: var(--q-weak);
+}
+.cp-list-text {
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--sky-text-secondary);
+  text-wrap: pretty;
+}
+
+/* --- Evidence (both variants) --- */
+.cp-evidence,
+.cp-deep {
+  margin-top: 4px;
+}
+.cp-evidence summary,
+.cp-deep summary {
+  cursor: pointer;
+}
+.cp-evidence-item {
+  font-size: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--sky-row-hover);
+}
+.cp-evidence-source {
+  background: var(--cobalt-tint);
+  color: var(--cobalt);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-right: 6px;
+}
+.cp-evidence-claim {
+  color: var(--sky-text);
+}
+.cp-evidence-quote {
+  color: var(--sky-text-tertiary);
+  font-style: italic;
+  margin-top: 2px;
+}
+
+/* --- Approach / experience match prose --- */
+.cp-prose {
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--sky-text-secondary);
+  text-wrap: pretty;
+}
+
+/* --- Verdict note --- */
+.cp-verdict {
+  border-radius: 12px;
+  padding: 16px 18px;
+  font-size: 13px;
+  line-height: 1.7;
+  font-style: italic;
+  text-wrap: pretty;
+}
+
+/* --- About lede: description/summary + personal note + recent news --- */
+.cp-lede {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.cp-note {
+  background: rgba(58, 56, 51, 0.035);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.6;
+  color: var(--sky-text-secondary);
+}
+.cp-empty-fit {
+  font-size: 13px;
+  color: var(--sky-text-faint);
+  font-style: italic;
+}
+
+/* --- Open roles: header, distribution strip, rows --- */
+.cp-roles-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.cp-roles-count {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  color: var(--sky-text-faint);
+}
+.cp-dist {
+  margin: 10px 0 2px;
+}
+.cp-dist-legend {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 10.5px;
+  color: var(--sky-text-tertiary);
+  flex-wrap: wrap;
+}
+.cp-dist-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.cp-dist-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.cp-dist-bar {
+  display: flex;
+  height: 7px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(58, 56, 51, 0.07);
+  margin-bottom: 4px;
+}
+.cp-roles-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+}
+.cp-role-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 6px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.cp-role-row:hover {
+  background: var(--sky-row-hover);
+}
+.cp-role-score {
+  flex: none;
+  width: 36px;
+  height: 26px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.cp-role-score--none {
+  background: var(--sky-row-hover);
+  color: var(--sky-text-faint);
+}
+.cp-role-body {
+  flex: 1;
+  min-width: 0;
+}
+.cp-role-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.cp-role-title {
+  /* flex-shrink only (no grow): a short title sits snug next to its status
+     chip/screen badge instead of stretching to push them to the row's far
+     edge; a long title still shrinks below its content width and ellipsizes
+     against those siblings. */
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--sky-text);
+}
+.cp-role-meta {
+  font-size: 11.5px;
+  color: var(--sky-text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+.cp-role-arrow {
+  flex: none;
+  font-size: 14px;
+  color: var(--sky-text-faint);
+}
+.cp-role-row:hover .cp-role-arrow {
+  color: var(--cobalt);
+}
+.cp-view-all-link {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--cobalt);
+  cursor: pointer;
+}
+.cp-view-all-link:hover {
+  text-decoration: underline;
+}
+
+/* --- Rail: fact links + status pill + monitoring row --- */
+.cp-fact-link {
+  color: var(--cobalt);
+  font-weight: 600;
+  font-size: 12.5px;
+  text-decoration: none;
+}
+.cp-fact-link:hover {
+  text-decoration: underline;
+}
+.cp-status-pill {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 4px 11px;
+  border-radius: 9999px;
+}
+.cp-mon-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--sky-text);
+  margin-top: 4px;
 }
