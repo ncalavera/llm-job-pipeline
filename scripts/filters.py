@@ -42,23 +42,41 @@ DESCRIPTION_BLACKLIST_PHRASES = GLOBAL_BLACKLIST_DESC_SUBSTR
 
 def build_title_blacklist_pattern(words) -> re.Pattern:
     """Compile the whole-word title-blacklist regex for an arbitrary keyword
-    list — single alternation regex, words sorted by length desc to prevent
-    shorter substrings matching prematurely. A trailing (?:es|s)? lets a
-    singular keyword also catch its plural, so "developer" matches
-    "developers", "fellow" -> "fellows", "coach" -> "coaches" without listing
-    every plural by hand.
+    list — one alternation, keywords sorted by length desc to prevent shorter
+    substrings matching prematurely. A trailing (?:es|s)? lets a singular
+    keyword also catch its plural, so "developer" matches "developers",
+    "fellow" -> "fellows", "coach" -> "coaches" without listing every plural by
+    hand.
+
+    Boundaries are computed PER KEYWORD from its own edge characters, not with a
+    single ``\\b`` wrapping the whole alternation. A ``\\b`` only sits between a
+    word char and a non-word char, so wrapping a keyword that ENDS in a non-word
+    character (``c++``, ``c#``) in a trailing ``(?:es|s)?\\b`` produces a regex
+    that can never match a real title — "C++ Developer" has a space after the
+    "+", so the ``\\b`` fails and the keyword is a silent no-op. Each keyword
+    therefore gets: a non-word-char guard on whichever edge is a word char (so it
+    still matches as a whole token), the plural suffix ONLY when it ends in a
+    word char, and a plain "not glued to another word char" guard on a
+    punctuation edge.
 
     This is the ONE place the live title filter's matching semantics are
-    defined — callers that need to know what the filter would do to a
-    candidate word (e.g. the learning cycle's backtest) must call this
-    instead of hand-rolling an equivalent regex, or the two can drift apart.
+    defined — callers that need to know what the filter would do to a candidate
+    word (e.g. the learning cycle's backtest) must call this instead of
+    hand-rolling an equivalent regex, or the two can drift apart.
     """
-    return re.compile(
-        r"\b(?:"
-        + "|".join(re.escape(kw) for kw in sorted(words, key=len, reverse=True))
-        + r")(?:es|s)?\b",
-        re.IGNORECASE,
-    )
+    parts = []
+    for kw in sorted(words, key=len, reverse=True):
+        if not kw:
+            continue
+        head = r"\b" if kw[0].isalnum() or kw[0] == "_" else r"(?<!\w)"
+        if kw[-1].isalnum() or kw[-1] == "_":
+            tail = r"(?:es|s)?\b"  # word-ending keyword: plural + word boundary
+        else:
+            tail = r"(?!\w)"  # punctuation-ending keyword (c++, c#): no \b, no plural
+        parts.append(head + re.escape(kw) + tail)
+    if not parts:
+        parts.append(r"(?!x)x")  # matches nothing — an empty keyword list drops nothing
+    return re.compile("(?:" + "|".join(parts) + ")", re.IGNORECASE)
 
 
 # Pre-compiled blacklist (~10-50x faster than iterating individual re.search()

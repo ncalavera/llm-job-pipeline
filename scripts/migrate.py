@@ -255,23 +255,33 @@ class _Sqlite:
                 self.conn.executescript(sql)  # not transactional — covered by restore()
             except sqlite3.OperationalError as e:
                 # SQLite has no ADD COLUMN IF NOT EXISTS (unlike the guarded
-                # Postgres siblings), and the frozen baseline schema already
-                # declares a couple of columns that a later migration also
-                # adds (us_eligibility in 0003, expiring_alerted_at in 0005) --
-                # a historical baseline/migration overlap, not a per-database
-                # inconsistency. On a fresh install the column is already
-                # there via the baseline, so the ADD is a no-op: treat the
+                # Postgres siblings), so a single-statement ADD COLUMN whose
+                # column already exists raises "duplicate column name". Two
+                # sources of that overlap, both a no-op re-add rather than a
+                # real inconsistency:
+                #   * the frozen baseline already declares a column a later
+                #     migration also adds (us_eligibility in 0003,
+                #     expiring_alerted_at in 0005); and
+                #   * a HALF-MIGRATED database — the column landed but its
+                #     ledger row was lost (an adopted DB whose schema advanced
+                #     past the runner, then replayed). For 0009 (scored_by) and
+                #     0011 (board.enabled) that otherwise aborts + auto-restores
+                #     on EVERY run, leaving the DB permanently stuck one
+                #     migration short with no way forward.
+                # In all these cases the column is already there, so treat the
                 # migration as applied instead of aborting the whole run.
                 #
-                # This guard is scoped to those two known versions on purpose.
-                # A future multi-statement migration could hit "duplicate
-                # column name" on its *second* statement after a *first*
-                # statement (e.g. CREATE TABLE) already ran — swallowing that
-                # would mark the migration applied while only half of it took
-                # effect. New migrations must be idempotent on their own
+                # Scoped to these four single-statement ADD COLUMN versions on
+                # purpose. A future MULTI-statement migration could hit
+                # "duplicate column name" on its *second* statement after a
+                # *first* statement (e.g. CREATE TABLE) already ran — swallowing
+                # that would mark the migration applied while only half of it
+                # took effect. New migrations must be idempotent on their own
                 # terms (e.g. ``ADD COLUMN IF NOT EXISTS`` as in 0006) rather
                 # than relying on this catch.
-                if version not in ("0003", "0005") or "duplicate column name" not in str(e):
+                if version not in ("0003", "0005", "0009", "0011") or (
+                    "duplicate column name" not in str(e)
+                ):
                     raise
                 print(f"    (column already present — treating {version} as applied: {e})")
         self.conn.execute("INSERT INTO schema_migrations(version) VALUES (?)", (version,))

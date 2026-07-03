@@ -419,3 +419,77 @@ def test_apply_disable_board_clears_the_persisted_flag_and_logs(learn_db):
         e["kind"] == "disable_board" and e["detail"]["board"] == "fictive_board"
         for e in lrn.applied_log()
     )
+
+
+# ---------------------------------------------------------------------------
+# apply on an UNMIGRATED DB — fail loudly + atomically, never a silent
+# unlogged self-edit (STRATEGY guardrail 8)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def unmigrated_db(tmp_path, monkeypatch):
+    """A throwaway SQLite DB with NO learning_log table (migrate.py never ran)
+    plus a throwaway profile copy."""
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
+    monkeypatch.setenv("JOBSEARCH_DB_PATH", str(tmp_path / "jobsearch.db"))
+
+    prof = tmp_path / "user_profile.md"
+    prof.write_text("## HARD_FILTERS\nexclude_title_keywords: (none)\n", encoding="utf-8")
+    monkeypatch.setenv("USER_PROFILE_PATH", str(prof))
+
+    for mod in (
+        "database_supabase",
+        "config",
+        "company_registry",
+        "db_conn",
+        "db_backend",
+        "hard_filters",
+        "prompts",
+        "learning",
+    ):
+        sys.modules.pop(mod, None)
+
+    import db_backend
+
+    importlib.reload(db_backend)
+    assert db_backend.IS_SQLITE
+
+    import learning as lrn
+
+    importlib.reload(lrn)
+    yield lrn, prof
+    try:
+        from db_conn import close_conn
+
+        close_conn()
+    except Exception:
+        pass
+
+
+def test_apply_on_unmigrated_db_raises_and_leaves_profile_untouched(unmigrated_db):
+    """The apply path used to edit the profile, THEN fail on the missing
+    learning_log INSERT — a raw traceback plus an applied-but-unlogged
+    self-edit. Now it refuses up front: a clear error, and the profile is
+    byte-for-byte unchanged."""
+    lrn, prof = unmigrated_db
+    assert lrn.table_ready() is False
+    original = prof.read_text(encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="migrate.py"):
+        lrn.apply_add_filter_word("casino")
+
+    assert prof.read_text(encoding="utf-8") == original  # no self-edit
+    assert not (prof.with_name(prof.name + ".bak")).exists()  # nothing was written
+
+
+def test_every_apply_helper_guards_the_missing_ledger(unmigrated_db):
+    """All four apply_* entry points refuse when the ledger is absent."""
+    lrn, _ = unmigrated_db
+    with pytest.raises(RuntimeError, match="migrate.py"):
+        lrn.apply_remove_filter_word("casino")
+    with pytest.raises(RuntimeError, match="migrate.py"):
+        lrn.apply_factor_move("Gambling.", "casino")
+    with pytest.raises(RuntimeError, match="migrate.py"):
+        lrn.apply_disable_board("fictive_board")

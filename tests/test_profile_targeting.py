@@ -273,6 +273,38 @@ def test_derive_role_keywords_does_not_vanish_user_role_left_on_eg_line():
     ]
 
 
+# The shipped example's TARGET_ROLES GUIDANCE PROSE (not just its ``e.g.``
+# samples) is scaffolding. Split on its commas/semicolons the
+# sentence shatters into stray one-word "roles" (``field``, ``careers``) that, in
+# a half-copied profile, became live LinkedIn search queries.
+_EXAMPLE_TARGET_ROLES_PROSE = (
+    "The exact job titles you want to see — one per line or comma-separated. Any\n"
+    "field; pick your own. The lines below are only format examples from different\n"
+    "careers, not a default set — replace them:"
+)
+
+
+def test_derive_role_keywords_drops_example_guidance_prose():
+    """The intro paragraph alone must yield NO keywords — not "field"/"careers"."""
+    roles = pt._derive_role_keywords(_EXAMPLE_TARGET_ROLES_PROSE)
+    assert roles == []
+    assert "field" not in roles and "careers" not in roles
+
+
+def test_derive_role_keywords_full_unedited_target_roles_yields_nothing():
+    """A verbatim, unedited TARGET_ROLES section (intro prose + bracket line +
+    the three ``e.g.`` samples) derives no queries at all."""
+    body = _EXAMPLE_TARGET_ROLES_PROSE + "\n\n" + _UNEDITED_ROLE_SCAFFOLD
+    assert pt._derive_role_keywords(body) == []
+
+
+def test_real_role_survives_alongside_example_guidance_prose():
+    """The prose is stripped but a real role typed under it comes through — the
+    guard keys off the example's own text, never off a topic word."""
+    body = _EXAMPLE_TARGET_ROLES_PROSE + "\n- Platform Engineer, Staff Engineer"
+    assert pt._derive_role_keywords(body) == ["Platform Engineer", "Staff Engineer"]
+
+
 def test_derive_locations_ignores_unedited_placeholder():
     """An untouched ``**Target locations:** [where you'd work — …]`` placeholder
     is scaffolding, not a location list; derivation falls back to Remote."""
