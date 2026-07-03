@@ -26,14 +26,15 @@ export const VACANCY_VIEWS = ["catalog", "stats", "archive"];
 // The vacancy leaf shown when Vacancies is opened with no remembered view.
 export const DEFAULT_VACANCY_VIEW = "catalog";
 
-// Leaf views that live UNDER the Applications section, in sub-nav order.
-// Triage used to be a Vacancies sub-view; it moved here because triaging is
-// the step that turns a liked vacancy into an application.
+// Leaf views that live UNDER the Applications section. "applications"
+// (Applied) has no sidebar sub-item anymore (post-ship fast fix) — it stays
+// listed here because it's still a real leaf mode, reachable programmatically
+// (palette, nav parent mapping), just not from a sidebar affordance.
 export const APPLICATIONS_VIEWS = ["applications", "pipeline"];
 
-// The applications leaf shown when Applications is opened with no remembered
-// view.
-export const DEFAULT_APPLICATIONS_VIEW = "applications";
+// The applications leaf the sidebar opens: always Triage now, direct with no
+// remembered sub-view (there's nothing left to remember between).
+export const DEFAULT_APPLICATIONS_VIEW = "pipeline";
 
 // Every leaf mode → the top-nav section that owns it. The last two entries are
 // not leaf modes but the deep-link DETAIL screens (route.js's route.screen

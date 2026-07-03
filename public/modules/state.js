@@ -165,7 +165,6 @@ export const state = {
   companyStatuses: {},
   companyStatusesLoaded: false,
   companySubTab: "approved",
-  companyCardFilter: null,
   companyMonitorFilters: new Set(),
   currentProfileSlug: null,
   // Routed vacancy detail page open over the list (?vacancy=<group-id>), or

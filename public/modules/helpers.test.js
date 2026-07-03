@@ -23,6 +23,7 @@ import {
   qualityClass,
   tierClass,
   scoreLabel,
+  resolveVacancyCompany,
 } from "./helpers.js";
 
 const DAY = 86400000;
@@ -427,4 +428,37 @@ test("scoreLabel: null/undefined/NaN fall back to Weak", () => {
   assert.equal(scoreLabel(null), "Weak");
   assert.equal(scoreLabel(undefined), "Weak");
   assert.equal(scoreLabel(NaN), "Weak");
+});
+
+// --- resolveVacancyCompany (post-ship fast fix #6) --------------------------
+
+test("resolveVacancyCompany matches by company_id, the only reliable join", () => {
+  const companies = [
+    { company_id: "1", slug: "givewell", calculated_tier: "S" },
+    { company_id: "2", slug: "founders-pledge", calculated_tier: "A" },
+  ];
+  const g = { org: "Founders Pledge", company_id: "2" };
+  assert.deepEqual(resolveVacancyCompany(g, companies), companies[1]);
+});
+
+test("resolveVacancyCompany returns null when nothing matches (org untracked)", () => {
+  const companies = [{ company_id: "1", slug: "givewell" }];
+  assert.equal(
+    resolveVacancyCompany({ org: "Untracked Co", company_id: "9" }, companies),
+    null,
+  );
+});
+
+test("resolveVacancyCompany returns null, never throws, on missing inputs", () => {
+  assert.equal(resolveVacancyCompany(null, []), null);
+  assert.equal(resolveVacancyCompany({ org: "X" }, []), null); // no company_id
+  assert.equal(resolveVacancyCompany({ company_id: "1" }, null), null);
+  assert.equal(resolveVacancyCompany({ company_id: "1" }, undefined), null);
+});
+
+test("resolveVacancyCompany never matches on org/name text alone (the bug it replaces)", () => {
+  // Same display name, DIFFERENT company_id — must not match by name/org.
+  const companies = [{ company_id: "1", name: "Acme", slug: "acme-old" }];
+  const g = { org: "Acme", company_id: "2" };
+  assert.equal(resolveVacancyCompany(g, companies), null);
 });

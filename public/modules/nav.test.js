@@ -83,6 +83,10 @@ test("the default applications view is one of the applications views", () => {
   assert.ok(APPLICATIONS_VIEWS.includes(DEFAULT_APPLICATIONS_VIEW));
 });
 
+test("the sidebar opens Triage directly, not the remembered sub-view (post-ship fast fix)", () => {
+  assert.equal(DEFAULT_APPLICATIONS_VIEW, "pipeline");
+});
+
 // --- Sidebar sync-status state machine (DHA-387, U3) ------------------------
 
 test("initial sync state is 'checking' with no failures", () => {

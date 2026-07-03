@@ -412,8 +412,8 @@ body::after {
    affordance's text, counts, inline sub-items, and the footer's language/sync
    words, keeping just the colourful section icons tappable. Icon tap still
    opens the section's default leaf (switchVacancies()/switchApplications()
-   unchanged). The narrow-width pill row (vacancySubNav/applicationsSubNav)
-   takes over reaching a hub's sub-views instead. */
+   unchanged). The narrow-width pill row (vacancySubNav) takes over reaching
+   Vacancies' sub-views instead — Applications has none (post-ship fast fix). */
 @media (max-width: 899px) {
   .sidebar {
     width: 56px;
@@ -447,8 +447,7 @@ body::after {
     padding: 6px 0;
   }
 
-  .vacancy-sub-nav.active,
-  .applications-sub-nav.active {
+  .vacancy-sub-nav.active {
     display: flex;
   }
 }
@@ -1305,7 +1304,10 @@ body::after {
 /* Company sub-tabs (.company-sub-tabs/.company-sub-tab/.sub-tab-count) —
    restyled as segmented pills in the U8 companies redesign block at EOF. */
 
-/* --- Company stats cards --- */
+/* --- Company stats cards ---
+   Approved tab's Total/With new/Needs attention row was removed entirely
+   (post-ship fast fix) — the container stays for Pending/Archived's smaller
+   card rows below, and collapses to no space when empty (:empty). */
 .company-enrichment-stats {
   display: flex;
   align-items: stretch;
@@ -1313,6 +1315,9 @@ body::after {
   gap: 12px;
   padding: 0 16px;
   margin-bottom: 16px;
+}
+.company-enrichment-stats:empty {
+  margin-bottom: 0;
 }
 .ces-card {
   display: flex;
@@ -1330,17 +1335,6 @@ body::after {
     box-shadow 0.2s,
     border-color 0.2s;
 }
-.ces-card--clickable {
-  cursor: pointer;
-  user-select: none;
-}
-.ces-card--clickable:hover {
-  box-shadow: var(--shadow-md);
-}
-.ces-card--active {
-  box-shadow: var(--shadow-md);
-  border-width: 2px;
-}
 .ces-card:hover {
   box-shadow: var(--shadow-md);
 }
@@ -1354,20 +1348,6 @@ body::after {
 }
 .ces-card--total {
   border-color: var(--surface);
-}
-.ces-card--new {
-  border-color: var(--amber);
-  background: var(--amber-tint);
-}
-.ces-card--new .ces-number {
-  color: var(--amber);
-}
-.ces-card--attention {
-  border-color: var(--orange);
-  background: var(--amber-tint);
-}
-.ces-card--attention .ces-number {
-  color: var(--orange);
 }
 .ces-number {
   font-size: 32px;
@@ -1392,27 +1372,11 @@ body::after {
   color: var(--muted);
   margin-top: 2px;
 }
-.ces-sub {
-  font-size: var(--text-xs);
-  color: var(--muted);
-  opacity: 0.7;
-  margin-top: 2px;
-}
 .ces-shown {
   text-align: center;
   font-size: var(--text-xs);
   color: var(--muted);
   margin-bottom: 8px;
-}
-.ces-filter-dismiss {
-  cursor: pointer;
-  color: var(--muted);
-  opacity: 0.7;
-  margin-left: 4px;
-}
-.ces-filter-dismiss:hover {
-  opacity: 1;
-  color: var(--coral);
 }
 .ces-review-complete {
   text-align: center;
@@ -1879,6 +1843,30 @@ body::after {
 }
 .vac-btn--link:hover {
   text-decoration: underline;
+}
+
+/* Keyboard-nav hint (post-ship fast fix) — same quiet mono-chip recipe as
+   Browse's .browse-keyhint, namespaced for the vacancy page. .vac-page's flex
+   gap already spaces it from the header above and the sheet below. */
+.vac-keyhint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--sky-text-faint);
+  flex-wrap: wrap;
+}
+.vac-key {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--sky-text-tertiary);
+  background: rgba(58, 56, 51, 0.05);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+.vac-keyhint-label {
+  margin-right: 8px;
 }
 
 /* --- Sheet: reading column + facts rail --- */
@@ -2353,16 +2341,15 @@ body::after {
    Settings, and the Boards catalogue additions.
    ========================================================================= */
 
-/* Vacancies sub-navigation (Browse / Geo / Archive) and Applications
-   sub-navigation (Applications / Triage). DHA-387, U3: the sidebar's own
-   inline sub-items now cover this at desktop widths, so these two rows are
-   hidden there and only reappear below 900px, as the pill row above the
-   sheet that reaches a hub's sub-views once the sidebar collapses to an icon
-   rail (see the responsive block near the end of this file). Active state is
-   still toggled by app.js's switchMode(), now via .active instead of an
-   inline display style. */
-.vacancy-sub-nav,
-.applications-sub-nav {
+/* Vacancies sub-navigation (Browse / Geo / Archive). DHA-387, U3: the
+   sidebar's own inline sub-items now cover this at desktop widths, so this
+   row is hidden there and only reappears below 900px, as the pill row above
+   the sheet that reaches Vacancies' sub-views once the sidebar collapses to
+   an icon rail (see the responsive block near the end of this file). Active
+   state is still toggled by app.js's switchMode(), via .active instead of an
+   inline display style. Applications had the same row (Applications /
+   Triage) until the post-ship fast fix collapsed its sub-nav entirely. */
+.vacancy-sub-nav {
   display: none;
   gap: 0;
   margin-bottom: 14px;
@@ -2373,8 +2360,7 @@ body::after {
     inset 0 0 0 1px var(--sky-hairline),
     0 1px 3px rgba(58, 56, 51, 0.05);
 }
-.vacancy-sub-tab,
-.applications-sub-tab {
+.vacancy-sub-tab {
   flex: 1;
   padding: 10px 16px;
   border: none;
@@ -2387,13 +2373,11 @@ body::after {
   transition: all 0.15s;
   border-bottom: 2px solid transparent;
 }
-.vacancy-sub-tab:hover,
-.applications-sub-tab:hover {
+.vacancy-sub-tab:hover {
   background: var(--sky-row-hover);
   color: var(--sky-text);
 }
-.vacancy-sub-tab.active,
-.applications-sub-tab.active {
+.vacancy-sub-tab.active {
   color: var(--cobalt);
   border-bottom-color: var(--cobalt);
   background: var(--cobalt-tint);

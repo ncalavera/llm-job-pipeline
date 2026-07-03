@@ -53,7 +53,6 @@ import {
   sortCompanyTable,
   toggleCompanySort,
   switchCompanySubTab,
-  toggleCompanyCardFilter,
   toggleMonitoringChip,
   companyVacancyAction,
   reviewCompany,
@@ -530,13 +529,11 @@ function switchMode(mode) {
 
   // Sidebar sub-items are always expanded inline (Linear-style, protocol
   // section 4) — no visibility toggle, just the active state tracking the
-  // leaf.
+  // leaf. Applications has none (post-ship fast fix collapsed them).
   var subBtns = {
     catalog: "navSubBrowse",
     stats: "navSubGeo",
     archive: "navSubArchive",
-    applications: "navSubApplied",
-    pipeline: "navSubTriage",
   };
   Object.keys(subBtns).forEach(function (leaf) {
     var btn = document.getElementById(subBtns[leaf]);
@@ -544,9 +541,8 @@ function switchMode(mode) {
   });
 
   // Narrow-width (<900px) pill row: the sidebar collapses to an icon rail
-  // there, so this becomes the way to reach a hub's sub-views. CSS hides both
-  // rows entirely at desktop widths, where the sidebar's inline sub-items
-  // above already cover this — only one row is ever "active" at a time.
+  // there, so this becomes the way to reach Vacancies' sub-views (Applications'
+  // own pill row was removed the same way as its inline sub-items above).
   var subNav = document.getElementById("vacancySubNav");
   if (subNav) subNav.classList.toggle("active", section === "vacancies");
   var vsubBtns = {
@@ -556,18 +552,6 @@ function switchMode(mode) {
   };
   Object.keys(vsubBtns).forEach(function (leaf) {
     var btn = document.getElementById(vsubBtns[leaf]);
-    if (btn) btn.classList.toggle("active", leaf === mode);
-  });
-
-  var appsSubNav = document.getElementById("applicationsSubNav");
-  if (appsSubNav)
-    appsSubNav.classList.toggle("active", section === "applications");
-  var asubBtns = {
-    applications: "asubApplications",
-    pipeline: "asubTriage",
-  };
-  Object.keys(asubBtns).forEach(function (leaf) {
-    var btn = document.getElementById(asubBtns[leaf]);
     if (btn) btn.classList.toggle("active", leaf === mode);
   });
 
@@ -608,10 +592,12 @@ function switchVacancies() {
   switchMode(state.vacancyView || "catalog");
 }
 
-// The Applications top-nav button opens the remembered sub-view (default
-// Applications).
+// The Applications top-nav button opens Triage directly (post-ship fast fix —
+// its sub-nav affordances are gone, so there's no remembered sub-view to
+// return to). Applied stays reachable via whatever already routes to it
+// directly (palette, nav parent mapping) — see nav.js.
 function switchApplications() {
-  switchMode(state.applicationsView || "applications");
+  switchMode("pipeline");
 }
 
 // ---------------------------------------------------------------------------
@@ -642,7 +628,6 @@ window.initCompanies = initCompanies;
 window.sortCompanyTable = sortCompanyTable;
 window.toggleCompanySort = toggleCompanySort;
 window.switchCompanySubTab = switchCompanySubTab;
-window.toggleCompanyCardFilter = toggleCompanyCardFilter;
 window.toggleMonitoringChip = toggleMonitoringChip;
 window.companyVacancyAction = companyVacancyAction;
 window.reviewCompany = reviewCompany;

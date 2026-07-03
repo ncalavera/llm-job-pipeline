@@ -538,7 +538,6 @@ test("_buildRow: an XSS payload in the company name is inert in both text and th
     search.value = "";
     tierFilter.value = "";
     state.companySubTab = "approved";
-    state.companyCardFilter = null;
     state.companyMonitorFilters = new Set();
     renderCompanies();
     assert.ok(

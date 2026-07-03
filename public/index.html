@@ -21,7 +21,8 @@
            Desktop (>=900px): full sidebar, sub-items expanded inline.
            Narrow (<900px): collapses to an icon rail via CSS; the active
            section's sub-items appear instead as the pill row below
-           (vacancySubNav / applicationsSubNav), same as before U3. -->
+           (vacancySubNav — Applications' own sub-nav was removed, post-ship
+           fast fix), same as before U3. -->
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand">
           <div class="sidebar-brand-mark">JP</div>
@@ -235,26 +236,9 @@
               >Applications</span
             >
           </button>
-          <div class="nav-subitems" id="navSubApplications">
-            <button
-              type="button"
-              class="nav-subitem"
-              id="navSubApplied"
-              onclick="switchMode('applications')"
-            >
-              <span class="nav-label" data-i18n="app_status_applied"
-                >Applied</span
-              >
-            </button>
-            <button
-              type="button"
-              class="nav-subitem"
-              id="navSubTriage"
-              onclick="switchMode('pipeline')"
-            >
-              <span class="nav-label" data-i18n="tab_triage">Triage</span>
-            </button>
-          </div>
+          <!-- No sub-items (post-ship fast fix): clicking Applications opens
+               Triage directly. Applied stays reachable programmatically
+               (palette, nav parent mapping) — see nav.js. -->
 
           <button
             type="button"
@@ -382,25 +366,8 @@
             </button>
           </div>
 
-          <!-- === APPLICATIONS SUB-NAV (Applications / Triage) ===
-               Same narrow-width role as vacancySubNav above, for the
-               Applications section. -->
-          <div class="applications-sub-nav" id="applicationsSubNav">
-            <button
-              class="applications-sub-tab"
-              id="asubApplications"
-              onclick="switchMode('applications')"
-            >
-              <span data-i18n="tab_applications">Applications</span>
-            </button>
-            <button
-              class="applications-sub-tab"
-              id="asubTriage"
-              onclick="switchMode('pipeline')"
-            >
-              <span data-i18n="tab_triage">Triage</span>
-            </button>
-          </div>
+          <!-- Applications no longer has a sub-nav (post-ship fast fix):
+               the sidebar item opens Triage directly, at every width. -->
 
           <!-- === TODAY MODE === -->
           <div class="today-section" id="todaySection"></div>

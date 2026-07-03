@@ -27,6 +27,7 @@ const {
   statusChipLabel,
   buildFactsRail,
   nextUnreviewedId,
+  queueStep,
   vacancyPageHtml,
   vacancyNotFoundHtml,
 } = await import("./vacancy.js");
@@ -36,12 +37,15 @@ const { toastMessage } = await import("./helpers.js");
 const t = (key, fallback) => fallback;
 const opts = { t, locale: "en-US" };
 
+// company_slug/calculated_tier are dead fields data_prep.py never sets on a
+// real group (post-ship fast fix #6) — vacancyPageHtml takes the resolved
+// `company` object below as its own parameter instead, so the group fixture
+// only needs company_id, the real join key resolveVacancyCompany uses.
 const fullGroup = {
   id: "g1",
   org: "GiveWell",
   company_name: "GiveWell",
-  company_slug: "givewell",
-  calculated_tier: "S",
+  company_id: "c1",
   title: "Research Analyst",
   llm_score: 82,
   llm_summary: "Short summary of the role.",
@@ -65,6 +69,7 @@ const fullGroup = {
 };
 
 const company = {
+  company_id: "c1",
   slug: "givewell",
   name: "GiveWell",
   strategy: "greenhouse",
@@ -228,6 +233,27 @@ test("nextUnreviewedId is keyed by id, not list position (AE5)", () => {
   assert.equal(nextUnreviewedId("g1", queueAfterPoll, isUnseen), "g3");
 });
 
+// --- queueStep (← → / k j vacancy-page nav, post-ship fast fix) ------------
+
+test("queueStep walks the full queue, unfiltered, in both directions", () => {
+  const queue = ["g1", "g2", "g3"];
+  assert.equal(queueStep("g1", queue, 1), "g2");
+  assert.equal(queueStep("g2", queue, 1), "g3");
+  assert.equal(queueStep("g2", queue, -1), "g1");
+});
+
+test("queueStep clamps at both ends instead of wrapping", () => {
+  const queue = ["g1", "g2", "g3"];
+  assert.equal(queueStep("g1", queue, -1), null);
+  assert.equal(queueStep("g3", queue, 1), null);
+});
+
+test("queueStep no-ops gracefully with no queue or an id that isn't in it", () => {
+  assert.equal(queueStep("g1", [], 1), null);
+  assert.equal(queueStep("g1", null, 1), null);
+  assert.equal(queueStep("gX", ["g1", "g2"], 1), null);
+});
+
 // --- toast coverage (R18 regression for the silent to_apply gap) ------------
 
 test("toastMessage covers every status the UI can set", () => {
@@ -261,6 +287,14 @@ test("vacancyPageHtml renders score tile, reading column, rail, actions", () => 
   assert.ok(html.includes("vacancyLike")); // unseen → like shown
   assert.ok(html.includes("openCompanyProfile")); // company mini-card
   assert.ok(html.includes("Open posting")); // outbound link present
+});
+
+test("vacancyPageHtml renders the keyboard-nav hint row (post-ship fast fix)", () => {
+  const html = vacancyPageHtml(fullGroup, company, "unseen", opts);
+  assert.ok(html.includes("vac-keyhint"));
+  assert.ok(html.includes("browse"));
+  assert.ok(html.includes("Esc"));
+  assert.ok(html.includes("back"));
 });
 
 test("vacancyPageHtml: the header org name and the rail company card are keyboard-reachable via Enter/Space (R12, WAI-ARIA button pattern)", () => {
@@ -297,6 +331,23 @@ test("vacancyPageHtml: null score renders a neutral tile, not a crimson one", ()
   assert.ok(!html.includes("q-weak-bg"));
 });
 
+// --- org link + tier badge driven by the resolved company (post-ship #6) ---
+
+test("vacancyPageHtml: org name and tier badge come from the resolved company, not the group", () => {
+  const html = vacancyPageHtml(fullGroup, company, "unseen", opts);
+  assert.ok(html.includes("vac-org--link"));
+  assert.ok(html.includes("openCompanyProfile('givewell')"));
+  assert.match(html, /class="vac-tier tier-s">S</);
+});
+
+test("vacancyPageHtml: an untracked org (no matching company) renders plain text, no dead link or tier badge", () => {
+  const html = vacancyPageHtml(fullGroup, null, "unseen", opts);
+  assert.ok(!html.includes("vac-org--link"));
+  assert.ok(!html.includes("openCompanyProfile"));
+  assert.ok(!html.includes("vac-tier"));
+  assert.ok(html.includes("GiveWell")); // org name still shown, just inert
+});
+
 // --- source-freshness badge (relocated from the retired Browse card, U5
 // parity: "relocation counts as parity, dropping does not") -------------------
 
@@ -330,7 +381,7 @@ test("vacancyPageHtml escapes every externally-sourced string", () => {
     id: "x1",
     org: "<script>alert('org')</script>",
     company_name: "<script>alert('org')</script>",
-    company_slug: "givewell",
+    company_id: "c1",
     title: "<script>alert('title')</script>",
     llm_score: 60,
     llm_summary: "<script>alert('sum')</script>",
@@ -386,7 +437,6 @@ test("vacancyPageHtml escapes a quote-breakout URL in href attributes (R14)", ()
     id: "b1",
     org: "Acme",
     company_name: "Acme",
-    company_slug: null,
     title: "Role",
     llm_score: 60,
     llm_summary: "s",

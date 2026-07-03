@@ -70,3 +70,21 @@ test("buildTriageCard: benign notes still render their text", () => {
   });
   assert.match(html, /Tailor CV for growth role/);
 });
+
+// --- org-name link via resolveVacancyCompany (post-ship fast fix #6) -------
+// The card's org link used to check the group's own company_slug, a field
+// data_prep.py never sets — it was always the plain, non-clickable div.
+
+test("buildTriageCard: org name links to the company when company_id matches", () => {
+  const g = { ...group(), company_id: "c1" };
+  const companies = [{ company_id: "c1", slug: "example-org" }];
+  const html = buildTriageCard(g, COL, {}, companies);
+  assert.match(html, /pipe-card-org-link/);
+  assert.match(html, /data-company-slug="example-org"/);
+});
+
+test("buildTriageCard: no matching company (or no companies list) stays plain, non-clickable", () => {
+  const g = { ...group(), company_id: "c1" };
+  assert.doesNotMatch(buildTriageCard(g, COL, {}, []), /pipe-card-org-link/);
+  assert.doesNotMatch(buildTriageCard(g, COL, {}), /pipe-card-org-link/); // omitted entirely
+});
