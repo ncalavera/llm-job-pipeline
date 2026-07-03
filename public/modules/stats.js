@@ -10,7 +10,12 @@ import {
   getGroupStatus,
   isGroupCompanyApproved,
 } from "./state.js";
-import { escHtml, getFlagForChip, isVacancyExpired } from "./helpers.js";
+import {
+  escHtml,
+  getFlagForChip,
+  isVacancyExpired,
+  qualityClass,
+} from "./helpers.js";
 import { T } from "./i18n.js";
 import { geoBuckets, VISIBLE_MIN_SCORE } from "./derive.js";
 
@@ -105,7 +110,10 @@ function rowHtml(r) {
   const countryCell = flag
     ? `${flag} ${escHtml(r.country)}`
     : escHtml(r.country);
-  const meanCell = r.meanScore == null ? "—" : r.meanScore.toFixed(1);
+  const meanCell =
+    r.meanScore == null
+      ? '<span class="geo-score-dash">—</span>'
+      : `<span class="${qualityClass(r.meanScore)}">${r.meanScore.toFixed(1)}</span>`;
   const likedCell =
     r.liked > 0
       ? `<span class="ct-liked-nonzero">${r.liked}</span>`
@@ -132,7 +140,12 @@ function buildHtml(rows, sortCol, sortAsc) {
     COLUMNS.map((c) => thHtml(c.key, c.label, sortCol, sortAsc)).join("") +
     "</tr></thead>";
   const tbody = "<tbody>" + rows.map(rowHtml).join("") + "</tbody>";
-  return help + `<table class="company-table">${thead}${tbody}</table>`;
+  return (
+    help +
+    // Scroll-guard (AE4): the table scrolls inside this wrapper at narrow
+    // widths instead of crushing the city column — see style.css U10 block.
+    `<div class="geo-table-wrap"><table class="company-table">${thead}${tbody}</table></div>`
+  );
 }
 
 export function renderStats() {
