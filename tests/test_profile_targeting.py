@@ -227,3 +227,76 @@ def test_derived_queries_are_capped():
     roles = ", ".join(f"Role{i}" for i in range(20))
     q = pt.resolve_linkedin_queries({"TARGET_ROLES": f"- {roles}"})
     assert len(q) <= pt._MAX_DERIVED_QUERIES
+
+
+# ---------------------------------------------------------------------------
+# Scaffolding stripping — the two directions of the same misfilter
+#
+# 1. UNEDITED example scaffolding (a placeholder line + the shipped ``e.g. "…"``
+#    sample lines) must be dropped so it cannot leak into targeting.
+# 2. A user's OWN content that happens to sit on an ``e.g.`` line (a common
+#    half-edit: real roles typed in, prefix not deleted) must NOT be dropped —
+#    that would silently erase a real role, the inverse of the original bug.
+# ---------------------------------------------------------------------------
+
+# The verbatim sample lines the shipped example carries under TARGET_ROLES.
+_UNEDITED_ROLE_SCAFFOLD = (
+    "- [your target title], [a more senior version], [an adjacent title]\n"
+    '- e.g. "Registered Nurse, Charge Nurse, Nurse Manager"\n'
+    '- e.g. "Backend Engineer, Senior Software Engineer, Staff Engineer"\n'
+    '- e.g. "Operations Manager, Head of Operations, Chief of Staff"'
+)
+
+
+def test_derive_role_keywords_drops_unedited_scaffolding():
+    """Placeholder line + the shipped ``e.g.`` samples yield no keywords: none of
+    them is the user's own choice, so none may become a LinkedIn search."""
+    assert pt._derive_role_keywords(_UNEDITED_ROLE_SCAFFOLD) == []
+
+
+def test_derive_role_keywords_keeps_only_the_users_real_role():
+    """A real role typed above the untouched sample lines survives alone."""
+    body = "- Platform Engineer, Staff Engineer\n" + _UNEDITED_ROLE_SCAFFOLD
+    assert pt._derive_role_keywords(body) == ["Platform Engineer", "Staff Engineer"]
+
+
+def test_derive_role_keywords_does_not_vanish_user_role_left_on_eg_line():
+    """The inverse misfilter: a user edited their OWN roles into an ``e.g. "…"``
+    line and left the prefix. That line is NOT a shipped sample, so it must NOT
+    be dropped — the roles come through, and the stray ``e.g.``/quote decoration
+    is scrubbed so the keyword is actually searchable."""
+    body = '- e.g. "ICU Nurse, Charge Nurse, Public Health Nurse Manager"'
+    assert pt._derive_role_keywords(body) == [
+        "ICU Nurse",
+        "Charge Nurse",
+        "Public Health Nurse Manager",
+    ]
+
+
+def test_derive_locations_ignores_unedited_placeholder():
+    """An untouched ``**Target locations:** [where you'd work — …]`` placeholder
+    is scaffolding, not a location list; derivation falls back to Remote."""
+    sections = {
+        "USER_PROFILE": "**Target locations:** [where you'd work — cities, "
+        'countries, or "remote-EU" style]'
+    }
+    assert pt._derive_locations(sections) == ["Remote"]
+
+
+def test_derive_locations_still_reads_a_real_line():
+    """A real, edited target-locations line is unaffected by the strip."""
+    sections = {"USER_PROFILE": "**Target locations:** Berlin (DE), remote-EU"}
+    assert pt._derive_locations(sections) == ["Berlin", "Remote"]
+
+
+def test_markdown_link_label_is_not_stripped_as_a_placeholder():
+    """``[label](url)`` is a user's own Markdown link, not template guidance —
+    its words must survive in the board-matching haystack."""
+    text = pt._strip_scaffolding("See my [Nonprofit consulting portfolio](https://x.test/p).")
+    assert "nonprofit consulting portfolio" in text.lower()
+
+
+def test_bracket_placeholder_without_link_is_stripped():
+    """A bare ``[…]`` placeholder (no trailing link target) is still removed."""
+    text = pt._strip_scaffolding("**Want to work in:** [healthcare, public policy].")
+    assert "healthcare" not in text and "policy" not in text

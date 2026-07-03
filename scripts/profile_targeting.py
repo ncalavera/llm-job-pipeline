@@ -25,10 +25,11 @@ degrades to "no recommendation / no derived queries", never a crash.
 
 from __future__ import annotations
 
+import functools
 import re
 
 import settings
-from prompts import _load_user_profile
+from prompts import EXAMPLE_PROFILE_PATH, _load_user_profile
 
 # Strip HTML comment blocks so the example lines inside a template's explanatory
 # comment are never parsed as real values (matches hard_filters / scoring_settings).
@@ -37,33 +38,66 @@ _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 # The shipped example profile teaches ONE placeholder convention: guidance to
 # delete sits inside square brackets ("The `[brackets]` show what goes where —
 # delete the guidance once you have filled them in"), and pure format samples are
-# bullet lines that open with "e.g.". A profile only half-edited from that
-# template still carries those markers, and their topic words (a nurse / impact /
-# public-policy example the user never deleted) would otherwise be keyword-matched
-# as if the user had CHOSEN that field — the board-recommendation regression this
-# module exists to prevent (an engineer handed impact/nonprofit boards). Both
-# markers are stripped before any targeting keyword match. The rules key on the
-# markers themselves — brackets and a leading "e.g." — never on topic words, so a
-# user's real prose (which carries neither) passes through untouched.
+# bullet lines that open with "e.g." and quote a sample. A profile only
+# half-edited from that template still carries those markers, and their topic
+# words (a nurse / impact / public-policy example the user never deleted) would
+# otherwise be keyword-matched as if the user had CHOSEN that field — the
+# board-recommendation regression this module exists to prevent (an engineer
+# handed impact/nonprofit boards). Both markers are stripped before any targeting
+# keyword match. The rules key on the markers themselves, never on topic words,
+# so a user's real prose passes through untouched.
 #
 # ``[^\]]`` spans newlines, so a placeholder wrapped across two lines
-# (``[the fields … healthcare,\ngames …]``) is removed whole.
-_PLACEHOLDER_SPAN = re.compile(r"\[[^\]]*\]")
-_EXAMPLE_LINE = re.compile(r"^\s*(?:[-•*·]\s*)?\*{0,2}\s*e\.g\.", re.IGNORECASE)
+# (``[the fields … healthcare,\ngames …]``) is removed whole. The ``(?!\()``
+# tail leaves a Markdown-link label ``[text](url)`` alone — that label is the
+# user's own content, not template guidance.
+_PLACEHOLDER_SPAN = re.compile(r"\[[^\]]*\](?!\()")
+
+
+def _norm_line(line: str) -> str:
+    """Normalise a line for comparison: drop a leading bullet + emphasis marks,
+    collapse whitespace, lowercase — so a profile line matches the example's own
+    sample lines regardless of bullet style or spacing."""
+    line = re.sub(r"^\s*[-•*·]+\s*", "", line.strip())
+    line = re.sub(r"\*+", "", line)
+    return re.sub(r"\s+", " ", line).strip().lower()
+
+
+@functools.lru_cache(maxsize=1)
+def _example_sample_lines() -> frozenset[str]:
+    """The exact ``e.g.``-prefixed sample lines the SHIPPED example carries.
+
+    An ``e.g.`` line is treated as unedited scaffolding only when it matches one
+    of these verbatim (normalised) — that is the whole point of keying off the
+    example's real text. A common half-edit is to type your OWN roles into an
+    ``e.g. "…"`` line without deleting the prefix; that text is not a shipped
+    sample, so the line is KEPT, not silently dropped (the inverse misfilter).
+    Degrades to an empty set (strip no ``e.g.`` line) if the example is
+    unreadable — safer to under-strip than to delete a user's content.
+    """
+    try:
+        text = EXAMPLE_PROFILE_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return frozenset()
+    return frozenset(
+        norm for line in text.splitlines() if (norm := _norm_line(line)).startswith("e.g.")
+    )
 
 
 def _strip_scaffolding(text: str) -> str:
     """Remove unedited example-template scaffolding from ``text``.
 
-    Drops (1) HTML comment blocks, (2) ``[…]`` placeholder spans, and (3) bullet
-    lines that open with "e.g." — the three markers the shipped example uses for
-    "replace me" guidance. Deterministic and content-blind: it keys on the
-    markers, not on any topic word, so real user content survives unchanged.
+    Three markers, each keyed off the example itself, never off a topic word:
+      1. HTML comment blocks (``<!-- … -->``);
+      2. lines that are VERBATIM ``e.g.`` sample lines from the shipped example
+         (see ``_example_sample_lines``) — a user's own text edited into an
+         ``e.g.`` line is not a shipped sample, so it survives;
+      3. ``[…]`` placeholder spans, except a Markdown-link label ``[text](url)``.
     """
     text = _HTML_COMMENT.sub("", text or "")
-    text = _PLACEHOLDER_SPAN.sub(" ", text)
-    kept = [line for line in text.splitlines() if not _EXAMPLE_LINE.match(line)]
-    return "\n".join(kept)
+    samples = _example_sample_lines()
+    kept = [line for line in text.splitlines() if _norm_line(line) not in samples]
+    return _PLACEHOLDER_SPAN.sub(" ", "\n".join(kept))
 
 
 # Values that mean "the user left this empty".
@@ -214,6 +248,12 @@ def _clean_role(phrase: str) -> str:
     phrase = re.sub(r"\*+", "", phrase)
     phrase = re.sub(r"\([^)]*\)", " ", phrase)
     phrase = phrase.strip().strip("-•*·.").strip()
+    # A user who typed their OWN roles into an example's `e.g. "…"` line without
+    # deleting the decoration keeps that line (it is not a verbatim shipped
+    # sample), so scrub the stray `e.g.` lead-in and quote marks here — a real
+    # role keyword never carries either — leaving the role itself searchable.
+    phrase = re.sub(r'["“”]', "", phrase)
+    phrase = re.sub(r"^\s*e\.g\.[.,:]?\s*", "", phrase, flags=re.IGNORECASE)
     # A "Track name: role, role" prefix — keep only the part after the colon.
     if ":" in phrase:
         phrase = phrase.split(":", 1)[1]
