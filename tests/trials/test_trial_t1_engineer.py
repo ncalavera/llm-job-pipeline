@@ -57,6 +57,34 @@ def test_engineer_recommendations_skip_impact_only_boards(monkeypatch, tmp_path)
     assert not leaked, f"impact/EA boards proposed to an engineer: {sorted(leaked)}"
 
 
+def test_half_edited_engineer_profile_keeps_impact_boards_off(monkeypatch, tmp_path):
+    """A profile only HALF-edited from the example template must not leak boards.
+
+    The clean ``profile_engineer.md`` above proves the mechanism when the user
+    deletes all the guidance. But a real first user rarely does: they fill in
+    name / experience / roles and leave the shipped scaffolding — the bracketed
+    "Domain preferences" placeholder (which lists *public policy*, healthcare, …)
+    and the ``e.g. "…Operations Manager…"`` sample bullets. Left in, those
+    example words get keyword-matched as if the engineer had chosen impact /
+    nonprofit work, so impact-only boards get recommended — the regression.
+
+    This is the persona-level failure the clean fixture could never catch — it
+    carries no scaffolding to leak. Assert the engineer still gets the general
+    board plus a real engineering board, and NONE of the impact-only boards.
+    """
+    h.use_persona(monkeypatch, profile="profile_engineer_half_edited.md", db_path=tmp_path / "db")
+
+    import profile_targeting as pt
+    import prompts
+
+    ids = [r["id"] for r in pt.recommend_boards(prompts._load_user_profile())]
+
+    assert "linkedin" in ids, "the general board always fits"
+    assert "arbeitnow" in ids, "the engineer's real roles still match an engineering board"
+    leaked = IMPACT_ONLY_BOARDS.intersection(ids)
+    assert not leaked, f"leftover example scaffolding recommended impact boards: {sorted(leaked)}"
+
+
 def test_engineer_scoring_prompt_has_no_ea_frame(monkeypatch, tmp_path):
     """The rendered vacancy prompt is built from the engineer's field, EA-free."""
     h.use_persona(monkeypatch, profile="profile_engineer.md", db_path=tmp_path / "db")

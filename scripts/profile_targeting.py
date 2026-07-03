@@ -34,6 +34,38 @@ from prompts import _load_user_profile
 # comment are never parsed as real values (matches hard_filters / scoring_settings).
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 
+# The shipped example profile teaches ONE placeholder convention: guidance to
+# delete sits inside square brackets ("The `[brackets]` show what goes where —
+# delete the guidance once you have filled them in"), and pure format samples are
+# bullet lines that open with "e.g.". A profile only half-edited from that
+# template still carries those markers, and their topic words (a nurse / impact /
+# public-policy example the user never deleted) would otherwise be keyword-matched
+# as if the user had CHOSEN that field — the board-recommendation regression this
+# module exists to prevent (an engineer handed impact/nonprofit boards). Both
+# markers are stripped before any targeting keyword match. The rules key on the
+# markers themselves — brackets and a leading "e.g." — never on topic words, so a
+# user's real prose (which carries neither) passes through untouched.
+#
+# ``[^\]]`` spans newlines, so a placeholder wrapped across two lines
+# (``[the fields … healthcare,\ngames …]``) is removed whole.
+_PLACEHOLDER_SPAN = re.compile(r"\[[^\]]*\]")
+_EXAMPLE_LINE = re.compile(r"^\s*(?:[-•*·]\s*)?\*{0,2}\s*e\.g\.", re.IGNORECASE)
+
+
+def _strip_scaffolding(text: str) -> str:
+    """Remove unedited example-template scaffolding from ``text``.
+
+    Drops (1) HTML comment blocks, (2) ``[…]`` placeholder spans, and (3) bullet
+    lines that open with "e.g." — the three markers the shipped example uses for
+    "replace me" guidance. Deterministic and content-blind: it keys on the
+    markers, not on any topic word, so real user content survives unchanged.
+    """
+    text = _HTML_COMMENT.sub("", text or "")
+    text = _PLACEHOLDER_SPAN.sub(" ", text)
+    kept = [line for line in text.splitlines() if not _EXAMPLE_LINE.match(line)]
+    return "\n".join(kept)
+
+
 # Values that mean "the user left this empty".
 _EMPTY_TOKENS = {"", "(none)", "none", "-", "n/a", "na"}
 
@@ -83,13 +115,15 @@ def _profile_text(sections: dict[str, str]) -> str:
     Board matching looks for a board's audience tag anywhere the user described
     their field / roles / domain, so it reads USER_PROFILE + TARGET_ROLES (the
     positive targeting sections). EXCLUDE_PATTERNS is deliberately NOT included:
-    a word the user wants to AVOID must not pull in a board.
+    a word the user wants to AVOID must not pull in a board. Unedited example
+    scaffolding is stripped first (see ``_strip_scaffolding``) so a half-filled
+    profile's leftover impact/nonprofit example words can't recommend a board.
     """
     parts = [
         sections.get("USER_PROFILE", ""),
         _positive_roles_body(sections.get("TARGET_ROLES", "")),
     ]
-    return _HTML_COMMENT.sub("", "\n".join(parts)).lower()
+    return _strip_scaffolding("\n".join(parts)).lower()
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +232,7 @@ def _derive_role_keywords(target_roles_body: str) -> list[str]:
     de-dupes case-insensitively. Best-effort ("sane queries", not perfect
     parsing) — the clean path is an explicit ## LINKEDIN_QUERIES section.
     """
-    body = _positive_roles_body(_HTML_COMMENT.sub("", target_roles_body or ""))
+    body = _positive_roles_body(_strip_scaffolding(target_roles_body or ""))
     roles: list[str] = []
     seen: set[str] = set()
     for line in body.splitlines():
@@ -232,7 +266,9 @@ def _derive_locations(sections: dict[str, str]) -> list[str]:
     # search exactly where the user said not to (review nit on #44).
     negated = re.compile(r"\b(?:not|no|never|excluded?)\W*$", re.IGNORECASE)
     for body in sections.values():
-        for line in (body or "").splitlines():
+        # Strip scaffolding so an unedited "**Target locations:** [where you'd
+        # work — cities…]" placeholder is not parsed as real target locations.
+        for line in _strip_scaffolding(body or "").splitlines():
             m = pat.search(line)
             if m and not negated.search(m.group("prefix")):
                 raw_line = m.group("rest")
