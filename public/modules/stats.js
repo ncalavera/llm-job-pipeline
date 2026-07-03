@@ -10,77 +10,28 @@ import {
   getGroupStatus,
   isGroupCompanyApproved,
 } from "./state.js";
-import { escHtml, getFlagForChip } from "./helpers.js";
+import { escHtml, getFlagForChip, isVacancyExpired } from "./helpers.js";
 import { T } from "./i18n.js";
+import { geoBuckets, VISIBLE_MIN_SCORE } from "./derive.js";
 
-const REMOTE_KEY = "__remote_unknown";
 const HELP_TEXT =
   "A vacancy with N locations is counted N times — the table shows role availability by city.";
 const REMOTE_LABEL = T("geo_remote_unknown", "Remote / Unknown");
 const COUNTRY_ONLY_LABEL = "(whole country)";
 const EMPTY_LABEL = "🏢 No data";
 
-// ---------------------------------------------------------------------------
-// Pure aggregator — easy to unit-test if a JS framework is added later
-// ---------------------------------------------------------------------------
-
-export function aggregateGeoStats(
-  groupsArr,
-  isApprovedFn,
-  getStatusFn,
-  basketMap,
-) {
-  const buckets = new Map();
-  const visible = groupsArr.filter((g) => isApprovedFn(g));
-
-  for (const g of visible) {
-    const status = getStatusFn(g);
-    const isLiked = basketMap[status] === "liked";
-    const score =
-      typeof g.llm_score === "number" && g.llm_score >= 0 ? g.llm_score : null;
-
-    const locs = Array.isArray(g.locations) ? g.locations : [];
-    const places = [];
-    for (const loc of locs) {
-      const city = (loc.city || "").trim();
-      const country = (loc.country || "").trim();
-      if (!city && !country) continue;
-      places.push({
-        city: city || COUNTRY_ONLY_LABEL,
-        country: country || "—",
-      });
-    }
-    if (places.length === 0) places.push({ key: REMOTE_KEY });
-
-    for (const p of places) {
-      const key = p.key || `${p.country}::${p.city}`;
-      let bucket = buckets.get(key);
-      if (!bucket) {
-        bucket = {
-          key,
-          city: p.city || REMOTE_LABEL,
-          country: p.country || "—",
-          count: 0,
-          liked: 0,
-          scoreSum: 0,
-          scoreN: 0,
-          isRemote: !!p.key,
-        };
-        buckets.set(key, bucket);
-      }
-      bucket.count += 1;
-      if (isLiked) bucket.liked += 1;
-      if (score !== null) {
-        bucket.scoreSum += score;
-        bucket.scoreN += 1;
-      }
-    }
-  }
-
-  for (const b of buckets.values()) {
-    b.meanScore = b.scoreN > 0 ? +(b.scoreSum / b.scoreN).toFixed(1) : null;
-  }
-  return Array.from(buckets.values());
+// The shared visibility filter (approved + score floor) and the expiry
+// re-bucketing behind the "liked" column live in derive.js — geoBuckets reads
+// exactly the visible set the Catalog does, so the Geo numbers track live
+// likes/passes and today's expiry with no run (DHA-376).
+function visOpts() {
+  return {
+    isApproved: isGroupCompanyApproved,
+    getStatus: getGroupStatus,
+    isExpired: isVacancyExpired,
+    basketMap: STATUS_BASKET,
+    minScore: VISIBLE_MIN_SCORE,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -184,12 +135,18 @@ function buildHtml(rows, sortCol, sortAsc) {
 export function renderStats() {
   const container = document.getElementById("statsSection");
   if (!container) return;
-  const rows = aggregateGeoStats(
-    groups,
-    isGroupCompanyApproved,
-    getGroupStatus,
-    STATUS_BASKET,
-  );
+  const rows = geoBuckets(groups, visOpts());
+  // geoBuckets keeps raw city/country (empty = whole-country or remote); apply
+  // the display labels + flags here so the derivation stays i18n-free.
+  for (const r of rows) {
+    if (r.isRemote) {
+      r.city = REMOTE_LABEL;
+      r.country = "—";
+    } else {
+      r.city = r.city || COUNTRY_ONLY_LABEL;
+      r.country = r.country || "—";
+    }
+  }
   const sortCol = state.statsSortCol || "count";
   const sortAsc = state.statsSortAsc ?? false;
   rows.sort((a, b) => compareRows(a, b, sortCol, sortAsc));
