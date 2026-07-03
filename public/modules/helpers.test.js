@@ -18,6 +18,10 @@ import {
   safeUrl,
   renderLocationChips,
   mdToHtml,
+  qualityBand,
+  qualityClass,
+  tierClass,
+  scoreLabel,
 } from "./helpers.js";
 
 const DAY = 86400000;
@@ -248,4 +252,76 @@ test("mdToHtml: a javascript: markdown link renders inert, not a link", () => {
 test("mdToHtml: a normal https markdown link still renders as a link", () => {
   const html = mdToHtml("[click me](https://example.org)");
   assert.match(html, /<a href="https:\/\/example\.org"/);
+});
+
+// --- qualityBand / qualityClass (DHA-385, U1) -------------------------------
+
+test("qualityBand: boundary at 70 (good/moderate)", () => {
+  assert.equal(qualityBand(70), "good");
+  assert.equal(qualityBand(69), "moderate");
+});
+
+test("qualityBand: boundary at 50 (moderate/weak)", () => {
+  assert.equal(qualityBand(50), "moderate");
+  assert.equal(qualityBand(49), "weak");
+});
+
+test("qualityBand: well inside each band", () => {
+  assert.equal(qualityBand(95), "good");
+  assert.equal(qualityBand(60), "moderate");
+  assert.equal(qualityBand(10), "weak");
+});
+
+test("qualityClass: mirrors qualityBand as a 'q-' prefixed CSS class", () => {
+  assert.equal(qualityClass(70), "q-good");
+  assert.equal(qualityClass(69), "q-moderate");
+  assert.equal(qualityClass(50), "q-moderate");
+  assert.equal(qualityClass(49), "q-weak");
+});
+
+test("qualityBand: null/undefined/NaN fall back to weak", () => {
+  assert.equal(qualityBand(null), "weak");
+  assert.equal(qualityBand(undefined), "weak");
+  assert.equal(qualityBand(NaN), "weak");
+});
+
+test("qualityClass: null/undefined/NaN fall back to q-weak", () => {
+  assert.equal(qualityClass(null), "q-weak");
+  assert.equal(qualityClass(undefined), "q-weak");
+  assert.equal(qualityClass(NaN), "q-weak");
+});
+
+// --- tierClass ---------------------------------------------------------------
+
+test("tierClass: maps S/A/B/C to fixed classes", () => {
+  assert.equal(tierClass("S"), "tier-s");
+  assert.equal(tierClass("A"), "tier-a");
+  assert.equal(tierClass("B"), "tier-b");
+  assert.equal(tierClass("C"), "tier-c");
+});
+
+test("tierClass: unknown/missing tier falls back safely", () => {
+  assert.equal(tierClass("Z"), "tier-unknown");
+  assert.equal(tierClass(""), "tier-unknown");
+  assert.equal(tierClass(null), "tier-unknown");
+  assert.equal(tierClass(undefined), "tier-unknown");
+});
+
+// --- scoreLabel ----------------------------------------------------------
+
+test("scoreLabel: boundaries at 50/70/80/90", () => {
+  assert.equal(scoreLabel(49), "Weak");
+  assert.equal(scoreLabel(50), "Moderate");
+  assert.equal(scoreLabel(69), "Moderate");
+  assert.equal(scoreLabel(70), "Good");
+  assert.equal(scoreLabel(79), "Good");
+  assert.equal(scoreLabel(80), "Strong");
+  assert.equal(scoreLabel(89), "Strong");
+  assert.equal(scoreLabel(90), "Exceptional");
+});
+
+test("scoreLabel: null/undefined/NaN fall back to Weak", () => {
+  assert.equal(scoreLabel(null), "Weak");
+  assert.equal(scoreLabel(undefined), "Weak");
+  assert.equal(scoreLabel(NaN), "Weak");
 });

@@ -30,6 +30,46 @@
   --text-lg: 18px;
   --text-xl: 24px;
   --text-2xl: 36px;
+
+  /* --- Sky redesign token layer (DHA-385, U1) ---
+     Single source for the new look; old tokens above stay until every
+     consumer migrates (retired in U18). See architecture-notes/design/. */
+
+  /* Sky material — shell (page background) + sheet (content surface) */
+  --sky-shell: #e3e7ed;
+  --sky-sheet: #f6f8fa;
+  --sky-text: #3a3833;
+  --sky-text-secondary: #67635a;
+  --sky-text-tertiary: #8a867c;
+  --sky-text-faint: #b5b1a6;
+  --sky-hairline: rgba(255, 255, 255, 0.85);
+  --sky-row-hover: rgba(58, 56, 51, 0.035);
+
+  /* Quality scale — the ONE meaning of green/ochre/crimson everywhere
+     (score tiles, tier badges, breakdown bars, distribution strips) */
+  --q-good: #0b5f44;
+  --q-good-bg: #e3f2eb;
+  --q-moderate: #8a6410;
+  --q-moderate-bg: #f5ebd3;
+  --q-weak: #b3262e;
+  --q-weak-bg: #f9e9e8;
+
+  /* Tier colors — fixed per tier, independent of the quality scale above */
+  --tier-s: #0b5f44;
+  --tier-a: #2e8b57;
+  --tier-b: #c99a2c;
+  --tier-c: #b3262e;
+
+  /* Cobalt — interaction only, never quality (active nav, selection, links) */
+  --cobalt: #2545d3;
+  --cobalt-tint: rgba(37, 69, 211, 0.1);
+
+  /* Radii */
+  --radius-row: 12px;
+  --radius-sheet: 18px;
+  --radius-pill: 9999px;
+  --radius-tile: 8px;
+  --radius-tile-lg: 9px;
 }
 
 * {
@@ -1881,6 +1921,52 @@ body[data-dashboard-style="minimal"] .loading-illus {
   color: var(--muted);
   border: 1px dashed var(--border);
   opacity: 0.6;
+}
+
+/* Sky redesign quality/tier classes (DHA-385, U1) — bound to the token layer
+   above. Unused until later units apply them; kept alongside .ctier-* rather
+   than replacing it (old classes retired in U18). */
+.q-good {
+  color: var(--q-good);
+}
+.q-good-bg {
+  background: var(--q-good-bg);
+  color: var(--q-good);
+}
+.q-moderate {
+  color: var(--q-moderate);
+}
+.q-moderate-bg {
+  background: var(--q-moderate-bg);
+  color: var(--q-moderate);
+}
+.q-weak {
+  color: var(--q-weak);
+}
+.q-weak-bg {
+  background: var(--q-weak-bg);
+  color: var(--q-weak);
+}
+
+.tier-s {
+  color: #fff;
+  background: var(--tier-s);
+}
+.tier-a {
+  color: #fff;
+  background: var(--tier-a);
+}
+.tier-b {
+  color: #fff;
+  background: var(--tier-b);
+}
+.tier-c {
+  color: #fff;
+  background: var(--tier-c);
+}
+.tier-unknown {
+  color: #fff;
+  background: var(--sky-text-faint);
 }
 
 .company-card-right {
