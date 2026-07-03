@@ -148,9 +148,11 @@ export function todayRowHtml(g, extra, actions) {
   return (
     '<div class="today-row" data-id="' +
     escHtml(g.id) +
-    '" onclick="openTodayRow(\'' +
+    '" role="button" tabindex="0" onclick="openTodayRow(\'' +
     jsAttr(g.id) +
-    "')\">" +
+    "')\" onkeydown=\"if(event.key==='Enter'&&event.target===event.currentTarget){openTodayRow('" +
+    jsAttr(g.id) +
+    "')}\">" +
     '<div class="today-row-score ' +
     scoreCls +
     '">' +

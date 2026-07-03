@@ -108,6 +108,15 @@ test("row click opens the vacancy via openCatalogRow with the row's id", () => {
   assert.match(html, /onclick="openCatalogRow\('g1'\)"/);
 });
 
+test("row is keyboard-reachable and Enter opens it only when the row itself has focus (R12)", () => {
+  const html = catalogRowHtml(baseGroup, "unseen", opts);
+  assert.match(html, /role="button" tabindex="0"/);
+  assert.match(
+    html,
+    /onkeydown="if\(event\.key==='Enter'&&event\.target===event\.currentTarget\)\{openCatalogRow\('g1'\)\}"/,
+  );
+});
+
 test("like/pass buttons stop propagation so they never trigger the row click", () => {
   const html = catalogRowHtml(baseGroup, "unseen", opts);
   assert.match(

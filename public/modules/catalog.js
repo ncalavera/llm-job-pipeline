@@ -478,9 +478,11 @@ export function catalogRowHtml(g, basket, opts) {
   return (
     '<div class="catalog-row" data-id="' +
     escHtml(g.id) +
-    '" onclick="openCatalogRow(\'' +
+    '" role="button" tabindex="0" onclick="openCatalogRow(\'' +
     idAttr +
-    "')\">" +
+    "')\" onkeydown=\"if(event.key==='Enter'&&event.target===event.currentTarget){openCatalogRow('" +
+    idAttr +
+    "')}\">" +
     '<div class="catalog-row-score ' +
     scoreCls +
     '">' +

@@ -196,8 +196,15 @@ export function applicationRowHtml(a, opts) {
   const sentText = a.applied_at ? escHtml(relativeTime(a.applied_at, t)) : "—";
   const channelText = a.channel ? " · " + escHtml(a.channel) : "";
   const rowCls = "apl-row" + (a.live ? "" : " apl-row-unlinked");
+  // Only a live row opens anything — an unlinked one (its vacancy left the
+  // live payload) has nothing to navigate to, so it stays a plain, non-
+  // focusable row (R12: don't hand keyboard focus to a dead control).
   const rowClick = a.live
-    ? " onclick=\"openApplicationRow('" + jsAttr(a.id) + "')\""
+    ? ' role="button" tabindex="0" onclick="openApplicationRow(\'' +
+      jsAttr(a.id) +
+      "')\" onkeydown=\"if(event.key==='Enter'&&event.target===event.currentTarget){openApplicationRow('" +
+      jsAttr(a.id) +
+      "')}\""
     : "";
   return (
     '<div class="' +

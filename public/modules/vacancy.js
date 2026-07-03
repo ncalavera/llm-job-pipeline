@@ -235,9 +235,11 @@ export function vacancyPageHtml(g, company, status, opts) {
   const [orgFg] = g.org_color || ["#8A867C", "#F6F8FA"];
   const orgName = escHtml(g.company_name || g.org);
   const orgHtml = g.company_slug
-    ? '<span class="vac-org vac-org--link" onclick="openCompanyProfile(\'' +
+    ? '<span class="vac-org vac-org--link" role="button" tabindex="0" onclick="openCompanyProfile(\'' +
       jsAttr(g.company_slug) +
-      "')\">" +
+      "')\" onkeydown=\"if(event.key==='Enter'){openCompanyProfile('" +
+      jsAttr(g.company_slug) +
+      "')}\">" +
       orgName +
       "</span>"
     : '<span class="vac-org">' + orgName + "</span>";
@@ -476,9 +478,11 @@ export function vacancyPageHtml(g, company, status, opts) {
   if (company) {
     const note = company.sector || company.description || "";
     railParts.push(
-      '<div class="vac-company-card" onclick="openCompanyProfile(\'' +
+      '<div class="vac-company-card" role="button" tabindex="0" onclick="openCompanyProfile(\'' +
         jsAttr(company.slug) +
-        "')\">" +
+        "')\" onkeydown=\"if(event.key==='Enter'){openCompanyProfile('" +
+        jsAttr(company.slug) +
+        "')}\">" +
         '<div class="vac-company-top">' +
         '<span class="vac-company-mono" style="background:' +
         escHtml(orgFg) +
