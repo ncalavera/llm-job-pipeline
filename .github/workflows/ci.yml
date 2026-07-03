@@ -75,3 +75,56 @@ jobs:
 
       - name: Tests (node --test)
         run: npm run test:js
+
+  install-smoke:
+    # STRATEGY goal 3 ("usable by a stranger"): a bare container follows
+    # INSTALL-EASY.md literally and reaches the onboarding gate with nothing to
+    # debug and no network. This job tests the INSTALL path only — it never runs
+    # pytest (the `python` job covers the code); a green run here is the automated
+    # proof that a first-time clone works in simple mode (SQLite, no signups).
+    name: Install smoke (clean container, simple mode)
+    runs-on: ubuntu-latest
+    container: python:3.12-slim
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install deps (INSTALL-EASY.md step 2 — simple mode, no build tools)
+        run: python3 -m pip install requests beautifulsoup4 python-dateutil
+
+      - name: Create profile (INSTALL-EASY.md step 3 — neutral persona)
+        run: |
+          set -euo pipefail
+          # INSTALL-EASY: copy the example, then edit it to describe yourself.
+          cp config/user_profile.example.md config/user_profile.md
+          # The manual "describe yourself" edit is stood in for by a committed,
+          # neutral persona fixture, so nothing personal enters a committed file.
+          cp tests/fixtures/profile_medic.md config/user_profile.md
+          # Guard the one footgun: a profile still equal to the example makes the
+          # first run abort (exit 20) instead of onboarding — fail here, clearly.
+          python3 -c "import pathlib,sys; e=pathlib.Path('config/user_profile.example.md').read_text(encoding='utf-8').strip(); p=pathlib.Path('config/user_profile.md').read_text(encoding='utf-8').strip(); sys.exit('FAIL: profile equals the example — validate_profile would abort. The neutral fixture must differ from user_profile.example.md.' if e==p else 0)"
+
+      - name: First run reaches the onboarding gate (exit 10, no network)
+        run: |
+          set -uo pipefail
+          # Simple mode is SQLite. Match INSTALL-EASY's warning: a stray Supabase
+          # URL inherited from elsewhere would silently flip the backend to
+          # Postgres (an empty value is not "unset"), so unset both for this run.
+          unset SUPABASE_DB_URL SUPABASE_DIRECT_URL FIRECRAWL_API_KEY
+          out="$(python3 scripts/run_daily.py 2>&1)"; code=$?
+          echo "$out"
+          echo "---------- run_daily.py exit code: $code ----------"
+          case "$code" in
+            10) : ;;  # onboarding gate — the expected first-run outcome
+            20) echo "FAIL: run aborted (exit 20). A stranger's first run must reach the onboarding gate, not abort (profile or DB problem)."; exit 1 ;;
+            30) echo "FAIL: a stage crashed (exit 30). The first run must not crash before onboarding — check the traceback above."; exit 1 ;;
+            0)  echo "FAIL: run finished (exit 0) without stopping to onboard — the empty-database gate did not fire."; exit 1 ;;
+            *)  echo "FAIL: unexpected exit code $code (expected 10, the onboarding gate)."; exit 1 ;;
+          esac
+          # Exit 10 alone is not enough — the stop must be self-explanatory.
+          echo "$out" | grep -q "GATE: onboarding" \
+            || { echo "FAIL: exit 10 but the onboarding gate banner is missing — the stop is not self-explanatory."; exit 1; }
+          echo "$out" | grep -q "company table is empty" \
+            || { echo "FAIL: onboarding banner lacks its plain-language reason ('company table is empty')."; exit 1; }
+          echo "$out" | grep -q "SQLite: connected" \
+            || { echo "FAIL: run did not connect to a local SQLite file — simple mode may have used the wrong backend."; exit 1; }
+          echo "PASS: clean container reached the self-explanatory onboarding gate (exit 10) with no network, on local SQLite."
