@@ -96,6 +96,25 @@ def table_ready() -> bool:
         cur.close()
 
 
+def _require_ledger() -> None:
+    """Refuse to apply a self-edit we could not log (STRATEGY guardrail 8).
+
+    The ``apply_*`` helpers mutate DURABLE state — the profile file or the board
+    ``enabled`` flag — and THEN append an 'applied' row to the ``learning_log``
+    ledger. If that table is missing (migrate.py never ran) the append fails
+    AFTER the edit: the change is applied but unlogged, and a raw ``no such
+    table: learning_log`` traceback surfaces to the user — a silent, unlogged
+    self-edit, the exact thing the guardrail forbids. Checking the ledger is
+    ready up front, BEFORE touching anything, makes the failure loud and atomic
+    (nothing changed) instead of half-applied.
+    """
+    if not table_ready():
+        raise RuntimeError(
+            "learning_log ledger is missing — run `python3 scripts/migrate.py` "
+            "before applying a learning-cycle change. Nothing was modified."
+        )
+
+
 def log_event(kind: str, ref: str | None = None, detail: dict | None = None) -> None:
     """Append one row to the ledger and commit (DAL writes are not auto-committed)."""
     from db_backend import Json
@@ -662,6 +681,7 @@ def _atomic_write_profile(path: Path, new_text: str, previous_text: str) -> None
 
 def apply_add_filter_word(word: str) -> dict:
     """Add a title keyword to the hard filter (approved 'add word W'). Logged."""
+    _require_ledger()
     word = word.strip().lower()
     path = _profile_path()
     text = path.read_text(encoding="utf-8")
@@ -676,6 +696,7 @@ def apply_add_filter_word(word: str) -> dict:
 
 def apply_remove_filter_word(word: str) -> dict:
     """Remove a title keyword from the hard filter (weaken a rule). Logged."""
+    _require_ledger()
     word = word.strip().lower()
     path = _profile_path()
     text = path.read_text(encoding="utf-8")
@@ -690,6 +711,7 @@ def apply_factor_move(factor_text: str, keyword: str) -> dict:
     """Move a factor penalty -> filter: drop the EXCLUDE_PATTERNS bullet and add
     the keyword to the hard filter. Both edits, then log. Never called without an
     explicit user yes."""
+    _require_ledger()
     path = _profile_path()
     original = path.read_text(encoding="utf-8")
     text, removed = _remove_penalty_bullet(original, factor_text)
@@ -720,6 +742,7 @@ def apply_disable_board(board: str) -> dict:
     printing advice. It changes just the durable default; the board can still be
     re-enabled for a one-off run via JOB_BOARDS / --boards. Applied only on the
     user's explicit yes (guardrail 8: never a silent self-edit)."""
+    _require_ledger()
     from database_supabase import set_board_enabled
 
     set_board_enabled(board, False)

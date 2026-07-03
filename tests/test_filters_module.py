@@ -75,6 +75,44 @@ def test_description_kill_phrase_detected_by_predicate():
 
 
 # ---------------------------------------------------------------------------
+# build_title_blacklist_pattern — boundary handling for punctuation keywords
+# ---------------------------------------------------------------------------
+
+
+def test_blacklist_keyword_ending_in_nonword_char_matches():
+    """A keyword ending in a non-word character (c++, c#) must still match.
+
+    The old single ``\\b…(?:es|s)?\\b`` wrapper put a word boundary right after
+    the keyword; after a "+"/"#" that boundary needs a following WORD char, so
+    "C++ Developer" (space after) never matched and the filter was a silent
+    no-op."""
+    pat = filters.build_title_blacklist_pattern(["c++"])
+    assert pat.search("C++ Developer")
+    assert pat.search("Senior C++ Engineer")
+    assert pat.search("Backend C++")  # keyword at end of the title
+    # Still a WHOLE-token match: not a substring of a bigger word.
+    assert not pat.search("abc++x developer")
+
+    pat_hash = filters.build_title_blacklist_pattern(["c#"])
+    assert pat_hash.search("C# Developer")
+
+
+def test_blacklist_ordinary_and_plural_keywords_unchanged():
+    """The word-ending keywords keep their plural handling (regression guard)."""
+    pat = filters.build_title_blacklist_pattern(["engineer", "coach"])
+    assert pat.search("Senior Engineer")
+    assert pat.search("Engineers wanted")  # plural via (?:es|s)?
+    assert pat.search("Head Coaches")  # coach -> coaches
+    assert not pat.search("Product Manager")
+
+
+def test_blacklist_empty_list_matches_nothing():
+    """An empty keyword list drops nothing (never an accidental match-all)."""
+    pat = filters.build_title_blacklist_pattern([])
+    assert not pat.search("Any Title Whatsoever")
+
+
+# ---------------------------------------------------------------------------
 # No-mutation guarantee for the pure predicates
 # ---------------------------------------------------------------------------
 

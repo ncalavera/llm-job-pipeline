@@ -123,10 +123,13 @@ database.
 Then triage from the terminal:
 
 ```
-/jobs-review list           # top unseen vacancies by score
-/jobs-review show <id>      # full description + scoring reasoning
-/jobs-review mark <id> liked
+python3 scripts/vac.py list           # top unseen vacancies by score
+python3 scripts/vac.py show <id>      # full description + scoring reasoning
+python3 scripts/vac.py mark <id> liked
 ```
+
+(Inside your agent the same thin CLI is `/jobs-review vac list`, `… show <id>`,
+`… mark <id> liked`.)
 
 ### Optional: job boards
 

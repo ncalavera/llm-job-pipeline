@@ -367,6 +367,38 @@ def test_duplicate_column_guard_is_scoped_to_known_versions(mig):
     assert _logical_snapshot(mig.db_path) == before_snapshot
 
 
+@pytest.mark.parametrize("version", ["0009", "0011"])
+def test_half_migrated_single_add_column_is_idempotent(mig, version, capsys):
+    """0009 (scored_by) / 0011 (board.enabled) are single
+    ADD COLUMN migrations with no SQLite ``IF NOT EXISTS``. On a HALF-MIGRATED
+    DB — the column exists but its ledger row was lost — re-running used to hit
+    'duplicate column name', abort, auto-restore, and stay stuck one migration
+    short on EVERY subsequent run. These versions are now in the swallow-on-
+    duplicate allowlist, so the re-run records them and moves on."""
+    col = f"col_{version}"
+    (mig.migrations_dir / f"{version}_add.sqlite.sql").write_text(
+        f"ALTER TABLE vacancy ADD COLUMN {col} TEXT;\n", encoding="utf-8"
+    )
+    # First apply: column added, version recorded.
+    assert mig.m.cmd_migrate(allow_destructive=False, do_backup=False) == 0
+    assert col in _columns(mig.db_path, "vacancy")
+    assert version in _applied_versions(mig.db_path)
+
+    # Simulate the half-migrated state: column present, ledger row gone.
+    conn = sqlite3.connect(str(mig.db_path))
+    conn.execute("DELETE FROM schema_migrations WHERE version = ?", (version,))
+    conn.commit()
+    conn.close()
+    assert version not in _applied_versions(mig.db_path)
+
+    # Re-run: the duplicate ADD COLUMN is treated as already-applied, not a stuck
+    # abort. Twice, to prove it converges rather than looping on failure.
+    assert mig.m.cmd_migrate(allow_destructive=False, do_backup=False) == 0
+    assert mig.m.cmd_migrate(allow_destructive=False, do_backup=False) == 0
+    assert version in _applied_versions(mig.db_path)
+    assert "column already present" in capsys.readouterr().out
+
+
 # ---------------------------------------------------------------------------
 # A version number already recorded as "n/a (other dialect)" must never be
 # reused for a later dialect-specific migration -- it would silently never run

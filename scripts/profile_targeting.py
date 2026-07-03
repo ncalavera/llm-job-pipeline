@@ -64,24 +64,42 @@ def _norm_line(line: str) -> str:
 
 
 @functools.lru_cache(maxsize=1)
-def _example_sample_lines() -> frozenset[str]:
-    """The exact ``e.g.``-prefixed sample lines the SHIPPED example carries.
+def _example_scaffolding_lines() -> frozenset[str]:
+    """Normalised lines of the SHIPPED example that are unedited scaffolding:
 
-    An ``e.g.`` line is treated as unedited scaffolding only when it matches one
-    of these verbatim (normalised) — that is the whole point of keying off the
-    example's real text. A common half-edit is to type your OWN roles into an
-    ``e.g. "…"`` line without deleting the prefix; that text is not a shipped
-    sample, so the line is KEPT, not silently dropped (the inverse misfilter).
-    Degrades to an empty set (strip no ``e.g.`` line) if the example is
-    unreadable — safer to under-strip than to delete a user's content.
+      * every ``e.g.``-prefixed FORMAT SAMPLE anywhere in the example (e.g. the
+        "Professional experience" samples), and
+      * every non-blank line of the example's ``## TARGET_ROLES`` section — its
+        GUIDANCE PROSE included. That prose ("The exact job titles you want to
+        see — one per line or comma-separated. Any field; … from different
+        careers, …") splits on its commas/semicolons into stray one-word
+        "roles" (``field``, ``careers``) that would otherwise become live
+        LinkedIn search queries in a half-copied profile.
+
+    A line is scaffolding only when it matches one of these VERBATIM (normalised)
+    — the whole point of keying off the example's own text, never off a topic
+    word. A user who typed their OWN roles over the template (so the line no
+    longer matches) keeps them; nothing is dropped on a topic guess. Degrades to
+    an empty set (strip nothing) if the example is unreadable — safer to
+    under-strip than to delete a user's content.
     """
     try:
         text = EXAMPLE_PROFILE_PATH.read_text(encoding="utf-8")
     except OSError:
         return frozenset()
-    return frozenset(
-        norm for line in text.splitlines() if (norm := _norm_line(line)).startswith("e.g.")
-    )
+    out: set[str] = set()
+    in_target_roles = False
+    for line in text.splitlines():
+        heading = re.match(r"^##\s+(.+?)\s*$", line)
+        if heading:
+            in_target_roles = heading.group(1).upper().replace(" ", "_") == "TARGET_ROLES"
+            continue
+        norm = _norm_line(line)
+        if not norm:
+            continue
+        if norm.startswith("e.g.") or in_target_roles:
+            out.add(norm)
+    return frozenset(out)
 
 
 def _strip_scaffolding(text: str) -> str:
@@ -89,13 +107,14 @@ def _strip_scaffolding(text: str) -> str:
 
     Three markers, each keyed off the example itself, never off a topic word:
       1. HTML comment blocks (``<!-- … -->``);
-      2. lines that are VERBATIM ``e.g.`` sample lines from the shipped example
-         (see ``_example_sample_lines``) — a user's own text edited into an
-         ``e.g.`` line is not a shipped sample, so it survives;
+      2. lines that are VERBATIM scaffolding lines from the shipped example — its
+         ``e.g.`` samples and its ``## TARGET_ROLES`` guidance prose (see
+         ``_example_scaffolding_lines``); a user's own text edited over the
+         template is not a shipped line, so it survives;
       3. ``[…]`` placeholder spans, except a Markdown-link label ``[text](url)``.
     """
     text = _HTML_COMMENT.sub("", text or "")
-    samples = _example_sample_lines()
+    samples = _example_scaffolding_lines()
     kept = [line for line in text.splitlines() if _norm_line(line) not in samples]
     return _PLACEHOLDER_SPAN.sub(" ", "\n".join(kept))
 

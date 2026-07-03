@@ -345,3 +345,93 @@ def test_cmd_save_escalation_overwrites_screen_scored_by(sqlite_dal_migrated, mo
     saved = db.load_vacancies()[vid]
     assert saved["scored_by"] == "opus"
     assert saved["llm_score"] == 78
+
+
+# ---------------------------------------------------------------------------
+# cmd_save — score type/range validation
+# ---------------------------------------------------------------------------
+
+
+def _save_flat(db, monkeypatch, vid, score):
+    monkeypatch.setitem(
+        sys.modules, "report", types.SimpleNamespace(generate_dashboard=lambda *a, **k: None)
+    )
+    payload = [
+        {
+            "member_ids": [vid],
+            "org": "Acme Robotics",
+            "title": "Head of Community",
+            "score": score,
+            "reasoning": "r",
+            "short_summary": "A " * 120,
+        }
+    ]
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    import score_vacancies
+
+    importlib.reload(score_vacancies)
+    score_vacancies.cmd_save(types.SimpleNamespace(archive=False))
+
+
+@pytest.mark.parametrize("bad", [999, -5, 3.7])
+def test_cmd_save_rejects_out_of_range_or_fractional_score(sqlite_dal, monkeypatch, bad):
+    """A bare-LLM slip (999 / -5 / 3.7) must NOT reach the DB — and from there
+    public/data.js — verbatim. The entry is skipped, the row stays unscored."""
+    db = sqlite_dal
+    vid = _seed_one_vacancy(db)
+    _save_flat(db, monkeypatch, vid, bad)
+    assert db.load_vacancies()[vid]["llm_score"] is None
+
+
+def test_cmd_save_accepts_integer_valued_float(sqlite_dal, monkeypatch):
+    """An in-range whole-number float (85.0) is coerced to the int 85, not
+    rejected — the agent occasionally emits ``85.0``."""
+    db = sqlite_dal
+    vid = _seed_one_vacancy(db)
+    _save_flat(db, monkeypatch, vid, 85.0)
+    assert db.load_vacancies()[vid]["llm_score"] == 85
+
+
+def test_coerce_score_unit():
+    import score_vacancies
+
+    importlib.reload(score_vacancies)
+    c = score_vacancies._coerce_score
+    assert c(0) == 0 and c(100) == 100 and c(73) == 73
+    assert c(85.0) == 85 and c("42") == 42 and c(" 7 ") == 7
+    assert c(999) is None and c(-1) is None and c(3.7) is None
+    assert c("high") is None and c(None) is None and c(True) is None
+
+
+# ---------------------------------------------------------------------------
+# cmd_save — empty member_ids is a skipped error, never a silent success
+# (verified NOT a bug in a stress sweep; this locks the guard in)
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_save_empty_member_ids_is_error_not_saved(sqlite_dal, monkeypatch, capsys):
+    db = sqlite_dal
+    vid = _seed_one_vacancy(db)
+    monkeypatch.setitem(
+        sys.modules, "report", types.SimpleNamespace(generate_dashboard=lambda *a, **k: None)
+    )
+    payload = [
+        {
+            "member_ids": [],
+            "org": "Acme Robotics",
+            "title": "Head of Community",
+            "score": 80,
+            "reasoning": "r",
+            "short_summary": "A " * 120,
+        }
+    ]
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    import score_vacancies
+
+    importlib.reload(score_vacancies)
+    score_vacancies.cmd_save(types.SimpleNamespace(archive=False))
+
+    out = capsys.readouterr()
+    assert db.load_vacancies()[vid]["llm_score"] is None  # 0 rows touched
+    assert "Saved 0 scores" in out.out  # NOT counted as a successful save
+    assert "missing member_ids" in out.err

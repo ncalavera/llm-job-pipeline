@@ -785,3 +785,67 @@ def test_full_rescore_stays_single_pass_oneshot(rd, monkeypatch, tmp_path):
     kind, info = rd._h_vacancy_scoring(state, entry, opts)
     assert kind == "advance"
     assert "one-shot" in info
+
+
+# ---------------------------------------------------------------------------
+# 5. A corrupt checkpoint is never silently ignored
+# ---------------------------------------------------------------------------
+
+
+def test_corrupt_state_resume_does_not_lie_no_run(rd, monkeypatch, capsys):
+    """--resume on a present-but-unreadable checkpoint must NOT report "No run
+    to resume" (which would send the user off to start fresh and lose it)."""
+    rd.STATE_PATH.write_text("{ corrupt json ", encoding="utf-8")
+    monkeypatch.setattr(rd, "drive", lambda state, opts: rd.EXIT_DONE)
+
+    rc = rd.main(["--resume"])
+    out = capsys.readouterr()
+    assert rc == rd.EXIT_ABORT
+    assert "No run to resume" not in (out.out + out.err)
+    assert "corrupt" in (out.out + out.err).lower()
+    # The file is left untouched for the user to inspect.
+    assert rd.STATE_PATH.read_text(encoding="utf-8") == "{ corrupt json "
+
+
+def test_corrupt_state_bare_run_does_not_clobber(rd, monkeypatch, capsys):
+    """A BARE invocation on a corrupt checkpoint must abort, not silently start a
+    fresh run and overwrite the (possibly recoverable) file."""
+    rd.STATE_PATH.write_text("{ corrupt json ", encoding="utf-8")
+    # If the guard fails and it proceeds, drive is a no-op so no real work runs.
+    monkeypatch.setattr(rd, "drive", lambda state, opts: rd.EXIT_DONE)
+
+    rc = rd.main([])
+    out = capsys.readouterr()
+    assert rc == rd.EXIT_ABORT
+    assert rd.STATE_PATH.read_text(encoding="utf-8") == "{ corrupt json "  # not clobbered
+    assert "corrupt" in (out.out + out.err).lower()
+
+
+def test_corrupt_state_new_run_is_allowed_to_discard(rd, monkeypatch, capsys):
+    """--new is the documented escape hatch: it must NOT abort on a corrupt
+    checkpoint — it proceeds past the guard to build a fresh run. drive is a
+    no-op so no real pipeline runs."""
+    rd.STATE_PATH.write_text("{ corrupt json ", encoding="utf-8")
+    captured = {}
+
+    def fake_drive(state, opts):
+        captured["state"] = state  # the corrupt guard let us build a fresh state
+        return rd.EXIT_DONE
+
+    monkeypatch.setattr(rd, "drive", fake_drive)
+    monkeypatch.setattr(rd, "_resolve_boards", lambda b: None)
+    monkeypatch.setattr(rd, "_print_run_banner", lambda opts: None)
+    monkeypatch.setattr(rd, "_print_summary", lambda state: None)
+
+    rc = rd.main(["--new"])
+    out = capsys.readouterr()
+    assert rc != rd.EXIT_ABORT
+    assert "corrupt" not in (out.out + out.err).lower()
+    assert captured["state"]["finished"] is False  # a brand-new, fresh run state
+
+
+def test_missing_state_still_reads_as_no_run(rd):
+    """A genuinely ABSENT checkpoint (no file) is not corruption — --resume still
+    reports "No run to resume" as before."""
+    assert not rd.STATE_PATH.exists()
+    assert rd._state_file_corrupt() is False

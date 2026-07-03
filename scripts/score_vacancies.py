@@ -8,6 +8,7 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -259,6 +260,40 @@ def _load_and_dedup(
 # ---------------------------------------------------------------------------
 
 
+#: The scorer contract (scripts/prompts/vacancy-scoring.md) is an INTEGER 0-100.
+_SCORE_MIN, _SCORE_MAX = 0, 100
+
+
+def _coerce_score(raw):
+    """Coerce an agent-supplied score to a whole int in [0, 100], or None.
+
+    The scoring prompt asks for an integer 0-100, but a bare-LLM slip can emit
+    999, 3.7, "high" or a bool. Those must never reach the DB — and from there
+    public/data.js — verbatim (this is the save-time guard, the last line before
+    the write). Returns None for anything that is not a whole number in range;
+    the caller skips that entry loudly, exactly like a missing member_ids or a
+    UUID-not-found row, so the vacancy stays unscored and is re-offered next run
+    rather than surfacing a garbage score.
+    """
+    if isinstance(raw, bool):  # bool is an int subclass — never a valid score
+        return None
+    if isinstance(raw, int):
+        val = raw
+    elif isinstance(raw, float):
+        if not raw.is_integer():
+            return None
+        val = int(raw)
+    elif isinstance(raw, str):
+        if not re.fullmatch(r"\s*-?\d+\s*", raw):
+            return None
+        val = int(raw)
+    else:
+        return None
+    if val < _SCORE_MIN or val > _SCORE_MAX:
+        return None
+    return val
+
+
 def _apply_onsite_penalty(score: int, country: str, work_mode: str) -> int:
     """Subtract the profile's on-site penalty for a non-remote role outside the
     no-penalty regions (makes remote roles preferable). Pure score nudge — hard
@@ -422,8 +457,18 @@ def cmd_save(args):
         score_data = entry.get("score_data")
         if not score_data:
             if "score" in entry:
+                score = _coerce_score(entry["score"])
+                if score is None:
+                    print(
+                        f"ERROR: invalid score {entry['score']!r} (must be an "
+                        f"integer 0-100) — score not saved for "
+                        f"{entry.get('org', '?')} — {entry.get('title', '?')}",
+                        file=sys.stderr,
+                    )
+                    errors += 1
+                    continue
                 result = {
-                    "score": entry["score"],
+                    "score": score,
                     "reasoning": entry.get("reasoning", ""),
                     "short_summary": entry.get("short_summary", ""),
                     "hard_requirements": entry.get("hard_requirements", []),

@@ -164,6 +164,24 @@ def _load_state() -> dict | None:
         return None
 
 
+def _state_file_corrupt() -> bool:
+    """True when a checkpoint FILE exists on disk but cannot be parsed.
+
+    ``_load_state`` collapses both "no checkpoint" and "checkpoint present but
+    unreadable" to ``None``. That conflation is dangerous: on a corrupt file
+    ``--resume`` would falsely report "No run to resume", and a BARE invocation
+    would silently start a fresh run and overwrite the (possibly recoverable)
+    checkpoint. Distinguishing the two lets ``main`` stop and tell the user
+    instead of lying or clobbering."""
+    if not STATE_PATH.exists():
+        return False
+    try:
+        json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        return False
+    except Exception:
+        return True
+
+
 def _stage(state: dict, name: str) -> dict:
     for s in state["stages"]:
         if s["name"] == name:
@@ -1482,6 +1500,20 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_DONE
 
     existing = _load_state()
+
+    # A present-but-unreadable checkpoint must never be silently ignored: that
+    # would let --resume lie ("No run to resume") and a bare run clobber it. Stop
+    # and say so — unless --new, whose documented job is to discard prior state.
+    if existing is None and not args.new and _state_file_corrupt():
+        print(
+            f"✗ The run checkpoint at {STATE_PATH} exists but is unreadable "
+            "(corrupt JSON). Not touching it. Inspect or fix it, or discard it "
+            "and start over with: python3 scripts/run_daily.py --new",
+            file=sys.stderr,
+            flush=True,
+        )
+        return EXIT_ABORT
+
     fresh_run = False
     try:
         if args.new:
