@@ -1,0 +1,35 @@
+name: Eval gate
+
+# DHA-362: prompt-changing PRs must carry golden-set eval evidence (STRATEGY.md
+# guardrail 8 — closed feedback loops, no silent self-edits to a judging
+# surface). Triggers only on PRs that touch a prompt surface, via the native
+# `paths:` filter below — other PRs never see this workflow at all.
+
+on:
+  pull_request:
+    # Explicit types: the default set (opened/synchronize/reopened) excludes
+    # `edited`, so pasting the Eval line into the PR body after a first
+    # failure would never re-trigger the check. `paths:` still applies
+    # per-event regardless of type — GitHub diffs base vs head for the whole
+    # PR, not just what changed in that event — so an `edited` event on a
+    # prompt-touching PR still fires, and one on a non-prompt PR still doesn't.
+    types: [opened, edited, synchronize, reopened]
+    paths:
+      - "scripts/prompts/**"
+      - "scripts/prompts.py"
+
+jobs:
+  eval-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a filled "Eval: agreement X% (baseline Y%)" line in the PR body
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          PATTERN='eval:\s*agreement\s*[0-9]+(\.[0-9]+)?\s*%\s*\(\s*baseline\s*[0-9]+(\.[0-9]+)?\s*%\s*\)'
+          if printf '%s' "$PR_BODY" | grep -Piq -- "$PATTERN"; then
+            echo "Found eval evidence in the PR body."
+          else
+            echo "::error::This PR changes a prompt surface (scripts/prompts/** or scripts/prompts.py) but its body has no filled 'Eval: agreement X% (baseline Y%)' line. Run /jobs-eval locally, then paste the real numbers — see .github/PULL_REQUEST_TEMPLATE.md."
+            exit 1
+          fi

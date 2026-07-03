@@ -21,3 +21,4 @@
 
 ## Gate
 - [ ] `ruff check .` and `ruff format --check .` clean; `python3 -m pytest -q` green (baseline not shrunk)
+- [ ] Changes a prompt (`scripts/prompts/**` or `scripts/prompts.py`)? Run `/jobs-eval` locally and paste the line here: `Eval: agreement X% (baseline Y%)`
