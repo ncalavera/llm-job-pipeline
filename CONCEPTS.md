@@ -70,6 +70,14 @@ Two distinct pass signals. **Not mine** is a plain `passed` status: the role was
 ### Backtest (clean)
 The safety check every filter-word proposal must pass before it is offered. A candidate word is **clean** when it matches (whole-word) no title in the liked history AND no title of a vacancy scored ≥ 40 — i.e. adding it to the filter would have killed nothing good. A dirty candidate is not proposed; the exact roles it would have wrongly killed (its collisions) are shown instead. Pure string matching — no LLM.
 
+## Dashboard design
+
+### Shell and sheet
+The dashboard's two-layer visual anatomy (2026-07 redesign): the **shell** is the continuous tinted background material — sidebar and header chrome sit directly on it with no borders — and each screen's data floats on a **sheet**, a rounded panel seated into the material with a hairline rim and whisper shadow. Separation comes from spacing and soft fills, never 1px rules or large drop shadows.
+
+### Quality scale (color = meaning)
+The fixed rule that every color on the dashboard means exactly one thing. Fit/quality reads green (≥70) → ochre (50–69) → crimson (<50) everywhere it appears — score tiles, tier badges, bars, distribution strips — and cobalt marks interaction only (active nav, selection, primary actions), never quality. New hues are not invented per feature.
+
 ## Flagged ambiguities
 
 - "Expiring" had been used for both the stored protected status and for liked roles past their deadline (one Triage column mixed both) — these are distinct concepts; the derived display state is now called Expired.
