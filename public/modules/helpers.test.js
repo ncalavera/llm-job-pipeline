@@ -279,6 +279,18 @@ test("qualityClass: mirrors qualityBand as a 'q-' prefixed CSS class", () => {
   assert.equal(qualityClass(49), "q-weak");
 });
 
+test("qualityBand: null/undefined/NaN fall back to weak", () => {
+  assert.equal(qualityBand(null), "weak");
+  assert.equal(qualityBand(undefined), "weak");
+  assert.equal(qualityBand(NaN), "weak");
+});
+
+test("qualityClass: null/undefined/NaN fall back to q-weak", () => {
+  assert.equal(qualityClass(null), "q-weak");
+  assert.equal(qualityClass(undefined), "q-weak");
+  assert.equal(qualityClass(NaN), "q-weak");
+});
+
 // --- tierClass ---------------------------------------------------------------
 
 test("tierClass: maps S/A/B/C to fixed classes", () => {
@@ -306,4 +318,10 @@ test("scoreLabel: boundaries at 50/70/80/90", () => {
   assert.equal(scoreLabel(80), "Strong");
   assert.equal(scoreLabel(89), "Strong");
   assert.equal(scoreLabel(90), "Exceptional");
+});
+
+test("scoreLabel: null/undefined/NaN fall back to Weak", () => {
+  assert.equal(scoreLabel(null), "Weak");
+  assert.equal(scoreLabel(undefined), "Weak");
+  assert.equal(scoreLabel(NaN), "Weak");
 });
