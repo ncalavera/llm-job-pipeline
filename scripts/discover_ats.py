@@ -88,7 +88,16 @@ CAREERS_KEYWORDS = {
     "opportunities",
 }
 
-# ATS strategies that are considered "working" and should never be downgraded
+# ATS strategies with a registered fetcher — safe to keep and never downgrade.
+#
+# INVARIANT (tests/test_discover_ats_registry_guard.py): every entry here — and
+# every strategy discover_ats can auto-ASSIGN (see ATS_PATTERNS via
+# resolve_assignable_strategy) — MUST be registered in COMPANY_FETCHERS /
+# BOARD_FETCHERS. A "working" strategy with no fetcher strands the company on
+# ``error: no fetcher registered for strategy '<X>'`` forever AND the
+# never-downgrade guard below would protect it from ever being fixed. That is
+# why personio/occupop/applied/breezy/jazzhr (recognized but unfetchable) and
+# the orphan bare ``rss`` were removed from this set.
 WORKING_ATS_STRATEGIES = {
     "greenhouse",
     "lever",
@@ -99,19 +108,19 @@ WORKING_ATS_STRATEGIES = {
     "workday_api",
     "bamboohr",
     "smartrecruiters",
-    "occupop",
-    "personio",
-    "applied",
     "pinpoint",
-    "breezy",
-    "jazzhr",
     "reliefweb_api",
-    "rss",
 }
 
 # ---------------------------------------------------------------------------
 # ATS URL patterns → (regex, strategy_name)
-# Used in both map() links and HTML source scanning
+# Used in both map() links and HTML source scanning.
+#
+# Discovery RECOGNIZES more ATSes than the pipeline can fetch. Recognition (the
+# name below) is kept for reporting, but assignment is routed through
+# ``resolve_assignable_strategy`` — a recognized ATS with no registered fetcher
+# (personio/occupop/applied/breezy/jazzhr) is assigned ``firecrawl_scrape`` (the
+# honest generic path over the discovered careers URL), never the dead strategy.
 # ---------------------------------------------------------------------------
 
 ATS_PATTERNS = [
@@ -168,6 +177,22 @@ HTML_ONLY_PATTERNS = [
     # Personio embed
     (r'src=["\'][^"\']*personio\.de/recruiting/embed', "personio", None),
 ]
+
+
+def resolve_assignable_strategy(ats_name: str) -> str:
+    """Map a RECOGNIZED ATS to a strategy the pipeline can actually fetch.
+
+    discover_ats recognizes more ATSes (ATS_PATTERNS) than there are registered
+    fetchers. Assigning a recognized-but-unregistered strategy (personio,
+    occupop, applied, breezy, jazzhr) strands the company on
+    ``error: no fetcher registered for strategy '<X>'`` forever. So any ATS with
+    no registered company fetcher falls back to ``firecrawl_scrape`` — the honest
+    generic path that scrapes the discovered careers URL. A registered ATS
+    (greenhouse, ashby, pinpoint, …) resolves to itself.
+    """
+    from fetchers.registry import COMPANY_FETCHERS
+
+    return ats_name if ats_name in COMPANY_FETCHERS else "firecrawl_scrape"
 
 
 def detect_ats_in_urls(urls: list[str]) -> list[dict]:
@@ -389,8 +414,12 @@ def _apply_results(scan_results: list[dict], dry_run: bool = False) -> None:
 
     for result in upgradeable:
         company = result["company"]
-        new_strategy = result["ats"]
-        new_slug = result.get("slug", "")
+        recognized_ats = result["ats"]
+        # Recognized-but-unfetchable ATSes fall back to firecrawl_scrape so a
+        # company is never assigned a strategy with no registered fetcher.
+        new_strategy = resolve_assignable_strategy(recognized_ats)
+        # On fallback the provider slug is meaningless (firecrawl scrapes the URL).
+        new_slug = result.get("slug", "") if new_strategy == recognized_ats else ""
         discovered_url = result.get("url", "")
 
         # Look up current state
