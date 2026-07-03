@@ -251,6 +251,17 @@ on("switchToCatalog", ({ orgFilter }) => {
   }
 });
 
+// Lightweight repaint for every poll outcome (bootstrap.js's applyPollResult,
+// U3 review fix) — sidebar footer + nav counts only, deliberately NOT the
+// full "render" handler above. A poll firing every 60s regardless of whether
+// data changed must never rebuild the section grids: that would blow away
+// DOM-only state a snapshot replace never touches (an expanded catalog card,
+// the triage board's SortableJS-managed DOM).
+on("sync", () => {
+  updateNavCounts();
+  renderSyncFooter();
+});
+
 // ---------------------------------------------------------------------------
 // Mode switching
 // ---------------------------------------------------------------------------
