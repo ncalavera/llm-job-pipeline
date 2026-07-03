@@ -1,0 +1,104 @@
+{
+  "data": [
+    {
+      "id": "463161",
+      "title": "Science and Technology Lead - Next-Generation Compute Architectures",
+      "url": "https://aria.pinpointhq.com/en/postings/f9e555e3-ffdb-4587-9bcf-47961c2fbb9d",
+      "path": "/en/postings/f9e555e3-ffdb-4587-9bcf-47961c2fbb9d",
+      "compensation": "£70,000 - £105,000 / year",
+      "compensation_visible": true,
+      "deadline_at": null,
+      "workplace_type_text": "Hybrid",
+      "employment_type_text": "Permanent - Full Time",
+      "description": "<div><!--block--><strong><em>Salary Levels:</em></strong><em> £70,000, £90,000, £105,000 (offers will be calibrated on benchmarked experience levels and assessment against our selection criteria)</em></div><div><!--block--><strong><em>Location: </em></strong><em>Kings X, London; Tues - Thurs (3 days) at HQ, Monday + Friday, anywhere</em></div><div><!--block--><strong><em>Employment Type: </em></st",
+      "location": {
+        "id": "46798",
+        "city": "London",
+        "name": "London",
+        "province": "London"
+      },
+      "job": {
+        "id": "472971",
+        "department": {
+          "id": "59613",
+          "name": "Programmes"
+        }
+      }
+    },
+    {
+      "id": "466410",
+      "title": "Science and Technology Lead - Multi-Agent Security",
+      "url": "https://aria.pinpointhq.com/en/postings/1ade5ec1-be4f-4e3c-a666-ee72b9375424",
+      "path": "/en/postings/1ade5ec1-be4f-4e3c-a666-ee72b9375424",
+      "compensation": "£70,000 - £105,000 / year",
+      "compensation_visible": true,
+      "deadline_at": null,
+      "workplace_type_text": "Hybrid",
+      "employment_type_text": "Permanent - Full Time",
+      "description": "<div><!--block--><strong><em>Salary Levels:</em></strong><em> £70,000, £90,000, £105,000 (offers will be calibrated on benchmarked experience levels and assessment against our selection criteria)</em></div><div><!--block--><strong><em>Location: </em></strong><em>Kings X, London; Tues - Thurs (3 days) at HQ, Monday + Friday, anywhere</em></div><div><!--block--><strong><em>Employment Type: </em></st",
+      "location": {
+        "id": "46798",
+        "city": "London",
+        "name": "London",
+        "province": "London"
+      },
+      "job": {
+        "id": "476052",
+        "department": {
+          "id": "59613",
+          "name": "Programmes"
+        }
+      }
+    },
+    {
+      "id": "513743",
+      "title": "Science and Technology Lead - AI for Chemistry (Olfactory Perception)",
+      "url": "https://aria.pinpointhq.com/en/postings/086d6a09-806e-4c88-a6f3-a9761a5eec58",
+      "path": "/en/postings/086d6a09-806e-4c88-a6f3-a9761a5eec58",
+      "compensation": "£70,000 - £105,000 / year",
+      "compensation_visible": true,
+      "deadline_at": "2026-07-05T23:59:59+01:00",
+      "workplace_type_text": "Hybrid",
+      "employment_type_text": "Permanent - Full Time",
+      "description": "<div><!--block--><strong><em>Salary Levels:</em></strong><em> £70,000, £90,000, £105,000 (offers will be calibrated on benchmarked experience levels and assessment against our selection criteria)</em></div><div><!--block--><strong><em>Location: </em></strong><em>Kings X, London; Tues - Thurs (3 days) at HQ, Monday + Friday, anywhere</em></div><div><!--block--><strong><em>Employment Type: </em></st",
+      "location": {
+        "id": "46798",
+        "city": "London",
+        "name": "London",
+        "province": "London"
+      },
+      "job": {
+        "id": "520236",
+        "department": {
+          "id": "59613",
+          "name": "Programmes"
+        }
+      }
+    },
+    {
+      "id": "527082",
+      "title": "Technical and Translational Lead - Safeguarded AI (Cybersecurity)",
+      "url": "https://aria.pinpointhq.com/en/postings/f1288172-37fe-4da5-96ed-de7e719d65e8",
+      "path": "/en/postings/f1288172-37fe-4da5-96ed-de7e719d65e8",
+      "compensation": "£105,000 / year",
+      "compensation_visible": true,
+      "deadline_at": null,
+      "workplace_type_text": "Hybrid",
+      "employment_type_text": "Fixed Term - Full Time",
+      "description": "<div><!--block--><strong><em>Salary</em></strong><em> c.£105,000</em></div><div><!--block--><strong><em>Location: </em></strong><em>Kings X, London; Tues - Thurs (3 days) at HQ, Monday + Friday, anywhere</em></div><div><!--block--><strong><em>Employment Type: </em></strong><em>We plan for this role to be full-time, but we’re open to discussing flexible working arrangements.<br></em><strong><em>Con",
+      "location": {
+        "id": "46798",
+        "city": "London",
+        "name": "London",
+        "province": "London"
+      },
+      "job": {
+        "id": "532406",
+        "department": {
+          "id": "59613",
+          "name": "Programmes"
+        }
+      }
+    }
+  ]
+}

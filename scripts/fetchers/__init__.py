@@ -96,6 +96,7 @@ from fetchers.ats.amazon import fetch_amazon_jobs
 from fetchers.ats.apple import fetch_apple_jobs
 from fetchers.ats.unops import fetch_unops_widget, _fetch_unops_job_detail
 from fetchers.ats.smartrecruiters import fetch_smartrecruiters, _sr_location, _sr_department
+from fetchers.ats.pinpoint import fetch_pinpoint, _pinpoint_location
 from fetchers.boards.algolia import fetch_algolia_board
 from fetchers.boards.firecrawl_board import fetch_firecrawl_board
 from fetchers.boards.reliefweb import fetch_reliefweb_board

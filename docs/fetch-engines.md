@@ -99,7 +99,7 @@ recipes read the network but write nothing to any real DB.
 
 ---
 
-## Company engines (`COMPANY_FETCHERS`, 15)
+## Company engines (`COMPANY_FETCHERS`, 16)
 
 ### `greenhouse` — Greenhouse boards API
 <!-- ENGINE: greenhouse -->
@@ -140,6 +140,14 @@ recipes read the network but write nothing to any real DB.
 - **Pagination & caps:** none.
 - **Failure signatures:** ≥400 → `error: http_<code>`.
 - **Debug:** `from fetchers.ats.recruitee import fetch_recruitee; print(len(fetch_recruitee("Example", "<slug>")))`
+
+### `pinpoint` — Pinpoint postings feed
+<!-- ENGINE: pinpoint -->
+- **Surface / auth:** `GET https://{slug}.pinpointhq.com/postings.json`. Public, no auth. One `data` array of live postings; each carries an inline HTML `description`, a structured `location` dict, a `job.department`, and a pre-formatted `compensation` string.
+- **Config keys:** `slug` (req; the hosted-board subdomain, i.e. `{slug}.pinpointhq.com`).
+- **Pagination & caps:** none — the feed returns every live posting in one request (`?page=` is ignored).
+- **Failure signatures:** unknown/disabled board → HTTP 404 → `error: http_404`. Any ≥400 → `error: http_<code>`. Empty board → `[]`, `ok`. `compensation` is shown only when the posting's `compensation_visible` is true.
+- **Debug:** `from fetchers.ats.pinpoint import fetch_pinpoint; print(len(fetch_pinpoint("Example", "<slug>")))`
 
 ### `adp_json` — ADP Workforce Now requisitions feed
 <!-- ENGINE: adp_json -->
