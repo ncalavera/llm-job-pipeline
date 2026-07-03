@@ -41,6 +41,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "sync_live": "Live",
         "sync_stale": "Stale snapshot",
         "sync_error": "Sync error",
+        # Routing not-found / placeholder (U4)
+        "route_not_found": "Not found",
+        "route_not_found_hint": "This page doesn’t exist or hasn’t loaded.",
+        "route_back": "Go back",
         # Applyable-roles count (U6)
         "col_applyable": "Applyable / Total",
         "badge_applyable": "applyable",
@@ -332,6 +336,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "sync_live": "Актуально",
         "sync_stale": "Устаревший снимок",
         "sync_error": "Ошибка синхронизации",
+        # Routing not-found / placeholder (U4)
+        "route_not_found": "Не найдено",
+        "route_not_found_hint": "Такой страницы нет или она ещё не загрузилась.",
+        "route_back": "Назад",
         # Applyable-roles count (U6)
         "col_applyable": "Годные / Всего",
         "badge_applyable": "годных",

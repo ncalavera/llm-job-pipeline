@@ -43,6 +43,14 @@ test("every leaf mode maps to its owning section", () => {
   assert.equal(sectionForMode("settings"), "settings");
 });
 
+test("the deep-link detail screens map to their owning parent section (U4)", () => {
+  // route.js's route.screen values — the router highlights the owning section
+  // through the same function so a cold ?vacancy=/?company= deep link lights
+  // up the right sidebar parent (AE6).
+  assert.equal(sectionForMode("vacancy"), "vacancies");
+  assert.equal(sectionForMode("company"), "companies");
+});
+
 test("an unknown mode falls back to the Today section (safe home)", () => {
   assert.equal(sectionForMode("nonsense"), "today");
   assert.equal(sectionForMode(undefined), "today");
