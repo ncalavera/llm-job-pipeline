@@ -10,6 +10,7 @@ import {
   llmScoreBadge,
   screenScoreBadge,
   relativeTime,
+  safeUrl,
 } from "./helpers.js";
 import { T } from "./i18n.js";
 
@@ -77,8 +78,9 @@ export function renderArchive() {
 
 function buildArchiveCard(g) {
   const [fg, bg] = g.org_color || ["#F97316", "#FFF7ED"];
-  const firstUrl =
-    (g.locations || []).find((l) => l.url)?.url || g.org_url || "";
+  const firstUrl = safeUrl(
+    (g.locations || []).find((l) => l.url)?.url || g.org_url || "",
+  );
   const titleHtml = firstUrl
     ? '<a href="' +
       escHtml(firstUrl) +

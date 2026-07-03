@@ -27,6 +27,7 @@ import {
   STALE_SOURCE_DAYS,
   sourceAgeDays,
   screenScoreBadge,
+  safeUrl,
 } from "./helpers.js";
 import { T } from "./i18n.js";
 
@@ -77,7 +78,7 @@ function _isLiveRole(g) {
 
 function _vacUrl(g) {
   const loc = (g.locations || []).find((l) => l && l.url);
-  return (loc && loc.url) || g.org_url || "";
+  return safeUrl((loc && loc.url) || g.org_url || "");
 }
 
 // One inline-action button per entry. `glyph` → icon button (title carries the

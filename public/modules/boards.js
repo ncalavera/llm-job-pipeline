@@ -11,7 +11,7 @@
 // =============================================================================
 
 import { API_BASE } from "./state.js";
-import { escHtml, relativeTime } from "./helpers.js";
+import { escHtml, relativeTime, safeUrl } from "./helpers.js";
 import { T } from "./i18n.js";
 
 let boardsInited = false;
@@ -135,9 +135,10 @@ export function renderBoards() {
 
   const body = rows
     .map((b) => {
-      const nameCell = b.url
+      const boardUrl = safeUrl(b.url);
+      const nameCell = boardUrl
         ? '<a href="' +
-          escHtml(b.url) +
+          escHtml(boardUrl) +
           '" target="_blank" rel="noopener">' +
           escHtml(b.name) +
           "</a>"
