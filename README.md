@@ -285,6 +285,7 @@ there is nothing pending, it prints "Up to date" and exits.
 - [INSTALL.md](INSTALL.md) — full-mode install runbook (Supabase + Vercel)
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module map, pipeline stages, the two backends
 - [docs/job-boards-catalogue.md](docs/job-boards-catalogue.md) — the built-in boards, generated from config
+- [docs/fetch-engines.md](docs/fetch-engines.md) — every fetch engine: what it hits, config keys, failure modes, debug recipes
 - [AGENTS.md](AGENTS.md) — the runbooks / slash commands, for any coding agent
 - [CONCEPTS.md](CONCEPTS.md) — domain vocabulary (entities, statuses, processes)
 - [sql/schema.sql](sql/schema.sql) — the database schema (Postgres; SQLite variant alongside)
