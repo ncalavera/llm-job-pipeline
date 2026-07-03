@@ -74,7 +74,16 @@ test("todayRowHtml renders a tinted score tile, title, org, and opens the vacanc
   assert.match(html, /today-row-sub">GiveWell</);
   assert.match(
     html,
-    /class="today-row" data-id="g1" onclick="openTodayRow\('g1'\)"/,
+    /class="today-row" data-id="g1" role="button" tabindex="0" onclick="openTodayRow\('g1'\)"/,
+  );
+});
+
+test("todayRowHtml: row is keyboard-reachable and Enter/Space open it only when the row itself has focus (R12, WAI-ARIA button pattern)", () => {
+  const html = todayRowHtml(baseGroup, null, []);
+  assert.match(html, /role="button" tabindex="0"/);
+  assert.match(
+    html,
+    /onkeydown="if\(\(event\.key==='Enter'\|\|event\.key===' '\)&&event\.target===event\.currentTarget\)\{event\.preventDefault\(\);openTodayRow\('g1'\)\}"/,
   );
 });
 

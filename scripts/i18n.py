@@ -243,6 +243,10 @@ STRINGS: dict[str, dict[str, str]] = {
         # Companies filters
         "search_companies_ph": "Search by company, description, location...",
         "all_tiers": "All tiers",
+        # Companies empty states (R11: first-run / filtered-to-zero / basket-empty)
+        "companies_empty": "No companies yet.",
+        "companies_no_match": "Nothing matches the filters",
+        "companies_basket_empty": "no companies",
         "tier_s": "S — Strategic",
         "tier_a": "A — Strong Fit",
         "tier_b": "B — Monitor",
@@ -640,6 +644,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "subtab_archived": "Архив",
         "search_companies_ph": "Поиск по компании, описанию, локации...",
         "all_tiers": "Все тиры",
+        "companies_empty": "Компаний пока нет.",
+        "companies_no_match": "Ничего не найдено по фильтрам",
+        "companies_basket_empty": "нет компаний",
         "tier_s": "S — Strategic",
         "tier_a": "A — Strong Fit",
         "tier_b": "B — Monitor",

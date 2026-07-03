@@ -263,6 +263,20 @@ test("vacancyPageHtml renders score tile, reading column, rail, actions", () => 
   assert.ok(html.includes("Open posting")); // outbound link present
 });
 
+test("vacancyPageHtml: the header org name and the rail company card are keyboard-reachable via Enter/Space (R12, WAI-ARIA button pattern)", () => {
+  const html = vacancyPageHtml(fullGroup, company, "unseen", opts);
+  // Header band: .vac-org--link (span acting as a link to the company page).
+  assert.match(
+    html,
+    /class="vac-org vac-org--link" role="button" tabindex="0" onclick="openCompanyProfile\('givewell'\)" onkeydown="if\(\(event\.key==='Enter'\|\|event\.key===' '\)&&event\.target===event\.currentTarget\)\{event\.preventDefault\(\);openCompanyProfile\('givewell'\)\}"/,
+  );
+  // Rail: .vac-company-card (mini company card, also opens the profile).
+  assert.match(
+    html,
+    /class="vac-company-card" role="button" tabindex="0" onclick="openCompanyProfile\('givewell'\)" onkeydown="if\(\(event\.key==='Enter'\|\|event\.key===' '\)&&event\.target===event\.currentTarget\)\{event\.preventDefault\(\);openCompanyProfile\('givewell'\)\}"/,
+  );
+});
+
 test("vacancyPageHtml shows a status chip for a decided role, not for unseen", () => {
   assert.ok(
     !vacancyPageHtml(fullGroup, company, "unseen", opts).includes(

@@ -144,6 +144,21 @@ function _getReviewStatus(c) {
   return c.review_status || "pending";
 }
 
+// Companies belonging to `subTab` before any search/tier/card/chip filter —
+// the basket size a sub-tab would show with every filter cleared. Shared by
+// the "N shown" label and the empty-state flavor check below (R11).
+function _subTabTotal(subTab) {
+  var all = getCompanies();
+  var n = 0;
+  for (var i = 0; i < all.length; i++) {
+    var rs = _getReviewStatus(all[i]);
+    if (subTab === "approved" && rs === "approved") n++;
+    else if (subTab === "pending" && rs === "pending") n++;
+    else if (subTab === "archived" && rs === "rejected") n++;
+  }
+  return n;
+}
+
 // ---------------------------------------------------------------------------
 // Filtering + sorting
 // ---------------------------------------------------------------------------
@@ -946,16 +961,7 @@ export function renderCompanies() {
     } else if (hasChips) {
       shownEl.textContent = filtered.length + " shown";
     } else {
-      // Count total for current sub-tab
-      var subTab = state.companySubTab;
-      var tabTotal = 0;
-      var allCompanies = getCompanies();
-      for (var ci = 0; ci < allCompanies.length; ci++) {
-        var rs = _getReviewStatus(allCompanies[ci]);
-        if (subTab === "approved" && rs === "approved") tabTotal++;
-        else if (subTab === "pending" && rs === "pending") tabTotal++;
-        else if (subTab === "archived" && rs === "rejected") tabTotal++;
-      }
+      var tabTotal = _subTabTotal(state.companySubTab);
       shownEl.textContent =
         filtered.length !== tabTotal ? filtered.length + " shown" : "";
     }
@@ -965,8 +971,38 @@ export function renderCompanies() {
   _updateSubTabCounts();
 
   if (filtered.length === 0) {
+    var subTab = state.companySubTab;
+    var query = (document.getElementById("companySearch").value || "").trim();
+    var tierFilter = document.getElementById("companyTierFilter").value;
+    var hasFilters = !!(
+      query ||
+      tierFilter ||
+      (subTab === "approved" &&
+        (state.companyCardFilter || state.companyMonitorFilters.size > 0))
+    );
+    var emptyMsg;
+    if (getCompanies().length === 0) {
+      // First-run-empty: no companies in the payload at all.
+      emptyMsg = T("companies_empty", "No companies yet.");
+    } else if (hasFilters && _subTabTotal(subTab) > 0) {
+      // Filtered-to-zero: this tab has companies, but the active filters hide
+      // all of them.
+      emptyMsg = T("companies_no_match", "Nothing matches the filters");
+    } else {
+      // Basket-empty: this sub-tab (approved/pending/archived) has none,
+      // regardless of filters — same "<tab> — no X" phrasing Browse uses.
+      var subTabLabels = {
+        approved: T("subtab_approved", "Approved"),
+        pending: T("subtab_pending", "Pending Review"),
+        archived: T("subtab_archived", "Archived"),
+      };
+      emptyMsg =
+        (subTabLabels[subTab] || "") +
+        " — " +
+        T("companies_basket_empty", "no companies");
+    }
     grid.innerHTML =
-      '<div class="company-empty">\uD83C\uDFE2 Nothing found</div>';
+      '<div class="company-empty">\uD83C\uDFE2 ' + escHtml(emptyMsg) + "</div>";
     return;
   }
 
@@ -981,15 +1017,29 @@ export function renderCompanies() {
     // no native title, so we don't get a second OS tooltip a second later.
     var titleAttr = c.tip ? ' data-tip="' + escHtml(c.tip) + '"' : "";
     if (c.sortable) {
+      // tabindex + onkeydown make the header Tab-reachable and operable with
+      // Enter/Space, not just a mouse click (R12: every interactive control
+      // must be keyboard-reachable). aria-sort tells assistive tech the
+      // current sort direction the visual arrow otherwise only shows sighted
+      // users.
+      var ariaSort = isActive
+        ? state.companySortAsc
+          ? "ascending"
+          : "descending"
+        : "none";
       thead +=
         '<th class="ct-th ' +
         c.cls +
         (isActive ? " ct-th-active" : "") +
         '"' +
         titleAttr +
-        " onclick=\"sortCompanyTable('" +
+        ' tabindex="0" aria-sort="' +
+        ariaSort +
+        '" onclick="sortCompanyTable(\'' +
         c.key +
-        "')\">" +
+        "')\" onkeydown=\"if(event.key==='Enter'||event.key===' '){event.preventDefault();sortCompanyTable('" +
+        c.key +
+        "')}\">" +
         escHtml(c.label) +
         arrow +
         "</th>";
@@ -1095,9 +1145,11 @@ function _buildApprovedRow(c) {
   var locText = c.offices ? escHtml(c.offices) : "\u2014";
 
   return (
-    '<tr class="ct-row" onclick="openCompanyProfile(\'' +
+    '<tr class="ct-row" tabindex="0" onclick="openCompanyProfile(\'' +
     jsAttr(c.slug) +
-    "')\">" +
+    "')\" onkeydown=\"if(event.key==='Enter'&&event.target===event.currentTarget){openCompanyProfile('" +
+    jsAttr(c.slug) +
+    "')}\">" +
     '<td class="ct-td ct-col-name"><span class="ct-name-wrap">' +
     _monoHtml(c) +
     '<span class="ct-name-text">' +
@@ -1175,9 +1227,11 @@ function _buildPendingRow(c) {
   }
 
   return (
-    '<tr class="ct-row" onclick="openCompanyProfile(\'' +
+    '<tr class="ct-row" tabindex="0" onclick="openCompanyProfile(\'' +
     jsAttr(c.slug) +
-    "')\">" +
+    "')\" onkeydown=\"if(event.key==='Enter'&&event.target===event.currentTarget){openCompanyProfile('" +
+    jsAttr(c.slug) +
+    "')}\">" +
     '<td class="ct-td ct-col-name ct-col-name--pending"><span class="ct-name-wrap">' +
     _monoHtml(c) +
     '<span class="ct-name-text">' +
@@ -1216,9 +1270,11 @@ function _buildArchivedRow(c) {
   var reasonText = c.status_reason ? escHtml(c.status_reason) : "\u2014";
 
   return (
-    '<tr class="ct-row ct-row--archived" onclick="openCompanyProfile(\'' +
+    '<tr class="ct-row ct-row--archived" tabindex="0" onclick="openCompanyProfile(\'' +
     jsAttr(c.slug) +
-    "')\">" +
+    "')\" onkeydown=\"if(event.key==='Enter'&&event.target===event.currentTarget){openCompanyProfile('" +
+    jsAttr(c.slug) +
+    "')}\">" +
     '<td class="ct-td ct-col-name ct-col-name--archived"><span class="ct-name-wrap">' +
     _monoHtml(c) +
     '<span class="ct-name-text">' +
@@ -1871,9 +1927,11 @@ function companyRoleRowHtml(r, t) {
     ? screenScoreBadge({ screen_only_score: true })
     : "";
   return (
-    '<div class="cp-role-row" onclick="openVacancyRoute(\'' +
+    '<div class="cp-role-row" role="button" tabindex="0" onclick="openVacancyRoute(\'' +
     jsAttr(r.id) +
-    "',{context:'company'})\">" +
+    "',{context:'company'})\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openVacancyRoute('" +
+    jsAttr(r.id) +
+    "',{context:'company'})}\">" +
     '<div class="cp-role-score ' +
     scoreCls +
     '">' +
@@ -2004,9 +2062,11 @@ function companyRolesBlockHtml(c, roles, counts, t) {
     '<div class="cp-roles-list">' +
     rows +
     "</div>" +
-    '<span class="cp-view-all-link" onclick="viewOrgInCatalog(\'' +
+    '<span class="cp-view-all-link" role="button" tabindex="0" onclick="viewOrgInCatalog(\'' +
     jsAttr(c.name) +
-    "')\">" +
+    "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();viewOrgInCatalog('" +
+    jsAttr(c.name) +
+    "')}\">" +
     escHtml(t("cp_view_all_browse", "View all in Browse")) +
     " →</span>" +
     "</div>"

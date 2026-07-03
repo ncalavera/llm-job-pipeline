@@ -158,15 +158,28 @@ test("a linked row (live vacancy) opens the vacancy page on click", () => {
   const html = applicationRowHtml(baseApp);
   assert.match(
     html,
-    /class="apl-row" data-id="v1" onclick="openApplicationRow\('v1'\)"/,
+    /class="apl-row" data-id="v1" role="button" tabindex="0" onclick="openApplicationRow\('v1'\)"/,
   );
   assert.doesNotMatch(html, /apl-row-unlinked/);
+});
+
+test("a linked row is keyboard-reachable and Enter/Space open it only when the row itself has focus (R12, WAI-ARIA button pattern)", () => {
+  const html = applicationRowHtml(baseApp);
+  assert.match(
+    html,
+    /onkeydown="if\(\(event\.key==='Enter'\|\|event\.key===' '\)&&event\.target===event\.currentTarget\)\{event\.preventDefault\(\);openApplicationRow\('v1'\)\}"/,
+  );
 });
 
 test("an unlinked row (vacancy no longer live) has no onclick and is visually dimmed", () => {
   const html = applicationRowHtml({ ...baseApp, live: false });
   assert.match(html, /class="apl-row apl-row-unlinked" data-id="v1">/);
   assert.doesNotMatch(html, /onclick="openApplicationRow/);
+  assert.doesNotMatch(
+    html,
+    /tabindex/,
+    "a dead row must not take keyboard focus",
+  );
 });
 
 test("applicationRowHtml renders the tinted fit tile, stage chip, and a company link", () => {

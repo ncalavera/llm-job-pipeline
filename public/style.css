@@ -40,8 +40,23 @@
   --sky-sheet: #f6f8fa;
   --sky-text: #3a3833;
   --sky-text-secondary: #67635a;
-  --sky-text-tertiary: #8a867c;
-  --sky-text-faint: #b5b1a6;
+  /* tertiary/faint retuned for AA (U16, DHA-400): the originals (#8a867c,
+     #b5b1a6) read 2.9–3.6:1 and 1.7–2.1:1 against every background they're
+     used on (shell/sheet/white), both well under the 4.5:1 floor for
+     body-size text. Contrast is ~L-dominated for this warm-grey hue, so the
+     lightest value that clears 4.5:1 against the worst case (shell
+     #e3e7ed, the un-seated material) sits within a hair of --sky-text-
+     secondary — three visible levels survive, but the bottom two compress
+     close together. Ratios (WCAG relative-luminance):
+       tertiary #6b675f — shell 4.54:1, sheet 5.29:1, white 5.63:1
+       faint    #6c675a — shell 4.54:1, sheet 5.30:1, white 5.64:1
+     Genuinely decorative/redundant glyphs (row-arrow icons, a placeholder,
+     a kbd hint next to an already-labeled control) stay on the ORIGINAL
+     faint value via --sky-text-disabled below — WCAG's contrast minimum
+     doesn't apply to them, and forcing them dark would fight their intent. */
+  --sky-text-tertiary: #6b675f;
+  --sky-text-faint: #6c675a;
+  --sky-text-disabled: #b5b1a6;
   --sky-hairline: rgba(255, 255, 255, 0.85);
   --sky-row-hover: rgba(58, 56, 51, 0.035);
 
@@ -210,7 +225,9 @@ body::after {
   flex: none;
   font-family: "JetBrains Mono", monospace;
   font-size: 10px;
-  color: var(--sky-text-faint);
+  /* Redundant with the labeled search affordance itself — decorative
+     shortcut hint, not required to clear AA (U16). */
+  color: var(--sky-text-disabled);
 }
 
 .sidebar-nav {
@@ -347,7 +364,9 @@ body::after {
   height: 7px;
   flex: none;
   border-radius: 50%;
-  background: var(--sky-text-faint);
+  /* Default/neutral dot; the .sync-label text next to it carries the same
+     state — decorative, not required to clear AA (U16). */
+  background: var(--sky-text-disabled);
 }
 
 .sync-dot.ok {
@@ -515,7 +534,7 @@ body::after {
   border-color: var(--terracotta);
 }
 .chip:focus-visible {
-  outline: 2px solid var(--coral);
+  outline: 2px solid var(--cobalt);
   outline-offset: 2px;
 }
 .chip.chip-sort {
@@ -1305,7 +1324,8 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 
 .catalog-search:focus {
-  border-color: var(--coral);
+  outline: 2px solid var(--cobalt);
+  outline-offset: -1px;
 }
 
 .catalog-org-filter {
@@ -1322,7 +1342,8 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 
 .catalog-org-filter:focus {
-  border-color: var(--coral);
+  outline: 2px solid var(--cobalt);
+  outline-offset: -1px;
 }
 
 /* ===========================================================================
@@ -1936,12 +1957,21 @@ body[data-dashboard-style="minimal"] .loading-illus {
   color: #fff;
   background: var(--tier-s);
 }
+/* A/B badge text is black, not white (AA, R12): white-on-tier-a is 4.25:1
+   and white-on-tier-b is 2.58:1, both below the 4.5:1 floor for this
+   9px/800 weight text. The app's standard dark-text token (--sky-text,
+   #3a3833) does NOT fix this — it's only 2.76:1 on tier-a and 4.54:1 on
+   tier-b (review caught this: an earlier version of this comment wrongly
+   quoted the black-on-tier-a ratio for --sky-text). Pure black clears both
+   comfortably (4.95:1 on tier-a, 8.14:1 on tier-b) without touching the
+   tier-a/tier-b background hex the design protocol documents as fixed
+   brand colors. */
 .tier-a {
-  color: #fff;
+  color: #000;
   background: var(--tier-a);
 }
 .tier-b {
-  color: #fff;
+  color: #000;
   background: var(--tier-b);
 }
 .tier-c {
@@ -3506,7 +3536,9 @@ body[data-dashboard-style="minimal"] .loading-illus {
   height: 6px;
   border-radius: 2px;
   margin-top: 7px;
-  background: var(--sky-text-faint);
+  /* Plain list-bullet marker, redundant with its own bullet text —
+     decorative, not required to clear AA (U16). */
+  background: var(--sky-text-disabled);
 }
 .cp-bullet--good {
   background: var(--q-good);
@@ -3699,7 +3731,9 @@ body[data-dashboard-style="minimal"] .loading-illus {
 .cp-role-arrow {
   flex: none;
   font-size: 14px;
-  color: var(--sky-text-faint);
+  /* Purely decorative chevron on an already-labeled, already-clickable row
+     — not required to clear AA (U16). */
+  color: var(--sky-text-disabled);
 }
 .cp-role-row:hover .cp-role-arrow {
   color: var(--cobalt);
@@ -4253,7 +4287,9 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .freshness-never {
   background: transparent;
-  border: 1.5px dashed var(--sky-text-faint);
+  /* The adjacent "Never fetched" text carries the same state — decorative,
+     not required to clear AA (U16). */
+  border: 1.5px dashed var(--sky-text-disabled);
 }
 
 /* --- Monitoring status cell (dot + text) --- */
@@ -4293,7 +4329,9 @@ body[data-dashboard-style="minimal"] .loading-illus {
 }
 .mon-dot--never {
   background: transparent;
-  border: 1.5px dashed var(--sky-text-faint);
+  /* The .mon-cell label text next to it carries the same state —
+     decorative, not required to clear AA (U16). */
+  border: 1.5px dashed var(--sky-text-disabled);
 }
 
 /* --- Company review buttons (Approve ✓ / Archive ✗) --- */
@@ -4414,7 +4452,9 @@ body[data-dashboard-style="minimal"] .loading-illus {
   color: var(--q-good);
 }
 .triage-stage-arrow {
-  color: var(--sky-text-faint);
+  /* Purely decorative — the funnel strip's numbers already carry the
+     information; not required to clear AA (U16). */
+  color: var(--sky-text-disabled);
 }
 
 .triage-board-controls {
@@ -4704,7 +4744,9 @@ a.pipe-grp-role-title:hover {
 .pipe-card-ghost {
   opacity: 0.4;
   background: color-mix(in srgb, var(--sky-text) 6%, transparent);
-  border: 1px dashed var(--sky-text-faint);
+  /* Transient drag-and-drop placeholder — decorative, not required to
+     clear AA (U16). */
+  border: 1px dashed var(--sky-text-disabled);
 }
 .pipe-card-dragging {
   opacity: 0.95;
@@ -5271,7 +5313,9 @@ a.pipe-grp-role-title:hover {
   outline: none;
 }
 .palette-input::placeholder {
-  color: var(--sky-text-faint);
+  /* Input placeholder text — WCAG's contrast minimum doesn't apply here
+     (U16). */
+  color: var(--sky-text-disabled);
   font-weight: 400;
 }
 .palette-results {
@@ -5345,4 +5389,74 @@ a.pipe-grp-role-title:hover {
   text-align: center;
   font-size: 13px;
   color: var(--sky-text-faint);
+}
+
+/* ===========================================================================
+   === U16 sweep === (DHA-400): empty states, responsive + a11y hygiene.
+   Everything below is additive — existing rules are untouched — to keep this
+   block isolated from the in-flight ⌘K palette's own EOF style.css block.
+   =========================================================================== */
+
+/* --- Focus-visible (R12) ---------------------------------------------------
+   A global cobalt fallback for every Tab-reachable control that had no
+   per-component rule (Triage card links, Boards links, the vacancy page's
+   company mini-card/org link, the company profile's role rows). Bare
+   `:focus-visible` has lower specificity than any `.class:focus-visible`
+   rule already in this file, so it never overrides them — it only fills the
+   gaps. `.ct-row`/`.ct-th` get their own inset variant, matching the
+   existing row/cell pattern used by `.catalog-row`/`.today-row`/`.apl-row`
+   elsewhere in this file, since the outward 2px default here would be
+   clipped or bleed into the adjacent cell/row inside a table. */
+:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+}
+.ct-row:focus-visible,
+.ct-th:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: -2px;
+}
+
+/* --- Motion (R12): prefers-reduced-motion --------------------------------
+   `.loading-illus`/`.catalog-loading.hidden` already have a guard above; this
+   extends it to the loading screen's own entrance fade plus two redesign
+   affordances that animate on state change (toast, scroll-to-top) — none of
+   these carry information, so removing the motion loses nothing. */
+@media (prefers-reduced-motion: reduce) {
+  .catalog-loading {
+    animation: none;
+  }
+  .toast,
+  .scroll-top-btn {
+    transition: none;
+  }
+}
+
+/* --- Responsive (R12): two real body-scrolls-horizontally bugs found by a
+   375px headless walkthrough, neither caught by the scroll-guard audit above
+   since neither is a table — both are a hard min-width that doesn't shrink
+   below the sidebar's icon-rail breakpoint (900px, matching .today-rail's
+   existing query above and the sidebar collapse). --------------------------- */
+@media (max-width: 900px) {
+  /* Today's main column refused to shrink below 360px, so at narrow widths
+     the whole .today-sheet (flex, wrap) overflowed its container instead of
+     stacking under the rail. */
+  .today-main {
+    min-width: 0;
+  }
+}
+@media (max-width: 899px) {
+  /* Settings' 3-column grid (label/value/source) has real min-widths summing
+     past 430px — fine on desktop, but wider than the entire content column
+     once the sidebar collapses. Stack the row instead of trying to scroll a
+     label/value/source triple sideways (scroll-guard is for dense tables;
+     a short settings list reads better stacked). */
+  .stg-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+    row-gap: 2px;
+  }
+  .stg-source {
+    padding-bottom: 4px;
+  }
 }

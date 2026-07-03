@@ -250,6 +250,24 @@ test("companyProfileHtml (scored): open-role rows route via the U4/U6 contract",
   );
 });
 
+test("companyProfileHtml: open-role rows and the 'view all' link are keyboard-reachable via Enter/Space (R12, WAI-ARIA button pattern)", () => {
+  const html = companyProfileHtml(scoredCompany, roles, {
+    t,
+    reviewStatus: "approved",
+    counts,
+  });
+  assert.ok(
+    html.includes(
+      "class=\"cp-role-row\" role=\"button\" tabindex=\"0\" onclick=\"openVacancyRoute('r1',{context:'company'})\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openVacancyRoute('r1',{context:'company'})}\"",
+    ),
+  );
+  assert.ok(
+    html.includes(
+      'class="cp-view-all-link" role="button" tabindex="0" onclick="viewOrgInCatalog(\'GiveWell\')" onkeydown="if((event.key===\'Enter\'||event.key===\' \')&&event.target===event.currentTarget){event.preventDefault();viewOrgInCatalog(\'GiveWell\')}"',
+    ),
+  );
+});
+
 test("companyProfileHtml (scored): distribution strip counts match qualityBand over the fixture roles", () => {
   const html = companyProfileHtml(scoredCompany, roles, {
     t,
@@ -416,6 +434,18 @@ test("_buildRow (pending tab): still renders the monogram alongside the hot-vaca
   state.companySubTab = "approved";
 });
 
+test("_buildRow: the row is keyboard-reachable and Enter opens it only when the row itself has focus (R12)", () => {
+  state.companySubTab = "approved";
+  const html = _buildRow(tableCompany);
+  assert.match(html, /<tr class="ct-row" tabindex="0"/);
+  assert.match(
+    html,
+    new RegExp(
+      `onkeydown="if\\(event\\.key==='Enter'&&event\\.target===event\\.currentTarget\\)\\{openCompanyProfile\\('${tableCompany.slug}'\\)\\}"`,
+    ),
+  );
+});
+
 test("_buildRow (archived tab): still renders the monogram, no crash without org_color", () => {
   state.companySubTab = "archived";
   const archived = {
@@ -447,3 +477,90 @@ test("_buildRow: an XSS payload in the company name is inert in both text and th
   // break out of the attribute.
   assert.ok(!/style="background:[^"]*<script>/.test(html));
 });
+
+// --- renderCompanies: empty-state flavors (U16, DHA-400, R11) ---------------
+//
+// renderCompanies touches several DOM ids; a minimal shim (mirrors
+// archive.test.js) covers the ones the empty path reads. Unregistered ids
+// resolve to null, which makes the optional stats/chips/disclaimer helpers
+// no-op (each starts with `if (!el) return`).
+
+{
+  const search = { value: "" };
+  const tierFilter = { value: "" };
+  const grid = { innerHTML: "" };
+  const shownCount = { textContent: "", innerHTML: "" };
+  const byId = {
+    companySearch: search,
+    companyTierFilter: tierFilter,
+    companiesGrid: grid,
+    companyShownCount: shownCount,
+  };
+  globalThis.document = {
+    getElementById: (id) => byId[id] || null,
+    querySelectorAll: () => [],
+  };
+
+  const { renderCompanies } = await import("./companies.js");
+  const companiesArr = globalThis.window.VACANCY_DATA.companies;
+
+  function setCompanies(list) {
+    companiesArr.length = 0;
+    companiesArr.push(...list);
+  }
+
+  function companyFixture(id, name, reviewStatus) {
+    return {
+      name,
+      slug: name.toLowerCase(),
+      company_id: id,
+      review_status: reviewStatus,
+      calculated_tier: null,
+    };
+  }
+
+  test("companies empty state: first-run-empty when there are no companies at all", () => {
+    setCompanies([]);
+    search.value = "";
+    tierFilter.value = "";
+    state.companySubTab = "approved";
+    state.companyCardFilter = null;
+    state.companyMonitorFilters = new Set();
+    renderCompanies();
+    assert.ok(
+      grid.innerHTML.includes("No companies yet."),
+      "expected the true first-run-empty copy",
+    );
+  });
+
+  test("companies empty state: basket-empty when the sub-tab itself has none", () => {
+    setCompanies([companyFixture("c1", "Alpha", "approved")]);
+    search.value = "";
+    tierFilter.value = "";
+    state.companySubTab = "archived"; // fixture has no rejected companies
+    renderCompanies();
+    assert.ok(
+      grid.innerHTML.includes("Archived") &&
+        grid.innerHTML.includes("no companies"),
+      "expected the sub-tab-labelled basket-empty copy, got: " + grid.innerHTML,
+    );
+    state.companySubTab = "approved";
+  });
+
+  test("companies empty state: filtered-to-zero distinct from basket-empty", () => {
+    setCompanies([companyFixture("c1", "Alpha", "approved")]);
+    search.value = "zzz-no-such-match";
+    tierFilter.value = "";
+    state.companySubTab = "approved"; // has 1 company, but the search hides it
+    renderCompanies();
+    assert.ok(
+      grid.innerHTML.includes("Nothing matches the filters"),
+      "expected the filtered-to-zero copy, got: " + grid.innerHTML,
+    );
+    assert.ok(
+      !grid.innerHTML.includes("no companies"),
+      "must not fall back to the basket-empty copy while a filter is active",
+    );
+    search.value = ""; // leave the shared fake clean for any later test
+  });
+}

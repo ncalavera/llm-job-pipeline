@@ -102,7 +102,16 @@ function thHtml(col, label, sortCol, sortAsc) {
   const active = col === sortCol;
   const arrow = active ? (sortAsc ? " ↑" : " ↓") : "";
   const cls = `ct-th ct-col-${col}${active ? " ct-th-active" : ""}`;
-  return `<th class="${cls}" onclick="sortStatsTable('${col}')">${escHtml(label)}${arrow}</th>`;
+  // tabindex + onkeydown make the header Tab-reachable and operable with
+  // Enter/Space (R12); aria-sort surfaces the sort direction to assistive
+  // tech, mirroring the same fix on the Companies table's headers.
+  const ariaSort = active ? (sortAsc ? "ascending" : "descending") : "none";
+  return (
+    `<th class="${cls}" tabindex="0" aria-sort="${ariaSort}" ` +
+    `onclick="sortStatsTable('${col}')" ` +
+    `onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();sortStatsTable('${col}')}">` +
+    `${escHtml(label)}${arrow}</th>`
+  );
 }
 
 function rowHtml(r) {
