@@ -1754,7 +1754,7 @@ function companyApplicationsHtml(c, t) {
             '<span class="cp-app-status cp-app-status-' +
             escHtml(a.status) +
             '">' +
-            escHtml(T("app_status_" + a.status, a.status)) +
+            escHtml(t("app_status_" + a.status, a.status)) +
             "</span>" +
             (meta.length
               ? '<span class="cp-app-meta">' + meta.join(" · ") + "</span>"
@@ -1945,9 +1945,11 @@ function companyRolesBlockHtml(c, roles, counts, t) {
         "</span>"
       : "") +
     (c.avg_llm_score != null
-      ? '<span class="cp-stat">' +
+      ? '<span class="cp-stat"><span class="q-' +
+        qualityBand(c.avg_llm_score) +
+        '">' +
         Math.round(c.avg_llm_score) +
-        " " +
+        "</span> " +
         escHtml(t("cp_stat_avg_suffix", "avg")) +
         "</span>"
       : "") +
