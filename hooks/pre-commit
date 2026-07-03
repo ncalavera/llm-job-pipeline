@@ -36,6 +36,29 @@ while IFS= read -r f; do
   fi
 done <<< "$staged"
 
+# 3) Private-DATA SIGNATURES — catch a PII leak by CONTENT, not just by name.
+# public/data.js is already path-blocked (section 1), but a renamed copy or a
+# JSON-shaped export/dump escapes that. This catches ONLY the double-quoted
+# JSON shape (a quoted key, a colon, then a quoted STRING value) — a repr()/
+# print() dump or a YAML export slips through; section 1 stays the backstop.
+# That opening value-quote is the discriminator: real serialized data pairs the
+# key with a quoted string, whereas the source that BUILDS the payload pairs it
+# with a variable (r.get(...), no quote), so this never fires on the generator
+# or on plain field references. These six keys are triage-only and appear
+# nowhere else in the tree.
+# Skip .claude/worktrees/: live agent checkouts carry this project's own data
+# by design and are never shipped — scanning them makes the guard fire on every
+# commit while an agent works (mirrors the PR #43 pytest carve-out).
+pii_re='"(cv_notes|first_impression|preparation|skip_reason|research_question|network_contact)"[[:space:]]*:[[:space:]]*"'
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  case "$f" in .claude/worktrees/*) continue ;; esac
+  [ -f "$f" ] || continue
+  if git show ":$f" 2>/dev/null | grep -qIE "$pii_re"; then
+    blocked+="  $f  (contains serialized private triage-review data — PII)\n"
+  fi
+done <<< "$staged"
+
 if [ -n "$blocked" ]; then
   printf '\n\033[31m✖ COMMIT BLOCKED — private data must not enter this PUBLIC repo:\033[0m\n' >&2
   printf '%b' "$blocked" >&2
