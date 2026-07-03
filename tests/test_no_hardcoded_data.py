@@ -428,13 +428,14 @@ def test_no_geo_proper_noun_in_branch_literals():
 #
 # The scoring rubric must take the candidate's salary benchmark and every other
 # money anchor FROM THE USER PROFILE, never from a figure baked into a shipped
-# prompt template (the leak was a "€7k/month benchmark" welded into
-# company-scoring.md) or a shipped runbook (a "€80–100k" compensation example in
-# jobs-add.md). A currency-symbol-plus-digit, a currency-code-plus-digit (either
-# order), or a "<n>k/month"-style pay figure (with "/", "per", or "a" as the
-# connector) on either surface is therefore always a regression. Score bands
-# ("85–100"), runway durations ("18–24 months") and a bare "$X" placeholder carry
-# no currency+digit pairing, so they do not trip this guard.
+# prompt template (the leak was a currency-tagged monthly benchmark welded into
+# company-scoring.md) or a shipped runbook (a currency-tagged salary range in a
+# compensation example in jobs-add.md). A currency-symbol-plus-digit, a
+# currency-code-plus-digit (either order), or a "<n>k/month"-style pay figure
+# (with "/", "per", or "a" as the connector) on either surface is therefore
+# always a regression. Score bands ("85–100"), runway durations ("18–24 months")
+# and a bare "$X" placeholder carry no currency+digit pairing, so they do not
+# trip this guard.
 # ---------------------------------------------------------------------------
 
 MONEY_LITERAL = re.compile(

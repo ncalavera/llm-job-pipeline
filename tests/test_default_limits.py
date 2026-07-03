@@ -155,4 +155,4 @@ def test_score_companies_entrypoint_applies_default_cap(fresh_install, restore_s
     finally:
         monkeypatch.undo()
 
-    assert seen["n"] == default_cap  # 175 candidates capped down to the finite default
+    assert seen["n"] == default_cap  # the default_cap + 25 candidates truncate to the finite cap

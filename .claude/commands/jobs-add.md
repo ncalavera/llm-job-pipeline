@@ -153,7 +153,7 @@ Ask for (skip any the user already provided):
 **Optional**
 - **location** — e.g. "Remote (EU)", "Berlin, Germany"
 - **snippet** — a short summary line
-- **compensation** — e.g. "80–100k" (any currency)
+- **compensation** — e.g. "50–70k" (any currency)
 - **deadline** — application deadline
 - **department** — e.g. "Engineering"
 
