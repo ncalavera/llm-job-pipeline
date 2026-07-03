@@ -451,9 +451,12 @@ def _backfill_candidate_websites(opts: Opts) -> None:
 
 def _collect_company_evidence(names: list[str], opts: Opts) -> None:
     """Collect primary-source evidence (company_evidence rows) for the companies
-    about to be scored. Runs BEFORE score_companies so the
-    scorer reads real primary text, not the legacy scrape cache. Only the capped
-    scoring set is passed in (STRATEGY guardrail 3: evidence is a paid path)."""
+    about to be scored. Runs BEFORE score_companies so the scorer reads real
+    primary text, not the legacy scrape cache. The caller has already capped
+    ``names`` to at most ``scoring_settings.max_per_run`` candidates (the same
+    per-run set that fetch and scoring receive), so evidence — a paid path
+    (STRATEGY guardrail 3) — is collected for exactly the companies scored this
+    run and no more."""
     if not names:
         return
     print(f"  Collecting primary-source evidence for {len(names)} company(ies)", flush=True)
@@ -961,13 +964,34 @@ def _h_company_scoring(state, entry, opts):
     if n == 0:
         return "advance", "no new candidate companies to score"
 
-    names = _candidate_names_to_score(n)
-    rc = _run(_py("fetch_companies.py") + ["--limit", str(n)], opts)
+    # Spike-day cost cap (STRATEGY guardrail 3). The whole PAID chain — Firecrawl
+    # scrape (fetch_companies), primary-source evidence collection, and
+    # WANT-scoring — must run on at most max_per_run() candidates. Passing the
+    # uncapped count as an explicit --limit to score_companies would SUPPRESS its
+    # own internal cap (that cap only applies when --limit is None), so the cap is
+    # applied here and threaded into all three steps, exactly as
+    # _backfill_candidate_websites caps the website search. The candidates,
+    # scoring set, and evidence set share one canonical_name ordering, so the same
+    # first `capped` rows flow through every step; the rest stay candidates and
+    # are picked up next run — reported here, never silently dropped.
+    from scoring_settings import max_per_run
+
+    cap = max_per_run()
+    capped = min(n, cap)
+    if n > cap:
+        print(
+            f"  {n} candidate companies to score — scoring the first {cap} this run "
+            f"(per-run cost cap); {n - cap} deferred to a later run",
+            flush=True,
+        )
+
+    names = _candidate_names_to_score(capped)
+    rc = _run(_py("fetch_companies.py") + ["--limit", str(capped)], opts)
     if rc != 0:
         return "error", f"company scrape exited with code {rc}"
     _collect_company_evidence(names, opts)
 
-    res = _run_capture(_py("score_companies.py") + ["--local", "--limit", str(n)], opts)
+    res = _run_capture(_py("score_companies.py") + ["--local", "--limit", str(capped)], opts)
     if res.returncode != 0:
         return "error", f"score_companies --local exited {res.returncode}: {res.stderr[-400:]}"
     # score_companies --local prints its "N with company_evidence rows" line and a
@@ -983,9 +1007,12 @@ def _h_company_scoring(state, entry, opts):
     _write_payload(CO_PAYLOAD_PATH, payloads)
     entry["target_ids"] = [str(p["id"]) for p in payloads]
     ghosts_left = _ghost_candidate_count()
-    note_suffix = (
-        f"; {ghosts_left} candidate(s) still lack a findable website" if ghosts_left else ""
-    )
+    notes = []
+    if n > cap:
+        notes.append(f"{n - cap} candidate(s) deferred to a later run (per-run cap {cap})")
+    if ghosts_left:
+        notes.append(f"{ghosts_left} candidate(s) still lack a findable website")
+    note_suffix = ("; " + "; ".join(notes)) if notes else ""
     return "gate", {
         "action": "score_companies",
         "count": len(payloads),

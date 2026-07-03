@@ -198,6 +198,69 @@ def test_backfill_skips_limit_flag_reasoning_when_under_cap(rd, monkeypatch, cap
     assert "deferred" not in out
 
 
+def test_company_scoring_caps_paid_chain_at_max_per_run(rd, monkeypatch, capsys):
+    """company_scoring must cap the whole PAID chain — Firecrawl scrape,
+    evidence collection, WANT-scoring — at scoring_settings.max_per_run()
+    (STRATEGY guardrail 3: cost). The bug: the stage passed the UNCAPPED candidate
+    count as an explicit --limit to score_companies, and score_companies only
+    applies its own cap when --limit is None, so the cap was always bypassed. All
+    three paid steps must receive the capped count/names, and the deferred count
+    must be reported (no silent drops)."""
+    import scoring_settings
+
+    monkeypatch.setattr(scoring_settings, "max_per_run", lambda: 2)
+    run_daily, dal = rd
+    ids = [_seed_candidate(dal, f"Cand {i}", f"https://cand{i}.org") for i in range(5)]
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
+
+    calls = []
+    monkeypatch.setattr(run_daily, "_run", lambda cmd, opts: calls.append(cmd) or 0)
+
+    def fake_run_capture(cmd, opts):
+        calls.append(cmd)
+        import json
+
+        payloads = [
+            {
+                "payload_kind": "company",
+                "id": str(ids[i]),
+                "canonical_name": f"Cand {i}",
+                "url": f"https://cand{i}.org",
+                "system_prompt": "sp",
+                "user_msg": "um",
+            }
+            for i in range(2)
+        ]
+        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payloads), stderr="")
+
+    monkeypatch.setattr(run_daily, "_run_capture", fake_run_capture)
+
+    state = run_daily._new_state(run_daily.Opts())
+    entry = run_daily._stage(state, "company_scoring")
+    kind, payload = run_daily._h_company_scoring(state, entry, run_daily.Opts())
+
+    assert kind == "gate"
+
+    def cmd_with(substr):
+        return next(c for c in calls if any(substr in str(x) for x in c))
+
+    # Firecrawl scrape capped at 2, not the 5 available.
+    fetch = cmd_with("fetch_companies.py")
+    assert fetch[-2:] == ["--limit", "2"], fetch
+    # WANT-scoring capped at 2 too — passing 5 here suppressed score_companies'
+    # own internal cap (the actual bug this test guards against).
+    score = cmd_with("score_companies.py")
+    assert score[-2:] == ["--limit", "2"], score
+    # Evidence collected for EXACTLY the capped set (2 names), not all 5.
+    evidence = cmd_with("collect_company_evidence.py")
+    names_arg = evidence[evidence.index("--company") + 1]
+    assert names_arg.split(",") == ["Cand 0", "Cand 1"], names_arg
+    # Deferral reported to the run output (3 = 5 available − 2 cap).
+    assert "3 deferred to a later run" in capsys.readouterr().out
+    # And surfaced at the scoring gate note.
+    assert "3 candidate(s) deferred" in payload["instructions"]
+
+
 def test_company_scoring_advances_when_no_candidates(rd, monkeypatch):
     run_daily, dal = rd
     monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
