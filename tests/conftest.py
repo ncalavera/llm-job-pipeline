@@ -70,7 +70,7 @@ def _reset_report_package_cache():
     Several tests reload the backend chain via ad hoc ``sys.modules`` surgery to
     point the ``report`` package at a fresh throwaway SQLite file (see e.g.
     ``tests/test_applications.py::_fresh_sqlite``,
-    ``tests/test_dashboard_generation.py::_force_sqlite``). Their pop lists
+    ``tests/test_dashboard_generation.py::_fresh_report``). Their pop lists
     aren't consistent: some evict only the top-level package name
     (``"report"``), not its already-imported submodule (``"report.data_prep"``
     lives under a SEPARATE ``sys.modules`` key). When a later test re-imports
