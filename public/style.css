@@ -1664,56 +1664,8 @@ body[data-dashboard-style="minimal"] .loading-illus {
   align-items: center;
 }
 
-/* --- Company sub-tabs --- */
-.company-sub-tabs {
-  display: flex;
-  gap: 0;
-  margin-bottom: 12px;
-  background: var(--card);
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: var(--shadow-sm);
-}
-.company-sub-tab {
-  flex: 1;
-  padding: 10px 16px;
-  border: none;
-  background: transparent;
-  font-family: "Onest", sans-serif;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--muted);
-  cursor: pointer;
-  transition: all 0.15s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border-bottom: 2px solid transparent;
-}
-.company-sub-tab:hover {
-  background: var(--bg);
-  color: var(--text);
-}
-.company-sub-tab.active {
-  color: var(--coral);
-  border-bottom-color: var(--coral);
-  background: var(--coral-tint);
-}
-.sub-tab-count {
-  font-size: var(--text-xs);
-  font-weight: 700;
-  padding: 1px 7px;
-  border-radius: 9999px;
-  background: var(--surface);
-  color: var(--muted);
-  min-width: 20px;
-  text-align: center;
-}
-.company-sub-tab.active .sub-tab-count {
-  background: var(--coral);
-  color: white;
-}
+/* Company sub-tabs (.company-sub-tabs/.company-sub-tab/.sub-tab-count) —
+   restyled as segmented pills in the U8 companies redesign block at EOF. */
 
 /* --- Company stats cards --- */
 .company-enrichment-stats {
@@ -1895,10 +1847,7 @@ body[data-dashboard-style="minimal"] .loading-illus {
   }
 }
 
-/* --- Company grid --- */
-.companies-grid {
-  display: block;
-}
+/* .companies-grid (scroll-guard wrapper) restyled in the U8 block at EOF. */
 
 /* --- Company card --- */
 .company-card {
@@ -1954,63 +1903,13 @@ body[data-dashboard-style="minimal"] .loading-illus {
   color: var(--coral);
 }
 
-.company-tier-badge {
-  font-size: var(--text-xs);
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 2px 7px;
-  border-radius: 9999px;
-  flex-shrink: 0;
-}
-
-.company-tier-badge.tier-1 {
-  background: var(--coral-tint);
-  color: var(--coral);
-  border: 1px solid var(--coral);
-}
-.company-tier-badge.tier-2 {
-  background: var(--amber-tint);
-  color: var(--amber);
-  border: 1px solid var(--amber);
-}
-.company-tier-badge.tier-3 {
-  background: var(--surface);
-  color: var(--muted);
-  border: 1px solid var(--surface);
-}
-
-/* Calculated tier badges (S/A/B/C) — shared across tinder + companies */
-.ctier-s {
-  background: var(--coral-tint);
-  color: var(--coral);
-  border: 1px solid var(--coral);
-}
-.ctier-a {
-  background: var(--amber-tint);
-  color: var(--amber);
-  border: 1px solid var(--amber);
-}
-.ctier-b {
-  background: var(--emerald-tint);
-  color: var(--emerald);
-  border: 1px solid var(--emerald);
-}
-.ctier-c {
-  background: var(--surface);
-  color: var(--muted);
-  border: 1px solid var(--border);
-}
-.ctier-none {
-  background: transparent;
-  color: var(--muted);
-  border: 1px dashed var(--border);
-  opacity: 0.6;
-}
+/* .company-tier-badge / .ctier-s/a/b/c/none retired (U8, DHA-392): the
+   companies table's tier badge now uses .vac-tier + tierClass() below, the
+   same shared classes the vacancy page (U6) and company profile (U7) already
+   use — a tier never shows two colors depending on which screen you're on. */
 
 /* Sky redesign quality/tier classes (DHA-385, U1) — bound to the token layer
-   above. Unused until later units apply them; kept alongside .ctier-* rather
-   than replacing it (old classes retired in U18). */
+   above. */
 .q-good {
   color: var(--q-good);
 }
@@ -2229,13 +2128,8 @@ body[data-dashboard-style="minimal"] .loading-illus {
   background: var(--bg);
 }
 
-.company-empty {
-  text-align: center;
-  padding: 48px 24px;
-  color: var(--muted);
-  font-size: var(--text-base);
-  grid-column: 1 / -1;
-}
+/* .company-empty (shared with Geo via #statsSection override) restyled in
+   the U8 block at EOF. */
 
 /* --- Open profile button on company cards --- */
 .cp-open-btn {
@@ -2298,295 +2192,12 @@ body[data-dashboard-style="minimal"] .loading-illus {
   background: #fff7ed;
 }
 
-/* --- Company table --- */
-.company-table {
-  width: 100%;
-  background: var(--card);
-  border-radius: 14px;
-  overflow: hidden;
-  box-shadow: var(--shadow-sm);
-  border-collapse: collapse;
-  table-layout: fixed;
-}
-
-.ct-header-row {
-  background: var(--surface);
-}
-
-.ct-th {
-  padding: 10px 12px;
-  font-size: var(--text-xs);
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
-  text-align: left;
-  white-space: nowrap;
-  user-select: none;
-}
-
-.ct-th[onclick] {
-  cursor: pointer;
-  transition: color 0.15s;
-}
-
-.ct-th[onclick]:hover {
-  color: var(--text);
-}
-
-.ct-th-active {
-  color: var(--coral);
-}
-
-/* Column widths — Approved view */
-.ct-col-name {
-  width: 11%;
-}
-.ct-col-tier {
-  width: 5%;
-  text-align: center;
-}
-.ct-col-fit {
-  width: 6%;
-  text-align: center;
-}
-/* WANT aspect columns (Mission/Domain/…) — shared by Approved + Pending.
-   Narrow numeric columns with short 3-letter headers; the full name + a
-   one-line description show in an instant CSS tooltip on hover (data-tip). */
-.ct-col-dim {
-  width: 4.4%;
-  text-align: center;
-}
-.ct-th.ct-col-dim,
-.ct-td.ct-col-dim {
-  padding-left: 3px;
-  padding-right: 3px;
-}
-.ct-td.ct-col-dim {
-  overflow: hidden;
-}
-.ct-th.ct-col-dim {
-  position: relative;
-}
-/* Instant hover tooltip: full dimension name + what it measures. */
-.ct-th.ct-col-dim[data-tip]:hover::after {
-  content: attr(data-tip);
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 30;
-  width: max-content;
-  max-width: 230px;
-  padding: 7px 10px;
-  white-space: normal;
-  text-align: left;
-  text-transform: none;
-  letter-spacing: normal;
-  font-weight: 500;
-  font-size: var(--text-xs);
-  line-height: 1.4;
-  color: #fff;
-  background: #1f2937;
-  border-radius: 7px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
-  pointer-events: none;
-}
-.ct-dim-num {
-  font-weight: 700;
-}
-.ct-dim-empty {
-  color: var(--muted);
-}
-.ct-col-mpa {
-  width: 55px;
-  text-align: center;
-}
-.ct-col-liked {
-  width: 6%;
-  text-align: center;
-}
-.ct-col-new {
-  width: 6%;
-  text-align: center;
-}
-.ct-col-freshness {
-  width: 12%;
-}
-.ct-col-loc {
-  width: 15%;
-}
-.ct-col-monitoring {
-  width: 11%;
-}
-
-/* Column widths — Pending view */
-.ct-col-name--pending {
-  width: 13%;
-}
-.ct-col-cat--pending {
-  width: 15%;
-}
-.ct-col-fit--pending {
-  width: 8%;
-  text-align: center;
-}
-.ct-col-vac--pending {
-  width: 8%;
-  text-align: center;
-}
-.ct-col-loc--pending {
-  width: 18%;
-}
-.ct-col-source {
-  width: 12%;
-}
-.ct-col-review {
-  width: 14%;
-  text-align: center;
-}
-
-/* Column widths — Archived view */
-.ct-col-name--archived {
-  width: 25%;
-}
-.ct-col-cat--archived {
-  width: 15%;
-}
-.ct-col-fit--archived {
-  width: 8%;
-  text-align: center;
-}
-.ct-col-loc--archived {
-  width: 20%;
-}
-.ct-col-reason {
-  width: 32%;
-}
-
-/* Rows */
-.ct-row {
-  cursor: pointer;
-  border-left: 3px solid var(--row-accent, var(--coral));
-  transition: background 0.12s;
-}
-
-.ct-row:hover {
-  background: #fdf8f0;
-}
-
-.ct-row-nosource {
-  border-left-style: dashed;
-  border-left-color: var(--amber);
-}
-
-.ct-td {
-  padding: 10px 12px;
-  vertical-align: middle;
-  font-size: var(--text-sm);
-  border-bottom: 1px solid var(--surface);
-}
-
-.ct-name-text {
-  font-weight: 600;
-  color: var(--text);
-}
-
-.ct-liked-nonzero {
-  font-weight: 700;
-  color: var(--emerald);
-}
-
-.ct-liked-zero {
-  color: var(--muted);
-}
-
-.ct-location-text {
-  display: inline-block;
-  max-width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  vertical-align: middle;
-}
-
-/* --- New vacancies badge --- */
-.ct-new-nonzero {
-  font-weight: 700;
-  color: var(--amber);
-  background: var(--amber-tint);
-  padding: 2px 7px;
-  border-radius: 9999px;
-  font-size: var(--text-xs);
-}
-
-/* --- Freshness cell --- */
-.freshness-cell {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--text-sm);
-  color: var(--muted);
-}
-.freshness-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.freshness-green {
-  background: var(--emerald);
-}
-.freshness-amber {
-  background: var(--amber);
-}
-.freshness-red {
-  background: #dc2626;
-}
-.freshness-never {
-  background: var(--surface);
-  border: 1px dashed var(--muted);
-}
-
-/* --- Monitoring status cell (dot + text) --- */
-.mon-cell {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--text-sm);
-  color: var(--muted);
-  white-space: nowrap;
-}
-.mon-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.mon-dot--ok {
-  background: var(--emerald);
-}
-.mon-dot--stale {
-  background: var(--amber);
-}
-.mon-dot--error {
-  background: var(--coral);
-}
-.mon-dot--nodata {
-  background: var(--amber);
-  opacity: 0.7;
-}
-.mon-dot--manual {
-  background: #6366f1;
-}
-.mon-dot--nosource {
-  background: transparent;
-  border: 1.5px dashed var(--amber);
-}
-.mon-dot--never {
-  background: transparent;
-  border: 1.5px dashed var(--muted);
-}
+/* Company table shell + row/cell base (.company-table, .ct-header-row,
+   .ct-th*, .ct-col-*, .ct-row, .ct-td, .ct-name-text, .ct-liked-*,
+   .ct-location-text, .ct-new-nonzero, .freshness-*, .mon-cell/.mon-dot*)
+   rebuilt for the sky theme in the U8 companies redesign block at EOF.
+   (.mon-chips-row/.mon-chip below are the separate filter-chips row —
+   untouched by this unit.) */
 
 /* --- Monitoring filter chips row --- */
 .mon-chips-row {
@@ -2638,194 +2249,15 @@ body[data-dashboard-style="minimal"] .loading-illus {
   color: var(--emerald);
 }
 
-/* --- Archived row --- */
-.ct-row--archived {
-  opacity: 0.65;
-  border-left-color: var(--muted) !important;
-}
-.ct-row--archived:hover {
-  opacity: 0.85;
-}
-.ct-col-reason {
-  font-size: var(--text-xs);
-  color: var(--muted);
-  line-height: 1.4;
-}
-
-.ct-badge-deep {
-  display: inline-block;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 9999px;
-  background: #f5f3ff;
-  color: var(--lavender);
-  border: 1px solid #e0d5f5;
-  margin-left: 6px;
-  vertical-align: middle;
-}
-
-.ct-badge-enriched {
-  display: inline-block;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 5px;
-  border-radius: 9999px;
-  background: #ecfdf5;
-  color: #059669;
-  border: 1px solid #a7f3d0;
-  margin-left: 6px;
-  vertical-align: middle;
-}
-
-.ct-badge-partial {
-  display: inline-block;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 5px;
-  border-radius: 9999px;
-  background: #fffbeb;
-  color: var(--amber);
-  border: 1px solid #fde68a;
-  margin-left: 6px;
-  vertical-align: middle;
-}
-
-.ct-badge-nosource {
-  display: inline-block;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 9999px;
-  background: #fffbeb;
-  color: var(--amber);
-  border: 1px dashed var(--amber);
-  margin-left: 6px;
-  vertical-align: middle;
-}
-.ct-badge-manual {
-  display: inline-block;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 9999px;
-  background: #f0f4ff;
-  color: #6366f1;
-  border: 1px dashed #6366f1;
-  margin-left: 6px;
-  vertical-align: middle;
-}
-/* ces-manual and ces-detail removed — stats cards replaced inline stats */
-
-/* --- Company review buttons --- */
-.ct-col-review {
-  width: 10%;
-  text-align: center;
-}
-.cr-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 700;
-  transition:
-    transform 0.1s,
-    box-shadow 0.1s;
-}
-.cr-btn:hover {
-  transform: scale(1.1);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-}
-.cr-btn:active {
-  transform: scale(0.95);
-}
-.cr-approve {
-  background: #ecfdf5;
-  color: #059669;
-  margin-right: 4px;
-}
-.cr-approve:hover {
-  background: #d1fae5;
-}
-.cr-reject {
-  background: #fef2f2;
-  color: #dc2626;
-}
-.cr-reject:hover {
-  background: #fee2e2;
-}
-.cr-btn-lg {
-  width: auto;
-  height: auto;
-  padding: 8px 16px;
-  font-size: 14px;
-  border-radius: 8px;
-  gap: 4px;
-}
-.cr-status {
-  font-weight: 700;
-  font-size: 16px;
-}
-.cr-approved {
-  color: #059669;
-}
-.cr-rejected {
-  color: #dc2626;
-}
-
-/* --- Responsive companies table --- */
+/* .ct-row--archived, .ct-col-reason, .ct-badge-*, review buttons (.cr-*) and
+   the old column-hiding responsive block are rebuilt (or, for the unused
+   .cr-btn-lg/.cr-status/.cr-approved/.cr-rejected, dropped as dead) in the
+   U8 companies redesign block at EOF — narrow widths now scroll the sheet
+   (AE4) instead of hiding columns. */
 @media (max-width: 768px) {
   .companies-filters {
     flex-direction: column;
     align-items: stretch;
-  }
-  .company-sub-tab {
-    font-size: var(--text-xs);
-    padding: 8px 10px;
-  }
-  .ct-col-loc,
-  .ct-col-loc--pending,
-  .ct-col-loc--archived,
-  .ct-col-freshness,
-  .ct-col-monitoring,
-  .ct-col-source,
-  .ct-col-reason,
-  .ct-col-dim,
-  .ct-col-mpa {
-    display: none;
-  }
-  .ct-col-name,
-  .ct-col-name--pending,
-  .ct-col-name--archived {
-    width: 35%;
-  }
-  .ct-col-tier {
-    width: 10%;
-  }
-  .ct-col-fit,
-  .ct-col-fit--pending,
-  .ct-col-fit--archived {
-    width: 13%;
-  }
-  .ct-col-vac--pending {
-    width: 15%;
-  }
-  .ct-col-liked {
-    width: 13%;
-  }
-  .ct-col-new {
-    width: 13%;
-  }
-  .ct-td {
-    padding: 8px 8px;
-  }
-  .ct-th {
-    padding: 8px 8px;
   }
 }
 
@@ -5219,4 +4651,461 @@ a.pipe-grp-role-title:hover {
   flex: none;
   font-size: 11px;
   color: var(--sky-text-faint);
+}
+
+/* === U8 companies table (redesign) =========================================
+   Companies (DHA-392): sky-themed table shell, seven WANT-dimension columns
+   on the shared qualityBand/qualityClass helpers (retiring the old 75/55/35
+   four-color scale), a name+monogram cell, a new Open (applyable_count)
+   column, and segmented-pill sub-tabs. `.company-table`/`.ct-*` below are
+   shared with Geo (`#statsSection`, U10) via cascade — Geo's higher-
+   specificity `#statsSection .ct-*` overrides win regardless of source
+   order, so redefining the base here is safe. Filters bar, stats cards and
+   monitoring filter-chips row are untouched (out of this unit's scope).
+   =========================================================================== */
+
+/* --- Sub-tabs: segmented pill control, matching Browse's basket-tabs (U5) -- */
+.company-sub-tabs {
+  display: flex;
+  gap: 2px;
+  background: rgba(58, 56, 51, 0.06);
+  border-radius: 10px;
+  padding: 2.5px;
+  width: fit-content;
+  margin-bottom: 14px;
+}
+.company-sub-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 13px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  font-family: "Onest", sans-serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--sky-text-secondary);
+  cursor: pointer;
+}
+.company-sub-tab:hover {
+  color: var(--sky-text);
+}
+.company-sub-tab.active {
+  background: #fff;
+  color: var(--sky-text);
+  box-shadow: 0 1px 2px rgba(58, 56, 51, 0.08);
+}
+.company-sub-tab:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 1px;
+}
+.sub-tab-count {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--sky-text-tertiary);
+  background: transparent;
+  padding: 0;
+  min-width: 0;
+}
+.company-sub-tab.active .sub-tab-count {
+  background: transparent;
+  color: var(--sky-text-tertiary);
+}
+@media (max-width: 768px) {
+  .company-sub-tab {
+    font-size: 11.5px;
+    padding: 6px 10px;
+  }
+}
+
+/* --- Scroll-guard wrapper (AE4): the sheet scrolls horizontally, the page
+   body never does (body-level overflow-x:hidden is set near the top of this
+   file). This table is the widest in the app. --- */
+.companies-grid {
+  overflow-x: auto;
+}
+
+.company-table {
+  width: 100%;
+  min-width: 1120px;
+  background: var(--sky-sheet);
+  border-radius: var(--radius-sheet);
+  box-shadow:
+    inset 0 0 0 1px var(--sky-hairline),
+    0 1px 3px rgba(58, 56, 51, 0.05);
+  border-collapse: collapse;
+  table-layout: fixed;
+  overflow: hidden;
+}
+
+.ct-header-row {
+  background: transparent;
+}
+.ct-th {
+  padding: 10px 10px 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sky-text-faint);
+  text-align: left;
+  white-space: nowrap;
+  user-select: none;
+}
+.ct-th[onclick] {
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.ct-th[onclick]:hover {
+  color: var(--sky-text);
+}
+.ct-th-active {
+  color: var(--cobalt);
+}
+
+/* Column widths — Approved view */
+.ct-col-name {
+  width: 14%;
+}
+.ct-col-tier {
+  width: 4%;
+  text-align: center;
+}
+.ct-col-fit {
+  width: 5%;
+  text-align: center;
+}
+/* WANT aspect columns (Mission/Domain/…) — shared by Approved + Pending.
+   Narrow numeric columns with short 3-letter headers; the full name + a
+   one-line description show in an instant CSS tooltip on hover (data-tip). */
+.ct-col-dim {
+  width: 3.6%;
+  text-align: center;
+}
+.ct-th.ct-col-dim,
+.ct-td.ct-col-dim {
+  padding-left: 3px;
+  padding-right: 3px;
+}
+.ct-td.ct-col-dim {
+  overflow: hidden;
+}
+.ct-th.ct-col-dim {
+  position: relative;
+}
+/* Instant hover tooltip: full dimension name + what it measures. */
+.ct-th.ct-col-dim[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  width: max-content;
+  max-width: 230px;
+  padding: 7px 10px;
+  white-space: normal;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 500;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: #fff;
+  background: #1f2937;
+  border-radius: 7px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
+}
+.ct-dim-num {
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 700;
+}
+.ct-dim-empty {
+  color: var(--sky-text-faint);
+  font-family: "JetBrains Mono", monospace;
+}
+.ct-col-open {
+  width: 4%;
+  text-align: center;
+}
+.ct-col-mpa {
+  width: 55px;
+  text-align: center;
+}
+.ct-col-liked {
+  width: 4%;
+  text-align: center;
+}
+.ct-col-new {
+  width: 4%;
+  text-align: center;
+}
+.ct-col-loc {
+  width: 12%;
+}
+.ct-col-freshness {
+  width: 9%;
+}
+.ct-col-monitoring {
+  width: 10%;
+}
+
+/* Column widths — Pending view */
+.ct-col-name--pending {
+  width: 15%;
+}
+.ct-col-cat--pending {
+  width: 15%;
+}
+.ct-col-fit--pending {
+  width: 8%;
+  text-align: center;
+}
+.ct-col-vac--pending {
+  width: 8%;
+  text-align: center;
+}
+.ct-col-loc--pending {
+  width: 16%;
+}
+.ct-col-source {
+  width: 12%;
+}
+
+/* Column widths — Archived view */
+.ct-col-name--archived {
+  width: 25%;
+}
+.ct-col-cat--archived {
+  width: 15%;
+}
+.ct-col-fit--archived {
+  width: 8%;
+  text-align: center;
+}
+.ct-col-loc--archived {
+  width: 20%;
+}
+.ct-col-reason {
+  width: 32%;
+}
+.ct-col-review {
+  width: 6%;
+  text-align: center;
+}
+
+/* Rows — whitespace + hover tint, no left-border accent stripe (protocol
+   §1: the stripe is an "AI slop" tell). */
+.ct-row {
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.ct-row:hover {
+  background: var(--sky-row-hover);
+}
+.ct-row--archived {
+  opacity: 0.65;
+}
+.ct-row--archived:hover {
+  opacity: 0.85;
+}
+/* Dead now that the stripe is gone; kept out of the new rules entirely
+   (was .ct-row-nosource, never applied by any render path). */
+
+.ct-td {
+  padding: 10px 10px;
+  vertical-align: middle;
+  font-size: var(--text-sm);
+  border-bottom: none;
+  color: var(--sky-text-secondary);
+}
+
+.ct-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.ct-mono {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  font-family: "Onest", sans-serif;
+}
+.ct-name-text {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--sky-text);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ct-liked-nonzero {
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 700;
+  color: var(--q-good);
+}
+.ct-liked-zero {
+  font-family: "JetBrains Mono", monospace;
+  color: var(--sky-text-faint);
+}
+.ct-new-nonzero {
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 700;
+  color: var(--q-moderate);
+  background: var(--q-moderate-bg);
+  padding: 2px 7px;
+  border-radius: 9999px;
+  font-size: 11px;
+}
+.ct-location-text {
+  display: inline-block;
+  max-width: 100%;
+  font-size: 12px;
+  color: var(--sky-text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+.ct-col-cat,
+.ct-col-reason {
+  font-size: var(--text-xs);
+  color: var(--sky-text-secondary);
+  line-height: 1.4;
+}
+.ct-hot-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--q-moderate);
+}
+.ct-hot-deadline {
+  font-size: 11px;
+  color: var(--sky-text-tertiary);
+}
+
+/* --- Freshness cell (dot + relative time) --- */
+.freshness-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: var(--sky-text-tertiary);
+}
+.freshness-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.freshness-green {
+  background: var(--q-good);
+}
+.freshness-amber {
+  background: var(--q-moderate);
+}
+.freshness-red {
+  background: var(--q-weak);
+}
+.freshness-never {
+  background: transparent;
+  border: 1.5px dashed var(--sky-text-faint);
+}
+
+/* --- Monitoring status cell (dot + text) --- */
+.mon-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--sky-text-tertiary);
+  white-space: nowrap;
+}
+.mon-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.mon-dot--ok {
+  background: var(--q-good);
+}
+.mon-dot--stale {
+  background: var(--q-moderate);
+}
+.mon-dot--error {
+  background: var(--q-weak);
+}
+.mon-dot--nodata {
+  background: var(--q-moderate);
+  opacity: 0.7;
+}
+.mon-dot--manual {
+  background: var(--cobalt);
+}
+.mon-dot--nosource {
+  background: transparent;
+  border: 1.5px dashed var(--q-moderate);
+}
+.mon-dot--never {
+  background: transparent;
+  border: 1.5px dashed var(--sky-text-faint);
+}
+
+/* --- Company review buttons (Approve ✓ / Archive ✗) --- */
+.cr-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  transition: transform 0.1s;
+}
+.cr-btn:hover {
+  transform: scale(1.08);
+}
+.cr-btn:active {
+  transform: scale(0.95);
+}
+.cr-approve {
+  background: var(--q-good-bg);
+  color: var(--q-good);
+  margin-right: 4px;
+}
+.cr-approve:hover {
+  background: var(--q-good);
+  color: #fff;
+}
+.cr-reject {
+  background: var(--q-weak-bg);
+  color: var(--q-weak);
+}
+.cr-reject:hover {
+  background: var(--q-weak);
+  color: #fff;
+}
+
+.company-empty {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--sky-text-faint);
+  font-size: var(--text-base);
 }

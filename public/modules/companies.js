@@ -30,6 +30,7 @@ import {
   getFlagForChip,
   formatDeadlineHtml,
   qualityBand,
+  qualityClass,
   tierClass,
   safeUrl,
 } from "./helpers.js";
@@ -337,25 +338,29 @@ var WANT_DIMS = [
   ],
 ];
 
-function _dimColor(v) {
-  return v >= 75
-    ? "#059669"
-    : v >= 55
-      ? "#0284C7"
-      : v >= 35
-        ? "#D97706"
-        : "#DC2626";
+// Retired (U8, DHA-392) the old 75/55/35 four-color scale in favor of the
+// shared qualityBand/qualityClass helpers (70/50, three bands) — the same
+// ones the company profile's WANT bars (U7) already use, so a dimension
+// value never shows two colors depending on whether you're in the table or
+// the profile.
+export function _dimNumHtml(v) {
+  if (v == null) return '<span class="ct-dim-empty">—</span>';
+  return '<span class="ct-dim-num ' + qualityClass(v) + '">' + v + "</span>";
 }
 
-function _dimNumHtml(v) {
-  if (v == null) return '<span class="ct-dim-empty">—</span>';
-  return (
-    '<span class="ct-dim-num" style="color:' +
-    _dimColor(v) +
-    '">' +
-    v +
-    "</span>"
-  );
+// First one or two initials of a company name, for the row monogram —
+// mirrors vacancy.js's mini-card monogram (kept local: companies.js's file
+// scope for this unit is style.css + itself, not vacancy.js).
+function _initials(name) {
+  return String(name || "")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map(function (w) {
+      return w[0] || "";
+    })
+    .join("")
+    .toUpperCase();
 }
 
 function _dimColumns() {
@@ -497,6 +502,15 @@ function _getColumns() {
       cls: "ct-col-fit",
     },
     ..._dimColumns(),
+    // "Open" surfaces applyable_count for the first time (U8) — the sort key
+    // stays "applyable", already fully wired (this was previously the
+    // approved tab's default sort with no visible header to click).
+    {
+      key: "applyable",
+      label: T("col_open", "Open"),
+      sortable: true,
+      cls: "ct-col-open",
+    },
     ...(SHOW_MPA
       ? [{ key: "mpa", label: "MPA", sortable: true, cls: "ct-col-mpa" }]
       : []),
@@ -513,16 +527,16 @@ function _getColumns() {
       cls: "ct-col-new",
     },
     {
-      key: "freshness",
-      label: T("col_freshness", "Freshness"),
-      sortable: true,
-      cls: "ct-col-freshness",
-    },
-    {
       key: "offices",
       label: T("col_location", "Location"),
       sortable: false,
       cls: "ct-col-loc",
+    },
+    {
+      key: "freshness",
+      label: T("col_freshness", "Freshness"),
+      sortable: true,
+      cls: "ct-col-freshness",
     },
     {
       key: "monitoring",
@@ -1037,20 +1051,35 @@ function _updateSubTabCounts() {
 // Row builder (dispatches to sub-tab-specific builders)
 // ---------------------------------------------------------------------------
 
-function _buildRow(c) {
+export function _buildRow(c) {
   var subTab = state.companySubTab;
   if (subTab === "pending") return _buildPendingRow(c);
   if (subTab === "archived") return _buildArchivedRow(c);
   return _buildApprovedRow(c);
 }
 
-function _buildApprovedRow(c) {
+// Row monogram (name+avatar per the mock): org-colored initials tile, same
+// visual language as vacancy.js's company mini-card (U6).
+function _monoHtml(c) {
   var fg = (c.org_color || ["#F97316"])[0];
+  return (
+    '<span class="ct-mono" style="background:' +
+    escHtml(fg) +
+    '">' +
+    escHtml(_initials(c.name)) +
+    "</span>"
+  );
+}
+
+function _buildApprovedRow(c) {
   var counts = _counts(c);
-  var tierCls = c.calculated_tier
-    ? "ctier-" + c.calculated_tier.toLowerCase()
-    : "ctier-none";
-  var tierLabel = c.calculated_tier || "\u2014";
+  var tierHtml = c.calculated_tier
+    ? '<span class="vac-tier ' +
+      tierClass(c.calculated_tier) +
+      '">' +
+      escHtml(c.calculated_tier) +
+      "</span>"
+    : '<span class="ct-dim-empty">\u2014</span>';
   var fitBadge =
     c.alignment_score != null ? llmScoreBadge(c.alignment_score) : "\u2014";
   var likedCount = counts.liked;
@@ -1066,23 +1095,24 @@ function _buildApprovedRow(c) {
   var locText = c.offices ? escHtml(c.offices) : "\u2014";
 
   return (
-    '<tr class="ct-row" style="--row-accent:' +
-    fg +
-    '" onclick="openCompanyProfile(\'' +
+    '<tr class="ct-row" onclick="openCompanyProfile(\'' +
     jsAttr(c.slug) +
     "')\">" +
-    '<td class="ct-td ct-col-name"><span class="ct-name-text">' +
+    '<td class="ct-td ct-col-name"><span class="ct-name-wrap">' +
+    _monoHtml(c) +
+    '<span class="ct-name-text">' +
     escHtml(c.name) +
-    "</span></td>" +
-    '<td class="ct-td ct-col-tier"><span class="company-tier-badge ' +
-    tierCls +
-    '">' +
-    tierLabel +
-    "</span></td>" +
+    "</span></span></td>" +
+    '<td class="ct-td ct-col-tier">' +
+    tierHtml +
+    "</td>" +
     '<td class="ct-td ct-col-fit">' +
     fitBadge +
     "</td>" +
     _dimCellsHtml(c) +
+    '<td class="ct-td ct-col-open">' +
+    (c.applyable_count || 0) +
+    "</td>" +
     (SHOW_MPA
       ? '<td class="ct-td ct-col-mpa">' +
         (c.mpa_prestige != null ? llmScoreBadge(c.mpa_prestige) : "\u2014") +
@@ -1094,12 +1124,12 @@ function _buildApprovedRow(c) {
     '<td class="ct-td ct-col-new">' +
     newHtml +
     "</td>" +
-    '<td class="ct-td ct-col-freshness">' +
-    _freshnessHtml(c) +
-    "</td>" +
     '<td class="ct-td ct-col-loc"><span class="ct-location-text">' +
     locText +
     "</span></td>" +
+    '<td class="ct-td ct-col-freshness">' +
+    _freshnessHtml(c) +
+    "</td>" +
     '<td class="ct-td ct-col-monitoring">' +
     _monitoringHtml(c) +
     "</td>" +
@@ -1113,7 +1143,6 @@ function _buildApprovedRow(c) {
 }
 
 function _buildPendingRow(c) {
-  var fg = (c.org_color || ["#F97316"])[0];
   var fitBadge =
     c.alignment_score != null ? llmScoreBadge(c.alignment_score) : "\u2014";
   var locText = c.offices ? escHtml(c.offices) : "\u2014";
@@ -1146,14 +1175,14 @@ function _buildPendingRow(c) {
   }
 
   return (
-    '<tr class="ct-row" style="--row-accent:' +
-    fg +
-    '" onclick="openCompanyProfile(\'' +
+    '<tr class="ct-row" onclick="openCompanyProfile(\'' +
     jsAttr(c.slug) +
     "')\">" +
-    '<td class="ct-td ct-col-name ct-col-name--pending"><span class="ct-name-text">' +
+    '<td class="ct-td ct-col-name ct-col-name--pending"><span class="ct-name-wrap">' +
+    _monoHtml(c) +
+    '<span class="ct-name-text">' +
     escHtml(c.name) +
-    "</span>" +
+    "</span></span>" +
     hotBadge +
     "</td>" +
     '<td class="ct-td ct-col-cat ct-col-cat--pending">' +
@@ -1190,9 +1219,11 @@ function _buildArchivedRow(c) {
     '<tr class="ct-row ct-row--archived" onclick="openCompanyProfile(\'' +
     jsAttr(c.slug) +
     "')\">" +
-    '<td class="ct-td ct-col-name ct-col-name--archived"><span class="ct-name-text">' +
+    '<td class="ct-td ct-col-name ct-col-name--archived"><span class="ct-name-wrap">' +
+    _monoHtml(c) +
+    '<span class="ct-name-text">' +
     escHtml(c.name) +
-    "</span></td>" +
+    "</span></span></td>" +
     '<td class="ct-td ct-col-cat ct-col-cat--archived">' +
     catText +
     "</td>" +
