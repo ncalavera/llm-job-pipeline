@@ -459,6 +459,20 @@ test("_buildRow (archived tab): still renders the monogram, no crash without org
   state.companySubTab = "approved";
 });
 
+test("_buildRow (pending/archived tabs): a quote/apostrophe in company_id stays inert in the review buttons (jsAttr)", () => {
+  const evilId = "c1'-alert(1)-'";
+
+  state.companySubTab = "pending";
+  const pendingHtml = _buildRow({ ...tableCompany, company_id: evilId });
+  assert.ok(!pendingHtml.includes(`reviewCompany('${evilId}'`));
+
+  state.companySubTab = "archived";
+  const archivedHtml = _buildRow({ ...tableCompany, company_id: evilId });
+  assert.ok(!archivedHtml.includes(`reviewCompany('${evilId}'`));
+
+  state.companySubTab = "approved";
+});
+
 test("_buildRow: an XSS payload in the company name is inert in both text and the monogram's style attribute", () => {
   const payload = '"><script>window.pwned=1</script>';
   const evil = {

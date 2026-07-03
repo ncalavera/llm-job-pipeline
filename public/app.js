@@ -141,17 +141,6 @@ function renderLanguageSwitch() {
 }
 
 // ---------------------------------------------------------------------------
-// Dashboard style — "illustrated" (default) or "minimal".
-// Drives CSS via body[data-dashboard-style]; baked into data.js by the generator.
-// ---------------------------------------------------------------------------
-
-(function applyDashboardStyle() {
-  var style = (config && config.dashboard_style) || "illustrated";
-  if (style !== "illustrated" && style !== "minimal") style = "illustrated";
-  document.body.dataset.dashboardStyle = style;
-})();
-
-// ---------------------------------------------------------------------------
 // Sidebar nav counts (U3) — quiet mono counts derived client-side from live
 // state. The Vacancies count reuses derive.js's basketCounts with the exact
 // same visibility options catalog.js's own "Unreviewed" badge uses, so the
@@ -401,7 +390,7 @@ function notFoundPanelHtml(section) {
     '<div class="catalog-empty-hint">' +
     T("route_not_found_hint", "This page doesn’t exist or hasn’t loaded.") +
     "</div>" +
-    '<div style="margin-top:16px"><button class="cp-back-btn" onclick="' +
+    '<div style="margin-top:16px"><button class="nf-back-btn" onclick="' +
     backOnclick +
     '">' +
     T("route_back", "Go back") +
