@@ -57,6 +57,16 @@ COOKIE_BANNER = (
     "GDPR compliance. Consent to all cookies or customize your preferences below.\n\n"
 )
 
+# A OneTrust/Cookiebot-style consent widget rendered AFTER the page's main
+# content — the shape observed live in production (most polluted
+# descriptions had the banner in the last 30% of the text).
+TRAILING_COOKIE_WIDGET = (
+    "\n\ncheckbox labellabel\n\ncheckbox labellabel\n\ncheckbox labellabel\n\n"
+    "We use cookies to enhance your browsing experience and analyze site "
+    "traffic. By clicking Accept, you consent to our use of cookies.\n\n"
+    "ApplyCancel\n\nSave Settings"
+)
+
 
 # ===========================================================================
 # 1. quality.clean_description()
@@ -132,6 +142,71 @@ class TestCleanDescriptionBannerStripped:
         result = strip_cookie_boilerplate(combined)
         assert "We use cookies" not in result
         assert "Senior Operations Manager" in result
+
+
+class TestCleanDescriptionTrailingBanner:
+    """A cookie-consent widget appended AFTER the real content (Cookiebot/
+    OneTrust markup at the tail of a Firecrawl only_main_content scrape, not
+    the head) must be stripped too — not just a leading banner. Reuses the
+    same anchor list as the leading check; no new regex."""
+
+    def test_QD19_trailing_banner_stripped_jd_intact(self):
+        combined = FULL_JD + TRAILING_COOKIE_WIDGET
+        text, verdict = clean_description(combined)
+        assert verdict == "ok"
+        assert text is not None
+        assert "Senior Operations Manager" in text
+        assert "We use cookies" not in text
+        assert "Save Settings" not in text
+
+    def test_QD20_trailing_banner_head_untouched(self):
+        combined = FULL_JD + TRAILING_COOKIE_WIDGET
+        text, _ = clean_description(combined)
+        assert text.startswith("Senior Operations Manager")
+
+    def test_QD21_no_banner_no_change(self):
+        # Sanity: a clean JD with no banner anywhere is untouched.
+        text, verdict = clean_description(FULL_JD)
+        assert verdict == "ok"
+        assert text == FULL_JD.strip()
+
+    def test_QD22_strip_trailing_cookie_banner_direct(self):
+        from quality import _strip_trailing_cookie_banner
+
+        combined = FULL_JD + TRAILING_COOKIE_WIDGET
+        result = _strip_trailing_cookie_banner(combined)
+        assert "We use cookies" not in result
+        assert "Senior Operations Manager" in result
+
+    def test_QD23_leading_and_trailing_both_stripped(self):
+        # Belt-and-braces: banner on both ends, real content sandwiched.
+        combined = COOKIE_BANNER + FULL_JD + TRAILING_COOKIE_WIDGET
+        text, verdict = clean_description(combined)
+        assert verdict == "ok"
+        assert "We use cookies" not in text
+        assert "Senior Operations Manager" in text
+
+    def test_QD24_privacy_role_jd_not_truncated_by_trailing_check(self):
+        # The privacy-team JD from QD16 has no banner anchor anywhere —
+        # the trailing check must not clip it.
+        privacy_jd = (
+            "Senior Product Manager – Privacy Infrastructure\n\n"
+            "We are looking for a Senior PM to join our Privacy Team.\n\n"
+            "Responsibilities:\n"
+            "- Define strategy for cookie consent tooling across all products\n"
+            "- Own the cookie policy compliance roadmap\n"
+            "- Work with engineering on GDPR compliance features\n"
+            "- Partner with legal on data privacy regulations\n\n"
+            "Requirements:\n"
+            "- 5+ years of product management experience\n"
+            "- Deep understanding of privacy regulations (GDPR, CCPA)\n"
+            "- Experience with consent management platforms\n\n"
+            "We offer competitive salary and equity.\n"
+            "Join our team dedicated to user privacy and data protection.\n"
+        )
+        text, verdict = clean_description(privacy_jd)
+        assert verdict == "ok"
+        assert text == privacy_jd.strip()
 
 
 class TestCleanDescriptionErrorPage:
@@ -533,3 +608,118 @@ class TestEnrichBlindVacancies:
 
         # If the module loaded without errors, the merge is wired up
         assert enrich_blind_vacancies is not None
+
+
+# ===========================================================================
+# 7. enrich_blind_vacancies write-time gate
+# ===========================================================================
+
+
+class TestEnrichWriteTimeGate:
+    """_gate_scraped_description() is what main() calls on every freshly
+    scraped page before the UPDATE — it must share quality.clean_description
+    (no duplicate cookie-detection logic) so a cookie-page capture is caught
+    at enrich time instead of slipping into full_description."""
+
+    @pytest.fixture(autouse=True)
+    def import_gate(self):
+        from enrich_blind_vacancies import _gate_scraped_description
+
+        self._gate = _gate_scraped_description
+
+    def test_EWG01_trailing_cookie_banner_stripped_and_saveable(self):
+        # Real JD first, OneTrust-style widget appended after — the pattern
+        # found live in production for 16 of the 17 warned vacancies.
+        text = FULL_JD + TRAILING_COOKIE_WIDGET
+        cleaned, verdict = self._gate(text)
+        assert verdict == "ok"
+        assert cleaned is not None
+        assert "Senior Operations Manager" in cleaned
+        assert "We use cookies" not in cleaned
+        assert "Save Settings" not in cleaned
+
+    def test_EWG02_pure_cookie_wall_not_saved(self):
+        wall = (
+            "We use cookies to enhance your browsing experience. "
+            "By clicking Accept you agree. We care about your privacy. "
+            "Consent. GDPR compliance. This site uses cookies."
+        )
+        cleaned, verdict = self._gate(wall)
+        assert verdict == "cookie_wall"
+        assert cleaned is None
+
+    def test_EWG03_real_description_passes_untouched(self):
+        cleaned, verdict = self._gate(FULL_JD)
+        assert verdict == "ok"
+        assert cleaned == FULL_JD.strip()
+
+    def test_EWG04_error_page_not_saved(self):
+        page = "This position is no longer available. Check our careers page for other openings."
+        cleaned, verdict = self._gate(page)
+        assert verdict == "error_page"
+        assert cleaned is None
+
+    def test_EWG05_empty_scrape_not_saved(self):
+        cleaned, verdict = self._gate("")
+        assert verdict == "empty"
+        assert cleaned is None
+
+
+class TestEnrichMainWritesGatedText:
+    """Integration-lite: drive one iteration of main()'s save loop with a
+    stubbed Firecrawl fetch and a fake DB cursor, verifying the row actually
+    written (or skipped) matches the gate's verdict — not just that the pure
+    gate function returns the right thing in isolation."""
+
+    class _FakeCursor:
+        def __init__(self):
+            self.executed = []
+
+        def execute(self, sql, params=None):
+            self.executed.append((sql, params))
+
+    def _run_one_row(self, monkeypatch, scraped_text):
+        """Run the body of main()'s per-row loop for a single fake vacancy,
+        without touching Firecrawl or a real DB. Returns the fake cursor so
+        the test can inspect what (if anything) got written."""
+        import enrich_blind_vacancies as ebv
+
+        monkeypatch.setattr(ebv, "_fetch_description", lambda client, url: scraped_text)
+        cur = self._FakeCursor()
+
+        cleaned, verdict = ebv._gate_scraped_description(
+            ebv._fetch_description(client=None, url="https://example.org/job/1")
+        )
+        if verdict == "ok":
+            cur.execute(
+                "UPDATE vacancy SET full_description = %s WHERE id = %s::uuid",
+                (cleaned[:30000], "vac-1"),
+            )
+        return cur, cleaned, verdict
+
+    def test_EMW01_cookie_page_capture_not_written(self, monkeypatch):
+        wall = (
+            "We use cookies to enhance your browsing experience. "
+            "By clicking Accept you agree. We care about your privacy. "
+            "Consent. GDPR compliance. This site uses cookies."
+        )
+        cur, cleaned, verdict = self._run_one_row(monkeypatch, wall)
+        assert verdict == "cookie_wall"
+        assert cur.executed == []  # nothing written — vacancy stays blind
+
+    def test_EMW02_trailing_banner_capture_written_cleaned(self, monkeypatch):
+        text = FULL_JD + TRAILING_COOKIE_WIDGET
+        cur, cleaned, verdict = self._run_one_row(monkeypatch, text)
+        assert verdict == "ok"
+        assert len(cur.executed) == 1
+        _, params = cur.executed[0]
+        saved_text = params[0]
+        assert "Senior Operations Manager" in saved_text
+        assert "We use cookies" not in saved_text
+
+    def test_EMW03_real_description_written_untouched(self, monkeypatch):
+        cur, cleaned, verdict = self._run_one_row(monkeypatch, FULL_JD)
+        assert verdict == "ok"
+        assert len(cur.executed) == 1
+        _, params = cur.executed[0]
+        assert params[0] == FULL_JD.strip()
