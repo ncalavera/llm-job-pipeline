@@ -344,6 +344,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "funnel_in_progress": "In progress",
         "funnel_applied": "Applied",
         "funnel_passed": "Passed",
+        "triage_drag_hint": "drag cards between columns",
         # Geo / stats table (dynamic)
         "geo_city": "City",
         "geo_country": "Country",
@@ -724,6 +725,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "funnel_in_progress": "В работе",
         "funnel_applied": "Подано",
         "funnel_passed": "Откинутые",
+        "triage_drag_hint": "перетаскивайте карточки между колонками",
         # Geo / stats table
         "geo_city": "Город",
         "geo_country": "Страна",

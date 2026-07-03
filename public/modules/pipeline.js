@@ -17,11 +17,11 @@ import {
 import {
   escHtml,
   normalizeDedupeText,
-  dedupeTriageEntries,
+  computeTriageFunnel,
   formatDeadlineHtml,
   isVacancyStale,
   sourceAgeDays,
-  triageColumnFor,
+  qualityClass,
   safeUrl,
 } from "./helpers.js";
 import { T, dateLocale } from "./i18n.js";
@@ -61,6 +61,10 @@ function scrollToTriageColumn(colKey) {
 // Funnel visualization
 // ---------------------------------------------------------------------------
 
+// Header strip (design-protocol.md #6 "Board (Triage)"): the "Triage" title
+// plus an inline funnel track "in db \u2192 liked \u2192 triaged \u2192 in progress \u2192
+// applied \u2192 passed", each actionable stage jumping to its column. Sits on the
+// material \u2014 only .pipeline-board (the columns) is seated in the sheet.
 function renderTriageFunnel(funnelEl, metrics) {
   if (!funnelEl) return;
 
@@ -69,87 +73,84 @@ function renderTriageFunnel(funnelEl, metrics) {
       key: "base_total",
       label: T("funnel_in_database", "In database"),
       count: metrics.base_total,
-      hint: "all vacancies",
       scrollTo: "",
     },
     {
       key: "liked_queue",
       label: T("funnel_liked", "Liked"),
       count: metrics.liked_queue,
-      hint: "queued for triage",
       scrollTo: "liked",
     },
     {
       key: "triaged_total",
       label: T("funnel_triaged", "Triaged"),
       count: metrics.triaged_total,
-      hint: "review done",
       scrollTo: "to_apply",
     },
     {
       key: "in_work",
       label: T("funnel_in_progress", "In progress"),
       count: metrics.in_work,
-      hint: "apply + research + network",
       scrollTo: "to_apply",
     },
     {
       key: "applied_total",
       label: T("funnel_applied", "Applied"),
       count: metrics.applied_total,
-      hint: "submitted applications",
       scrollTo: "applied",
     },
     {
       key: "rejected_total",
       label: T("funnel_passed", "Passed"),
       count: metrics.rejected_total,
-      hint: "catalog + triage",
       scrollTo: "",
     },
   ];
 
+  const track = stages
+    .map(function (stage, idx) {
+      const isAction = !!stage.scrollTo;
+      const tag = isAction ? "button" : "span";
+      const cls =
+        "triage-stage" +
+        (isAction ? " triage-stage-btn" : "") +
+        " stage-" +
+        stage.key;
+      const attrs = isAction
+        ? ' type="button" data-scroll-col="' + stage.scrollTo + '"'
+        : "";
+      return (
+        "<" +
+        tag +
+        ' class="' +
+        cls +
+        '"' +
+        attrs +
+        ">" +
+        '<span class="triage-stage-count">' +
+        stage.count +
+        "</span> " +
+        stage.label +
+        "</" +
+        tag +
+        ">" +
+        (idx < stages.length - 1
+          ? '<span class="triage-stage-arrow">\u2192</span>'
+          : "")
+      );
+    })
+    .join("");
+
   funnelEl.innerHTML =
+    '<span class="triage-title">' +
+    escHtml(T("tab_triage", "Triage")) +
+    "</span>" +
     '<div class="triage-funnel-track">' +
-    stages
-      .map(function (stage, idx) {
-        const isAction = !!stage.scrollTo;
-        const tag = isAction ? "button" : "div";
-        const cls =
-          "triage-stage" +
-          (isAction ? " triage-stage-btn" : "") +
-          " stage-" +
-          stage.key;
-        const attrs = isAction
-          ? ' type="button" data-scroll-col="' + stage.scrollTo + '"'
-          : "";
-        return (
-          "<" +
-          tag +
-          ' class="' +
-          cls +
-          '"' +
-          attrs +
-          ">" +
-          '<span class="triage-stage-count">' +
-          stage.count +
-          "</span>" +
-          '<span class="triage-stage-label">' +
-          stage.label +
-          "</span>" +
-          '<span class="triage-stage-hint">' +
-          stage.hint +
-          "</span>" +
-          "</" +
-          tag +
-          ">" +
-          (idx < stages.length - 1
-            ? '<span class="triage-stage-arrow">\u2192</span>'
-            : "")
-        );
-      })
-      .join("") +
-    "</div>";
+    track +
+    "</div>" +
+    '<span class="triage-hint">' +
+    escHtml(T("triage_drag_hint", "drag cards between columns")) +
+    "</span>";
 
   funnelEl.querySelectorAll("[data-scroll-col]").forEach(function (btn) {
     btn.addEventListener("click", function () {
@@ -291,18 +292,12 @@ export function buildTriageCard(g, col, review) {
   }
 
   const orgHtml = g.company_slug
-    ? '<button type="button" class="pipe-card-org pipe-card-org-link" style="color:' +
-      (g.org_color ? g.org_color[0] : "var(--coral)") +
-      '" data-company-slug="' +
+    ? '<button type="button" class="pipe-card-org pipe-card-org-link" data-company-slug="' +
       escHtml(g.company_slug) +
       '" title="Open company card">' +
       escHtml(g.org) +
       "</button>"
-    : '<div class="pipe-card-org" style="color:' +
-      (g.org_color ? g.org_color[0] : "var(--coral)") +
-      '">' +
-      escHtml(g.org) +
-      "</div>";
+    : '<div class="pipe-card-org">' + escHtml(g.org) + "</div>";
 
   const titleHtml = firstUrl
     ? '<a class="pipe-card-title-link" href="' +
@@ -335,7 +330,11 @@ export function buildTriageCard(g, col, review) {
     escHtml(locs || "\u2014") +
     "</div>" +
     (g.llm_score != null
-      ? '<span class="pipe-card-score">' + g.llm_score + "</span>"
+      ? '<span class="pipe-card-score ' +
+        qualityClass(g.llm_score) +
+        '">' +
+        g.llm_score +
+        "</span>"
       : "") +
     buildTriageFreshness(g) +
     openLinkHtml +
@@ -349,20 +348,13 @@ export function buildTriageCard(g, col, review) {
 // already conveys the status, so no per-card status badge is needed.
 function buildTriageGroupCard(entries, col) {
   const head = entries[0];
-  const orgColor = head.org_color ? head.org_color[0] : "var(--coral)";
   const orgHtml = head.company_slug
-    ? '<button type="button" class="pipe-card-org pipe-card-org-link" style="color:' +
-      orgColor +
-      '" data-company-slug="' +
+    ? '<button type="button" class="pipe-card-org pipe-card-org-link" data-company-slug="' +
       escHtml(head.company_slug) +
       '" title="Open company card">' +
       escHtml(head.org) +
       "</button>"
-    : '<div class="pipe-card-org" style="color:' +
-      orgColor +
-      '">' +
-      escHtml(head.org) +
-      "</div>";
+    : '<div class="pipe-card-org">' + escHtml(head.org) + "</div>";
 
   const roles = entries.slice().sort(function (a, b) {
     return (b.llm_score || 0) - (a.llm_score || 0);
@@ -394,7 +386,11 @@ function buildTriageGroupCard(entries, col) {
         '<div class="pipe-grp-role-head">' +
         titleHtml +
         (g.llm_score != null
-          ? '<span class="pipe-grp-role-score">' + g.llm_score + "</span>"
+          ? '<span class="pipe-grp-role-score ' +
+            qualityClass(g.llm_score) +
+            '">' +
+            g.llm_score +
+            "</span>"
           : "") +
         "</div>" +
         (locs
@@ -467,56 +463,25 @@ export function renderPipeline() {
     reviewByVid[r.vacancy_id] = r;
   });
 
-  const buckets = {};
-  TRIAGE_COLUMNS.forEach(function (col) {
-    buckets[col.key] = [];
-  });
-
-  const catalogEntries = [];
-  let catalogRejectedTotal = 0;
-  const visibleGroups = groups.filter((g) => isGroupCompanyApproved(g));
-  visibleGroups.forEach(function (g) {
-    const status = getGroupStatus(g);
-    if ((STATUS_BASKET[status] || "unseen") === "passed") {
-      catalogRejectedTotal += 1;
-    }
+  // Tag every group with the two state.js-dependent facts the pure funnel
+  // helper needs (status, company approval) plus its private review, then
+  // hand the whole thing to computeTriageFunnel — the SAME dedupe/column
+  // reduction backs both the header strip and the board below, so they can
+  // never disagree (DHA-396, U12; pipeline.js can't be imported under
+  // `node --test`, so the derivation itself lives in helpers.js).
+  const entries = groups.map(function (g) {
     var entry = Object.assign({}, g);
-    entry._status = status;
+    entry._status = getGroupStatus(g);
+    entry._approved = isGroupCompanyApproved(g);
     entry._review = getReviewForGroup(g, reviewByVid);
-    catalogEntries.push(entry);
+    return entry;
   });
-  // Collapse cross-board copies onto one card, carrying the freshest last_seen
-  // across duplicates so a stale copy can't route a live role into "Expired".
-  const deduped = dedupeTriageEntries(catalogEntries, STATUS_PRI);
   const columnKeys = new Set(TRIAGE_COLUMNS.map((c) => c.key));
-  deduped.forEach(function (entry) {
-    // 'expiring' roles live in the Today tab, not the board; liked/to_apply/
-    // to_research/to_network that are no longer actual collapse into the shared
-    // "Expired" column; applied/skipped stay put (see triageColumnFor).
-    const col = triageColumnFor(entry, columnKeys);
-    if (col && buckets[col] !== undefined) buckets[col].push(entry);
+  const { buckets, metrics } = computeTriageFunnel(entries, {
+    statusPri: STATUS_PRI,
+    statusBasket: STATUS_BASKET,
+    columnKeys: columnKeys,
   });
-
-  const metrics = {
-    // Derived live from the raw payload — `groups` IS the scored-roles list the
-    // pipeline once shipped as stats.total_roles, so groups.length is that same
-    // number, computed in the browser and unable to drift (DHA-376 phase 2).
-    base_total: groups.length,
-    liked_queue: buckets.liked.length,
-    triaged_total:
-      buckets.to_apply.length +
-      buckets.to_research.length +
-      buckets.to_network.length +
-      buckets.skipped.length +
-      buckets.applied.length,
-    in_work:
-      buckets.to_apply.length +
-      buckets.to_research.length +
-      buckets.to_network.length,
-    applied_total: buckets.applied.length,
-    skipped_total: buckets.skipped.length,
-    rejected_total: catalogRejectedTotal,
-  };
 
   renderTriageFunnel(funnelEl, metrics);
   renderTriageControls(controlsEl, metrics);
@@ -542,9 +507,10 @@ export function renderPipeline() {
       '<div class="pipe-col" id="triageCol-' +
       col.key +
       '">' +
-      '<div class="pipe-col-header" style="border-color:' +
+      '<div class="pipe-col-header">' +
+      '<span class="pipe-col-dot" style="background:' +
       col.color +
-      '">' +
+      '"></span>' +
       '<span class="pipe-col-title">' +
       col.label +
       "</span>" +

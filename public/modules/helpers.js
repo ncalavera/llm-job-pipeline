@@ -983,6 +983,65 @@ export function dedupeTriageEntries(entries, statusPri) {
 }
 
 // ---------------------------------------------------------------------------
+// Triage funnel (DHA-396, U12) — the board header's "in db → liked → triaged →
+// applied" strip must never disagree with the columns it summarizes, so it is
+// derived by the SAME dedupeTriageEntries/triageColumnFor reduction the board
+// itself uses, not a second parallel count. Pure and DOM-free (pipeline.js
+// can't be imported under `node --test` — see the dedupe-lesson doc), so a
+// hand-built fixture can exercise every bucket transition directly.
+//
+// `entries` are plain objects already carrying `_status` (from
+// getGroupStatus) and `_approved` (from isGroupCompanyApproved) — the two
+// state.js-dependent lookups pipeline.js resolves before calling in. `opts`:
+// { statusPri, statusBasket, columnKeys } — the same lookup tables state.js
+// exports (STATUS_PRI / STATUS_BASKET / TRIAGE_COLUMNS keys).
+// ---------------------------------------------------------------------------
+
+export function computeTriageFunnel(entries, opts) {
+  const statusPri = opts.statusPri;
+  const statusBasket = opts.statusBasket;
+  const columnKeys = opts.columnKeys;
+
+  const baseTotal = entries.length;
+  const approved = entries.filter(function (e) {
+    return e._approved;
+  });
+
+  let rejectedTotal = 0;
+  approved.forEach(function (e) {
+    if ((statusBasket[e._status] || "unseen") === "passed") rejectedTotal += 1;
+  });
+
+  const buckets = {};
+  columnKeys.forEach(function (k) {
+    buckets[k] = [];
+  });
+  const deduped = dedupeTriageEntries(approved, statusPri);
+  deduped.forEach(function (entry) {
+    const col = triageColumnFor(entry, columnKeys);
+    if (col && buckets[col] !== undefined) buckets[col].push(entry);
+  });
+
+  const at = (key) => (buckets[key] || []).length;
+  const metrics = {
+    base_total: baseTotal,
+    liked_queue: at("liked"),
+    triaged_total:
+      at("to_apply") +
+      at("to_research") +
+      at("to_network") +
+      at("skipped") +
+      at("applied"),
+    in_work: at("to_apply") + at("to_research") + at("to_network"),
+    applied_total: at("applied"),
+    skipped_total: at("skipped"),
+    rejected_total: rejectedTotal,
+  };
+
+  return { buckets, metrics };
+}
+
+// ---------------------------------------------------------------------------
 // Minimal markdown renderer
 // ---------------------------------------------------------------------------
 
