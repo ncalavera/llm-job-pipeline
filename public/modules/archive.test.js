@@ -88,7 +88,8 @@ globalThis.window = {
 globalThis.location = { protocol: "file:", origin: "" };
 globalThis.localStorage = { getItem: () => null, setItem: () => {} };
 
-const { initArchive, renderArchive } = await import("./archive.js");
+const { initArchive, renderArchive, openArchiveRow, restoreArchivedVacancy } =
+  await import("./archive.js");
 
 // --- Synthetic archived rows in the shipped _build_group shape -------------
 
@@ -223,6 +224,85 @@ test("row markup carries the score tile and title/subline hooks", () => {
   assert.ok(html.includes("archive-row-title"), "title hook present");
   assert.ok(html.includes("archive-row-sub"), "subline hook present");
   assert.ok(html.includes("GoodOrg — Role"), "title text renders");
+});
+
+test("a row opens the vacancy page like a Browse row (clickable + keyboard-operable)", () => {
+  sel.value = "";
+  search.value = "";
+  setRows([archivedRow("v-open", "OpenOrg")]);
+  renderArchive();
+
+  const html = grid.innerHTML;
+  // Whole row is a button that routes to the vacancy detail page.
+  assert.match(html, /class="archive-row" data-id="v-open" role="button"/);
+  assert.ok(html.includes("openArchiveRow('v-open')"), "row click routes");
+  assert.ok(
+    html.includes("event.key==='Enter'") && html.includes("event.key===' '"),
+    "Enter/Space open the row (keyboard-operable)",
+  );
+});
+
+test("the title's outbound link stops propagation so it doesn't also open the page", () => {
+  sel.value = "";
+  search.value = "";
+  setRows([archivedRow("v-link", "LinkedOrg")]);
+  renderArchive();
+  const html = grid.innerHTML;
+  assert.ok(html.includes("<a "), "the title link is present");
+  assert.match(
+    html,
+    /<a [^>]*onclick="event\.stopPropagation\(\)"/,
+    "the title link stops propagation",
+  );
+});
+
+test("each row carries a Restore control that stops propagation", () => {
+  sel.value = "";
+  search.value = "";
+  setRows([archivedRow("v-r", "RestoreOrg")]);
+  renderArchive();
+  const html = grid.innerHTML;
+  assert.ok(html.includes("archive-row-restore"), "restore button hook");
+  assert.match(
+    html,
+    /onclick="event\.stopPropagation\(\);restoreArchivedVacancy\('v-r'\)"/,
+    "restore stops propagation and calls the handler",
+  );
+});
+
+test("Restore optimistically drops the row, then reverts when the save can't persist (static mode)", async () => {
+  sel.value = "";
+  search.value = "";
+  setRows([archivedRow("keep", "KeepOrg"), archivedRow("go", "GoneOrg")]);
+  renderArchive();
+  assert.equal(cardCount(), 2);
+
+  // Optimistic removal is synchronous (the grid re-renders before the save
+  // resolves).
+  restoreArchivedVacancy("go");
+  assert.equal(cardCount(), 1, "the restored row leaves the archive at once");
+  assert.ok(!grid.innerHTML.includes("GoneOrg"), "the removed row is gone");
+
+  // This file:// shim has no API host (API_BASE=""), so the save resolves
+  // false and the row comes back — the honest degradation a static view gives.
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(cardCount(), 2, "a failed save reverts the removal");
+  assert.ok(grid.innerHTML.includes("GoneOrg"), "the row is restored on error");
+});
+
+test("restoring an unknown id is a no-op (never throws, grid unchanged)", () => {
+  sel.value = "";
+  search.value = "";
+  setRows([archivedRow("only", "OnlyOrg")]);
+  renderArchive();
+  assert.doesNotThrow(() => restoreArchivedVacancy("does-not-exist"));
+  assert.equal(cardCount(), 1);
+});
+
+test("openArchiveRow no-ops safely when the vacancy route isn't wired", () => {
+  // window.openVacancyRoute is only defined once app.js loads; the archive
+  // module must not throw when a test (or a cold import) calls it first.
+  assert.doesNotThrow(() => openArchiveRow("whatever"));
 });
 
 test("row output escapes malicious text in both text and attribute positions", () => {

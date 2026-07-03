@@ -19,6 +19,7 @@
 import {
   state,
   groupsById,
+  archivedGroupsById,
   getCompanies,
   getGroupStatus,
   STATUS_BASKET,
@@ -71,13 +72,28 @@ export function sourceLabel(strategy) {
 // Which action buttons the page shows for a live status. Mirrors the catalog
 // card's per-basket thumb logic (unseen → like+pass, liked → pass, passed →
 // like) and adds the primary "Move to apply", hidden once the role is already
-// in/through apply so the CTA never contradicts the status chip.
+// in/through apply so the CTA never contradicts the status chip. Research /
+// Network are the two remaining triage dispositions (both valid /api/save
+// statuses) surfaced here too, each hidden once the role already sits in that
+// exact status or has been applied to. An archived role is a read-only page
+// (reached from the Archive list) - no decision buttons, only Open posting.
 export function vacancyActions(status) {
+  if (status === "archived") {
+    return {
+      canLike: false,
+      canPass: false,
+      canApply: false,
+      canResearch: false,
+      canNetwork: false,
+    };
+  }
   const basket = STATUS_BASKET[status] || "unseen";
   return {
     canLike: basket === "unseen" || basket === "passed",
     canPass: basket === "unseen" || basket === "liked",
     canApply: status !== "to_apply" && status !== "applied",
+    canResearch: status !== "to_research" && status !== "applied",
+    canNetwork: status !== "to_network" && status !== "applied",
   };
 }
 
@@ -91,6 +107,7 @@ const STATUS_CHIP_KEYS = {
   to_research: ["vac_status_to_research", "Research"],
   to_network: ["vac_status_to_network", "Networking"],
   applied: ["vac_status_applied", "Applied"],
+  archived: ["vac_status_archived", "Archived"],
 };
 
 export function statusChipLabel(status, t) {
@@ -374,6 +391,23 @@ export function vacancyPageHtml(g, company, status, opts) {
       escHtml(t("vac_pass", "Pass")) +
       "</button>"
     : "";
+  // Research / Network: the two triage dispositions that used to be reachable
+  // only from the Triage board. Same inline-onclick + status path as the other
+  // action buttons; gated by vacancyActions above.
+  const researchBtn = acts.canResearch
+    ? '<button class="vac-btn vac-btn--research" onclick="vacancyResearch(\'' +
+      idAttr +
+      "')\">" +
+      escHtml(t("vac_research", "Research")) +
+      "</button>"
+    : "";
+  const networkBtn = acts.canNetwork
+    ? '<button class="vac-btn vac-btn--network" onclick="vacancyNetwork(\'' +
+      idAttr +
+      "')\">" +
+      escHtml(t("vac_network", "Network")) +
+      "</button>"
+    : "";
 
   const header =
     '<div class="vac-header">' +
@@ -405,6 +439,8 @@ export function vacancyPageHtml(g, company, status, opts) {
     "</div>" +
     '<div class="vac-actions">' +
     applyBtn +
+    researchBtn +
+    networkBtn +
     likeBtn +
     passBtn +
     openPosting +
@@ -623,15 +659,25 @@ function pageOpts() {
 export function renderVacancyDetail(id) {
   const host = document.getElementById("vacancyDetail");
   if (!host) return;
-  const g = groupsById.get(id);
-  if (!g) {
-    host.innerHTML = vacancyNotFoundHtml(pageOpts());
-    return;
+  let g = groupsById.get(id);
+  let status;
+  if (g) {
+    status = getGroupStatus(g);
+  } else {
+    // Archived rows aren't in groupsById (kept out so they can't skew company
+    // rollups - see state.js archivedGroupsById). Resolve the id there so an
+    // Archive-list click opens a real, read-only page instead of "not found".
+    g = archivedGroupsById.get(id);
+    if (!g) {
+      host.innerHTML = vacancyNotFoundHtml(pageOpts());
+      return;
+    }
+    status = "archived";
   }
   // g.company_slug is a dead field (data_prep.py never sets it) — resolve the
   // parent company by the real shared key instead (post-ship fast fix #6).
   const company = resolveVacancyCompany(g, getCompanies());
-  host.innerHTML = vacancyPageHtml(g, company, getGroupStatus(g), pageOpts());
+  host.innerHTML = vacancyPageHtml(g, company, status, pageOpts());
 }
 
 export function vacancyLike(id) {
@@ -642,6 +688,16 @@ export function vacancyLike(id) {
 export function vacancyPass(id) {
   const g = groupsById.get(id);
   if (g) updateStatus(id, g.member_ids || [], "passed");
+}
+
+export function vacancyResearch(id) {
+  const g = groupsById.get(id);
+  if (g) updateStatus(id, g.member_ids || [], "to_research");
+}
+
+export function vacancyNetwork(id) {
+  const g = groupsById.get(id);
+  if (g) updateStatus(id, g.member_ids || [], "to_network");
 }
 
 export function vacancyMoveToApply(id) {

@@ -36,6 +36,13 @@ export const API_BASE =
 
 // O(1) lookup maps
 export const groupsById = new Map(groups.map((g) => [g.id, g]));
+// Archived rows live in their OWN index, deliberately NOT in groupsById: the
+// company rollups (companies.js _companyRoles / derive.js companyRollup) join a
+// company's vacancy_ids through groupsById, and archived ids CAN appear in that
+// list (data_prep ships all statuses) — folding them into groupsById would
+// silently change every company's vacancy/applyable counts. Kept separate so
+// the vacancy detail route can still resolve an archived id (read-only page).
+export const archivedGroupsById = new Map(archivedGroups.map((g) => [g.id, g]));
 export const companiesBySlug = new Map(companies.map((c) => [c.slug, c]));
 export const companiesList = Array.isArray(companies) ? companies : [];
 
@@ -349,6 +356,12 @@ export function applySnapshot(payload) {
     g.member_ids = Array.isArray(g.member_ids) ? g.member_ids : [];
     if (!state.dbData[g.id]) state.dbData[g.id] = { status: "unseen" };
     groupsById.set(g.id, g);
+  }
+
+  archivedGroupsById.clear();
+  for (const g of archivedGroups) {
+    g.member_ids = Array.isArray(g.member_ids) ? g.member_ids : [];
+    archivedGroupsById.set(g.id, g);
   }
 
   companiesBySlug.clear();

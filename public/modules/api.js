@@ -50,9 +50,14 @@ export function hideOfflineBanner() {
 // Save to server
 // ---------------------------------------------------------------------------
 
+// Fire-and-forget for the auto-save handler, but also returns a Promise<boolean>
+// so a caller that needs to revert on failure (archive Restore, mirroring
+// companies.js's saveCompanyReview) can await the outcome. No API_BASE (a
+// static file:// view with no host) resolves false - an honest "couldn't save"
+// the caller degrades on, same as an HTTP error would.
 export function saveToServer(id, status) {
-  if (!API_BASE) return;
-  fetch(API_BASE + "/api/save", {
+  if (!API_BASE) return Promise.resolve(false);
+  return fetch(API_BASE + "/api/save", {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
@@ -68,16 +73,19 @@ export function saveToServer(id, status) {
           "\u2705 Saved: " + new Date().toLocaleTimeString(),
           false,
         );
+        return true;
       } else {
         console.error("Save API error:", r.status, r.statusText);
         state.apiHealthy = false;
         showOfflineBanner();
+        return false;
       }
     })
     .catch(function (e) {
       console.error("Save network error:", e);
       state.apiHealthy = false;
       showOfflineBanner();
+      return false;
     });
 }
 

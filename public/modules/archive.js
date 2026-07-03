@@ -3,16 +3,29 @@
 // =============================================================================
 
 import { archivedGroups } from "./state.js";
-import { escHtml, relativeTime, safeUrl, qualityBand } from "./helpers.js";
+import { saveToServer } from "./api.js";
+import {
+  escHtml,
+  jsAttr,
+  relativeTime,
+  safeUrl,
+  qualityBand,
+} from "./helpers.js";
 import { T } from "./i18n.js";
 
 // Archived rows are NOT in state.js's groupsById (that map is built from the
-// live `groups` array only), so window.openVacancyRoute(id) would render the
-// vacancy page's "not found" panel for an archived id. Rows stay non-clickable
-// (only the title's outbound link, when present, is interactive) rather than
-// wiring a route that always 404s.
+// live `groups` array only) - so they get their own archivedGroupsById index,
+// which the vacancy route now consults (state.js / vacancy.js). A row click
+// opens that read-only detail page exactly like a Browse row does; a per-row
+// Restore writes the pre-archive-less default ('unseen') back through the same
+// /api/save channel every status write uses.
 
 let archiveInited = false;
+
+// The ordered id queue for the currently-rendered archive rows - what a row
+// click hands the vacancy route as its ←/→ browse queue (mirrors catalog.js's
+// _browseQueue). Recomputed on every renderArchive.
+let _archiveQueue = [];
 
 export function initArchive() {
   if (!archiveInited) {
@@ -60,6 +73,9 @@ export function renderArchive() {
     }
     return true;
   });
+
+  // The row-click browse queue for this filtered view (parity with Browse).
+  _archiveQueue = filtered.map((g) => g.id);
 
   const countEl = document.getElementById("archiveResultsCount");
   if (countEl) {
@@ -117,10 +133,12 @@ function buildArchiveRow(g) {
   const firstUrl = safeUrl(
     (g.locations || []).find((l) => l.url)?.url || g.org_url || "",
   );
+  // stopPropagation: the whole row now opens the vacancy page, so the title's
+  // outbound link must not also trigger that navigation on click.
   const titleHtml = firstUrl
     ? '<a href="' +
       escHtml(firstUrl) +
-      '" target="_blank" rel="noopener">' +
+      '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' +
       escHtml(g.title) +
       "</a>"
     : escHtml(g.title);
@@ -138,11 +156,16 @@ function buildArchiveRow(g) {
   }
 
   const seenText = g.first_seen ? relativeTime(g.first_seen, T) : "—";
+  const idAttr = jsAttr(g.id);
 
   return (
     '<div class="archive-row" data-id="' +
     escHtml(g.id) +
-    '">' +
+    '" role="button" tabindex="0" onclick="openArchiveRow(\'' +
+    idAttr +
+    "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openArchiveRow('" +
+    idAttr +
+    "')}\">" +
     '<div class="archive-row-score ' +
     scoreCls +
     '">' +
@@ -159,7 +182,23 @@ function buildArchiveRow(g) {
     '<span class="archive-row-seen">' +
     escHtml(seenText) +
     "</span>" +
+    restoreBtnHtml(idAttr) +
     "</div>"
+  );
+}
+
+// Per-row un-archive control. stopPropagation so it never also opens the
+// vacancy page; the write + optimistic removal live in restoreArchivedVacancy.
+function restoreBtnHtml(idAttr) {
+  const restoreLabel = escHtml(T("archive_restore", "Restore"));
+  return (
+    '<button class="archive-row-restore" onclick="event.stopPropagation();restoreArchivedVacancy(\'' +
+    idAttr +
+    '\')" title="' +
+    restoreLabel +
+    '" aria-label="' +
+    restoreLabel +
+    '">↩</button>'
   );
 }
 
@@ -182,11 +221,17 @@ function buildArchiveFallbackRow(g) {
     safeField(() => g.company_name || g.org, "") || "Unknown company",
   );
   const title = escHtml(safeField(() => g.title, "") || "Untitled role");
-  const id = escHtml(String(safeField(() => g.id, "")));
+  const rawId = String(safeField(() => g.id, ""));
+  const id = escHtml(rawId);
+  const idAttr = jsAttr(rawId);
   return (
     '<div class="archive-row" data-id="' +
     id +
-    '">' +
+    '" role="button" tabindex="0" onclick="openArchiveRow(\'' +
+    idAttr +
+    "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openArchiveRow('" +
+    idAttr +
+    "')}\">" +
     '<div class="archive-row-score vac-score--none">—</div>' +
     '<div class="archive-row-role">' +
     '<div class="archive-row-title">' +
@@ -197,6 +242,43 @@ function buildArchiveFallbackRow(g) {
     "</div>" +
     "</div>" +
     '<span class="archive-row-seen">—</span>' +
+    restoreBtnHtml(idAttr) +
     "</div>"
   );
+}
+
+// ---------------------------------------------------------------------------
+// Row actions
+// ---------------------------------------------------------------------------
+
+// Open an archived role's read-only detail page (mirrors catalog.js's
+// openCatalogRow): hands the vacancy route the current filtered id queue so
+// ←/→ walk the archive list. window.openVacancyRoute is wired by app.js.
+export function openArchiveRow(id) {
+  if (typeof window !== "undefined" && window.openVacancyRoute) {
+    window.openVacancyRoute(id, { context: "archive", queue: _archiveQueue });
+  }
+}
+
+// Un-archive: optimistically drop the row, then persist 'unseen' via the same
+// /api/save channel every status write uses. There is no stored pre-archive
+// status (archiving overwrites `status` in the DB), so restore lands on
+// 'unseen' - the vacancy re-enters the normal review flow on the next fetch.
+// Revert-on-error mirrors companies.js's reviewCompany (saveCompanyReview).
+export function restoreArchivedVacancy(id) {
+  const idx = archivedGroups.findIndex((g) => g && g.id === id);
+  if (idx === -1) return;
+  const [removed] = archivedGroups.splice(idx, 1);
+  renderArchive();
+  Promise.resolve(saveToServer(id, "unseen")).then((ok) => {
+    if (!ok) {
+      archivedGroups.splice(idx, 0, removed);
+      renderArchive();
+    }
+  });
+}
+
+if (typeof window !== "undefined") {
+  window.openArchiveRow = openArchiveRow;
+  window.restoreArchivedVacancy = restoreArchivedVacancy;
 }

@@ -9,9 +9,11 @@ import {
   STATUS_BASKET,
   getGroupStatus,
   isGroupCompanyApproved,
+  emit,
 } from "./state.js";
 import {
   escHtml,
+  jsAttr,
   getFlagForChip,
   isVacancyExpired,
   qualityClass,
@@ -24,6 +26,10 @@ const HELP_TEXT =
 const REMOTE_LABEL = T("geo_remote_unknown", "Remote / Unknown");
 const COUNTRY_ONLY_LABEL = "(whole country)";
 const EMPTY_LABEL = "🏢 No data";
+// Browse's search box matches location text; remote roles carry a "Remote"
+// location string, so this term filters Browse to them when the remote row is
+// clicked (the raw city/country are empty for that bucket).
+const REMOTE_FILTER_TERM = "Remote";
 
 // The shared visibility filter (approved + score floor) and the expiry
 // re-bucketing behind the "liked" column live in derive.js — geoBuckets reads
@@ -128,8 +134,17 @@ function rowHtml(r) {
       ? `<span class="ct-liked-nonzero">${r.liked}</span>`
       : `<span class="ct-liked-zero">0</span>`;
   const rowCls = r.isRemote ? "ct-row ct-row--remote" : "ct-row";
+  // Row click drops this place into Browse's search box (keyboard-operable via
+  // Enter/Space, same pattern as the sortable headers). A blank term (no
+  // resolvable place) leaves the row inert rather than filtering to everything.
+  const term = r.filterTerm || "";
+  const clickAttrs = term
+    ? ` role="button" tabindex="0"` +
+      ` onclick="filterCatalogByLocation('${jsAttr(term)}')"` +
+      ` onkeydown="if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();filterCatalogByLocation('${jsAttr(term)}')}"`
+    : "";
   return (
-    `<tr class="${rowCls}">` +
+    `<tr class="${rowCls}"${clickAttrs}>` +
     `<td class="ct-td ct-col-name"><span class="ct-name-text">${escHtml(r.city)}</span></td>` +
     `<td class="ct-td ct-col-country">${countryCell}</td>` +
     `<td class="ct-td ct-col-vac">${r.count}</td>` +
@@ -137,6 +152,14 @@ function rowHtml(r) {
     `<td class="ct-td ct-col-fit">${meanCell}</td>` +
     `</tr>`
   );
+}
+
+// Apply a place as a Browse filter: reuses the existing switchToCatalog seam
+// (app.js) that the company profile's "view roles in Browse" already rides,
+// dropping the term into Browse's search box. Exposed on window for the inline
+// onclick on dynamically-rendered rows.
+export function filterCatalogByLocation(term) {
+  emit("switchToCatalog", { locSearch: term });
 }
 
 function buildHtml(rows, sortCol, sortAsc) {
@@ -164,6 +187,10 @@ export function renderStats() {
   // geoBuckets keeps raw city/country (empty = whole-country or remote); apply
   // the display labels + flags here so the derivation stays i18n-free.
   for (const r of rows) {
+    // Capture a Browse filter term from the RAW place BEFORE the display labels
+    // overwrite it: city if known, else country, else "Remote" (which matches
+    // the location text remote roles carry). Drives the row's click-to-filter.
+    r.filterTerm = r.isRemote ? REMOTE_FILTER_TERM : r.city || r.country || "";
     if (r.isRemote) {
       r.city = REMOTE_LABEL;
       r.country = "—";
@@ -182,5 +209,6 @@ export function initStats() {
   renderStats();
 }
 
-// Expose for inline onclick in dynamically rendered <th>s
+// Expose for inline onclick in dynamically rendered <th>s / rows
 window.sortStatsTable = sortStatsTable;
+window.filterCatalogByLocation = filterCatalogByLocation;
