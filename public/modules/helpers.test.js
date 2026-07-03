@@ -14,6 +14,7 @@ import {
   isVacancyGone,
   triageColumnFor,
   dedupeTriageEntries,
+  computeTriageFunnel,
   screenScoreBadge,
   safeUrl,
   renderLocationChips,
@@ -175,6 +176,108 @@ test("dedupe: a stale copy never routes a still-live role to 'expired'", () => {
     assert.equal(survivors.length, 1);
     assert.equal(triageColumnFor(survivors[0], COLS), "to_apply");
   }
+});
+
+// --- computeTriageFunnel (DHA-396, U12) -------------------------------------
+// The board header's funnel strip must equal what the columns it summarizes
+// would show — it is built from the SAME dedupeTriageEntries/triageColumnFor
+// reduction, not a second parallel count (AE3).
+
+const FUNNEL_STATUS_PRI = {
+  to_apply: 0,
+  to_research: 1,
+  to_network: 2,
+  applied: 3,
+  skipped: 4,
+  liked: 5,
+  expiring: 6,
+  passed: 7,
+  unseen: 8,
+};
+const FUNNEL_STATUS_BASKET = {
+  liked: "liked",
+  to_apply: "liked",
+  to_research: "liked",
+  to_network: "liked",
+  applied: "liked",
+  expiring: "liked",
+  unseen: "unseen",
+  passed: "passed",
+  skipped: "passed",
+};
+const FUNNEL_OPTS = {
+  statusPri: FUNNEL_STATUS_PRI,
+  statusBasket: FUNNEL_STATUS_BASKET,
+  columnKeys: COLS,
+};
+
+test("computeTriageFunnel: counts match a hand-built fixture across bucket transitions (AE3)", () => {
+  const entries = [
+    { _status: "liked", _approved: true, org: "A", title: "1" },
+    { _status: "liked", _approved: true, org: "B", title: "2" },
+    { _status: "liked", _approved: true, org: "C", title: "3" },
+    { _status: "applied", _approved: true, org: "D", title: "4" },
+    { _status: "to_apply", _approved: true, org: "E", title: "5" },
+    { _status: "passed", _approved: true, org: "F", title: "6" },
+    { _status: "skipped", _approved: true, org: "G", title: "7" },
+    // Not company-approved: counted in base_total only, never bucketed —
+    // mirrors visibleGroups' company-approval gate in pipeline.js.
+    { _status: "liked", _approved: false, org: "H", title: "8" },
+  ];
+  const { buckets, metrics } = computeTriageFunnel(entries, FUNNEL_OPTS);
+  assert.equal(metrics.base_total, 8);
+  assert.equal(metrics.liked_queue, 3);
+  assert.equal(metrics.applied_total, 1);
+  assert.equal(metrics.in_work, 1); // to_apply only
+  assert.equal(metrics.triaged_total, 3); // to_apply + skipped + applied
+  assert.equal(metrics.skipped_total, 1);
+  // 'passed' and 'skipped' both map to the "passed" basket (STATUS_BASKET),
+  // so both F and G count toward rejected_total.
+  assert.equal(metrics.rejected_total, 2);
+  assert.equal(buckets.liked.length, 3);
+  assert.equal(buckets.applied.length, 1);
+});
+
+// Regression per the dedupe lesson: without merging last_seen across
+// duplicates, a stale copy winning the tie would misroute the survivor to
+// "expired" in one insertion order but not the other, making the funnel
+// disagree with itself depending on fetch order alone.
+test("computeTriageFunnel: duplicate-order invariance", () => {
+  const stale = () => ({
+    org: "Acme",
+    title: "Engineer",
+    _status: "to_apply",
+    _approved: true,
+    last_seen: daysAgoISO(30),
+  });
+  const fresh = () => ({
+    org: "Acme",
+    title: "Engineer",
+    _status: "to_apply",
+    _approved: true,
+    last_seen: daysAgoISO(1),
+  });
+  const results = [
+    [stale(), fresh()],
+    [fresh(), stale()],
+  ].map((order) => computeTriageFunnel(order, FUNNEL_OPTS).metrics);
+  assert.deepEqual(results[0], results[1]);
+  assert.equal(results[0].base_total, 2);
+  assert.equal(results[0].in_work, 1); // deduped to one still-live to_apply card
+});
+
+test("computeTriageFunnel: empty payload -> zeros", () => {
+  const { buckets, metrics } = computeTriageFunnel([], FUNNEL_OPTS);
+  assert.deepEqual(metrics, {
+    base_total: 0,
+    liked_queue: 0,
+    triaged_total: 0,
+    in_work: 0,
+    applied_total: 0,
+    skipped_total: 0,
+    rejected_total: 0,
+  });
+  for (const k of COLS) assert.equal(buckets[k].length, 0);
 });
 
 // --- screenScoreBadge -------------------------------------------------------
