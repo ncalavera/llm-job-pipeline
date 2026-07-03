@@ -119,7 +119,7 @@ def _guard_shared_snapshot_profile() -> None:
     checkout's copy — resolves the bundled EXAMPLE profile. On the
     Postgres/Supabase backend that payload (settings, language, thresholds) is
     upserted into the SINGLE shared ``dashboard_snapshot`` row, overwriting the
-    owner's real configuration (e.g. flipping the dashboard language to English).
+    user profile's real values (e.g. flipping the dashboard language to English).
     ``prompts`` first tries the main checkout's profile; if that ALSO fails and
     we are on Postgres, stop here rather than corrupt shared state.
 
@@ -142,7 +142,7 @@ def _guard_shared_snapshot_profile() -> None:
         "Refusing to write the shared production dashboard snapshot: no real "
         "config/user_profile.md was found, so the bundled EXAMPLE profile would "
         "be baked into shared state (settings, language, thresholds), "
-        "overwriting the owner's real configuration. This is the linked-worktree "
+        "overwriting the user profile's real values. This is the linked-worktree "
         "trap — user_profile.md is gitignored and does not travel with a git "
         "worktree. Re-run from the MAIN checkout (where config/user_profile.md "
         "exists), or set USER_PROFILE_PATH to your real profile. Nothing was "

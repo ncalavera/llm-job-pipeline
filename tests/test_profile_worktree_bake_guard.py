@@ -4,7 +4,7 @@
 never carries it. A pipeline run launched from a worktree would fall through to
 the bundled EXAMPLE profile and bake DEFAULT settings (language, thresholds…)
 into the SINGLE shared ``dashboard_snapshot`` row in prod Supabase — silently
-overwriting the owner's real configuration. Two layers close it:
+overwriting the user profile's real values. Two layers close it:
 
   1. resolution recovers the REAL profile from the MAIN checkout's ``config/``
      when a linked worktree lacks its own copy (``prompts``);
