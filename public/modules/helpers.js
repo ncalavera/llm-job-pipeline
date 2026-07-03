@@ -868,6 +868,42 @@ export function hardReqHtml(g) {
   return `<div class="hard-req-row">${eligChip}${tagsHtml}</div>`;
 }
 
+// ---------------------------------------------------------------------------
+// Sky redesign — quality/tier color helpers (DHA-385, U1)
+// One place for score/tier coloring so no hex value is scattered across
+// render modules; each returns a CSS class name bound to the token layer in
+// style.css (`--q-*` / `--tier-*`).
+// ---------------------------------------------------------------------------
+
+// Quality band a numeric score falls into. Boundaries: >=70 good, 50-69
+// moderate, <50 weak (also covers null/undefined/NaN as weak).
+export function qualityBand(score) {
+  if (score >= 70) return "good";
+  if (score >= 50) return "moderate";
+  return "weak";
+}
+
+export function qualityClass(score) {
+  return "q-" + qualityBand(score);
+}
+
+const TIER_CLASSES = { S: "tier-s", A: "tier-a", B: "tier-b", C: "tier-c" };
+
+export function tierClass(tier) {
+  return TIER_CLASSES[tier] || "tier-unknown";
+}
+
+// Word for a score, matching the quality bands one level finer (protocol
+// section 1): 90+ Exceptional, 80-89 Strong, 70-79 Good, 50-69 Moderate,
+// <50 Weak.
+export function scoreLabel(score) {
+  if (score >= 90) return "Exceptional";
+  if (score >= 80) return "Strong";
+  if (score >= 70) return "Good";
+  if (score >= 50) return "Moderate";
+  return "Weak";
+}
+
 export function ratingDotsHtml(value, max) {
   max = max || 5;
   const filled = Math.round(value || 0);
