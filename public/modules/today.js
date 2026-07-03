@@ -396,14 +396,15 @@ export function renderToday() {
     },
     passAction,
   ];
+  // Plain cobalt text links, no emoji glyphs — the calm sheet aesthetic the
+  // mock shows for every Today row (DHA-412 items #2/#3).
   const newActions = [
     {
       action: "like",
       label: T("today_act_like", "Like"),
-      glyph: "👍",
       cls: "act-like",
     },
-    { ...passAction, glyph: "👎" },
+    passAction,
   ];
 
   const expiring = expiringRows.map((r) =>

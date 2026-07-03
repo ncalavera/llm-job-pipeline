@@ -763,7 +763,9 @@ export function formatDeadlineHtml(deadline, cssPrefix, opts) {
     year: "numeric",
     timeZone: "UTC",
   });
-  let label = "\u23F0 " + t("deadline_prefix", "Deadline:") + " " + dateStr;
+  // Plain text; urgency is carried by the pill's colour class, not a \u23F0 glyph
+  // (design-protocol "no decorative icons", DHA-412 #3).
+  let label = t("deadline_prefix", "Deadline:") + " " + dateStr;
   if (isExpired) {
     label += " " + t("deadline_expired", "(expired)");
   } else if (diffDays === 0) {

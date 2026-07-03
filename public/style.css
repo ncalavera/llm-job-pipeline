@@ -521,18 +521,21 @@ body::after {
   outline: 2px solid var(--cobalt);
   outline-offset: 2px;
 }
+/* Sort chips are pure interaction controls — they reorder the table, they do
+   not signal quality — so they're cobalt, never green (design-protocol.md §1:
+   "cobalt = interaction ONLY, green = quality"). DHA-412 item #1. */
 .chip.chip-sort {
-  border-color: var(--emerald);
-  color: var(--emerald);
+  border-color: var(--cobalt);
+  color: var(--cobalt);
 }
 .chip.chip-sort:hover {
-  background: var(--emerald);
+  background: var(--cobalt);
   color: white;
 }
 .chip.chip-sort.active {
-  background: var(--emerald);
+  background: var(--cobalt);
   color: white;
-  border-color: var(--emerald);
+  border-color: var(--cobalt);
 }
 
 /* --- Location chips (shared: Browse, Archive, company profile) --- */
@@ -626,8 +629,8 @@ body::after {
   background: color-mix(in srgb, var(--emerald) 12%, transparent);
 }
 .card-freshness.stale {
-  color: var(--coral);
-  background: color-mix(in srgb, var(--coral) 14%, transparent);
+  color: var(--q-weak);
+  background: var(--q-weak-bg);
 }
 
 .sync-indicator {
@@ -641,12 +644,12 @@ body::after {
   opacity: 0;
 }
 .sync-indicator.sync-offline {
-  color: var(--terracotta);
+  color: var(--q-weak);
   font-weight: 500;
   padding: 8px 16px;
-  background: #fef2f2;
+  background: var(--q-weak-bg);
   border-radius: 8px;
-  border: 1px solid var(--terracotta);
+  border: 1px solid var(--q-weak);
   opacity: 1;
 }
 
@@ -2635,46 +2638,38 @@ body::after {
 .today-actions {
   flex: none;
   display: flex;
-  gap: 6px;
-}
-.today-act {
-  height: 24px;
-  padding: 0 9px;
-  border-radius: var(--radius-pill);
-  border: none;
-  display: inline-flex;
+  gap: 16px;
   align-items: center;
+}
+/* Quiet cobalt text links, not filled pills — the calm sheet aesthetic, and
+   the same treatment as the rail's .today-pending-cta. The primary action is
+   cobalt; Pass is a muted secondary link. No colour fill, no emoji glyphs
+   (design-protocol: cobalt = interaction only). DHA-412 item #2. */
+.today-act {
+  border: none;
+  background: none;
+  padding: 0;
   font-family: "Onest", sans-serif;
-  font-size: 11px;
+  font-size: 12.5px;
   font-weight: 700;
+  color: var(--cobalt);
   cursor: pointer;
   white-space: nowrap;
 }
+.today-act:hover {
+  text-decoration: underline;
+}
 .today-act:focus-visible {
   outline: 2px solid var(--cobalt);
-  outline-offset: 1px;
-}
-.today-act.act-apply {
-  background: var(--cobalt);
-  color: #fff;
-}
-.today-act.act-apply:hover {
-  background: #1d38b2;
-}
-.today-act.act-like {
-  background: var(--q-good);
-  color: #fff;
-}
-.today-act.act-like:hover {
-  background: #094a35;
+  outline-offset: 2px;
 }
 .today-act.act-pass {
-  background: rgba(58, 56, 51, 0.06);
-  color: var(--sky-text-faint);
+  color: var(--sky-text-tertiary);
+  font-weight: 600;
 }
 .today-act.act-pass:hover {
-  background: var(--q-weak-bg);
   color: var(--q-weak);
+  text-decoration: none;
 }
 
 .today-empty {
@@ -3831,7 +3826,9 @@ body::after {
 }
 
 .pipe-col {
-  width: 248px;
+  /* Compact cards (title + org + score + note, no button row) let the column
+     narrow so ~6 fit at 1440px instead of ~4, matching the mock. DHA-412 #5. */
+  width: 190px;
   flex: none;
   background: var(--sky-row-hover);
   border-radius: var(--radius-row);
