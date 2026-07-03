@@ -1179,13 +1179,41 @@ export function initUI() {
   );
 }
 
-export function showToast(status) {
-  const messages = {
-    liked: "\u2705 Added to favorites",
-    passed: "\uD83D\uDC4E Skipped",
-  };
-  const msg = messages[status];
-  if (!msg || !toastEl) return;
+// Every status a UI action can set \u2192 its toast {key, fallback}. R18: no status
+// the UI can set may fall through showToast silently. Before U6, `to_apply`
+// (set from Today's "Send" action and the vacancy page's "Move to apply") had
+// no entry and produced no feedback; the vacancy page can set liked/passed/
+// to_apply, and the board/Today can set the rest \u2014 all covered here. `key` is
+// an i18n key; `fallback` is the original English string.
+export const TOAST_MESSAGES = {
+  liked: { key: "toast_liked", fallback: "\u2705 Added to favorites" },
+  passed: { key: "toast_passed", fallback: "\uD83D\uDC4E Skipped" },
+  skipped: { key: "toast_skipped", fallback: "\uD83D\uDC4E Skipped" },
+  to_apply: { key: "toast_to_apply", fallback: "\uD83D\uDCE5 Moved to apply" },
+  to_research: {
+    key: "toast_to_research",
+    fallback: "\uD83D\uDD0D Marked for research",
+  },
+  to_network: {
+    key: "toast_to_network",
+    fallback: "\uD83E\uDD1D Marked for networking",
+  },
+  applied: { key: "toast_applied", fallback: "\u2705 Marked as applied" },
+};
+
+// Resolve a status to its toast copy, or null when the status is not one a UI
+// action sets (e.g. `unseen`, `expiring` \u2014 no "you did X" moment).
+export function toastMessage(status) {
+  return TOAST_MESSAGES[status] || null;
+}
+
+// `t` is the i18n T(key, fallback) resolver, optional so the toast still shows
+// (in English) when called without it.
+export function showToast(status, t) {
+  const m = toastMessage(status);
+  if (!m || !toastEl) return;
+  const translate = t || ((key, fallback) => fallback);
+  const msg = translate(m.key, m.fallback);
   if (toastTimer) clearTimeout(toastTimer);
   toastEl.className = "toast toast-" + status;
   toastEl.textContent = msg;

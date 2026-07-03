@@ -171,6 +171,11 @@ export const state = {
   // Routed vacancy detail page open over the list (?vacancy=<group-id>), or
   // null. Mirror of currentProfileSlug for the second detail surface (U4).
   currentVacancyId: null,
+  // How the open vacancy page was entered (U6/F3). { context, queue } when
+  // opened from the Browse unreviewed list (drives "Move to apply" auto-
+  // advance); null for cold deep links, popstate, Today, and company roles —
+  // those confirm in place with no advance.
+  vacancyEntry: null,
   // Live company rows from /api/companies (null until loaded → snapshot used).
   liveCompanies: null,
   // Sidebar footer sync status (nav.js state machine). bootstrap.js's boot()

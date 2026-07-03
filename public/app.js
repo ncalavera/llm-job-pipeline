@@ -75,6 +75,12 @@ import {
   DEFAULT_VACANCY_VIEW,
 } from "./modules/nav.js";
 import { parse, build } from "./modules/route.js";
+import {
+  renderVacancyDetail,
+  vacancyLike,
+  vacancyPass,
+  vacancyMoveToApply,
+} from "./modules/vacancy.js";
 
 // ---------------------------------------------------------------------------
 // Initialize UI elements (toast, scroll-to-top)
@@ -222,7 +228,7 @@ function renderSyncFooter() {
 // ---------------------------------------------------------------------------
 
 on("statusChanged", ({ status }) => {
-  showToast(status);
+  showToast(status, T);
   updateBasketCounts();
   scheduleRender();
 });
@@ -388,19 +394,18 @@ function notFoundPanelHtml(section) {
   );
 }
 
-// Render the vacancy detail into #vacancyDetail. U4 ships the fixed placeholder;
-// U6's page module (public/modules/vacancy.js) replaces this body. `id` is the
-// group id — deliberately NOT written into the markup here.
-function renderVacancyDetail(id) {
-  var host = document.getElementById("vacancyDetail");
-  if (!host) return;
-  host.innerHTML = notFoundPanelHtml("vacancies");
-}
+// The vacancy detail body is rendered by public/modules/vacancy.js (U6),
+// imported above; U4's fixed placeholder is retired. A missing/gone id renders
+// vacancy.js's own fixed not-found panel, so a valid deep link never flashes
+// "not found".
 
 // Show the vacancy detail overlay (used by openVacancyRoute, popstate, and the
 // cold-deep-link path). Hides the company overlay + all leaf sections first.
+// Clears any entry context so a popstate/cold load defaults to no auto-advance
+// (F3); openVacancyRoute re-sets it after this call for Browse-list entries.
 function showVacancyDetail(id) {
   state.currentVacancyId = id;
+  state.vacancyEntry = null;
   var cp = document.getElementById("companyProfile");
   if (cp) {
     cp.classList.remove("active");
@@ -415,7 +420,10 @@ function showVacancyDetail(id) {
 
 // Open a vacancy detail page from a row/action (pushState so back returns to
 // the originating list). Exposed on window for U6's rows + actions to call.
-function openVacancyRoute(id) {
+// `opts.context` records HOW it was entered: "browse" (with `opts.queue`, the
+// ordered unreviewed id list) enables "Move to apply" auto-advance (F3); any
+// other entry omits opts and confirms in place.
+function openVacancyRoute(id, opts) {
   if (!id) return;
   var url = new URL(window.location);
   url.search = build({ screen: "vacancy", id: id });
@@ -424,6 +432,10 @@ function openVacancyRoute(id) {
   // would then reopen the detail from.
   history.pushState({ vacancy: id, inApp: true }, "", url);
   showVacancyDetail(id);
+  state.vacancyEntry =
+    opts && opts.context
+      ? { context: opts.context, queue: (opts.queue || []).slice() }
+      : null;
   setNavActiveSection(sectionForMode("vacancy"));
 }
 
@@ -626,6 +638,10 @@ window.closeCompanyProfile = closeCompanyProfile;
 // its back button calls closeDetail().
 window.openVacancyRoute = openVacancyRoute;
 window.closeDetail = closeDetail;
+// Vacancy detail page actions (U6) — inline onclick on the page's buttons.
+window.vacancyLike = vacancyLike;
+window.vacancyPass = vacancyPass;
+window.vacancyMoveToApply = vacancyMoveToApply;
 window.renderPipeline = renderPipeline;
 window.renderToday = renderToday;
 window.renderArchive = renderArchive;
