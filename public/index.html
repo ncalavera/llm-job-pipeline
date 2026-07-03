@@ -657,39 +657,16 @@
 
           <!-- === ARCHIVE MODE === -->
           <div class="archive-section" id="archiveSection">
-            <div class="gf-companion">
-              <img
-                src="images/illus-archive.png"
-                data-img="illus-archive"
-                alt="Illustration of the vacancy archive"
-              />
-            </div>
-            <div class="gf-accent">
-              <img
-                src="images/accent-archive.png"
-                data-img="accent-archive"
-                alt=""
-              />
-            </div>
-            <div class="archive-intro">
-              <h2 class="archive-title">
-                &#128230; <span data-i18n="archive_title">Vacancy archive</span>
-              </h2>
-              <p class="archive-sub" data-i18n="archive_sub">
-                Vacancies archived from earlier runs. View only.
-              </p>
-            </div>
-            <div class="catalog-filters">
-              <input
-                type="text"
-                class="catalog-search"
-                id="archiveSearch"
-                placeholder="Search by title, organization, location..."
-                data-i18n-ph="search_vacancies_ph"
-                oninput="renderArchive()"
-              />
+            <!-- Header on the material (design-protocol.md #6); rows sit in
+                 the sheet below (U11, DHA-395). Illustrated-style images
+                 retired (plan Key Decision: the illustration toggle is
+                 gone). -->
+            <div class="archive-header">
+              <span class="archive-header-title" data-i18n="archive_title"
+                >Vacancy archive</span
+              >
               <select
-                class="catalog-org-filter"
+                class="archive-org-filter"
                 id="archiveOrgFilter"
                 autocomplete="off"
                 onchange="renderArchive()"
@@ -698,9 +675,20 @@
                   All companies
                 </option>
               </select>
+              <input
+                type="text"
+                class="archive-search"
+                id="archiveSearch"
+                placeholder="Search by title, organization, location..."
+                data-i18n-ph="search_vacancies_ph"
+                oninput="renderArchive()"
+              />
+              <span class="archive-header-hint" data-i18n="archive_sub"
+                >Vacancies archived from earlier runs. View only.</span
+              >
             </div>
-            <div class="catalog-results-count" id="archiveResultsCount"></div>
-            <div class="catalog-grid" id="archiveGrid"></div>
+            <div class="archive-results-count" id="archiveResultsCount"></div>
+            <div class="archive-sheet" id="archiveGrid"></div>
           </div>
           <!-- /archive-section -->
 
