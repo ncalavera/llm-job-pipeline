@@ -7,6 +7,13 @@ name: Eval gate
 
 on:
   pull_request:
+    # Explicit types: the default set (opened/synchronize/reopened) excludes
+    # `edited`, so pasting the Eval line into the PR body after a first
+    # failure would never re-trigger the check. `paths:` still applies
+    # per-event regardless of type — GitHub diffs base vs head for the whole
+    # PR, not just what changed in that event — so an `edited` event on a
+    # prompt-touching PR still fires, and one on a non-prompt PR still doesn't.
+    types: [opened, edited, synchronize, reopened]
     paths:
       - "scripts/prompts/**"
       - "scripts/prompts.py"
