@@ -22,8 +22,9 @@ globalThis.window = {
 };
 globalThis.location = { protocol: "file:", origin: "" };
 
-const { roleScoreDistribution, companyProfileHtml } =
+const { roleScoreDistribution, companyProfileHtml, _dimNumHtml, _buildRow } =
   await import("./companies.js");
+const { state } = await import("./state.js");
 
 const t = (key, fallback) => fallback;
 const counts = { liked: 1, passed: 0, unseen: 2 };
@@ -340,4 +341,109 @@ test("companyProfileHtml: a quote/apostrophe in an id-bearing attribute position
   });
   // jsAttr must neutralize the quote so the onclick string can't be broken out of.
   assert.ok(!html.includes(`reviewCompany('${evilId}'`));
+});
+
+// --- companies table row builder (U8, DHA-392) -------------------------------
+//
+// _buildRow dispatches on state.companySubTab to _buildApprovedRow /
+// _buildPendingRow / _buildArchivedRow. All three take a plain company object
+// and read no DOM, so they're directly testable like companyProfileHtml above.
+
+const tableCompany = {
+  name: "GiveWell",
+  slug: "givewell",
+  company_id: "c1",
+  org_color: ["#0B5F44", "#E3F2EB"],
+  calculated_tier: "S",
+  alignment_score: 82,
+  applyable_count: 3,
+  liked_count: 2,
+  new_count: 1,
+  offices: "Oakland, Remote",
+  last_fetched: "2026-07-01T00:00:00Z",
+  fit_dimensions: {
+    mission_authenticity: 70, // boundary: good
+    domain_desirability: 69, // boundary: moderate
+    breadth_rotation: 50, // boundary: moderate
+    builder_stage: 49, // boundary: weak
+    career_entry_value: null, // missing -> dash
+    // money_stability, culture_fit intentionally absent (also -> dash)
+  },
+};
+
+test("_dimNumHtml: boundary values land in the shared 70/50 qualityBand classes", () => {
+  assert.ok(_dimNumHtml(70).includes('class="ct-dim-num q-good"'));
+  assert.ok(_dimNumHtml(69).includes('class="ct-dim-num q-moderate"'));
+  assert.ok(_dimNumHtml(50).includes('class="ct-dim-num q-moderate"'));
+  assert.ok(_dimNumHtml(49).includes('class="ct-dim-num q-weak"'));
+});
+
+test("_dimNumHtml: a missing dimension renders a quiet dash, never a zero", () => {
+  const html = _dimNumHtml(null);
+  assert.ok(html.includes('class="ct-dim-empty"'));
+  assert.ok(!html.includes(">0<"));
+});
+
+test("_buildRow (approved tab): renders the monogram, tier badge, WANT dims, and Open column", () => {
+  state.companySubTab = "approved";
+  const html = _buildRow(tableCompany);
+  assert.ok(html.includes('class="ct-mono"'), "row monogram missing");
+  assert.ok(
+    html.includes('class="vac-tier tier-s">S</span>'),
+    "tier badge should use the shared tierClass, not the retired .ctier-* classes",
+  );
+  assert.ok(!html.includes("ctier-"), "retired .ctier-* class leaked back in");
+  assert.ok(
+    html.includes('class="ct-td ct-col-open">3</td>'),
+    "Open column should surface applyable_count",
+  );
+  // 4 present dims should be colored; career_entry_value (explicit null) plus
+  // the 2 absent keys (money/culture) should dash — 3 total.
+  const dimEmptyCount = (html.match(/ct-dim-empty/g) || []).length;
+  assert.equal(dimEmptyCount, 3);
+});
+
+test("_buildRow (pending tab): still renders the monogram alongside the hot-vacancy badge", () => {
+  state.companySubTab = "pending";
+  const pending = {
+    ...tableCompany,
+    vacancy_count: 4,
+    hot_vacancy: { score: 91, deadline_label: null },
+  };
+  const html = _buildRow(pending);
+  assert.ok(html.includes('class="ct-mono"'));
+  assert.ok(html.includes("ct-hot-badge"));
+  state.companySubTab = "approved";
+});
+
+test("_buildRow (archived tab): still renders the monogram, no crash without org_color", () => {
+  state.companySubTab = "archived";
+  const archived = {
+    name: "Old Org",
+    slug: "old-org",
+    status_reason: "closed",
+  };
+  const html = _buildRow(archived);
+  assert.ok(html.includes('class="ct-mono"'));
+  assert.ok(html.includes("ct-row--archived"));
+  state.companySubTab = "approved";
+});
+
+test("_buildRow: an XSS payload in the company name is inert in both text and the monogram's style attribute", () => {
+  const payload = '"><script>window.pwned=1</script>';
+  const evil = {
+    ...tableCompany,
+    name: payload,
+    org_color: [`red;"><script>window.pwned=1</script>`],
+  };
+  state.companySubTab = "approved";
+  const html = _buildRow(evil);
+  assert.ok(!html.includes("<script>"), "raw <script> leaked into the row");
+  assert.ok(
+    html.includes("&lt;script&gt;"),
+    "payload should be HTML-escaped, not dropped",
+  );
+  // The monogram's inline style="background:..." must not let the payload
+  // break out of the attribute.
+  assert.ok(!/style="background:[^"]*<script>/.test(html));
 });
