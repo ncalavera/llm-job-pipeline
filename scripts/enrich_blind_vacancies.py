@@ -147,6 +147,15 @@ def _get_vacancy_url(vac: dict) -> str:
     return ""
 
 
+def _is_unscrapable_host(url: str) -> bool:
+    """Hosts Firecrawl demonstrably cannot scrape — spending credits is pure
+    waste. LinkedIn blocks scrapers outright (verified live 2026-07-03: a
+    guest job page returns 0 chars); such rows heal on the next fetch when
+    the detail pages aren't throttled, or age out via the stale-blind sweep."""
+    host = urlparse(url).netloc.lower()
+    return host == "linkedin.com" or host.endswith(".linkedin.com")
+
+
 def main():
     dry_run = "--dry-run" in sys.argv
     limit = None
@@ -168,6 +177,7 @@ def main():
     skipped_blacklist = 0
     skipped_excluded = 0
     skipped_no_url = 0
+    skipped_unscrapable = 0
     for vid, vac in all_vacs.items():
         desc = (vac.get("full_description") or "").strip()
         if len(desc) >= 100:
@@ -182,7 +192,17 @@ def main():
         if not url:
             skipped_no_url += 1
             continue
+        if _is_unscrapable_host(url):
+            skipped_unscrapable += 1
+            continue
         blind.append((vid, vac, url))
+
+    if skipped_blacklist or skipped_excluded or skipped_no_url or skipped_unscrapable:
+        print(
+            f"Pre-filtered: {skipped_blacklist} blacklisted, {skipped_excluded} excluded-country, "
+            f"{skipped_no_url} no URL, {skipped_unscrapable} unscrapable host "
+            "(scraper-blocked; heals on the next fetch or ages out)"
+        )
 
     if not blind:
         print("No blind vacancies with URLs found.")
@@ -191,10 +211,6 @@ def main():
     if limit:
         blind = blind[:limit]
 
-    if skipped_blacklist or skipped_excluded or skipped_no_url:
-        print(
-            f"Pre-filtered: {skipped_blacklist} blacklisted, {skipped_excluded} excluded-country, {skipped_no_url} no URL"
-        )
     print(f"Found {len(blind)} blind vacancies with URLs to enrich")
     print(f"Estimated Firecrawl credits: ~{len(blind)} (1 per page)")
 

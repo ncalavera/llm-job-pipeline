@@ -511,6 +511,18 @@ class TestEnrichBlindVacancies:
 
         assert "jobs.unicef.org" in enrich_blind_vacancies._DIRECT_HOST_FETCHERS
 
+    def test_EBV07_linkedin_hosts_never_scraped(self):
+        """LinkedIn blocks scrapers (verified live: 0 chars back) — spending
+        Firecrawl credits there is pure waste; such rows heal on the next
+        fetch or age out (review finding on #51)."""
+        import enrich_blind_vacancies as ebv
+
+        assert ebv._is_unscrapable_host("https://uk.linkedin.com/jobs/view/x-123")
+        assert ebv._is_unscrapable_host("https://www.linkedin.com/jobs/view/y-456")
+        assert ebv._is_unscrapable_host("https://linkedin.com/jobs/view/z-789")
+        assert not ebv._is_unscrapable_host("https://careers.example.org/jobs/1")
+        assert not ebv._is_unscrapable_host("https://notlinkedin.com/jobs/1")
+
     def test_EBV06_quality_functions_accessible(self):
         # enrich_blind_vacancies must use clean_description from quality
         from quality import clean_description
