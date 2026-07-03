@@ -406,7 +406,7 @@
           <div class="today-section" id="todaySection"></div>
           <!-- /today-section -->
 
-          <!-- === CATALOG MODE === -->
+          <!-- === CATALOG MODE (Browse, dense rows — U5, DHA-389) === -->
           <div class="catalog-section active" id="catalogSection">
             <div class="catalog-loading" id="catalogLoading">
               <img
@@ -420,72 +420,41 @@
               </p>
             </div>
 
-            <div class="gf-companion">
-              <img
-                src="images/illus-catalog.png"
-                data-img="illus-catalog"
-                alt="Illustration of a figure reviewing job listings"
-              />
-            </div>
-            <div class="gf-accent">
-              <img
-                src="images/accent-catalog.png"
-                data-img="accent-catalog"
-                alt=""
-              />
-            </div>
+            <!-- Header on the material (design-protocol.md #6): title,
+                 basket tabs, location pills, search + sort + show-all. -->
+            <div class="browse-header">
+              <span class="browse-title" data-i18n="vsub_browse">Browse</span>
 
-            <div class="basket-tabs">
-              <button
-                class="basket-tab"
-                data-basket="liked"
-                onclick="switchBasket(this)"
-              >
-                <span class="basket-dot"></span>
-                <span data-i18n="basket_liked">Liked</span>
-                <span class="basket-count" id="countLiked">0</span>
-              </button>
-              <button
-                class="basket-tab active"
-                data-basket="unseen"
-                onclick="switchBasket(this)"
-              >
-                <span class="basket-dot"></span>
-                <span data-i18n="basket_unreviewed">Unreviewed</span>
-                <span class="basket-count" id="countUnseen">0</span>
-              </button>
-              <button
-                class="basket-tab"
-                data-basket="passed"
-                onclick="switchBasket(this)"
-              >
-                <span class="basket-dot"></span>
-                <span data-i18n="basket_passed">Passed</span>
-                <span class="basket-count" id="countPassed">0</span>
-              </button>
-            </div>
-
-            <div class="catalog-filters">
-              <input
-                type="text"
-                class="catalog-search"
-                id="catalogSearch"
-                placeholder="Search by title, organization, location..."
-                data-i18n-ph="search_vacancies_ph"
-                oninput="renderCatalog()"
-              />
-              <select
-                class="catalog-org-filter"
-                id="catalogOrgFilter"
-                onchange="renderCatalog()"
-              >
-                <option value="" data-i18n="all_companies">
-                  All companies
-                </option>
-              </select>
-              <div class="catalog-loc-chips">
+              <div class="basket-tabs">
                 <button
-                  class="chip"
+                  class="basket-tab"
+                  data-basket="liked"
+                  onclick="switchBasket(this)"
+                >
+                  <span data-i18n="basket_liked">Liked</span>
+                  <span class="basket-count" id="countLiked">0</span>
+                </button>
+                <button
+                  class="basket-tab active"
+                  data-basket="unseen"
+                  onclick="switchBasket(this)"
+                >
+                  <span data-i18n="basket_unreviewed">Unreviewed</span>
+                  <span class="basket-count" id="countUnseen">0</span>
+                </button>
+                <button
+                  class="basket-tab"
+                  data-basket="passed"
+                  onclick="switchBasket(this)"
+                >
+                  <span data-i18n="basket_passed">Passed</span>
+                  <span class="basket-count" id="countPassed">0</span>
+                </button>
+              </div>
+
+              <div class="browse-loc-chips">
+                <button
+                  class="browse-loc-chip"
                   data-cloc="europe"
                   onclick="toggleCatalogLoc(this)"
                   data-i18n="loc_europe"
@@ -493,7 +462,7 @@
                   Europe
                 </button>
                 <button
-                  class="chip"
+                  class="browse-loc-chip"
                   data-cloc="us"
                   onclick="toggleCatalogLoc(this)"
                   data-i18n="loc_us"
@@ -501,7 +470,7 @@
                   US
                 </button>
                 <button
-                  class="chip"
+                  class="browse-loc-chip"
                   data-cloc="remote"
                   onclick="toggleCatalogLoc(this)"
                   data-i18n="loc_remote"
@@ -509,7 +478,7 @@
                   Remote
                 </button>
                 <button
-                  class="chip"
+                  class="browse-loc-chip"
                   data-cloc="other"
                   onclick="toggleCatalogLoc(this)"
                   data-i18n="loc_other"
@@ -517,23 +486,62 @@
                   Other
                 </button>
               </div>
-              <button
-                class="chip catalog-sort-btn active"
-                onclick="toggleCatalogSort(this)"
-              >
-                <span data-i18n="sort_score">Score</span>&#160;&#8595;
-              </button>
-              <button
-                class="chip catalog-showall-btn"
-                onclick="toggleCatalogShowAll(this)"
-                data-i18n="catalog_show_all"
-              >
-                Show all
-              </button>
+
+              <div class="browse-header-right">
+                <input
+                  type="text"
+                  class="browse-search"
+                  id="catalogSearch"
+                  placeholder="Search by title, organization, location..."
+                  data-i18n-ph="search_vacancies_ph"
+                  oninput="renderCatalog()"
+                />
+                <select
+                  class="browse-org-filter"
+                  id="catalogOrgFilter"
+                  onchange="renderCatalog()"
+                >
+                  <option value="" data-i18n="all_companies">
+                    All companies
+                  </option>
+                </select>
+                <button
+                  class="browse-sort-btn active"
+                  onclick="toggleCatalogSort(this)"
+                >
+                  <span data-i18n="sort_score">Score</span>&#160;&#8595;
+                </button>
+                <button
+                  class="browse-showall-btn"
+                  onclick="toggleCatalogShowAll(this)"
+                  data-i18n="catalog_show_all"
+                >
+                  Show all
+                </button>
+              </div>
             </div>
 
-            <div class="catalog-results-count" id="catalogResultsCount"></div>
-            <div class="catalog-grid" id="catalogGrid"></div>
+            <!-- Data as a sheet (design-protocol.md #2, #6). min-width guards
+                 the scroll (AE4): below 920px the table scrolls inside the
+                 sheet, never the page body. -->
+            <div class="catalog-sheet">
+              <div class="catalog-table">
+                <div class="catalog-row-head">
+                  <div data-i18n="browse_col_fit">Fit</div>
+                  <div data-i18n="browse_col_role">Role</div>
+                  <div data-i18n="browse_col_company">Company</div>
+                  <div data-i18n="browse_col_location">Location</div>
+                  <div data-i18n="browse_col_comp">Comp</div>
+                  <div data-i18n="browse_col_seen">Seen</div>
+                  <div></div>
+                </div>
+                <div class="browse-rows" id="catalogGrid"></div>
+                <div
+                  class="browse-results-count"
+                  id="catalogResultsCount"
+                ></div>
+              </div>
+            </div>
           </div>
           <!-- /catalog-section -->
 

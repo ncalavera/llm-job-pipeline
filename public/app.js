@@ -40,7 +40,7 @@ import {
   toggleCatalogSort,
   toggleCatalogShowAll,
   catalogThumbAction,
-  toggleCatalogExpand,
+  openCatalogRow,
 } from "./modules/catalog.js";
 import {
   initCompanies,
@@ -262,8 +262,8 @@ on("switchToCatalog", ({ orgFilter }) => {
 // U3 review fix) — sidebar footer + nav counts only, deliberately NOT the
 // full "render" handler above. A poll firing every 60s regardless of whether
 // data changed must never rebuild the section grids: that would blow away
-// DOM-only state a snapshot replace never touches (an expanded catalog card,
-// the triage board's SortableJS-managed DOM).
+// DOM-only state a snapshot replace never touches (the triage board's
+// SortableJS-managed DOM).
 on("sync", () => {
   updateNavCounts();
   renderSyncFooter();
@@ -631,7 +631,7 @@ window.toggleCatalogSort = toggleCatalogSort;
 window.toggleCatalogShowAll = toggleCatalogShowAll;
 window.catalogThumbAction = catalogThumbAction;
 window.todayAction = todayAction;
-window.toggleCatalogExpand = toggleCatalogExpand;
+window.openCatalogRow = openCatalogRow;
 window.renderCatalog = renderCatalog;
 window.renderCompanies = renderCompanies;
 window.initCompanies = initCompanies;

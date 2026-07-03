@@ -1,5 +1,9 @@
 // =============================================================================
-// catalog.js — Catalog view: vacancy cards, search, filters, baskets, swipes
+// catalog.js — Browse: dense vacancy rows, search, filters, baskets (U5,
+// DHA-389). The accordion/expand card is retired — its content (full
+// description, model reasoning, hard requirements, US-eligibility warning)
+// now lives on the routed vacancy detail page (U6, vacancy.js); a row click
+// opens it.
 // =============================================================================
 
 import {
@@ -14,17 +18,11 @@ import {
 import {
   escHtml,
   jsAttr,
-  parseLocationChips,
-  renderLocationChips,
-  llmScoreBadge,
-  screenScoreBadge,
   formatDeadlineHtml,
   relativeTime,
   isVacancyExpired,
-  sourceAgeDays,
-  STALE_SOURCE_DAYS,
-  hardReqHtml,
-  safeUrl,
+  qualityBand,
+  tierClass,
 } from "./helpers.js";
 import { T, dateLocale } from "./i18n.js";
 import { VISIBLE_MIN_SCORE, basketCounts, groupsInBasket } from "./derive.js";
@@ -40,29 +38,6 @@ function visOpts() {
     isExpired: isVacancyExpired,
     basketMap: STATUS_BASKET,
     minScore: state.catalogShowAll ? null : VISIBLE_MIN_SCORE,
-  };
-}
-
-// Source-freshness label from a role's last_seen date. Null when unknown.
-// STALE_SOURCE_DAYS + the age math are shared with the Triage "Expired" column.
-function catalogFreshness(lastSeen) {
-  const ageDays = sourceAgeDays(lastSeen);
-  if (ageDays == null) return null;
-  // Boundary: exactly STALE_SOURCE_DAYS counts as stale.
-  if (ageDays >= STALE_SOURCE_DAYS) {
-    return {
-      cls: "card-freshness stale",
-      text: T("freshness_stale", "stale, likely closed"),
-      title: T(
-        "freshness_stale_hint",
-        "based on the last time the source confirmed the role; direct ATS is exact, aggregators approximate",
-      ),
-    };
-  }
-  return {
-    cls: "card-freshness fresh",
-    text: T("freshness_fresh", "fresh, open"),
-    title: T("freshness_fresh_hint", "the source confirmed this role recently"),
   };
 }
 
@@ -103,8 +78,8 @@ export function toggleCatalogLoc(btn) {
 export function toggleCatalogSort(btn) {
   state.catalogSortDesc = !state.catalogSortDesc;
   btn.textContent = state.catalogSortDesc
-    ? T("sort_score", "Score") + "\u00A0\u2193"
-    : T("sort_score", "Score") + "\u00A0\u2191";
+    ? T("sort_score", "Score") + " ↓"
+    : T("sort_score", "Score") + " ↑";
   renderCatalog();
 }
 
@@ -143,7 +118,7 @@ export function initCatalog() {
 }
 
 // ---------------------------------------------------------------------------
-// Render catalog grid
+// Render catalog table
 // ---------------------------------------------------------------------------
 
 // Persistent note above the catalog: roles from not-yet-approved (candidate)
@@ -174,6 +149,11 @@ function _renderCatalogHiddenNote(grid) {
   note.textContent = tpl.replace("{vacs}", vacs).replace("{orgs}", orgs.size);
   grid.parentNode.insertBefore(note, grid);
 }
+
+// The ordered id queue for the currently rendered rows — what a row click
+// hands the U4 router as the "browse" context (F3's auto-advance walks this
+// same order). Read by openCatalogRow's thin DOM shell below.
+let _browseQueue = [];
 
 export function renderCatalog() {
   const query = (
@@ -209,24 +189,27 @@ export function renderCatalog() {
     return true;
   });
 
-  document.getElementById("catalogResultsCount").textContent =
-    filtered.length + " of " + inBasket.length + " vacancies";
+  const countTpl = T("browse_results_count", "{shown} of {total} vacancies");
+  document.getElementById("catalogResultsCount").textContent = countTpl
+    .replace("{shown}", filtered.length)
+    .replace("{total}", inBasket.length);
 
   if (filtered.length === 0) {
+    _browseQueue = [];
     const hasFilters = query || orgFilter || state.activeCatalogLocs.size > 0;
     // Fetched-but-unscored: the DB has vacancies, but none are scored yet, so the
     // dashboard (which only shows scored roles) looks empty. Tell the user to run
-    // scoring next \u2014 distinct from the truly-empty "no vacancies at all" case.
+    // scoring next — distinct from the truly-empty "no vacancies at all" case.
     const unscored = (stats && stats.unscored_count) || 0;
     if (!hasFilters && groups.length === 0 && unscored > 0) {
       grid.innerHTML =
-        '<div class="catalog-empty"><div class="catalog-empty-icon">\u23F3</div>' +
+        '<div class="catalog-empty"><div class="catalog-empty-icon">⏳</div>' +
         "<strong>" +
         unscored +
         (unscored === 1 ? " vacancy" : " vacancies") +
         " fetched, none scored yet.</strong>" +
         '<div class="catalog-empty-hint">Run scoring next ' +
-        "(<code>/jobs-score</code>) to rank them \u2014 scored roles appear here.</div>" +
+        "(<code>/jobs-score</code>) to rank them — scored roles appear here.</div>" +
         "</div>";
       return;
     }
@@ -237,10 +220,10 @@ export function renderCatalog() {
     };
     var basketEmpty =
       (basketLabels[state.currentBasket] || "") +
-      " \u2014 " +
+      " — " +
       T("catalog_basket_empty", "no vacancies");
     grid.innerHTML =
-      '<div class="catalog-empty"><div class="catalog-empty-icon">\uD83D\uDDC2</div>' +
+      '<div class="catalog-empty"><div class="catalog-empty-icon">🗂</div>' +
       (hasFilters
         ? T("catalog_no_match", "Nothing matches the filters")
         : groups.length === 0
@@ -256,298 +239,173 @@ export function renderCatalog() {
     filtered.sort((a, b) => (a.llm_score ?? 999) - (b.llm_score ?? 999));
   }
 
-  grid.innerHTML = filtered.map((g) => buildCatalogCard(g)).join("");
-
-  // Staggered fade-in via IntersectionObserver
-  const cards = grid.querySelectorAll(".catalog-card");
-  const observer = new IntersectionObserver(
-    function (entries) {
-      let batchIdx = 0;
-      entries.forEach(function (entry) {
-        if (
-          entry.isIntersecting &&
-          !entry.target.classList.contains("card-visible")
-        ) {
-          entry.target.style.setProperty(
-            "--stagger-delay",
-            batchIdx * 30 + "ms",
-          );
-          entry.target.classList.add("card-visible");
-          batchIdx++;
-          observer.unobserve(entry.target);
-        }
-      });
-    },
-    { threshold: 0.1 },
-  );
-  cards.forEach(function (card) {
-    observer.observe(card);
-  });
+  _browseQueue = catalogQueueIds(filtered);
+  const rowOpts = { t: T, locale: dateLocale() };
+  grid.innerHTML = filtered
+    .map((g) => catalogRowHtml(g, getGroupStatus(g), rowOpts))
+    .join("");
 }
 
 // ---------------------------------------------------------------------------
-// Build single catalog card HTML
+// Row assembly — pure (KTD2): no DOM/state reads beyond the arguments given,
+// so the click contract (row → vacancy id, action-button gating, escaping) is
+// directly unit-testable. `basket` is the group's current status bucket
+// (unseen/liked/passed), matching getGroupStatus(g)'s three basket values.
 // ---------------------------------------------------------------------------
 
-function buildCatalogCard(g) {
-  const [fg, bg] = g.org_color || ["#F97316", "#FFF7ED"];
-  const firstUrl = safeUrl(
-    g.locations.find((l) => l.url)?.url || g.org_url || "",
-  );
-  const titleHtml = firstUrl
-    ? '<a href="' +
-      escHtml(firstUrl) +
-      '" target="_blank" rel="noopener">' +
-      escHtml(g.title) +
-      "</a>"
-    : escHtml(g.title);
-
-  const catalogChips = g.locations.flatMap((l) => {
-    const chips = parseLocationChips(l.location);
-    chips.forEach((c) => {
-      if (l.url) c.url = l.url;
-    });
-    return chips;
-  });
-  const seenCatalog = new Set();
-  const uniqueCatalogChips = catalogChips.filter((c) => {
-    const key = c.text.toLowerCase();
-    if (seenCatalog.has(key)) return false;
-    seenCatalog.add(key);
-    return true;
-  });
-  const locChips = renderLocationChips(uniqueCatalogChips, {
-    chipClass: "loc-chip",
-    useRegionColor: false,
-    maxVisible: 3,
-  });
-
-  let compHtml = "";
-  if (g.compensation || g.deadline || g.first_seen) {
-    const parts = [];
-    if (g.compensation)
-      parts.push(
-        '<span class="card-comp">' + escHtml(g.compensation) + "</span>",
-      );
-    if (g.deadline) {
-      const dlHtml = formatDeadlineHtml(g.deadline, "card-deadline", {
-        t: T,
-        locale: dateLocale(),
-      });
-      if (dlHtml) parts.push(dlHtml);
-    }
-    if (g.first_seen) {
-      parts.push(
-        '<span class="card-first-seen">' +
-          relativeTime(g.first_seen, T) +
-          "</span>",
-      );
-    }
-    const fresh = catalogFreshness(g.last_seen);
-    if (fresh) {
-      parts.push(
-        '<span class="' +
-          fresh.cls +
-          '" title="' +
-          escHtml(fresh.title) +
-          '">' +
-          escHtml(fresh.text) +
-          "</span>",
-      );
-    }
-    compHtml = '<div class="card-comp-row">' + parts.join("") + "</div>";
-  }
-
-  const regionLabels = {
-    europe: T("region_europe", "Europe"),
-    americas: T("region_americas", "Americas"),
-    remote: T("region_remote", "Remote"),
-    asia: T("region_asia", "Asia"),
-    africa: T("region_africa", "Africa"),
+// First location's text plus a "+N" hint when there are more; the full list
+// is one click away on the vacancy detail page's facts rail.
+function primaryLocationInfo(g) {
+  const locs = (g.locations || []).filter((l) => l && l.location);
+  if (!locs.length) return null;
+  const extra = locs.length - 1;
+  return {
+    text: locs[0].location + (extra > 0 ? " +" + extra : ""),
+    title: locs.map((l) => l.location).join(", "),
   };
-  const regionCls = {
-    europe: "region-europe",
-    americas: "region-us",
-    remote: "region-remote",
-    asia: "region-other",
-    africa: "region-other",
-  };
-  const regionBadge = regionLabels[g.region]
-    ? '<span class="badge ' +
-      regionCls[g.region] +
+}
+
+export function catalogQueueIds(rows) {
+  return rows.map((g) => g.id);
+}
+
+export function catalogRowHtml(g, basket, opts) {
+  const o = opts || {};
+  const t = o.t || ((k, fb) => fb);
+  const locale = o.locale || "en-US";
+
+  const score = g.llm_score;
+  const scoreCls =
+    score == null ? "vac-score--none" : "q-" + qualityBand(score) + "-bg";
+  const scoreTxt = score == null ? "—" : String(score);
+
+  const idAttr = jsAttr(g.id);
+
+  const deadlineHtml = g.deadline
+    ? formatDeadlineHtml(g.deadline, "card-deadline", { t, locale })
+    : "";
+
+  const tierHtml = g.calculated_tier
+    ? '<span class="catalog-row-tier ' +
+      tierClass(g.calculated_tier) +
       '">' +
-      regionLabels[g.region] +
+      escHtml(g.calculated_tier) +
       "</span>"
     : "";
 
-  // Application badge: a small "applied · <status>" marker when this
-  // vacancy has an application attached. Full Applications section is later.
-  const appBadge =
-    g.application && g.application.status
-      ? '<span class="badge app-badge" title="' +
-        escHtml(
-          T("application_marker", "Application") +
-            (g.application.applied_at
-              ? " · " + escHtml(g.application.applied_at)
-              : ""),
-        ) +
-        '">✉ ' +
-        escHtml(g.application.status) +
-        "</span>"
-      : "";
-
-  const llmBadge = llmScoreBadge(g.llm_score) + screenScoreBadge(g);
-
-  const catTierVal = g.calculated_tier || null;
-  const catTierBadge = catTierVal
-    ? '<span class="company-tier-badge ctier-' +
-      catTierVal.toLowerCase() +
+  const loc = primaryLocationInfo(g);
+  const locHtml = loc
+    ? '<span title="' +
+      escHtml(loc.title) +
       '">' +
-      catTierVal +
+      escHtml(loc.text) +
       "</span>"
+    : "—";
+
+  const compText = g.compensation ? escHtml(g.compensation) : "—";
+  const seenText = g.first_seen ? escHtml(relativeTime(g.first_seen, t)) : "—";
+
+  const subText = g.llm_summary || g.snippet || "";
+  const subHtml = subText
+    ? '<div class="catalog-row-sub">' + escHtml(subText) + "</div>"
     : "";
 
-  const summaryText = g.llm_summary || g.snippet || "";
-  const summaryHtml = summaryText
-    ? '<p class="card-snippet">' + escHtml(summaryText) + "</p>"
-    : "";
-
-  const basket = getGroupStatus(g);
   const mids = JSON.stringify(g.member_ids).replace(/"/g, "&quot;");
-  let thumbBtns = "";
-  if (basket === "liked") {
-    thumbBtns =
-      '<button class="thumb-btn pass" onclick="event.stopPropagation();catalogThumbAction(\'' +
-      g.id +
-      "'," +
-      mids +
-      ',\'pass\')" title="Pass">\uD83D\uDC4E</button>';
-  } else if (basket === "unseen") {
-    thumbBtns =
-      '<button class="thumb-btn like" onclick="event.stopPropagation();catalogThumbAction(\'' +
-      g.id +
-      "'," +
-      mids +
-      ',\'like\')" title="Like">\uD83D\uDC4D</button>' +
-      '<button class="thumb-btn pass" onclick="event.stopPropagation();catalogThumbAction(\'' +
-      g.id +
-      "'," +
-      mids +
-      ',\'pass\')" title="Skip">\uD83D\uDC4E</button>';
-  } else if (basket === "passed") {
-    thumbBtns =
-      '<button class="thumb-btn like" onclick="event.stopPropagation();catalogThumbAction(\'' +
-      g.id +
-      "'," +
-      mids +
-      ',\'like\')" title="Like">\uD83D\uDC4D</button>';
-  }
-
-  const hasExpandContent =
-    (g.full_description &&
-      g.full_description.length > summaryText.length + 50) ||
-    g.llm_reasoning;
-  const expandBtn = hasExpandContent
-    ? '<button class="expand-btn" onclick="event.stopPropagation();toggleCatalogExpand(this)">' +
-      escHtml(T("catalog_details", "Details")) +
-      "</button>"
-    : "";
-  let expandParts = [];
-  if (g.llm_reasoning) {
-    expandParts.push(
-      '<div class="expand-reasoning"><span class="expand-reasoning-label">LLM reasoning:</span> ' +
-        escHtml(g.llm_reasoning) +
-        "</div>",
-    );
-  }
-  if (
-    g.full_description &&
-    g.full_description.length > summaryText.length + 50
-  ) {
-    expandParts.push(escHtml(g.full_description));
-  }
-  const fullDescHtml = hasExpandContent
-    ? '<div class="catalog-full-desc">' + expandParts.join("") + "</div>"
-    : "";
-
-  const isFeatured = g.llm_score != null && g.llm_score >= 65;
+  const likeLabel = escHtml(t("vac_like", "Like"));
+  const passLabel = escHtml(t("vac_pass", "Pass"));
+  const likeBtn =
+    '<button class="catalog-row-btn like" onclick="event.stopPropagation();catalogThumbAction(\'' +
+    idAttr +
+    "'," +
+    mids +
+    ",'like')\" title=\"" +
+    likeLabel +
+    '" aria-label="' +
+    likeLabel +
+    '">✓</button>';
+  const passBtn =
+    '<button class="catalog-row-btn pass" onclick="event.stopPropagation();catalogThumbAction(\'' +
+    idAttr +
+    "'," +
+    mids +
+    ",'pass')\" title=\"" +
+    passLabel +
+    '" aria-label="' +
+    passLabel +
+    '">✕</button>';
+  let actionsHtml = "";
+  if (basket === "liked") actionsHtml = passBtn;
+  else if (basket === "unseen") actionsHtml = likeBtn + passBtn;
+  else if (basket === "passed") actionsHtml = likeBtn;
 
   return (
-    '<div class="catalog-card' +
-    (isFeatured ? " card-featured" : "") +
-    '" data-id="' +
-    g.id +
+    '<div class="catalog-row" data-id="' +
+    escHtml(g.id) +
+    '" onclick="openCatalogRow(\'' +
+    idAttr +
+    "')\">" +
+    '<div class="catalog-row-score ' +
+    scoreCls +
     '">' +
-    '<div class="catalog-card-header">' +
-    '<div class="catalog-header-left">' +
-    (g.company_slug
-      ? '<span class="catalog-org catalog-org-link" style="color:' +
-        fg +
-        ";background:" +
-        bg +
-        '" onclick="event.stopPropagation();openCompanyProfile(\'' +
-        jsAttr(g.company_slug) +
-        "')\">"
-      : '<span class="catalog-org" style="color:' +
-        fg +
-        ";background:" +
-        bg +
-        '">') +
+    escHtml(scoreTxt) +
+    "</div>" +
+    '<div class="catalog-row-role">' +
+    '<div class="catalog-row-title-line">' +
+    '<span class="catalog-row-title">' +
+    escHtml(g.title) +
+    "</span>" +
+    deadlineHtml +
+    "</div>" +
+    subHtml +
+    "</div>" +
+    '<div class="catalog-row-company">' +
+    '<span class="catalog-row-org">' +
     escHtml(g.company_name || g.org) +
     "</span>" +
-    catTierBadge +
+    tierHtml +
     "</div>" +
-    '<div class="catalog-header-right">' +
-    llmBadge +
-    '<div class="catalog-thumb-btns">' +
-    thumbBtns +
-    "</div></div>" +
+    '<div class="catalog-row-loc">' +
+    locHtml +
     "</div>" +
-    '<h3 class="catalog-title">' +
-    titleHtml +
-    "</h3>" +
-    '<div class="catalog-loc-row">' +
-    locChips +
+    '<div class="catalog-row-comp">' +
+    compText +
     "</div>" +
-    compHtml +
-    '<div class="catalog-badges">' +
-    regionBadge +
-    appBadge +
+    '<div class="catalog-row-seen">' +
+    seenText +
     "</div>" +
-    hardReqHtml(g) +
-    summaryHtml +
-    expandBtn +
-    fullDescHtml +
+    '<div class="catalog-row-actions">' +
+    actionsHtml +
+    "</div>" +
     "</div>"
   );
 }
 
 // ---------------------------------------------------------------------------
-// Card actions
+// Row actions
 // ---------------------------------------------------------------------------
+
+// Thin DOM shell (KTD2): forwards a row click to the U4 router with the
+// "browse" context + the CURRENT sorted/filtered id queue, so U6's "Move to
+// apply" can auto-advance to the next unreviewed row (F3). `queue` is
+// overridable so the wiring itself is unit-testable without touching module
+// state.
+export function openCatalogRow(id, queue) {
+  window.openVacancyRoute(id, {
+    context: "browse",
+    queue: queue || _browseQueue,
+  });
+}
 
 export function catalogThumbAction(canonId, memberIds, action) {
   const targetStatus =
     action === "like" ? "liked" : action === "pass" ? "passed" : "unseen";
-  const card = document.querySelector(
-    '.catalog-card[data-id="' + canonId + '"]',
-  );
-  if (card) {
-    card.classList.add("dismissing");
+  const row = document.querySelector('.catalog-row[data-id="' + canonId + '"]');
+  if (row) {
+    row.classList.add("dismissing");
     setTimeout(function () {
       updateStatus(canonId, memberIds, targetStatus);
     }, 200);
   } else {
     updateStatus(canonId, memberIds, targetStatus);
   }
-}
-
-export function toggleCatalogExpand(btn) {
-  const card = btn.closest(".catalog-card");
-  const desc = card.querySelector(".catalog-full-desc");
-  if (!desc) return;
-  const expanded = desc.classList.toggle("expanded");
-  btn.textContent = expanded
-    ? T("catalog_collapse", "Collapse")
-    : T("catalog_details", "Details");
 }
