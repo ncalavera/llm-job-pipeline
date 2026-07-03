@@ -35,7 +35,7 @@
         <button
           class="mode-btn"
           id="modeApplications"
-          onclick="switchMode('applications')"
+          onclick="switchApplications()"
         >
           &#9993; <span data-i18n="tab_applications">Applications</span>
         </button>
@@ -58,10 +58,11 @@
     <div class="container">
       <div id="syncIndicator" class="sync-indicator"></div>
 
-      <!-- === VACANCIES SUB-NAV (Browse / Triage / Geo / Archive) ===
-           Shown only while the Vacancies section is active. These four leaf
-           views used to be top-level tabs; they now live under Vacancies so the
-           top nav stays at six sections. -->
+      <!-- === VACANCIES SUB-NAV (Browse / Geo / Archive) ===
+           Shown only while the Vacancies section is active. These leaf views
+           used to be top-level tabs; they now live under Vacancies so the top
+           nav stays at six sections. Triage used to be a fourth tab here; it
+           now lives under Applications (see applicationsSubNav below). -->
       <div class="vacancy-sub-nav" id="vacancySubNav" style="display: none">
         <button
           class="vacancy-sub-tab"
@@ -69,13 +70,6 @@
           onclick="switchMode('catalog')"
         >
           <span data-i18n="vsub_browse">Browse</span>
-        </button>
-        <button
-          class="vacancy-sub-tab"
-          id="vsubTriage"
-          onclick="switchMode('pipeline')"
-        >
-          <span data-i18n="tab_triage">Triage</span>
         </button>
         <button
           class="vacancy-sub-tab"
@@ -90,6 +84,32 @@
           onclick="switchMode('archive')"
         >
           <span data-i18n="tab_archive">Archive</span>
+        </button>
+      </div>
+
+      <!-- === APPLICATIONS SUB-NAV (Applications / Triage) ===
+           Shown only while the Applications section is active. Triage was
+           previously a leaf under the Vacancies sub-nav; it moved here
+           because triaging is the step that turns a liked vacancy into an
+           application. -->
+      <div
+        class="applications-sub-nav"
+        id="applicationsSubNav"
+        style="display: none"
+      >
+        <button
+          class="applications-sub-tab"
+          id="asubApplications"
+          onclick="switchMode('applications')"
+        >
+          <span data-i18n="tab_applications">Applications</span>
+        </button>
+        <button
+          class="applications-sub-tab"
+          id="asubTriage"
+          onclick="switchMode('pipeline')"
+        >
+          <span data-i18n="tab_triage">Triage</span>
         </button>
       </div>
 
@@ -330,27 +350,6 @@
       </div>
       <!-- /companies-section -->
 
-      <!-- === PIPELINE MODE === -->
-      <div class="pipeline-section" id="pipelineSection">
-        <div class="gf-companion">
-          <img
-            src="images/illus-pipeline.png"
-            data-img="illus-pipeline"
-            alt="Illustration of the triage pipeline"
-          />
-        </div>
-        <div class="gf-accent">
-          <img
-            src="images/accent-pipeline.png"
-            data-img="accent-pipeline"
-            alt=""
-          />
-        </div>
-        <div class="triage-funnel" id="triageFunnel"></div>
-        <div class="triage-board-controls" id="triageBoardControls"></div>
-        <div class="pipeline-board" id="pipelineBoard"></div>
-      </div>
-
       <!-- === STATS MODE === -->
       <div class="stats-section" id="statsSection"></div>
 
@@ -420,6 +419,30 @@
            KEYS only, never private values. -->
       <div class="applications-section" id="applicationsSection"></div>
       <!-- /applications-section -->
+
+      <!-- === PIPELINE MODE (Triage sub-tab under Applications) ===
+           Used to be a sub-tab under Vacancies; moved here because triaging
+           is the step that turns a liked vacancy into an application. -->
+      <div class="pipeline-section" id="pipelineSection">
+        <div class="gf-companion">
+          <img
+            src="images/illus-pipeline.png"
+            data-img="illus-pipeline"
+            alt="Illustration of the triage pipeline"
+          />
+        </div>
+        <div class="gf-accent">
+          <img
+            src="images/accent-pipeline.png"
+            data-img="accent-pipeline"
+            alt=""
+          />
+        </div>
+        <div class="triage-funnel" id="triageFunnel"></div>
+        <div class="triage-board-controls" id="triageBoardControls"></div>
+        <div class="pipeline-board" id="pipelineBoard"></div>
+      </div>
+      <!-- /pipeline-section -->
 
       <!-- === SETTINGS MODE ===
            Read-only display of the RESOLVED dials baked by the generator

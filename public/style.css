@@ -3916,10 +3916,12 @@ a.pipe-grp-role-title:hover {
    Settings, and the Boards catalogue additions.
    ========================================================================= */
 
-/* Vacancies sub-navigation (Browse / Triage / Geo / Archive). Mirrors the
-   company sub-tabs look. Visibility is toggled inline (display:none) by app.js
-   when the Vacancies section is not active. */
-.vacancy-sub-nav {
+/* Vacancies sub-navigation (Browse / Geo / Archive) and Applications
+   sub-navigation (Applications / Triage). Mirror the company sub-tabs look.
+   Visibility is toggled inline (display:none) by app.js when the owning
+   section is not active. */
+.vacancy-sub-nav,
+.applications-sub-nav {
   display: flex;
   gap: 0;
   margin-bottom: 14px;
@@ -3928,7 +3930,8 @@ a.pipe-grp-role-title:hover {
   overflow: hidden;
   box-shadow: var(--shadow-sm);
 }
-.vacancy-sub-tab {
+.vacancy-sub-tab,
+.applications-sub-tab {
   flex: 1;
   padding: 10px 16px;
   border: none;
@@ -3941,11 +3944,13 @@ a.pipe-grp-role-title:hover {
   transition: all 0.15s;
   border-bottom: 2px solid transparent;
 }
-.vacancy-sub-tab:hover {
+.vacancy-sub-tab:hover,
+.applications-sub-tab:hover {
   background: var(--bg);
   color: var(--text);
 }
-.vacancy-sub-tab.active {
+.vacancy-sub-tab.active,
+.applications-sub-tab.active {
   color: var(--coral);
   border-bottom-color: var(--coral);
   background: var(--coral-tint);
