@@ -197,6 +197,21 @@ export function nextUnreviewedId(currentId, queue, isUnseen) {
   return null;
 }
 
+// The id one step (±1) away from `currentId` in the entry queue (post-ship
+// fast fix: ← → / k j browse the SAME list the page was opened from, unlike
+// nextUnreviewedId above which only advances through still-unreviewed rows
+// after "Move to apply"). Clamped, not wrapped — mirrors keys.js's cursor
+// move. Returns null when there's no queue, currentId isn't in it, or the
+// step would go past an end (the caller no-ops).
+export function queueStep(currentId, queue, delta) {
+  if (!Array.isArray(queue) || queue.length === 0) return null;
+  const at = queue.indexOf(currentId);
+  if (at === -1) return null;
+  const next = at + delta;
+  if (next < 0 || next >= queue.length) return null;
+  return queue[next];
+}
+
 // First one or two initials of a company name, for the mini-card monogram.
 function initials(name) {
   return String(name || "")
@@ -210,6 +225,26 @@ function initials(name) {
 
 function label(text) {
   return '<div class="vac-section-label">' + escHtml(text) + "</div>";
+}
+
+// Quiet mono keyboard-hint row (post-ship fast fix), same recipe as Browse's
+// .browse-keyhint: ← →/k j walk the entry queue (a no-op without one — a cold
+// deep link, or an entry point that carries no queue), Esc always goes back.
+// Shown unconditionally, same as Browse's j/k/l/x hint showing even before a
+// row is selected — Esc alone is always live.
+function vacancyKeyhintHtml(t) {
+  return (
+    '<div class="vac-keyhint">' +
+    '<span class="vac-key">←</span><span class="vac-key">→</span>' +
+    '<span class="vac-keyhint-label">' +
+    escHtml(t("vac_keyhint_browse", "browse")) +
+    "</span>" +
+    '<span class="vac-key">Esc</span>' +
+    '<span class="vac-keyhint-label">' +
+    escHtml(t("vac_keyhint_back", "back")) +
+    "</span>" +
+    "</div>"
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -514,6 +549,7 @@ export function vacancyPageHtml(g, company, status, opts) {
   return (
     '<div class="vac-page">' +
     header +
+    vacancyKeyhintHtml(t) +
     '<div class="vac-sheet">' +
     reading +
     railHtml +
@@ -634,4 +670,67 @@ export function vacancyMoveToApply(id) {
   state.vacancyEntry = null;
   const host = document.getElementById("vacancyDetail");
   if (host) host.innerHTML = vacancyQueueDoneHtml(pageOpts());
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard nav (post-ship fast fix). One document-level listener, same
+// discipline as catalog.js's browseKeydown: returns early unless the vacancy
+// page is the active, in-focus surface with no palette open. Escape always
+// goes back; ←/→ (also k/j) step through state.vacancyEntry.queue — the SAME
+// queue "Move to apply" auto-advances through above — and no-op gracefully
+// when there isn't one (cold deep link, or an entry point that carries none).
+// ---------------------------------------------------------------------------
+
+function vacancyKeydown(e) {
+  if (e.isComposing) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  const active = document.activeElement;
+  if (active) {
+    const tag = active.tagName;
+    if (
+      tag === "INPUT" ||
+      tag === "TEXTAREA" ||
+      tag === "SELECT" ||
+      active.isContentEditable
+    )
+      return;
+  }
+
+  const palette = document.getElementById("commandPalette");
+  if (palette && palette.classList.contains("active")) return;
+
+  const host = document.getElementById("vacancyDetail");
+  if (!host || !host.classList.contains("active")) return;
+
+  const key = e.key;
+
+  if (key === "Escape") {
+    e.preventDefault();
+    if (typeof window.closeDetail === "function") window.closeDetail();
+    return;
+  }
+
+  if (key !== "ArrowLeft" && key !== "ArrowRight" && key !== "k" && key !== "j")
+    return;
+
+  const id = state.currentVacancyId;
+  const entry = state.vacancyEntry;
+  if (!id || !entry || !entry.queue || !entry.queue.length) return;
+
+  const delta = key === "ArrowRight" || key === "j" ? 1 : -1;
+  const next = queueStep(id, entry.queue, delta);
+  if (!next) return;
+  e.preventDefault();
+  // replace (not push), same as "Move to apply" auto-advance: Back from any
+  // hop returns straight to the originating list, not step-by-step.
+  window.openVacancyRoute(next, {
+    context: entry.context,
+    queue: entry.queue,
+    replace: true,
+  });
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("keydown", vacancyKeydown);
 }

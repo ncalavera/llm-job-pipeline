@@ -116,27 +116,6 @@ function _decorateRollups(c) {
 }
 
 // ---------------------------------------------------------------------------
-// Card filter toggle
-// ---------------------------------------------------------------------------
-
-export function toggleCompanyCardFilter(filter) {
-  // Click same card again → deselect (show all)
-  if (state.companyCardFilter === filter) {
-    state.companyCardFilter = null;
-    state.companyMonitorFilters.clear();
-  } else {
-    state.companyCardFilter = filter;
-    // "Needs attention" card → preset chips
-    if (filter === "needAction") {
-      state.companyMonitorFilters = new Set(["error", "stale", "never"]);
-    } else {
-      state.companyMonitorFilters.clear();
-    }
-  }
-  renderCompanies();
-}
-
-// ---------------------------------------------------------------------------
 // Monitoring chip toggle
 // ---------------------------------------------------------------------------
 
@@ -146,8 +125,6 @@ export function toggleMonitoringChip(level) {
   } else {
     state.companyMonitorFilters.add(level);
   }
-  // Clear card filter to avoid conflicts
-  state.companyCardFilter = null;
   renderCompanies();
 }
 
@@ -156,7 +133,6 @@ export function toggleMonitoringChip(level) {
 // ---------------------------------------------------------------------------
 
 export function switchCompanySubTab(tab) {
-  state.companyCardFilter = null;
   state.companyMonitorFilters.clear();
   state.companySubTab = tab;
   // Reset sort to sensible defaults per tab
@@ -245,17 +221,6 @@ function getFilteredSortedCompanies() {
     }
     return true;
   });
-
-  // Card filter (approved tab only) — applied AFTER base filters
-  var cardFilter = state.companyCardFilter;
-  if (subTab === "approved" && cardFilter) {
-    if (cardFilter === "withNew") {
-      filtered = filtered.filter(function (c) {
-        return _counts(c).unseen > 0;
-      });
-    }
-    // needAction card uses monitoring chips, not separate filter
-  }
 
   // Monitoring chip filter (approved tab only)
   if (subTab === "approved" && state.companyMonitorFilters.size > 0) {
@@ -631,79 +596,17 @@ function _getColumns() {
 // Stats cards (context-aware per tab)
 // ---------------------------------------------------------------------------
 
-function _renderStatsCards(unfilteredByCard, filtered) {
+// Approved tab shows no stat cards (post-ship fast fix: the maintainer
+// dropped the Total/With new/Needs attention row — the counts it carried are
+// not relocated anywhere else). Pending/Archived keep theirs.
+function _renderStatsCards(filtered) {
   var statsEl = document.getElementById("companyEnrichmentStats");
   if (!statsEl) return;
 
   var subTab = state.companySubTab;
 
   if (subTab === "approved") {
-    var total = unfilteredByCard.length;
-    var withNew = 0;
-    var staleCount = 0;
-    var errorCount = 0;
-    for (var i = 0; i < unfilteredByCard.length; i++) {
-      var counts = _counts(unfilteredByCard[i]);
-      if (counts.unseen > 0) withNew++;
-      var ms = _getMonitoringStatus(unfilteredByCard[i]);
-      if (ms.level === "stale" || ms.level === "never") staleCount++;
-      if (ms.level === "error") errorCount++;
-    }
-    var needAction = staleCount + errorCount;
-    var activeFilter = state.companyCardFilter;
-
-    // Subtitle for "Needs attention"
-    var actionParts = [];
-    if (staleCount > 0)
-      actionParts.push(staleCount + " " + T("stat_stale_suffix", "stale"));
-    if (errorCount > 0)
-      actionParts.push(errorCount + " " + T("stat_errors_suffix", "errors"));
-    var actionSub = actionParts.join(" \u00B7 ") || "\u2014";
-
-    // Subtitle for "With new"
-    var newSub =
-      withNew > 0
-        ? withNew + " " + T("stat_unreviewed_suffix", "unreviewed")
-        : "\u2014";
-
-    statsEl.innerHTML =
-      '<div class="ces-card ces-card--approved ces-card--clickable' +
-      (activeFilter === null ? " ces-card--active" : "") +
-      '" onclick="toggleCompanyCardFilter(null)">' +
-      '<span class="ces-number">' +
-      total +
-      "</span>" +
-      '<span class="ces-label">' +
-      escHtml(T("stat_total", "Total")) +
-      "</span>" +
-      '<span class="ces-sub">\u00A0</span>' +
-      "</div>" +
-      '<div class="ces-card ces-card--new ces-card--clickable' +
-      (activeFilter === "withNew" ? " ces-card--active" : "") +
-      '" onclick="toggleCompanyCardFilter(\'withNew\')">' +
-      '<span class="ces-number">' +
-      withNew +
-      "</span>" +
-      '<span class="ces-label">' +
-      escHtml(T("stat_with_new", "With new")) +
-      "</span>" +
-      '<span class="ces-sub">' +
-      escHtml(newSub) +
-      "</span>" +
-      "</div>" +
-      '<div class="ces-card ces-card--attention ces-card--clickable' +
-      (activeFilter === "needAction" ? " ces-card--active" : "") +
-      '" onclick="toggleCompanyCardFilter(\'needAction\')">' +
-      '<span class="ces-number">' +
-      needAction +
-      "</span>" +
-      '<span class="ces-label">' +
-      escHtml(T("stat_needs_attention", "Needs attention")) +
-      "</span>" +
-      '<span class="ces-sub">' +
-      escHtml(actionSub) +
-      "</span>" +
-      "</div>";
+    statsEl.innerHTML = "";
   } else if (subTab === "pending") {
     var pendingCount = filtered.length;
     var enrichedCount = 0;
@@ -989,35 +892,22 @@ function showReviewComplete() {
 
 export function renderCompanies() {
   var grid = document.getElementById("companiesGrid");
-  // Get base list (before card/chip filters) for stats cards + chip counts
-  var savedCardFilter = state.companyCardFilter;
+  // Get base list (before the monitoring-chip filter) for chip counts
   var savedMonitorFilters = state.companyMonitorFilters;
-  state.companyCardFilter = null;
   state.companyMonitorFilters = new Set();
-  var unfilteredByCard = getFilteredSortedCompanies();
-  state.companyCardFilter = savedCardFilter;
+  var unfiltered = getFilteredSortedCompanies();
   state.companyMonitorFilters = savedMonitorFilters;
-  // Get final filtered list (with card + chip filters applied)
+  // Get final filtered list (with the chip filter applied)
   var filtered = getFilteredSortedCompanies();
 
-  _renderStatsCards(unfilteredByCard, filtered);
-  _renderPendingDisclaimer(unfilteredByCard);
-  _renderMonitoringChips(unfilteredByCard);
+  _renderStatsCards(filtered);
+  _renderPendingDisclaimer(unfiltered);
+  _renderMonitoringChips(unfiltered);
 
   var shownEl = document.getElementById("companyShownCount");
   if (shownEl) {
-    var cardFilter = state.companyCardFilter;
-    var cardLabels = { withNew: "With new", needAction: "Needs attention" };
     var hasChips = state.companyMonitorFilters.size > 0;
-    if (cardFilter && cardLabels[cardFilter]) {
-      shownEl.innerHTML =
-        filtered.length +
-        " shown \u00B7 " +
-        escHtml(cardLabels[cardFilter]) +
-        ' <span class="ces-filter-dismiss" onclick="toggleCompanyCardFilter(\'' +
-        cardFilter +
-        "')\">✕</span>";
-    } else if (hasChips) {
+    if (hasChips) {
       shownEl.textContent = filtered.length + " shown";
     } else {
       var tabTotal = _subTabTotal(state.companySubTab);
@@ -1036,8 +926,7 @@ export function renderCompanies() {
     var hasFilters = !!(
       query ||
       tierFilter ||
-      (subTab === "approved" &&
-        (state.companyCardFilter || state.companyMonitorFilters.size > 0))
+      (subTab === "approved" && state.companyMonitorFilters.size > 0)
     );
     var emptyMsg;
     if (getCompanies().length === 0) {
@@ -1471,6 +1360,23 @@ export function viewOrgInCatalog(orgName) {
 // Company profile page
 // ---------------------------------------------------------------------------
 
+// Mirrors app.js's LEAF_SECTION_ID (not imported — no leaf module reaches back
+// into app.js). Before the palette (U17) a company profile could only be
+// opened from Browse or Companies, so renderProfileForSlug/hideProfile only
+// ever needed to touch those two. The palette can open one from ANY section
+// (Today, Boards, …), which exposed the gap: post-ship fast fix.
+var LEAF_SECTION_ID = {
+  today: "todaySection",
+  catalog: "catalogSection",
+  companies: "companiesSection",
+  pipeline: "pipelineSection",
+  stats: "statsSection",
+  archive: "archiveSection",
+  boards: "boardsSection",
+  applications: "applicationsSection",
+  settings: "settingsSection",
+};
+
 export function openCompanyProfile(slug) {
   var c = getCompanyBySlug(slug);
   if (!c) return;
@@ -1520,8 +1426,10 @@ export function renderProfileForSlug(slug) {
   // can never paint both and a reload can't resolve to a stacked state.
   state.currentVacancyId = null;
 
-  document.getElementById("catalogSection").classList.remove("active");
-  document.getElementById("companiesSection").classList.remove("active");
+  Object.keys(LEAF_SECTION_ID).forEach(function (mode) {
+    var el = document.getElementById(LEAF_SECTION_ID[mode]);
+    if (el) el.classList.remove("active");
+  });
   var vacancyEl = document.getElementById("vacancyDetail");
   if (vacancyEl) {
     vacancyEl.classList.remove("active");
@@ -1547,11 +1455,9 @@ export function hideProfile() {
   var statsPanel = document.getElementById("statsPanel");
   if (statsPanel) statsPanel.style.display = "";
 
-  if (state.currentMode === "catalog") {
-    document.getElementById("catalogSection").classList.add("active");
-  } else if (state.currentMode === "companies") {
-    document.getElementById("companiesSection").classList.add("active");
-  }
+  var restoreId = LEAF_SECTION_ID[state.currentMode];
+  var restoreEl = restoreId && document.getElementById(restoreId);
+  if (restoreEl) restoreEl.classList.add("active");
 }
 
 // ---------------------------------------------------------------------------

@@ -27,6 +27,7 @@ const {
   statusChipLabel,
   buildFactsRail,
   nextUnreviewedId,
+  queueStep,
   vacancyPageHtml,
   vacancyNotFoundHtml,
 } = await import("./vacancy.js");
@@ -228,6 +229,27 @@ test("nextUnreviewedId is keyed by id, not list position (AE5)", () => {
   assert.equal(nextUnreviewedId("g1", queueAfterPoll, isUnseen), "g3");
 });
 
+// --- queueStep (← → / k j vacancy-page nav, post-ship fast fix) ------------
+
+test("queueStep walks the full queue, unfiltered, in both directions", () => {
+  const queue = ["g1", "g2", "g3"];
+  assert.equal(queueStep("g1", queue, 1), "g2");
+  assert.equal(queueStep("g2", queue, 1), "g3");
+  assert.equal(queueStep("g2", queue, -1), "g1");
+});
+
+test("queueStep clamps at both ends instead of wrapping", () => {
+  const queue = ["g1", "g2", "g3"];
+  assert.equal(queueStep("g1", queue, -1), null);
+  assert.equal(queueStep("g3", queue, 1), null);
+});
+
+test("queueStep no-ops gracefully with no queue or an id that isn't in it", () => {
+  assert.equal(queueStep("g1", [], 1), null);
+  assert.equal(queueStep("g1", null, 1), null);
+  assert.equal(queueStep("gX", ["g1", "g2"], 1), null);
+});
+
 // --- toast coverage (R18 regression for the silent to_apply gap) ------------
 
 test("toastMessage covers every status the UI can set", () => {
@@ -261,6 +283,14 @@ test("vacancyPageHtml renders score tile, reading column, rail, actions", () => 
   assert.ok(html.includes("vacancyLike")); // unseen → like shown
   assert.ok(html.includes("openCompanyProfile")); // company mini-card
   assert.ok(html.includes("Open posting")); // outbound link present
+});
+
+test("vacancyPageHtml renders the keyboard-nav hint row (post-ship fast fix)", () => {
+  const html = vacancyPageHtml(fullGroup, company, "unseen", opts);
+  assert.ok(html.includes("vac-keyhint"));
+  assert.ok(html.includes("browse"));
+  assert.ok(html.includes("Esc"));
+  assert.ok(html.includes("back"));
 });
 
 test("vacancyPageHtml: the header org name and the rail company card are keyboard-reachable via Enter/Space (R12, WAI-ARIA button pattern)", () => {

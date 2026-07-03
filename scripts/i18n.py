@@ -81,6 +81,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "vac_queue_done": "All caught up",
         "vac_queue_done_hint": "No more unreviewed roles in this list.",
         "vac_back_to_browse": "Back to Browse",
+        # Vacancy keyboard-nav hint (post-ship fast fix)
+        "vac_keyhint_browse": "browse",
+        "vac_keyhint_back": "back",
         # Status-change toasts (U6, R18) — every settable status has one
         "toast_liked": "✅ Added to favorites",
         "toast_passed": "👎 Skipped",
@@ -247,16 +250,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "csort_liked": "Liked",
         "csort_score": "Score",
         "csort_interest": "Interest",
-        # Companies stat cards (dynamic)
-        "stat_total": "Total",
-        "stat_with_new": "With new",
-        "stat_needs_attention": "Needs attention",
+        # Companies stat cards (dynamic) — Approved tab's Total/With new/Needs
+        # attention row was removed (post-ship fast fix); Pending/Archived
+        # keep theirs.
         "stat_pending": "Pending",
         "stat_enriched": "Enriched",
         "stat_rejected": "Rejected",
-        "stat_unreviewed_suffix": "unreviewed",
-        "stat_stale_suffix": "stale",
-        "stat_errors_suffix": "errors",
         # Companies table headers (dynamic)
         "col_company": "Company",
         "col_tier": "Tier",
@@ -479,6 +478,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "vac_queue_done": "Всё разобрано",
         "vac_queue_done_hint": "Больше нерассмотренных ролей в этом списке нет.",
         "vac_back_to_browse": "К списку",
+        # Vacancy keyboard-nav hint (post-ship fast fix)
+        "vac_keyhint_browse": "листать",
+        "vac_keyhint_back": "назад",
         # Status-change toasts (U6, R18) — every settable status has one
         "toast_liked": "✅ Добавлено в избранное",
         "toast_passed": "👎 Пропущено",
@@ -639,15 +641,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "csort_score": "Скор",
         "csort_interest": "Интерес",
         # Companies stat cards
-        "stat_total": "Всего",
-        "stat_with_new": "С новыми",
-        "stat_needs_attention": "Нужно внимание",
         "stat_pending": "На ревью",
         "stat_enriched": "Обогащено",
         "stat_rejected": "Отклонено",
-        "stat_unreviewed_suffix": "неразобрано",
-        "stat_stale_suffix": "устарело",
-        "stat_errors_suffix": "ошибок",
         # Companies table headers
         "col_company": "Компания",
         "col_tier": "Тир",
