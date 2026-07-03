@@ -3164,20 +3164,395 @@ body[data-dashboard-style="minimal"] .loading-illus {
   display: block;
 }
 
-/* Vacancy detail page (routed, ?vacancy=). U4 ships routing + a fixed
-   placeholder seated on a sheet; U6 replaces the content and owns its full
-   layout (reading column + facts rail). */
+/* Vacancy detail page (routed, ?vacancy=, U6). The header band sits directly on
+   the material; only the reading column + facts rail are seated on a sheet
+   (protocol §6). The overlay itself is just a display toggle. */
 .vacancy-detail-page {
   display: none;
 }
 .vacancy-detail-page.active {
   display: block;
+}
+
+.vac-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* --- Header band (on the material) --- */
+.vac-back {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 4px 2px;
+  font-family: "Onest", sans-serif;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--sky-text-tertiary);
+  cursor: pointer;
+}
+.vac-back:hover {
+  color: var(--cobalt);
+}
+.vac-back:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.vac-header-main {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.vac-score-tile {
+  flex: none;
+  width: 54px;
+  height: 42px;
+  border-radius: var(--radius-tile-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 19px;
+  font-weight: 700;
+}
+.vac-score--none {
+  background: var(--sky-row-hover);
+  color: var(--sky-text-faint);
+}
+.vac-header-text {
+  flex: 1;
+  min-width: 240px;
+}
+.vac-title-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.vac-title {
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  color: var(--sky-text);
+}
+.vac-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  border-radius: var(--radius-pill);
+  padding: 2px 9px;
+}
+.vac-badge--expiring,
+.vac-badge--expired {
+  color: var(--q-weak);
+  background: var(--q-weak-bg);
+}
+.vac-status-chip {
+  font-size: 10.5px;
+  font-weight: 700;
+  border-radius: var(--radius-pill);
+  padding: 2px 9px;
+  color: var(--cobalt);
+  background: var(--cobalt-tint);
+}
+.vac-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 5px;
+  font-size: 12.5px;
+  color: var(--sky-text-tertiary);
+  flex-wrap: wrap;
+}
+.vac-org {
+  font-weight: 700;
+  color: var(--sky-text);
+}
+.vac-org--link {
+  cursor: pointer;
+}
+.vac-org--link:hover {
+  color: var(--cobalt);
+}
+.vac-tier {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.vac-meta-comp {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11.5px;
+  color: var(--sky-text-secondary);
+}
+.vac-meta-seen {
+  color: var(--sky-text-faint);
+}
+
+/* --- Actions --- */
+.vac-actions {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.vac-btn {
+  height: 34px;
+  padding: 0 15px;
+  border-radius: 10px;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  font-family: "Onest", sans-serif;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: none;
+}
+.vac-btn:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+}
+.vac-btn--apply {
+  background: var(--cobalt);
+  color: #fff;
+}
+.vac-btn--apply:hover {
+  background: #1d38b2;
+}
+.vac-btn--like {
+  background: var(--q-good);
+  color: #fff;
+}
+.vac-btn--like:hover {
+  filter: brightness(1.1);
+}
+.vac-btn--pass {
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--sky-text-secondary);
+  font-weight: 600;
+}
+.vac-btn--pass:hover {
+  background: var(--q-weak-bg);
+  color: var(--q-weak);
+}
+.vac-btn--link {
+  background: transparent;
+  color: var(--cobalt);
+  padding: 0 8px;
+}
+.vac-btn--link:hover {
+  text-decoration: underline;
+}
+
+/* --- Sheet: reading column + facts rail --- */
+.vac-sheet {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
   background: var(--sky-sheet);
   border-radius: var(--radius-sheet);
   box-shadow:
     inset 0 0 0 1px var(--sky-hairline),
     0 1px 3px rgba(58, 56, 51, 0.05);
-  padding: 24px;
+  overflow: hidden;
+}
+.vac-reading {
+  flex: 1;
+  min-width: 320px;
+  max-width: 700px;
+  padding: 34px 44px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.vac-summary {
+  font-size: 16px;
+  line-height: 1.7;
+  font-weight: 500;
+  color: var(--sky-text);
+  text-wrap: pretty;
+}
+.vac-caption {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--sky-text-faint);
+  margin-bottom: 8px;
+}
+.vac-reasoning-text {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--sky-text-secondary);
+  text-wrap: pretty;
+}
+.vac-section-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--sky-text-faint);
+  margin-bottom: 10px;
+}
+.vac-desc {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--sky-text);
+  text-wrap: pretty;
+}
+.vac-desc p {
+  margin-bottom: 10px;
+}
+.vac-desc ul {
+  margin: 8px 0 12px 18px;
+}
+.vac-desc li {
+  margin-bottom: 5px;
+}
+.vac-desc h1,
+.vac-desc h2,
+.vac-desc h3 {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 14px 0 6px;
+  color: var(--sky-text);
+}
+.vac-desc a {
+  color: var(--cobalt);
+}
+.vac-empty {
+  font-size: 13.5px;
+  color: var(--sky-text-tertiary);
+}
+
+/* --- Facts rail --- */
+.vac-rail {
+  width: 264px;
+  flex: none;
+  padding: 34px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.vac-rail-group {
+  display: flex;
+  flex-direction: column;
+}
+.vac-fact {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  padding: 4px 0;
+}
+.vac-fact-k {
+  color: var(--sky-text-tertiary);
+}
+.vac-fact-v {
+  font-weight: 600;
+  color: var(--sky-text);
+  text-align: right;
+}
+.vac-loc {
+  display: block;
+  font-size: 12.5px;
+  color: var(--sky-text);
+  padding: 3px 0;
+  text-decoration: none;
+}
+.vac-loc--link {
+  color: var(--cobalt);
+}
+.vac-loc--link:hover {
+  text-decoration: underline;
+}
+.vac-us-warn {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--q-weak);
+  background: var(--q-weak-bg);
+  border-radius: 10px;
+  padding: 9px 12px;
+  line-height: 1.4;
+}
+.vac-req-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.vac-req-chip {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sky-text-secondary);
+  background: var(--sky-row-hover);
+  border-radius: var(--radius-pill);
+  padding: 3px 9px;
+}
+.vac-company-card {
+  background: rgba(255, 255, 255, 0.75);
+  border-radius: 12px;
+  padding: 13px 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vac-company-card:hover {
+  box-shadow: 0 2px 8px rgba(58, 56, 51, 0.1);
+}
+.vac-company-top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.vac-company-mono {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.vac-company-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--sky-text);
+}
+.vac-company-note {
+  font-size: 11.5px;
+  color: var(--sky-text-tertiary);
+  line-height: 1.5;
+}
+.vac-company-link {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--cobalt);
+}
+.vac-empty-actions {
+  margin-top: 16px;
+}
+
+/* Narrow: stack the rail under the reading column (protocol collapse width) */
+@media (max-width: 900px) {
+  .vac-reading {
+    max-width: none;
+    padding: 24px 22px;
+  }
+  .vac-rail {
+    width: 100%;
+    border-top: 1px solid var(--sky-row-hover);
+  }
 }
 
 .company-profile {
