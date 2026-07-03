@@ -59,6 +59,18 @@ EXIT_GATE = 10
 EXIT_ABORT = 20
 EXIT_ERROR = 30
 
+
+class BoardResolveError(RuntimeError):
+    """The persisted board set could not be loaded because the DB is unreachable
+    (a genuine outage, NOT the schema-predates-persistence case, which degrades
+    to the override). Raised from _resolve_boards so main() can surface it through
+    the documented EXIT_ABORT path — a clear message + a documented exit code —
+    instead of the raw traceback + undocumented exit 1 it produced before, which
+    fired BEFORE the stage machine's own DB-outage preflight stop. Subclasses
+    RuntimeError and preserves the original message so callers that only assert
+    'a failure propagates' still see it."""
+
+
 # Publish gate: block a publish when a single org lost a large share of its live
 # roles to gone-from-source archival this run (the signature of a truncated
 # HTTP-200 fetch). A floor keeps a 1-of-1 tiny org from tripping the gate.
@@ -356,6 +368,11 @@ def _resolve_boards(cli_boards: str | None) -> str | None:
             persisted = list(get_enabled_boards())
         except BoardPersistenceUnavailable as exc:
             print(f"  (persisted board set unavailable: {exc}; using override only)", flush=True)
+        except Exception as exc:  # noqa: BLE001 — a genuine DB outage, not schema-missing
+            # Do NOT silently degrade to boards-off: that is indistinguishable
+            # from the fresh-clone case. Raise a typed error so main() aborts
+            # through the documented path instead of crashing with a raw traceback.
+            raise BoardResolveError(str(exc)) from exc
     finally:
         _close_db()
 
@@ -1022,6 +1039,20 @@ def _h_company_scoring(state, entry, opts):
     }
 
 
+def _corrupt_score_payload_msg(n_unscored: int, phase: str) -> str:
+    """Error text for a resume that can't map its still-unscored vacancies back to
+    gate tasks — the payload file is missing/truncated/unreadable. Failing loudly
+    here is the whole point: an empty read must NOT be mistaken for 'scoring
+    complete' and silently skip these rows into a publish."""
+    return (
+        f"score payload {VAC_PAYLOAD_PATH} is missing or unreadable, but {n_unscored} "
+        f"vacancy(ies) are still unscored in the DB ({phase} pass). Refusing to report "
+        "scoring complete (that would skip them and publish). Re-run scoring: "
+        "python3 scripts/run_daily.py --new (discards the run), or restore the payload "
+        "file and --resume."
+    )
+
+
 def _h_vacancy_scoring(state, entry, opts):
     """Two-pass vacancy scoring: a CHEAP model screens every new role,
     the STRONG model re-scores only the finalists that clear the calibrated
@@ -1103,6 +1134,8 @@ def _h_vacancy_scoring(state, entry, opts):
         remaining = [
             p for p in payloads if any(str(m) in remaining_ids for m in p.get("member_ids", []))
         ]
+        if remaining_ids and not remaining:
+            return "error", _corrupt_score_payload_msg(len(remaining_ids), "screen")
         if remaining:
             return "gate", {
                 "action": "score_vacancies",
@@ -1152,6 +1185,8 @@ def _h_vacancy_scoring(state, entry, opts):
     remaining = [
         p for p in payloads if any(str(m) in remaining_ids for m in p.get("member_ids", []))
     ]
+    if remaining_ids and not remaining:
+        return "error", _corrupt_score_payload_msg(len(remaining_ids), "escalate")
     if remaining:
         # Every call that reaches this branch is a RESUME of the escalate gate
         # (the transition above returns its own gate without falling through
@@ -1448,38 +1483,49 @@ def main(argv: list[str] | None = None) -> int:
 
     existing = _load_state()
     fresh_run = False
-    if args.new:
-        opts = Opts(
-            job_boards=_resolve_boards(args.boards),
-            full_rescore=args.full_rescore,
-            no_publish=args.no_publish,
+    try:
+        if args.new:
+            opts = Opts(
+                job_boards=_resolve_boards(args.boards),
+                full_rescore=args.full_rescore,
+                no_publish=args.no_publish,
+            )
+            state = _new_state(opts)
+            fresh_run = True
+        elif args.resume:
+            if not existing:
+                print("No run to resume. Start one: python3 scripts/run_daily.py")
+                return EXIT_ABORT
+            state = existing
+            opts = _opts_from_state(state)
+            _warn_ignored_resume_flags(args)
+            if args.no_publish:
+                opts.no_publish = True
+        elif existing and not existing.get("finished"):
+            print(f"Resuming interrupted run {existing.get('run_id')} …", flush=True)
+            state = existing
+            opts = _opts_from_state(state)
+            _warn_ignored_resume_flags(args)
+            if args.no_publish:
+                opts.no_publish = True
+        else:
+            opts = Opts(
+                job_boards=_resolve_boards(args.boards),
+                full_rescore=args.full_rescore,
+                no_publish=args.no_publish,
+            )
+            state = _new_state(opts)
+            fresh_run = True
+    except BoardResolveError as exc:
+        print(
+            "\n✗ Run aborted: could not load the persisted board set because the "
+            f"database is unreachable ({exc}). This is a genuine outage, not a "
+            "fresh clone (a fresh clone falls back to the board override). Fix the "
+            "DB, then start a fresh run.",
+            file=sys.stderr,
+            flush=True,
         )
-        state = _new_state(opts)
-        fresh_run = True
-    elif args.resume:
-        if not existing:
-            print("No run to resume. Start one: python3 scripts/run_daily.py")
-            return EXIT_ABORT
-        state = existing
-        opts = _opts_from_state(state)
-        _warn_ignored_resume_flags(args)
-        if args.no_publish:
-            opts.no_publish = True
-    elif existing and not existing.get("finished"):
-        print(f"Resuming interrupted run {existing.get('run_id')} …", flush=True)
-        state = existing
-        opts = _opts_from_state(state)
-        _warn_ignored_resume_flags(args)
-        if args.no_publish:
-            opts.no_publish = True
-    else:
-        opts = Opts(
-            job_boards=_resolve_boards(args.boards),
-            full_rescore=args.full_rescore,
-            no_publish=args.no_publish,
-        )
-        state = _new_state(opts)
-        fresh_run = True
+        return EXIT_ABORT
 
     if fresh_run:
         _print_run_banner(opts)

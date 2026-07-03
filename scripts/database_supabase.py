@@ -684,7 +684,12 @@ def load_vacancies(
         params.extend(status_exclude)
 
     if unscored_only:
-        conditions.append("v.llm_score IS NULL")
+        # "Unscored" must mean the same thing here as in the count the dashboard
+        # shows (report.data_prep._count_unscored) and the in-memory re-score
+        # gate (score_vacancies.py) — all treat a negative sentinel score as
+        # awaiting scoring. Loading only IS NULL stranded a -1 row: counted as
+        # awaiting scoring but never offered to the scorer.
+        conditions.append("(v.llm_score IS NULL OR v.llm_score < 0)")
         conditions.append("v.status != 'archived'")
 
     where = " AND ".join(conditions) if conditions else "TRUE"
@@ -770,7 +775,10 @@ def load_candidate_vacancies_for_scoring(
 
     conditions = [
         "c.status = 'candidate'",
-        "v.llm_score IS NULL",
+        # Same "unscored" definition as the main gate: a negative sentinel score
+        # is awaiting scoring, so the candidate rescue must offer it too, not
+        # strand it.
+        "(v.llm_score IS NULL OR v.llm_score < 0)",
         "v.status != 'archived'",
         "(c.alignment_score >= %s OR c.alignment_score IS NULL)",
     ]
