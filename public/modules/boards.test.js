@@ -34,7 +34,7 @@ globalThis.window = {
 globalThis.location = { protocol: "file:", origin: "" };
 globalThis.localStorage = { getItem: () => null, setItem: () => {} };
 
-const { renderBoards } = await import("./boards.js");
+const { renderBoards, toggleBoard } = await import("./boards.js");
 
 function boardRow(overrides = {}) {
   return Object.assign(
@@ -174,6 +174,34 @@ test("board fields are escaped in both text and attribute positions", () => {
     "the href attribute value itself is escaped, not raw",
   );
   assert.ok(html.includes("&quot;id"), "the id chip escapes embedded quotes");
+});
+
+// Simple mode (this file runs under file:// → API_BASE ""): the enabled dot
+// stays a read-only span, no interactive toggle, and the CLI hint is shown —
+// mirrors how the other write actions degrade offline.
+test("simple mode renders a read-only dot, no toggle button, and the CLI hint", () => {
+  setCatalog([boardRow({ id: "a", name: "Alpha", enabled: true })]);
+  renderBoards();
+
+  const html = grid.innerHTML;
+  assert.ok(html.includes("brd-dot-on"), "the read-only dot still renders");
+  assert.ok(!html.includes("brd-toggle"), "no toggle button in simple mode");
+  assert.ok(
+    !html.includes("aria-pressed"),
+    "no toggle semantics in simple mode",
+  );
+  assert.ok(html.includes("boards-cli-hint"), "the CLI hint is shown offline");
+  assert.ok(
+    !html.includes("boards-toggle-note"),
+    "the interactive note is not shown offline",
+  );
+});
+
+test("simple mode: toggleBoard is a no-op (no API to write to)", async () => {
+  setCatalog([boardRow({ id: "a", name: "Alpha", enabled: true })]);
+  const ok = await toggleBoard("a", false);
+  assert.equal(ok, false, "returns false — nothing was written");
+  assert.equal(catalog[0].enabled, true, "the catalogue entry is untouched");
 });
 
 test("an unsafe URL scheme never reaches an href", () => {

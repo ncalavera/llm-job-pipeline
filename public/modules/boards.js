@@ -7,12 +7,21 @@
 // its full read-only catalogue — including the freshness column, computed from
 // the baked ttl_days/last_fetched — in simple mode too, no /api required. When
 // the live /api/board-statuses endpoint IS reachable (full mode) it MERGES the
-// vacancy counts on top. Changing a board's enabled state is a CLI action
-// (shown as a hint) — there is no write endpoint here.
+// vacancy counts on top. When an /api is reachable (full OR local mode) the
+// enabled dot is an accessible toggle that writes board.enabled via
+// /api/board-toggle; in simple mode (static export, API_BASE "") it stays a
+// read-only dot with the CLI hint, mirroring how the other write actions
+// (saveToServer / saveCompanyReview) no-op offline.
 // =============================================================================
 
 import { API_BASE } from "./state.js";
-import { escHtml, relativeTime, safeUrl, tierClass } from "./helpers.js";
+import {
+  escHtml,
+  jsAttr,
+  relativeTime,
+  safeUrl,
+  tierClass,
+} from "./helpers.js";
 import { T } from "./i18n.js";
 
 let boardsInited = false;
@@ -51,6 +60,40 @@ function loadLiveBoards() {
     });
 }
 
+// Optimistic enable/disable. Writes ONLY board.enabled — the same field the CLI
+// (sources.py enable-board / disable-board) sets — via /api/board-toggle; the
+// next pipeline run unions the enabled set in. Mirrors company-review's
+// optimistic pattern: flip the baked catalogue entry in place + re-render, then
+// revert + re-render if the write fails. No-op in simple mode (button isn't
+// rendered there, but the guard keeps a stray call harmless).
+function _postToggle(boardId, enabled) {
+  return fetch(API_BASE + "/api/board-toggle", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ board_id: boardId, enabled: enabled }),
+  })
+    .then((r) => r.ok)
+    .catch(() => false);
+}
+
+export function toggleBoard(boardId, nextEnabled) {
+  if (!API_BASE) return Promise.resolve(false);
+  const entry = _bakedCatalog().find((b) => b.id === boardId);
+  if (!entry) return Promise.resolve(false);
+  const prev = !!entry.enabled;
+  const next = !!nextEnabled;
+  entry.enabled = next; // optimistic
+  renderBoards();
+  return _postToggle(boardId, next).then((ok) => {
+    if (!ok) {
+      entry.enabled = prev; // revert
+      renderBoards();
+    }
+    return ok;
+  });
+}
+
 // Freshness — computed baked-first from ttl_days + last_fetched (mirrors the
 // server's own overdue math in api/board-statuses.js) so the column works even
 // without the live API; the live row's last_fetched (if fresher) wins once it
@@ -87,6 +130,43 @@ function _ttlCell(b) {
   return "<code>" + escHtml(String(b.ttl_days)) + "d</code>";
 }
 
+// The enabled indicator. In simple mode (no /api) it stays the read-only dot it
+// has always been; when an /api is reachable it becomes an accessible toggle
+// button (aria-pressed reflects state, native button = keyboard operable) whose
+// click writes the SAME board.enabled flag the CLI sets.
+function _enabledControl(b) {
+  const onCls = b.enabled ? "brd-dot-on" : "brd-dot-off";
+  const title = escHtml(
+    b.enabled ? T("boards_enabled_yes", "On") : T("boards_enabled_no", "Off"),
+  );
+  if (!API_BASE) {
+    return '<span class="brd-dot ' + onCls + '" title="' + title + '"></span>';
+  }
+  const aria = escHtml(
+    T("boards_toggle_aria", "Toggle enabled for {name}").replace(
+      "{name}",
+      b.name || b.id,
+    ),
+  );
+  return (
+    '<button type="button" class="brd-toggle" aria-pressed="' +
+    (b.enabled ? "true" : "false") +
+    '" aria-label="' +
+    aria +
+    '" title="' +
+    title +
+    '" onclick="event.stopPropagation();toggleBoard(\'' +
+    jsAttr(b.id) +
+    "'," +
+    !b.enabled +
+    ')">' +
+    '<span class="brd-dot ' +
+    onCls +
+    '"></span>' +
+    "</button>"
+  );
+}
+
 function _nameCell(b) {
   const boardUrl = safeUrl(b.url);
   const nameText = boardUrl
@@ -96,16 +176,9 @@ function _nameCell(b) {
       escHtml(b.name) +
       "</a>"
     : escHtml(b.name);
-  const dotTitle = escHtml(
-    b.enabled ? T("boards_enabled_yes", "On") : T("boards_enabled_no", "Off"),
-  );
   return (
     '<div class="brd-name-wrap">' +
-    '<span class="brd-dot ' +
-    (b.enabled ? "brd-dot-on" : "brd-dot-off") +
-    '" title="' +
-    dotTitle +
-    '"></span>' +
+    _enabledControl(b) +
     '<div class="brd-name-col">' +
     '<span class="brd-name-text">' +
     nameText +
@@ -227,15 +300,27 @@ export function renderBoards() {
     })
     .join("");
 
-  const cliHint =
-    '<p class="boards-cli-hint"><code>' +
-    escHtml(
-      T(
-        "boards_cli_hint",
-        "Read-only. Enable a board across runs: python3 scripts/sources.py enable-board <id>",
-      ),
-    ) +
-    "</code></p>";
+  // Simple mode (no /api): the flag can't be written here, so keep the CLI
+  // hint. When an /api IS reachable the dots ARE toggles, so drop the
+  // "Read-only" hint and instead state, honestly, what a toggle does — it
+  // changes only the enabled flag; the change lands on the next run, not now.
+  const cliHint = API_BASE
+    ? '<p class="boards-toggle-note">' +
+      escHtml(
+        T(
+          "boards_toggle_note",
+          "Toggling a board changes only its enabled flag — the next run picks it up.",
+        ),
+      ) +
+      "</p>"
+    : '<p class="boards-cli-hint"><code>' +
+      escHtml(
+        T(
+          "boards_cli_hint",
+          "Read-only. Enable a board across runs: python3 scripts/sources.py enable-board <id>",
+        ),
+      ) +
+      "</code></p>";
   const liveNote = hasLive
     ? ""
     : '<p class="boards-live-note">' +

@@ -158,6 +158,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "boards_enabled_yes": "On",
         "boards_enabled_no": "Off",
         "boards_cli_hint": "Read-only. Enable a board across runs: python3 scripts/sources.py enable-board <id>",
+        "boards_toggle_aria": "Toggle enabled for {name}",
+        "boards_toggle_note": "Toggling a board changes only its enabled flag — the next run picks it up.",
         "boards_live_note": "Vacancy counts and freshness come from the live API.",
         # Applications section
         "apps_title": "Applications",
@@ -555,6 +557,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "boards_enabled_yes": "Вкл",
         "boards_enabled_no": "Выкл",
         "boards_cli_hint": "Только чтение. Включить доску на все прогоны: python3 scripts/sources.py enable-board <id>",
+        "boards_toggle_aria": "Переключить сбор для {name}",
+        "boards_toggle_note": "Переключение доски меняет только флаг включения — следующий прогон это подхватит.",
         "boards_live_note": "Число вакансий и свежесть — из живого API.",
         # Applications section
         "apps_title": "Отклики",

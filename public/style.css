@@ -4467,6 +4467,32 @@ a.pipe-grp-role-title:hover {
 .brd-dot-off {
   background: var(--sky-text-faint);
 }
+/* Enabled toggle (full/local mode). padding + equal negative margin grows the
+   click/focus target to ~19px while keeping the row's layout identical to the
+   read-only dot it replaces. */
+.brd-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  margin: -6px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  border-radius: 50%;
+  line-height: 0;
+}
+.brd-toggle .brd-dot {
+  transition: transform 0.12s ease;
+}
+.brd-toggle:hover .brd-dot {
+  transform: scale(1.35);
+}
+.brd-toggle:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 1px;
+}
 .brd-name-col {
   min-width: 0;
   display: flex;
@@ -4521,6 +4547,11 @@ a.pipe-grp-role-title:hover {
 }
 .boards-live-note {
   margin: 6px 8px 0;
+  font-size: 11px;
+  color: var(--sky-text-faint);
+}
+.boards-toggle-note {
+  margin: 12px 8px 0;
   font-size: 11px;
   color: var(--sky-text-faint);
 }
