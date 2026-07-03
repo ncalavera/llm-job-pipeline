@@ -13,6 +13,10 @@ import {
   sectionForMode,
   isVacancyView,
   isApplicationsView,
+  SYNC_STALE_AFTER,
+  initialSyncState,
+  nextSyncState,
+  syncStatusLabelKey,
 } from "./nav.js";
 
 test("there are exactly six top-nav sections, in order", () => {
@@ -69,4 +73,91 @@ test("the two applications sub-views are recognised; nothing else is", () => {
 
 test("the default applications view is one of the applications views", () => {
   assert.ok(APPLICATIONS_VIEWS.includes(DEFAULT_APPLICATIONS_VIEW));
+});
+
+// --- Sidebar sync-status state machine (DHA-387, U3) ------------------------
+
+test("initial sync state is 'checking' with no failures", () => {
+  assert.deepEqual(initialSyncState(), {
+    status: "checking",
+    consecutiveFailures: 0,
+  });
+});
+
+test("checking -> ok on the first successful poll", () => {
+  const s = nextSyncState(initialSyncState(), "ok");
+  assert.deepEqual(s, { status: "ok", consecutiveFailures: 0 });
+});
+
+test("a single soft failure while checking doesn't flip the status yet", () => {
+  const s = nextSyncState(initialSyncState(), "soft_fail");
+  assert.equal(s.status, "checking");
+  assert.equal(s.consecutiveFailures, 1);
+});
+
+test("soft failures accumulate to 'stale' exactly at SYNC_STALE_AFTER", () => {
+  assert.equal(SYNC_STALE_AFTER, 3);
+  let s = initialSyncState();
+  for (let i = 1; i < SYNC_STALE_AFTER; i++) {
+    s = nextSyncState(s, "soft_fail");
+    assert.equal(s.status, "checking", `still checking after ${i} blip(s)`);
+    assert.equal(s.consecutiveFailures, i);
+  }
+  s = nextSyncState(s, "soft_fail");
+  assert.equal(s.status, "stale");
+  assert.equal(s.consecutiveFailures, SYNC_STALE_AFTER);
+});
+
+test("a soft failure while ok holds 'ok' until the threshold is crossed", () => {
+  let s = nextSyncState(initialSyncState(), "ok"); // ok, 0 failures
+  s = nextSyncState(s, "soft_fail");
+  assert.deepEqual(s, { status: "ok", consecutiveFailures: 1 });
+  s = nextSyncState(s, "soft_fail");
+  assert.deepEqual(s, { status: "ok", consecutiveFailures: 2 });
+  s = nextSyncState(s, "soft_fail");
+  assert.deepEqual(s, { status: "stale", consecutiveFailures: 3 });
+});
+
+test("a hard failure jumps straight to 'error', bypassing the soft-fail counter", () => {
+  const s = nextSyncState(
+    { status: "ok", consecutiveFailures: 0 },
+    "hard_fail",
+  );
+  assert.deepEqual(s, { status: "error", consecutiveFailures: 0 });
+});
+
+test("full cycle: checking -> ok -> stale -> error -> ok", () => {
+  let s = initialSyncState();
+  s = nextSyncState(s, "ok");
+  assert.equal(s.status, "ok");
+  for (let i = 0; i < SYNC_STALE_AFTER; i++) s = nextSyncState(s, "soft_fail");
+  assert.equal(s.status, "stale");
+  s = nextSyncState(s, "hard_fail");
+  assert.equal(s.status, "error");
+  s = nextSyncState(s, "ok");
+  assert.deepEqual(s, { status: "ok", consecutiveFailures: 0 });
+});
+
+test("alternate order: ok -> error -> ok (skipping stale entirely)", () => {
+  let s = nextSyncState(initialSyncState(), "ok");
+  s = nextSyncState(s, "hard_fail");
+  assert.equal(s.status, "error");
+  s = nextSyncState(s, "ok");
+  assert.deepEqual(s, { status: "ok", consecutiveFailures: 0 });
+});
+
+test("'ok' recovers straight from 'stale' with the failure count reset", () => {
+  let s = initialSyncState();
+  for (let i = 0; i < SYNC_STALE_AFTER; i++) s = nextSyncState(s, "soft_fail");
+  assert.equal(s.status, "stale");
+  s = nextSyncState(s, "ok");
+  assert.deepEqual(s, { status: "ok", consecutiveFailures: 0 });
+});
+
+test("syncStatusLabelKey maps every known status; unknown falls back to checking", () => {
+  assert.equal(syncStatusLabelKey("checking"), "sync_checking");
+  assert.equal(syncStatusLabelKey("ok"), "sync_live");
+  assert.equal(syncStatusLabelKey("stale"), "sync_stale");
+  assert.equal(syncStatusLabelKey("error"), "sync_error");
+  assert.equal(syncStatusLabelKey("nonsense"), "sync_checking");
 });

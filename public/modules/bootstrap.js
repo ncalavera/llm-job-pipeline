@@ -21,6 +21,12 @@
 // UI state (active tab, filters, sort, scroll) — see state.js for why that's
 // safe. Polling pauses while the tab is hidden (Page Visibility API) and
 // catches up immediately on refocus instead of waiting out the interval.
+//
+// Every poll outcome — not just changed ones — also feeds the sidebar's
+// sync-status footer (DHA-387, U3) via a lightweight "sync" event, kept
+// deliberately separate from "render": a full re-render on every 60s tick
+// would blow away DOM-only UI state a snapshot replace never touches (an
+// expanded catalog card, the triage board's DOM). See applyPollResult().
 
 const POLL_INTERVAL_MS = 60_000; // 60s — live-feeling, and an unchanged poll is nearly free
 
@@ -52,6 +58,76 @@ export function shouldApplyPollResponse(status) {
 }
 
 /**
+ * Classify a poll response status for the sidebar sync-status footer (see
+ * nav.js's state machine). 304 confirms the endpoint is live even though
+ * there's nothing new to apply; any other non-2xx during a poll is a real
+ * failure worth surfacing, not silently swallowed like shouldApplyPollResponse
+ * does for rendering purposes. Pure — unit-tested without a browser.
+ * @returns {"ok"|"hard_fail"}
+ */
+export function pollOutcome(status) {
+  if (status === 304) return "ok";
+  return shouldApplyPollResponse(status) ? "ok" : "hard_fail";
+}
+
+/**
+ * Perform one poll round-trip and decide what happened — no state.js, no
+ * DOM, no timers, just an injected fetchImpl, so it's unit-testable under
+ * `node --test`. `payload` is present ONLY when there's new data to apply (a
+ * 2xx with a parseable body); its absence — including on a 304 — means
+ * "nothing to render", even though `outcome` may still be "ok" (the endpoint
+ * is confirmed live, just unchanged).
+ * @returns {Promise<{outcome:"ok"|"soft_fail"|"hard_fail", etag:string|null, payload?:object}>}
+ */
+export async function runPoll(fetchImpl, etag) {
+  let res;
+  try {
+    res = await fetchImpl("/api/vacancies", {
+      headers: etag
+        ? { Accept: "application/json", "If-None-Match": etag }
+        : { Accept: "application/json" },
+    });
+  } catch {
+    return { outcome: "soft_fail", etag }; // offline blip — next tick retries
+  }
+  if (pollOutcome(res.status) === "hard_fail") {
+    return { outcome: "hard_fail", etag }; // endpoint answered with a real error
+  }
+  if (!shouldApplyPollResponse(res.status)) {
+    return { outcome: "ok", etag }; // 304 — unchanged, but confirms we're live
+  }
+  const nextETag = res.headers.get("ETag") || etag;
+  let payload;
+  try {
+    payload = await res.json();
+  } catch {
+    return { outcome: "hard_fail", etag: nextETag };
+  }
+  return { outcome: "ok", etag: nextETag, payload };
+}
+
+/**
+ * Wire one runPoll() result into the sync-status state machine and the
+ * render pipeline. Split out from tick() so it's unit-testable with plain
+ * injected functions (no DOM/fetch/dynamic-import needed): a poll with no
+ * `payload` (a 304, or any failure) must repaint ONLY the lightweight "sync"
+ * listener (sidebar footer + nav counts) — the regression this guards
+ * against called scheduleRender() on every poll, blowing away DOM-only state
+ * (expanded catalog cards, the triage board) every 60s even when nothing
+ * changed. `applySnapshot` returning false (an invalid payload) also must
+ * not render.
+ * @param {{outcome:string, payload?:object}} result - from runPoll().
+ * @param {{recordSyncOutcome:Function, applySnapshot:Function, scheduleRender:Function, emit:Function}} deps
+ */
+export function applyPollResult(result, deps) {
+  deps.recordSyncOutcome(result.outcome);
+  deps.emit("sync"); // immediate, cheap — footer + nav counts only
+  if (result.payload !== undefined && deps.applySnapshot(result.payload)) {
+    deps.scheduleRender(); // full re-render, only when there's data to apply
+  }
+}
+
+/**
  * Poll /api/vacancies for a changed snapshot and hot-swap it in when found.
  * No-ops outside full mode (no endpoint) — callers only invoke this after a
  * "live" initial load. Exported for tests; real use is the `boot()` call below.
@@ -62,30 +138,19 @@ export function startPolling(initialETag) {
   let timer = null;
 
   async function tick() {
-    let res;
+    const result = await runPoll(fetch, etag);
+    etag = result.etag;
     try {
-      res = await fetch("/api/vacancies", {
-        headers: etag
-          ? { Accept: "application/json", "If-None-Match": etag }
-          : { Accept: "application/json" },
+      const { recordSyncOutcome, applySnapshot, scheduleRender, emit } =
+        await import("./state.js");
+      applyPollResult(result, {
+        recordSyncOutcome,
+        applySnapshot,
+        scheduleRender,
+        emit,
       });
     } catch {
-      return; // offline blip — next tick retries
-    }
-    if (!shouldApplyPollResponse(res.status)) return; // 304 or a poll-time error
-    const nextETag = res.headers.get("ETag");
-    let payload;
-    try {
-      payload = await res.json();
-    } catch {
-      return;
-    }
-    if (nextETag) etag = nextETag;
-    try {
-      const { applySnapshot, scheduleRender } = await import("./state.js");
-      if (applySnapshot(payload)) scheduleRender();
-    } catch {
-      return; // a background poll must never disrupt the visible dashboard
+      /* a background poll must never disrupt the visible dashboard */
     }
   }
 
@@ -190,6 +255,12 @@ export async function boot() {
       return;
     }
   }
+
+  // Seed the sidebar's sync-status footer before state.js evaluates: "live"
+  // starts confirmed-ok; "fallback" (simple/local mode, baked data.js, no
+  // /api/vacancies to poll) is honestly labeled a stale snapshot rather than
+  // silently rendering as live — see nav.js's sync-status state machine.
+  window.__DASHBOARD_SYNC_SOURCE__ = source;
 
   await import("../app.js"); // app.js lives at public/app.js, one level up
 

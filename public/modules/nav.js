@@ -62,3 +62,54 @@ export function isVacancyView(mode) {
 export function isApplicationsView(mode) {
   return APPLICATIONS_VIEWS.indexOf(mode) !== -1;
 }
+
+// =============================================================================
+// Sidebar sync-status state machine (DHA-387, U3).
+//
+// The sidebar footer shows one of four states: "checking" (before the first
+// poll resolves — the initial state), "ok" (the last poll confirmed live
+// data), "stale" (SYNC_STALE_AFTER consecutive soft failures — offline blips —
+// with no hard error yet), or "error" (a hard failure: the endpoint answered
+// with a real error status, or its body could not be parsed). A poll outcome
+// is one of "ok" | "soft_fail" | "hard_fail"; "ok" always clears straight back
+// to the live state regardless of what preceded it, so the indicator never
+// gets stuck showing stale/error once the connection recovers.
+// =============================================================================
+
+// Consecutive soft failures tolerated before the footer calls the snapshot
+// stale. One or two transient blips over 60s polling shouldn't flip the
+// indicator; a real outage (3+ minutes) should.
+export const SYNC_STALE_AFTER = 3;
+
+/** The sync-status footer's state before any poll has resolved. */
+export function initialSyncState() {
+  return { status: "checking", consecutiveFailures: 0 };
+}
+
+/** Advance the sync-status state machine by one poll outcome. */
+export function nextSyncState(prev, outcome) {
+  if (outcome === "ok") return { status: "ok", consecutiveFailures: 0 };
+  if (outcome === "hard_fail")
+    return { status: "error", consecutiveFailures: 0 };
+  // soft_fail: count it; only flip to "stale" once the threshold is crossed,
+  // otherwise hold whatever status was already showing.
+  const consecutiveFailures = ((prev && prev.consecutiveFailures) || 0) + 1;
+  const status =
+    consecutiveFailures >= SYNC_STALE_AFTER
+      ? "stale"
+      : (prev && prev.status) || "checking";
+  return { status, consecutiveFailures };
+}
+
+// The i18n key for each sync-status word, for the thin DOM shell to look up.
+const SYNC_LABEL_KEYS = {
+  checking: "sync_checking",
+  ok: "sync_live",
+  stale: "sync_stale",
+  error: "sync_error",
+};
+
+/** The i18n key for a sync-status word. Unknown status → "checking" (safe). */
+export function syncStatusLabelKey(status) {
+  return SYNC_LABEL_KEYS[status] || SYNC_LABEL_KEYS.checking;
+}
