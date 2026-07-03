@@ -5226,3 +5226,123 @@ a.pipe-grp-role-title:hover {
 .browse-keyhint-label {
   margin-right: 8px;
 }
+
+/* === U17 palette (redesign) === */
+/* ⌘K command palette (DHA-401). A floating dialog over a dimmed backdrop —
+   unlike a seated sheet it genuinely floats, so it earns a real (but restrained)
+   elevation on top of the sheet hairline rim. Selection is cobalt (protocol:
+   cobalt marks the current place / interaction, never quality). */
+.palette-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 12vh 16px 16px;
+  background: rgba(26, 22, 18, 0.32);
+}
+.palette-overlay.active {
+  display: flex;
+}
+.palette-dialog {
+  width: min(600px, 94vw);
+  max-height: 68vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--sky-sheet);
+  border-radius: var(--radius-sheet);
+  box-shadow:
+    inset 0 0 0 1px var(--sky-hairline),
+    0 12px 32px rgba(26, 22, 18, 0.18);
+  overflow: hidden;
+}
+.palette-input-wrap {
+  padding: 14px 18px 10px;
+}
+.palette-input {
+  width: 100%;
+  border: none;
+  background: transparent;
+  font-family: "Onest", sans-serif;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--sky-text);
+  outline: none;
+}
+.palette-input::placeholder {
+  color: var(--sky-text-faint);
+  font-weight: 400;
+}
+.palette-results {
+  overflow-y: auto;
+  padding: 4px 8px 10px;
+}
+.palette-group {
+  padding-top: 6px;
+}
+.palette-group-label {
+  padding: 6px 10px 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sky-text-faint);
+}
+.palette-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-row);
+  cursor: pointer;
+}
+.palette-option:hover {
+  background: var(--sky-row-hover);
+}
+.palette-option--active {
+  background: var(--cobalt-tint);
+}
+.palette-opt-score {
+  flex: none;
+  width: 34px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-tile);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+.palette-opt-score--none {
+  background: var(--sky-row-hover);
+  color: var(--sky-text-faint);
+}
+.palette-opt-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.palette-opt-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--sky-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.palette-opt-org {
+  font-size: 12px;
+  color: var(--sky-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.palette-empty {
+  padding: 22px 12px 26px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--sky-text-faint);
+}

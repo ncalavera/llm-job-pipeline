@@ -16,7 +16,12 @@ import {
   emit,
   scheduleRender,
 } from "./modules/state.js";
-import { initUI, showToast, isVacancyExpired } from "./modules/helpers.js";
+import {
+  initUI,
+  showToast,
+  isVacancyExpired,
+  escHtml,
+} from "./modules/helpers.js";
 import {
   applyI18n,
   T,
@@ -82,6 +87,13 @@ import {
   vacancyPass,
   vacancyMoveToApply,
 } from "./modules/vacancy.js";
+import {
+  filterPalette,
+  flatKeys,
+  routeForResult,
+  resultsHtml,
+  createSelection,
+} from "./modules/palette.js";
 
 // ---------------------------------------------------------------------------
 // Initialize UI elements (toast, scroll-to-top)
@@ -661,6 +673,302 @@ window.renderToday = renderToday;
 window.renderArchive = renderArchive;
 window.renderApplications = renderApplications;
 window.renderSettings = renderSettings;
+
+// ---------------------------------------------------------------------------
+// ⌘K command palette (U17, DHA-401) — thin DOM shell over palette.js's pure
+// filter/selection/markup. The overlay is built once and appended to <body>
+// (like initUI's toast), so no markup lands in index.html.
+//
+// Data binding (KTD7): results recompute from the LIVE `groups`/getCompanies()
+// on every keystroke and on every "render" (a 60s poll's applySnapshot fires
+// one) — never a cached snapshot. The highlight is keyed by result id/slug
+// (palette.js's createSelection, mirroring keys.js), so a poll that reorders
+// results under a pending Enter cannot change which result opens.
+//
+// Focus (a11y): the palette is a combobox — focus stays on the input the whole
+// time it is open (a genuine trap: Tab/Shift+Tab never leave the dialog, they
+// walk the result highlight instead), and the active option is announced via
+// aria-activedescendant on the listbox. Esc / backdrop-click close and return
+// focus to the element that opened it.
+// ---------------------------------------------------------------------------
+
+var _paletteOverlay = null;
+var _paletteDialog = null;
+var _paletteInput = null;
+var _paletteResults = null;
+var _paletteOpen = false;
+var _paletteTrigger = null; // element focus returns to on close
+var _paletteFlat = []; // current flat results (index → result), for choose/hover
+var _restoringFocus = false; // guards the sidebar-search focus handler on close
+var _paletteSelection = createSelection();
+
+function buildPaletteDom() {
+  if (_paletteOverlay) return;
+  _paletteOverlay = document.createElement("div");
+  _paletteOverlay.className = "palette-overlay";
+  _paletteOverlay.id = "commandPalette";
+
+  _paletteDialog = document.createElement("div");
+  _paletteDialog.className = "palette-dialog";
+  _paletteDialog.setAttribute("role", "dialog");
+  _paletteDialog.setAttribute("aria-modal", "true");
+  _paletteDialog.setAttribute("aria-label", T("nav_search", "Search"));
+
+  var inputWrap = document.createElement("div");
+  inputWrap.className = "palette-input-wrap";
+  _paletteInput = document.createElement("input");
+  _paletteInput.type = "text";
+  _paletteInput.className = "palette-input";
+  _paletteInput.id = "paletteInput";
+  _paletteInput.setAttribute("role", "combobox");
+  _paletteInput.setAttribute("aria-expanded", "false");
+  _paletteInput.setAttribute("aria-controls", "paletteResults");
+  _paletteInput.setAttribute("aria-autocomplete", "list");
+  _paletteInput.setAttribute("autocomplete", "off");
+  _paletteInput.setAttribute("spellcheck", "false");
+  _paletteInput.setAttribute(
+    "aria-label",
+    T("palette_placeholder", "Search vacancies and companies…"),
+  );
+  _paletteInput.placeholder = T(
+    "palette_placeholder",
+    "Search vacancies and companies…",
+  );
+  inputWrap.appendChild(_paletteInput);
+
+  _paletteResults = document.createElement("div");
+  _paletteResults.className = "palette-results";
+  _paletteResults.id = "paletteResults";
+  _paletteResults.setAttribute("role", "listbox");
+  _paletteResults.setAttribute("aria-label", T("nav_search", "Search"));
+
+  _paletteDialog.appendChild(inputWrap);
+  _paletteDialog.appendChild(_paletteResults);
+  _paletteOverlay.appendChild(_paletteDialog);
+  document.body.appendChild(_paletteOverlay);
+
+  _paletteInput.addEventListener("input", function () {
+    renderPaletteResults(true); // a new query resets the highlight to the top
+  });
+  _paletteDialog.addEventListener("keydown", paletteKeydown);
+  // Backdrop click (outside the dialog) closes.
+  _paletteOverlay.addEventListener("click", function (e) {
+    if (e.target === _paletteOverlay) closePalette();
+  });
+}
+
+// Adapt the LIVE payload into palette.js's input shape at call time (never a
+// cached snapshot — KTD7). Vacancies carry the group's fit score; companies the
+// alignment (fit) score. Both fall back cleanly when a score is absent.
+function paletteData() {
+  return {
+    vacancies: groups.map(function (g) {
+      return {
+        id: g.id,
+        title: g.title,
+        org: g.company_name || g.org,
+        score: g.llm_score,
+      };
+    }),
+    companies: getCompanies().map(function (c) {
+      return { slug: c.slug, name: c.name, score: c.alignment_score };
+    }),
+  };
+}
+
+// Re-run the filter from live data + the current query and repaint. `reset`
+// true (a keystroke) highlights the top match; false (a data refresh) reconciles
+// the existing highlight by id (KTD7).
+function renderPaletteResults(reset) {
+  if (!_paletteOpen) return;
+  var query = _paletteInput.value || "";
+  var fr = filterPalette(query, paletteData());
+  _paletteFlat = fr.flat;
+  var keys = flatKeys(fr);
+  if (reset) _paletteSelection.reset(keys);
+  else _paletteSelection.reconcile(keys);
+
+  if (!query.trim()) {
+    _paletteResults.innerHTML =
+      '<div class="palette-empty">' +
+      escHtml(T("palette_hint", "Type to search vacancies and companies.")) +
+      "</div>";
+  } else if (fr.flat.length === 0) {
+    _paletteResults.innerHTML =
+      '<div class="palette-empty">' +
+      escHtml(T("palette_no_results", "No matches.")) +
+      "</div>";
+  } else {
+    _paletteResults.innerHTML = resultsHtml(fr, _paletteSelection.index, {
+      labelVacancies: T("palette_group_vacancies", "Vacancies"),
+      labelCompanies: T("palette_group_companies", "Companies"),
+    });
+  }
+  applyPaletteActive();
+}
+
+// Repaint the active option without rebuilding the list (arrow / hover moves):
+// toggle the selected class + aria-selected by index and point the input's
+// aria-activedescendant at it, scrolling it into view.
+function applyPaletteActive() {
+  if (!_paletteResults) return;
+  var activeIdx = _paletteSelection.index;
+  _paletteResults.querySelectorAll(".palette-option").forEach(function (el) {
+    var idx = Number(el.dataset.idx);
+    var on = idx === activeIdx;
+    el.classList.toggle("palette-option--active", on);
+    el.setAttribute("aria-selected", on ? "true" : "false");
+    if (on && typeof el.scrollIntoView === "function")
+      el.scrollIntoView({ block: "nearest" });
+  });
+  if (activeIdx >= 0)
+    _paletteInput.setAttribute(
+      "aria-activedescendant",
+      "palette-opt-" + activeIdx,
+    );
+  else _paletteInput.removeAttribute("aria-activedescendant");
+}
+
+function paletteKeydown(e) {
+  if (e.isComposing) return;
+  var key = e.key;
+  if (key === "Escape") {
+    e.preventDefault();
+    closePalette();
+    return;
+  }
+  if (key === "ArrowDown" || (key === "Tab" && !e.shiftKey)) {
+    e.preventDefault();
+    _paletteSelection.move(1, flatKeys({ flat: _paletteFlat }));
+    applyPaletteActive();
+    return;
+  }
+  if (key === "ArrowUp" || (key === "Tab" && e.shiftKey)) {
+    e.preventDefault();
+    _paletteSelection.move(-1, flatKeys({ flat: _paletteFlat }));
+    applyPaletteActive();
+    return;
+  }
+  if (key === "Enter") {
+    e.preventDefault();
+    var idx = _paletteSelection.index;
+    if (idx >= 0) paletteChoose(idx);
+    return;
+  }
+}
+
+// Hide the overlay + reset palette state WITHOUT touching focus. Shared by the
+// close path (which then returns focus to the trigger) and choose (which
+// navigates away, so focus follows the detail page).
+function hidePaletteOverlay() {
+  _paletteOpen = false;
+  _paletteFlat = [];
+  _paletteSelection.clear();
+  if (_paletteOverlay) _paletteOverlay.classList.remove("active");
+  if (_paletteInput) {
+    _paletteInput.setAttribute("aria-expanded", "false");
+    _paletteInput.removeAttribute("aria-activedescendant");
+  }
+  if (_paletteResults) _paletteResults.innerHTML = "";
+}
+
+function openPalette(trigger) {
+  buildPaletteDom();
+  if (_paletteOpen) {
+    _paletteInput.focus();
+    return;
+  }
+  _paletteOpen = true;
+  _paletteTrigger = trigger || document.activeElement || document.body;
+  _paletteOverlay.classList.add("active");
+  _paletteInput.value = "";
+  _paletteInput.setAttribute("aria-expanded", "true");
+  renderPaletteResults(true); // empty query → the "type to search" hint
+  _paletteInput.focus();
+}
+
+function closePalette() {
+  if (!_paletteOpen) return;
+  var trigger = _paletteTrigger;
+  _paletteTrigger = null;
+  hidePaletteOverlay();
+  // Return focus to whatever opened the palette. Guard the sidebar-search focus
+  // handler so this programmatic focus can't immediately reopen it.
+  if (trigger && typeof trigger.focus === "function") {
+    _restoringFocus = true;
+    try {
+      trigger.focus();
+    } finally {
+      _restoringFocus = false;
+    }
+  }
+}
+
+// Open the highlighted (or clicked) result's detail page and dismiss the
+// palette. Routes via the SAME window entries a row click uses — with the
+// "palette" context so the vacancy page confirms in place (no Browse-queue
+// auto-advance, F3). Navigation takes over focus, so we don't restore it.
+function paletteChoose(idx) {
+  var route = routeForResult(_paletteFlat[idx]);
+  if (!route) return;
+  hidePaletteOverlay();
+  _paletteTrigger = null;
+  if (route.kind === "vacancy")
+    window.openVacancyRoute(route.id, { context: "palette" });
+  else window.openCompanyProfile(route.slug);
+}
+
+// Mouse hover moves the highlight to the pointed-at option (id-keyed set).
+function paletteHover(idx) {
+  var r = _paletteFlat[idx];
+  if (!r) return;
+  _paletteSelection.set(r.key, flatKeys({ flat: _paletteFlat }));
+  applyPaletteActive();
+}
+
+window.paletteChoose = paletteChoose;
+window.paletteHover = paletteHover;
+
+// Global ⌘K / Ctrl+K opens the palette. U15's browse keydown ignores meta/ctrl
+// combos (catalog.js), so this cannot double-fire with j/k/l/x triage.
+document.addEventListener("keydown", function (e) {
+  if (
+    (e.metaKey || e.ctrlKey) &&
+    !e.altKey &&
+    (e.key === "k" || e.key === "K")
+  ) {
+    e.preventDefault();
+    openPalette(document.activeElement);
+  }
+});
+
+// The sidebar search input is now a real palette trigger (its readonly hack is
+// dropped here, keeping index.html untouched). Focusing or clicking it opens
+// the palette and forwards focus to the palette input; the _restoringFocus
+// guard stops the close-time focus-return from reopening it.
+(function wireSidebarSearch() {
+  var input = document.getElementById("sidebarSearch");
+  if (!input) return;
+  input.removeAttribute("readonly");
+  input.setAttribute("role", "button");
+  input.setAttribute("aria-haspopup", "dialog");
+  input.setAttribute("aria-keyshortcuts", "Meta+K Control+K");
+  var open = function (e) {
+    if (_restoringFocus) return;
+    if (e) e.preventDefault();
+    openPalette(input);
+  };
+  input.addEventListener("focus", open);
+  input.addEventListener("click", open);
+})();
+
+// KTD7: a mid-open data refresh (applySnapshot → scheduleRender → "render")
+// recomputes the palette from the fresh data and reconciles the highlight by
+// id, so it survives the swap. Registered after the main "render" handler; both
+// fire, order-independent.
+on("render", function () {
+  if (_paletteOpen) renderPaletteResults(false);
+});
 
 // ---------------------------------------------------------------------------
 // Init sequence
