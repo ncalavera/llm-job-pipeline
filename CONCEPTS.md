@@ -53,6 +53,24 @@ The save layer's content classification: descriptions that are boilerplate (cook
 ### Blind vacancy
 A saved vacancy with no usable description — the listing was real but the detail content could not be obtained. Blind rows keep their title, company, location, and link, remain visible and scoreable in degraded form, and are queued for an enrichment sweep that tries to fetch the missing description; hosts the scraper provably cannot reach are excluded from the sweep. A blind row heals when a later fetch supplies the description, or ages out after staying blind past its window.
 
+## Applications
+
+### Application dossier
+The application entity's reason to exist (2026-07-04 decision): one record per submitted application that catalogues everything done for it — the stage history, timestamped free-text notes, and links to artifacts (CV version, cover-letter answers, research). A status-only applications view would merely duplicate Triage; the dossier is what the entity adds. Reachable from the company page, the vacancy page, and Triage.
+
+### Stage machine
+The application lifecycle: sent → interview (repeatable; each round is a timeline entry) → offer / rejected / ghosted (terminal). "Sent" is created automatically by "mark applied"; every other transition is a manual user action. Follow-ups are notes on the timeline, not a stage.
+
+### Ghosted
+Terminal application stage meaning the employer went silent and the user gave up waiting. Manual-only: an application silent for more than 21 days shows a derived "mark ghosted?" nudge, but the system never sets the stage itself.
+*Avoid:* auto-ghosting, ghosted as a computed state.
+
+## Company scoring
+
+### Banded verdict (WANT total)
+The WANT total is a holistic banded judgment (90–100 exceptional, 80–89 strong, …) made across all seven dimensions at once — deliberately NOT the arithmetic mean of the dimension scores. The bands plus the spread mandate exist to prevent score compression in a curated pool; drift between the total and the dimension average is expected behavior, and the UI says so.
+*Avoid:* "fixing" the total to equal the dimension mean.
+
 ## Learning cycle
 
 ### Factor strength
@@ -70,6 +88,9 @@ Two distinct pass signals. **Not mine** is a plain `passed` status: the role was
 ### Backtest (clean)
 The safety check every filter-word proposal must pass before it is offered. A candidate word is **clean** when it matches (whole-word) no title in the liked history AND no title of a vacancy scored ≥ 40 — i.e. adding it to the filter would have killed nothing good. A dirty candidate is not proposed; the exact roles it would have wrongly killed (its collisions) are shown instead. Pure string matching — no LLM.
 
+### Board-disable archive
+The board lifecycle rule (2026-07-04): disabling a board immediately archives its undecided rows (unseen and unscored) with `status_reason='board_disabled'`; decided rows are untouched; each archived row is individually restorable; re-enabling the board refetches fresh listings. Exists because board rows are outside gone-detection, so a disabled board's leftovers could otherwise never resolve.
+
 ## Dashboard design
 
 ### Shell and sheet
@@ -77,6 +98,9 @@ The dashboard's two-layer visual anatomy (2026-07 redesign): the **shell** is th
 
 ### Quality scale (color = meaning)
 The fixed rule that every color on the dashboard means exactly one thing. Fit/quality reads green (≥70) → ochre (50–69) → crimson (<50) everywhere it appears — score tiles, tier badges, bars, distribution strips — and cobalt marks interaction only (active nav, selection, primary actions), never quality. New hues are not invented per feature.
+
+### Calm coach (guardrail #10)
+The UX stance adopted 2026-07-04: the dashboard is a calm coach, not a control panel — job search is stressful, so every screen must lower stress. Concretely: fewest visible decisions per screen (Hick's Law), one consistent row template with no redundant info (Cognitive Load), at most 1–2 highlighted elements per view (Von Restorff), empty and completion states that encourage rather than blame (Peak-End Rule), and writes that confirm instantly (Doherty threshold). Blocks and strips hide entirely when empty.
 
 ## Flagged ambiguities
 

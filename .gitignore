@@ -79,3 +79,4 @@ package-lock.json
 
 # runtime company filter archives
 companies/
+_archive/
