@@ -98,16 +98,6 @@ export const TRIAGE_COLUMNS = [
     compact: true,
   },
   {
-    // Roles that fell out of actuality (deadline lapsed or gone from source):
-    // surfaced together for an explicit decision instead of silently passing.
-    // Display-only — 'expired' is not a real DB status, so cards can be dragged
-    // OUT to a decision but never dropped IN (see `derived`).
-    key: "expired",
-    label: "Expired",
-    color: "var(--terracotta)",
-    derived: true,
-  },
-  {
     key: "to_apply",
     label: "To apply",
     color: "var(--emerald)",
@@ -126,6 +116,17 @@ export const TRIAGE_COLUMNS = [
     key: "applied",
     label: "Applied",
     color: "var(--coral)",
+  },
+  {
+    // Roles that fell out of actuality (deadline lapsed or gone from source):
+    // surfaced together for an explicit decision instead of silently passing.
+    // Display-only — 'expired' is not a real DB status, so cards can be dragged
+    // OUT to a decision but never dropped IN (see `derived`). Sits next to the
+    // other dead-end column (Skipped) at the end of the board.
+    key: "expired",
+    label: "Expired",
+    color: "var(--terracotta)",
+    derived: true,
   },
   { key: "skipped", label: "Skipped", color: "var(--muted)" },
 ];
