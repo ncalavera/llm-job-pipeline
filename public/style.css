@@ -618,21 +618,6 @@ body::after {
   text-decoration: line-through;
 }
 
-.card-freshness {
-  font-size: var(--text-xs);
-  padding: 1px 6px;
-  border-radius: 6px;
-  white-space: nowrap;
-}
-.card-freshness.fresh {
-  color: var(--emerald);
-  background: color-mix(in srgb, var(--emerald) 12%, transparent);
-}
-.card-freshness.stale {
-  color: var(--q-weak);
-  background: var(--q-weak-bg);
-}
-
 .sync-indicator {
   font-size: var(--text-xs);
   color: var(--emerald);
@@ -3844,6 +3829,7 @@ body::after {
 .triage-stage-count {
   font-weight: 700;
   color: var(--sky-text);
+  margin-right: 4px;
 }
 .stage-applied_total .triage-stage-count {
   color: var(--q-good);
@@ -3977,6 +3963,14 @@ body::after {
   margin-bottom: 4px;
 }
 .pipe-card-title-link {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
   color: inherit;
   text-decoration: none;
 }
@@ -4010,6 +4004,19 @@ body::after {
   color: var(--amber);
   margin-top: 4px;
 }
+.pipe-card-loc {
+  font-size: 11.5px;
+  color: var(--sky-text-tertiary);
+  margin-top: 4px;
+}
+.pipe-card-source-link {
+  font-size: 11px;
+  color: var(--sky-text-tertiary);
+  text-decoration: none;
+}
+.pipe-card-source-link:hover {
+  color: var(--cobalt);
+}
 /* Triage deadline pill + staleness line — urgency-coloured. Flex is safe here
    (unlike .pipe-card itself): this is a nested child, not the Sortable
    draggable root, so it doesn't affect native drag-start detection. */
@@ -4021,10 +4028,14 @@ body::after {
 }
 .pipe-deadline {
   display: inline-block;
+  min-width: 0;
+  max-width: 100%;
   font-size: 11px;
   font-weight: 500;
   padding: 1px 8px;
   border-radius: var(--radius-pill);
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 .pipe-deadline--expired {
   color: var(--coral);
@@ -4037,6 +4048,10 @@ body::after {
 .pipe-deadline--active {
   color: var(--sky-text-tertiary);
   background: var(--sky-row-hover);
+}
+.pipe-deadline--stale {
+  color: var(--q-weak);
+  background: var(--q-weak-bg);
 }
 .pipe-card-note {
   font-size: 11px;
@@ -4092,25 +4107,26 @@ body::after {
   gap: 8px;
 }
 .pipe-grp-role-title {
-  font-size: 11.5px;
-  font-weight: 600;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 700;
   line-height: 1.3;
   color: var(--sky-text);
   text-decoration: none;
 }
-a.pipe-grp-role-title:hover {
+.pipe-grp-role-title:hover {
   color: var(--cobalt);
 }
 .pipe-grp-role-score {
   flex: none;
   font-family: "JetBrains Mono", monospace;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
-}
-.pipe-grp-role-loc {
-  font-size: 10.5px;
-  color: var(--sky-text-faint);
-  margin-top: 2px;
 }
 
 .triage-move-btns {

@@ -175,22 +175,57 @@ function renderTriageControls(controlsEl, metrics) {
 // (SortableJS, see renderPipeline). This keeps the columns narrow enough that
 // ~6 fit at 1440px instead of ~4.
 
-// Deadline (urgency-coloured) or, when a role has no deadline but its source
-// went quiet, a staleness line reusing the Catalog freshness badge look.
-function buildTriageFreshness(g) {
+// City (or Remote) + compensation, one line, expanded columns only. Reads the
+// first location entry's raw `city`/`work_mode` fields directly rather than
+// the pre-formatted `location` string — that string bakes in an "HQ: ..."
+// fallback and a region-suffixed work-mode label server-side
+// (scripts/report/data_prep.py), which is the source of the messy
+// "HQ: Brooklyn, New York, USA, Remote · Europe" line this replaces.
+function buildTriageLocationLine(g) {
+  const loc = (g.locations || [])[0];
+  const parts = [];
+  if (loc) {
+    if (loc.city) parts.push(loc.city);
+    else if ((loc.work_mode || "").toLowerCase() === "remote")
+      parts.push("Remote");
+    if (loc.compensation) parts.push(loc.compensation);
+  }
+  if (!parts.length) return "";
+  return '<div class="pipe-card-loc">' + escHtml(parts.join(" · ")) + "</div>";
+}
+
+// Resolve the external posting URL the same way the pre-internal-routing
+// title link used to: first location with a url, else the org's careers URL.
+function resolveVacancySourceUrl(g) {
+  return safeUrl(
+    (g.locations || []).find(function (l) {
+      return !!l.url;
+    })?.url ||
+      g.org_url ||
+      "",
+  );
+}
+
+// Deadline (urgency-coloured), or when a role has no deadline but its source
+// went quiet, a staleness line reusing the Catalog freshness badge look —
+// plus, on expanded columns only, a quiet Source ↗ link to the original
+// posting in the same row (Liked/compact cards stay freshness-only, R5).
+function buildTriageMetaRow(g, includeSource) {
   const dl = formatDeadlineHtml(g.deadline, "pipe-deadline", {
     t: T,
     locale: dateLocale(),
   });
-  if (dl) return '<div class="pipe-card-fresh">' + dl + "</div>";
-  if (isVacancyStale(g)) {
+  let pill = "";
+  if (dl) {
+    pill = dl;
+  } else if (isVacancyStale(g)) {
     const age = sourceAgeDays(g.last_seen);
     const text = T(
       "triage_stale_seen",
       "not seen at source for {n} days",
     ).replace("{n}", age);
-    return (
-      '<div class="pipe-card-fresh"><span class="card-freshness stale" title="' +
+    pill =
+      '<span class="pipe-deadline pipe-deadline--stale" title="' +
       escHtml(
         T(
           "freshness_stale_hint",
@@ -199,10 +234,20 @@ function buildTriageFreshness(g) {
       ) +
       '">' +
       escHtml(text) +
-      "</span></div>"
-    );
+      "</span>";
   }
-  return "";
+
+  const sourceUrl = includeSource ? resolveVacancySourceUrl(g) : "";
+  const sourceLink = sourceUrl
+    ? '<a class="pipe-card-source-link" href="' +
+      escHtml(sourceUrl) +
+      '" target="_blank" rel="noopener">' +
+      escHtml(T("triage_source_link", "Source ↗")) +
+      "</a>"
+    : "";
+
+  if (!pill && !sourceLink) return "";
+  return '<div class="pipe-card-fresh">' + pill + sourceLink + "</div>";
 }
 
 // Exported for unit tests (pipeline.test.js) — the private triage fields it
@@ -212,13 +257,6 @@ function buildTriageFreshness(g) {
 // just means resolveVacancyCompany finds no match, same as before this org
 // link had a real resolver behind it (post-ship fast fix #6).
 export function buildTriageCard(g, col, review, companies) {
-  const firstUrl = safeUrl(
-    (g.locations || []).find(function (l) {
-      return !!l.url;
-    })?.url ||
-      g.org_url ||
-      "",
-  );
   const isCompact = !!col.compact;
 
   let meta = "";
@@ -265,13 +303,12 @@ export function buildTriageCard(g, col, review, companies) {
       "</button>"
     : '<div class="pipe-card-org">' + escHtml(g.org) + "</div>";
 
-  const titleHtml = firstUrl
-    ? '<a class="pipe-card-title-link" href="' +
-      escHtml(firstUrl) +
-      '" target="_blank" rel="noopener" title="Open external vacancy">' +
-      escHtml(g.title) +
-      "</a>"
-    : escHtml(g.title);
+  const titleHtml =
+    '<button type="button" class="pipe-card-title-link" data-vacancy-id="' +
+    escHtml(g.id) +
+    '" title="Open vacancy">' +
+    escHtml(g.title) +
+    "</button>";
 
   // Compact card (DHA-412 #5): title + org + score + one-line note only. The
   // description snippet, location line, "Open \u2197" link, and the move-button row
@@ -294,7 +331,8 @@ export function buildTriageCard(g, col, review, companies) {
         g.llm_score +
         "</span>"
       : "") +
-    buildTriageFreshness(g) +
+    (isCompact ? "" : buildTriageLocationLine(g)) +
+    buildTriageMetaRow(g, !isCompact) +
     meta +
     "</div>"
   );
@@ -302,7 +340,9 @@ export function buildTriageCard(g, col, review, companies) {
 
 // One card for a company with several roles in the SAME column. The column
 // already conveys the status, so no per-card status badge is needed.
-function buildTriageGroupCard(entries, col, companies) {
+// Exported for unit tests (pipeline.test.js), same rationale as buildTriageCard.
+export function buildTriageGroupCard(entries, col, companies) {
+  const isCompact = !!col.compact;
   const head = entries[0];
   const headCompany = resolveVacancyCompany(head, companies);
   const orgHtml = headCompany
@@ -319,25 +359,12 @@ function buildTriageGroupCard(entries, col, companies) {
 
   const rolesHtml = roles
     .map(function (g) {
-      const firstUrl = safeUrl(
-        (g.locations || []).find(function (l) {
-          return !!l.url;
-        })?.url ||
-          g.org_url ||
-          "",
-      );
-      const locs = (g.locations || [])
-        .map(function (l) {
-          return l.location;
-        })
-        .join(", ");
-      const titleHtml = firstUrl
-        ? '<a class="pipe-grp-role-title" href="' +
-          escHtml(firstUrl) +
-          '" target="_blank" rel="noopener" title="Open external vacancy">' +
-          escHtml(g.title) +
-          "</a>"
-        : '<span class="pipe-grp-role-title">' + escHtml(g.title) + "</span>";
+      const titleHtml =
+        '<button type="button" class="pipe-grp-role-title" data-vacancy-id="' +
+        escHtml(g.id) +
+        '" title="Open vacancy">' +
+        escHtml(g.title) +
+        "</button>";
       return (
         '<li class="pipe-grp-role">' +
         '<div class="pipe-grp-role-head">' +
@@ -350,10 +377,8 @@ function buildTriageGroupCard(entries, col, companies) {
             "</span>"
           : "") +
         "</div>" +
-        (locs
-          ? '<div class="pipe-grp-role-loc">' + escHtml(locs) + "</div>"
-          : "") +
-        buildTriageFreshness(g) +
+        (isCompact ? "" : buildTriageLocationLine(g)) +
+        buildTriageMetaRow(g, !isCompact) +
         "</li>"
       );
     })
@@ -493,6 +518,17 @@ export function renderPipeline() {
         if (slug) window.openCompanyProfile(slug);
       });
     });
+
+  // Bind vacancy title openers — cards navigate to the internal vacancy
+  // detail page, not the external posting (source link lives on that page).
+  board.querySelectorAll("[data-vacancy-id]").forEach(function (el) {
+    el.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = el.getAttribute("data-vacancy-id");
+      if (id) window.openVacancyRoute(id, { context: "triage" });
+    });
+  });
 
   // Move every role on a card (one for a single card, all for a grouped card)
   // to the target column. updateStatus emits "statusChanged"; app.js handles

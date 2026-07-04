@@ -22,10 +22,16 @@ globalThis.window = {
 };
 globalThis.location = { protocol: "file:", origin: "" };
 
-const { buildTriageCard } = await import("./pipeline.js");
+const { buildTriageCard, buildTriageGroupCard } = await import("./pipeline.js");
 
 // A non-compact column so the review-meta block renders (compact cards omit it).
 const COL = { key: "to_apply", label: "To apply", color: "#000" };
+const LIKED_COL = {
+  key: "liked",
+  label: "Liked",
+  color: "#000",
+  compact: true,
+};
 
 function group() {
   return {
@@ -87,4 +93,110 @@ test("buildTriageCard: no matching company (or no companies list) stays plain, n
   const g = { ...group(), company_id: "c1" };
   assert.doesNotMatch(buildTriageCard(g, COL, {}, []), /pipe-card-org-link/);
   assert.doesNotMatch(buildTriageCard(g, COL, {}), /pipe-card-org-link/); // omitted entirely
+});
+
+// --- location + compensation line, and the Source ↗ link ------------------
+
+test("buildTriageCard: city + compensation render as one line, joined by ·", () => {
+  const g = {
+    ...group(),
+    locations: [
+      { city: "Brooklyn", compensation: "£70,000 - £105,000 / year" },
+    ],
+  };
+  const html = buildTriageCard(g, COL, {});
+  assert.match(html, /pipe-card-loc/);
+  assert.match(html, /Brooklyn · £70,000 - £105,000 \/ year/);
+});
+
+test("buildTriageCard: city with no compensation renders just the city", () => {
+  const g = { ...group(), locations: [{ city: "Brooklyn" }] };
+  const html = buildTriageCard(g, COL, {});
+  assert.match(html, /pipe-card-loc">Brooklyn</);
+});
+
+test("buildTriageCard: remote work_mode with no city renders Remote", () => {
+  const g = { ...group(), locations: [{ work_mode: "remote" }] };
+  const html = buildTriageCard(g, COL, {});
+  assert.match(html, /pipe-card-loc">Remote</);
+});
+
+test("buildTriageCard: no city, not remote, no compensation omits the location line entirely", () => {
+  const g = { ...group(), locations: [{ work_mode: "onsite" }] };
+  const html = buildTriageCard(g, COL, {});
+  assert.doesNotMatch(html, /pipe-card-loc/);
+});
+
+test("buildTriageCard: location text is HTML-escaped", () => {
+  const g = { ...group(), locations: [{ city: XSS }] };
+  const html = buildTriageCard(g, COL, {});
+  assert.doesNotMatch(html, /<img/i);
+  assert.match(html, /&lt;img/);
+});
+
+test("buildTriageCard: deadline pill still renders as before (regression)", () => {
+  const g = {
+    ...group(),
+    deadline: new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10),
+  };
+  const html = buildTriageCard(g, COL, {});
+  assert.match(html, /pipe-deadline/);
+});
+
+test("buildTriageCard: a resolvable posting URL renders the Source ↗ link", () => {
+  const g = { ...group(), locations: [{ url: "https://example.com/job/1" }] };
+  const html = buildTriageCard(g, COL, {});
+  assert.match(html, /pipe-card-source-link/);
+  assert.match(html, /href="https:\/\/example\.com\/job\/1"/);
+  assert.match(html, /target="_blank"/);
+});
+
+test("buildTriageCard: no deadline, not stale, no resolvable URL renders no meta row", () => {
+  const html = buildTriageCard(group(), COL, {});
+  assert.doesNotMatch(html, /pipe-card-fresh/);
+});
+
+test("buildTriageCard: Liked (compact) column omits location line and source link even when data is present", () => {
+  const g = {
+    ...group(),
+    locations: [
+      {
+        city: "Brooklyn",
+        compensation: "£70k",
+        url: "https://example.com/job/1",
+      },
+    ],
+  };
+  const html = buildTriageCard(g, LIKED_COL, {});
+  assert.doesNotMatch(html, /pipe-card-loc/);
+  assert.doesNotMatch(html, /pipe-card-source-link/);
+});
+
+test("buildTriageGroupCard: expanded column shows location/source per role, omitting fields the role lacks", () => {
+  const roles = [
+    {
+      ...group(),
+      id: "v1",
+      title: "Role A",
+      locations: [{ city: "Brooklyn", url: "https://example.com/job/a" }],
+    },
+    { ...group(), id: "v2", title: "Role B", locations: [] },
+  ];
+  const html = buildTriageGroupCard(roles, COL, []);
+  assert.match(html, /pipe-card-loc">Brooklyn</);
+  assert.match(html, /pipe-card-source-link/);
+});
+
+test("buildTriageGroupCard: Liked (compact) column shows no location or source link for any role", () => {
+  const roles = [
+    {
+      ...group(),
+      id: "v1",
+      title: "Role A",
+      locations: [{ city: "Brooklyn", url: "https://example.com/job/a" }],
+    },
+  ];
+  const html = buildTriageGroupCard(roles, LIKED_COL, []);
+  assert.doesNotMatch(html, /pipe-card-loc/);
+  assert.doesNotMatch(html, /pipe-card-source-link/);
 });
