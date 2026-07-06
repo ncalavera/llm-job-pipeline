@@ -141,6 +141,24 @@ export function syncStatusLabelKey(status) {
 export const FALLBACK_STALE_AFTER_MS = 48 * 60 * 60 * 1000;
 
 /**
+ * Parse config.last_updated to epoch ms, treating an offset-less datetime as
+ * UTC. The generator now writes a timezone-aware UTC stamp ("+00:00"), but
+ * bakes from before that fix carry a NAIVE local-time isoformat — and
+ * browsers parse an offset-less ISO datetime as browser-LOCAL time, skewing
+ * the 48h check by up to ±14h depending on the viewer's timezone. Pinning
+ * the interpretation to UTC keeps the error bounded by the PRODUCER's offset
+ * only, and deterministic across viewers.
+ * @returns {number} epoch ms, or NaN when unparseable
+ */
+export function parseSnapshotStamp(lastUpdated) {
+  if (!lastUpdated) return NaN;
+  // A "T" time part with no trailing designator (Z or ±hh[:]mm) → append Z.
+  const naive =
+    /T/.test(lastUpdated) && !/(Z|[+-]\d{2}:?\d{2})$/.test(lastUpdated);
+  return Date.parse(naive ? lastUpdated + "Z" : lastUpdated);
+}
+
+/**
  * Decide the fallback banner's state. Pure — unit-tested without DOM/Date.now.
  * @param {string} source - window.__DASHBOARD_SYNC_SOURCE__ ("live"|"fallback"|…)
  * @param {string|null|undefined} lastUpdated - config.last_updated (ISO), absent on a pre-stamp bake
@@ -150,7 +168,7 @@ export const FALLBACK_STALE_AFTER_MS = 48 * 60 * 60 * 1000;
 export function fallbackBannerState(source, lastUpdated, now) {
   if (source !== "fallback")
     return { show: false, level: "info", age: "known" };
-  const t = lastUpdated ? Date.parse(lastUpdated) : NaN;
+  const t = parseSnapshotStamp(lastUpdated);
   if (Number.isNaN(t)) return { show: true, level: "warning", age: "unknown" };
   const isStale = now - t > FALLBACK_STALE_AFTER_MS;
   return { show: true, level: isStale ? "warning" : "info", age: "known" };

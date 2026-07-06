@@ -276,6 +276,10 @@ function renderFallbackBanner() {
 
 var fallbackBannerDismissBtn = document.getElementById("fallbackBannerDismiss");
 if (fallbackBannerDismissBtn) {
+  fallbackBannerDismissBtn.setAttribute(
+    "aria-label",
+    T("fallback_banner_dismiss", "Dismiss"),
+  );
   fallbackBannerDismissBtn.addEventListener("click", function () {
     fallbackBannerDismissed = true;
     renderFallbackBanner();

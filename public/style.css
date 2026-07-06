@@ -639,6 +639,12 @@ body::after {
 }
 
 /* --- Fallback banner (DHA-422) — offline snapshot notice --- */
+/* display:flex is author-origin, so it would beat the UA stylesheet's
+   [hidden] { display: none } on the default (live-mode) hidden banner —
+   restate the [hidden] rule here so el.hidden actually hides it. */
+.fallback-banner[hidden] {
+  display: none;
+}
 .fallback-banner {
   display: flex;
   align-items: center;

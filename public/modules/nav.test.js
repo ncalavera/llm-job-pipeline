@@ -19,6 +19,7 @@ import {
   syncStatusLabelKey,
   FALLBACK_STALE_AFTER_MS,
   fallbackBannerState,
+  parseSnapshotStamp,
 } from "./nav.js";
 
 test("there are exactly six top-nav sections, in order", () => {
@@ -247,4 +248,59 @@ test("fallback with an unparseable stamp is treated the same as no stamp", () =>
     level: "warning",
     age: "unknown",
   });
+});
+
+// --- Stamp parsing: naive vs timezone-aware (the generator's real formats) --
+
+test("a NAIVE offset-less stamp (pre-fix bakes) is pinned to UTC, not browser-local", () => {
+  // datetime.now().isoformat(timespec="seconds") — no Z, no offset. Browsers
+  // would parse this as LOCAL time, skewing the 48h check per viewer; the
+  // parser pins it to UTC instead, same instant everywhere.
+  assert.equal(
+    parseSnapshotStamp("2026-07-06T12:00:00"),
+    Date.parse("2026-07-06T12:00:00Z"),
+  );
+});
+
+test("timezone-aware stamps parse as-written: +00:00 (the generator's new format) and Z", () => {
+  // datetime.now(timezone.utc).isoformat(timespec="seconds") ends "+00:00".
+  assert.equal(parseSnapshotStamp("2026-07-06T12:00:00+00:00"), NOW);
+  assert.equal(parseSnapshotStamp("2026-07-06T12:00:00Z"), NOW);
+  // A non-UTC offset is respected, not double-shifted.
+  assert.equal(
+    parseSnapshotStamp("2026-07-06T14:00:00+02:00"),
+    Date.parse("2026-07-06T12:00:00Z"),
+  );
+});
+
+test("the 48h staleness check is exercised with the real naive format, not just toISOString", () => {
+  // 49h before NOW, written the way the pre-fix generator wrote it (naive,
+  // seconds precision, no designator). Must read as stale/warning.
+  const naive49hAgo = new Date(NOW - 49 * 60 * 60 * 1000)
+    .toISOString()
+    .replace(/\.\d{3}Z$/, "");
+  assert.deepEqual(fallbackBannerState("fallback", naive49hAgo, NOW), {
+    show: true,
+    level: "warning",
+    age: "known",
+  });
+  // And a fresh naive stamp stays info.
+  const naive1hAgo = new Date(NOW - 60 * 60 * 1000)
+    .toISOString()
+    .replace(/\.\d{3}Z$/, "");
+  assert.equal(fallbackBannerState("fallback", naive1hAgo, NOW).level, "info");
+});
+
+// --- CSS cascade guard (review blocker): .fallback-banner sets display:flex
+// (author origin), which beats the UA stylesheet's [hidden]{display:none}
+// regardless of specificity — without an explicit author-origin [hidden]
+// override, the default-hidden banner would render as an empty flex box on
+// EVERY load, including live mode. Guard that the override stays in style.css.
+
+test("style.css restates [hidden]{display:none} for the flex banner", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const css = await readFile(new URL("../style.css", import.meta.url), "utf8");
+  const rule = css.match(/\.fallback-banner\[hidden\]\s*\{[^}]*\}/);
+  assert.ok(rule, "expected a .fallback-banner[hidden] rule in style.css");
+  assert.match(rule[0], /display:\s*none/);
 });
