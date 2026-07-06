@@ -131,7 +131,7 @@ STAGE_ABOUT = {
 
 
 # One-line preview of what a GATE will ask for, printed before the run pauses so
-# the operator knows the size of the judgment task up front (DHA-434).
+# the operator knows the size of the judgment task up front.
 def _gate_preview(action: str | None, count) -> str:
     n = count if count is not None else "?"
     return {
@@ -768,9 +768,11 @@ Show the user the freshly scored, still-unseen vacancies (highest score first)
 and capture a like / pass / skip verdict for each — writing EACH verdict
 immediately so an interruption keeps captured decisions:
 
-  python3 -c "import sys;sys.path.insert(0,'scripts');\\
-from database_supabase import update_vacancy_status; from db_conn import get_conn;\\
-update_vacancy_status('<VACANCY_ID>','liked'); get_conn().commit()"
+  python3 scripts/vac.py mark <VACANCY_ID> liked
+
+(<VACANCY_ID> may be a UUID prefix, 4+ chars; the command validates the status
+and commits. Do NOT use a `python3 -c` one-liner for this — ad-hoc one-liners
+are not an allowlisted entrypoint, so the prod-write guard blocks their writes.)
 
 Statuses: liked | passed | skipped | to_apply. A plain `passed` means "not for
 me" and calibrates scoring. If instead a role is GARBAGE — it should never have
@@ -1426,7 +1428,7 @@ def _record_history(state: dict, opts: Opts) -> None:
 def _announce_start(name: str) -> None:
     """Print the stage's plain-language start line and stamp the live card so the
     active stage (with a sane, freshly-reset elapsed) is visible even before a
-    long stage writes its own heartbeat (DHA-434 / BUG-1)."""
+    long stage writes its own heartbeat (and a prior run's card can't linger)."""
     about = STAGE_ABOUT.get(name, "")
     print(f"\n▶ {name}: {about}" if about else f"\n▶ {name}", flush=True)
     try:
@@ -1526,7 +1528,7 @@ def drive(state: dict, opts: Opts, observe: bool = False) -> int:
 
 
 def _health_lines(state: dict, opts: Opts) -> list[str]:
-    """The end-of-run expected-range check (DHA-415): an HONEST health signal that
+    """The end-of-run expected-range check: an HONEST health signal that
     catches a silent parser breakage instead of shrugging at a suspicious count.
 
     Compares this run's key counter (new vacancies) against the recent historical
@@ -1816,7 +1818,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Bind everything downstream to THIS run: run_status heartbeats (written by
     # this process AND its stage subprocesses, which inherit the env) carry the
-    # id, so run_card.py can tell a live card from a prior run's leftover (BUG-1).
+    # id, so run_card.py can tell a live card from a prior run's leftover.
     os.environ["JOBS_RUN_ID"] = str(state.get("run_id", ""))
     if fresh_run:
         _print_run_banner(opts)

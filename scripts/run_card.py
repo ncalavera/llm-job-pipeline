@@ -5,7 +5,7 @@ The /jobs-new runbook runs the long step in the background and calls this on a
 short cadence; each call prints ONE fresh card line which the assistant relays to
 chat. Standalone, no project imports — safe to call while a fetch is mid-flight.
 
-Two files feed the card, and the card BINDS them by run id (DHA-438 BUG-1):
+Two files feed the card, and the card BINDS them by run id (the stale-card fix):
 
 * ``run_state.json`` — the driver's authoritative stage board (which run, which
   stage, finished or not). It carries the current ``run_id``.

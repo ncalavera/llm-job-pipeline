@@ -1,4 +1,4 @@
-"""Durable per-run history — the ``pipeline_run`` table (DHA-434 / DHA-438 BUG-3).
+"""Durable per-run history — the ``pipeline_run`` table.
 
 ``run_card.py`` shows a run WHILE it happens; this module records it so a run can
 be reviewed AFTER it finishes (or dies). ``run_daily.record()`` calls
@@ -11,11 +11,11 @@ Best-effort, exactly like ``run_status.py``: a history write must NEVER break th
 daily run (STRATEGY goal 1). Every DB touch is wrapped; a failure (table missing
 on a not-yet-migrated DB, outage, unexpected shape) never raises — after a
 rollback so it can't poison the driver's shared connection. But NOT silently:
-best-effort with zero trace would defeat BUG-3 (history would just never
+best-effort with zero trace would defeat the point (history would just never
 accumulate, and the health check would say "no baseline yet" forever with no
 hint why), so the first failure per process prints ONE stderr warning naming the
 exception. The read helper :func:`recent_new_vacancies` feeds the end-of-run
-expected-range check (DHA-415) and likewise degrades to an empty history.
+expected-range check and likewise degrades to an empty history.
 """
 
 from __future__ import annotations
@@ -143,7 +143,7 @@ def record(state: dict, boards: str | None = None, counts: dict | None = None) -
     except Exception as exc:
         # A history write must never break the run; undo the partial write so the
         # driver's shared connection is not left in a poisoned transaction — but
-        # say so once, or BUG-3 quietly comes back as an always-empty history.
+        # say so once, or the dead-history bug quietly comes back as an always-empty history.
         _warn_once("write", exc)
         if conn is not None:
             try:

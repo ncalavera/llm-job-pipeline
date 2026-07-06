@@ -28,7 +28,7 @@ def _run_id() -> str | None:
     """The current run's id, stamped by run_daily via the ``JOBS_RUN_ID`` env var.
 
     Every heartbeat carries it so run_card.py can BIND the card to the CURRENT
-    run and refuse to render a prior run's leftover ``✓ done`` (DHA-438 BUG-1):
+    run and refuse to render a prior run's leftover ``✓ done`` (the stale-card bug):
     a heartbeat whose run_id differs from the live run_state is stale, not live.
     ``None`` when a writer runs outside a driver-launched run (e.g. a unit test).
     """
@@ -41,7 +41,7 @@ def mark(stage: str, note: str | None = None, total: int = 0) -> None:
     The driver calls this as each stage begins, so the live card shows the right
     stage (with a sane, freshly-reset elapsed) even for stages that have no
     heartbeat of their own, and so a previous run's finished heartbeat can never
-    linger as the visible state (BUG-1). Long stages (fetch, enrich) then
+    linger as the visible state (the stale-card bug). Long stages (fetch, enrich) then
     overwrite it with their own ``begin`` / ``step`` detail."""
     _write(
         {

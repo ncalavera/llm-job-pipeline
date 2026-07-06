@@ -1,4 +1,4 @@
--- 0012_pipeline_run — durable, per-stage run history (DHA-434 / DHA-438 BUG-3).
+-- 0012_pipeline_run — durable, per-stage run history.
 --
 -- The run_daily.py refactor dropped the write to this table: prod held only 2
 -- rows (last 2026-06-16) and, even those, only an end-of-run counts summary with
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS pipeline_run (
     finished          BOOLEAN NOT NULL DEFAULT FALSE,
     status            TEXT NOT NULL DEFAULT 'running',     -- running | done | gate | error | aborted
     boards            TEXT,
-    new_vacancies     INTEGER,                             -- key health counter (DHA-415 range check)
+    new_vacancies     INTEGER,                             -- key health counter (expected-range check)
     scored            INTEGER,
     companies_scored  INTEGER,
     stages            JSONB,                               -- [{name,status,note,started_at,finished_at}]

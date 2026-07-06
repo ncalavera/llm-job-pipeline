@@ -1,13 +1,13 @@
-"""Stage observability + durable run history (DHA-434 / DHA-415 / BUG-1 / BUG-3).
+"""Stage observability + durable run history.
 
 Covers three surfaces the ticket asks for, all with fixtures — no network, no
 real pipeline run:
 
 * run_card.py binds the live card to the CURRENT run id, so a prior run's
-  leftover ``✓ done`` heartbeat can never be shown mid-fetch (BUG-1);
+  leftover ``✓ done`` heartbeat can never be shown mid-fetch (the stale-card bug);
 * run_status stamps every heartbeat with the run id from the env;
 * pipeline_run persists one per-stage row per run and reads back a history range
-  for the end-of-run expected-range check (BUG-3 / DHA-415);
+  for the end-of-run expected-range check;
 * run_daily's health verdict flags 0-new-while-sources-enabled and out-of-range
   counts.
 """
@@ -26,7 +26,7 @@ if SCRIPTS not in sys.path:
 
 
 # ---------------------------------------------------------------------------
-# run_card — the fix for BUG-1 (bind the card to the current run id)
+# run_card — the stale-card fix (bind the card to the current run id)
 # ---------------------------------------------------------------------------
 
 
@@ -56,7 +56,7 @@ def _state(run_id="20260706-090000", finished=False, running="fetch"):
 
 
 def test_card_ignores_a_stale_prior_run_heartbeat(card):
-    """The BUG-1 scenario: fetch is mid-flight this run, but the only heartbeat on
+    """The stale-card scenario: fetch is mid-flight this run, but the only heartbeat on
     disk is a prior run's finished one. The card must NOT show its ``✓ done`` /
     nonsensical elapsed — it falls back to the driver's live stage board."""
     _write(card.STATE_PATH, _state(run_id="NEW", running="fetch"))
@@ -184,7 +184,7 @@ def test_run_status_run_id_none_without_env(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# pipeline_run — durable per-stage history (BUG-3) + history range (DHA-415)
+# pipeline_run — durable per-stage history + history range for the health check
 # ---------------------------------------------------------------------------
 
 
@@ -289,7 +289,7 @@ def test_record_is_best_effort_without_table(monkeypatch, tmp_path, capsys):
     """No pipeline_run table (DB not yet migrated) must NOT raise — a history
     write can never break the daily run. But not SILENTLY either: the first
     failure per process prints one stderr warning (else history would just
-    never accumulate with zero trace, quietly re-opening BUG-3)."""
+    never accumulate with zero trace, quietly killing run history again)."""
     db = tmp_path / "jobsearch.db"
     _force_sqlite(monkeypatch, db)
     import pipeline_run
