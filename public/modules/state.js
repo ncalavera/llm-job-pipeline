@@ -326,9 +326,9 @@ function replaceObjectContents(obj, next) {
  * separate `state` object and in DOM elements untouched by this function, so
  * it survives automatically; callers just call scheduleRender() after.
  *
- * Known gap: presentation config baked once at module load (SHOW_MPA in
- * companies.js, the i18n string table / pack images in i18n.js) does not
- * hot-reload — those still need a manual refresh. In practice they only
+ * Known gap: presentation config baked once at module load (the i18n string
+ * table / pack images in i18n.js) does not hot-reload — those still need a
+ * manual refresh. In practice they only
  * change if the user edits dashboard settings and reruns the pipeline while
  * the tab is open, which is rare enough to leave as a documented limitation.
  * Same class of gap: `state.liveCompanies` (loaded on demand from

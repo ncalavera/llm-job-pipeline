@@ -92,25 +92,6 @@ def _resolve_pack() -> str:
         return "default"
 
 
-def _resolve_show_mpa() -> bool:
-    """Whether to show the personal "MPA Prestige" column/profile metric.
-
-    Off by default (it is specific to an MPA/MPP application strategy). Opt in
-    with env ``DASHBOARD_MPA=1`` or ``[dashboard] show_mpa_column = true``.
-    """
-    env = (os.environ.get("DASHBOARD_MPA") or "").strip().lower()
-    if env in ("1", "true", "yes", "on"):
-        return True
-    if env in ("0", "false", "no", "off"):
-        return False
-    try:
-        import settings
-
-        return bool(settings.dashboard().get("show_mpa_column", False))
-    except Exception:
-        return False
-
-
 def _guard_shared_snapshot_profile() -> None:
     """Refuse to bake example/default settings into the SHARED production snapshot.
 
@@ -280,7 +261,6 @@ def generate_dashboard(db: dict = None) -> None:
             "i18n_all": {lang: i18n.strings(lang) for lang in i18n.available_languages()},
             "pack": pack,
             "pack_images": pack_images(pack),
-            "show_mpa_column": _resolve_show_mpa(),
         },
         "stats": stats,
         "enrichment_stats": enrichment_stats,

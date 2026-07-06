@@ -2839,12 +2839,6 @@ body::after {
   font-size: 11px;
   font-weight: 700;
 }
-.cp-mpa-note {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 11px;
-  color: var(--sky-text-faint);
-  margin-top: 4px;
-}
 
 /* --- Strengths / risks --- */
 .cp-block-title--good {
@@ -3459,10 +3453,6 @@ body::after {
 }
 .ct-col-open {
   width: 4%;
-  text-align: center;
-}
-.ct-col-mpa {
-  width: 55px;
   text-align: center;
 }
 .ct-col-liked {
