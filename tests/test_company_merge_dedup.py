@@ -43,6 +43,8 @@ MUST_MATCH = [
     ),
     ("Code.X 0", "Code.X"),
     ("Resolution", "Resolution Foundation"),
+    # Accent folding: NFKD-normalized names must dedup.
+    ("Médecins Sans Frontières", "Medecins Sans Frontieres"),
 ]
 
 MUST_NOT_MATCH = [
@@ -66,6 +68,10 @@ MUST_NOT_MATCH = [
         "Cambridge University, Leverhulme Centre for the Future of Intelligence",
         "Leverhulme Trust",
     ),
+    # Anagram is NOT an acronym: in-order initials are FIA, not FAI.
+    ("FAI - Fund International Agricultural", "Fund International Agricultural"),
+    # A lone generic org-suffix token carries no identity — never merge on it.
+    ("The Foundation", "Foundation Inc"),
 ]
 
 
