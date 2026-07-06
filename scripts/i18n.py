@@ -22,15 +22,17 @@ STRINGS: dict[str, dict[str, str]] = {
         # Document
         "html_lang": "en",
         "page_title": "Job Vacancy Dashboard",
-        # Top-nav tabs
+        # Top-nav tabs. tab_triage doubles as the Triage section's own render
+        # header label (pipeline.js) — Triage now owns its top-nav slot
+        # outright; the Applications section it used to share it with was
+        # deleted (0 real usage, Triage's applied column is the tracker).
         "tab_today": "Today",
         "tab_companies": "Companies",
         "tab_vacancies": "Vacancies",
-        "tab_applications": "Applications",
+        "tab_triage": "Triage",
         "tab_boards": "Boards",
         "tab_settings": "Settings",
-        # Vacancies sub-navigation (Browse / Triage / Geo / Archive live here now)
-        "tab_triage": "Triage",
+        # Vacancies sub-navigation (Browse / Geo / Archive)
         "tab_geo": "Geo",
         "tab_archive": "Archive",
         "vsub_browse": "Browse",
@@ -179,20 +181,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "boards_yield_nodata": "no data yet",
         "boards_yield_note": "Yield is your own history: scored roles this board reached, how many clear the apply bar (≥60), and how many you liked.",
         "boards_suggest": "Know a board worth adding? Suggest one →",
-        # Applications section
-        "apps_title": "Applications",
-        "apps_sub": "Sent applications and where each one stands.",
-        "apps_empty": "No applications yet. Mark a role applied in Triage or Today.",
-        "apps_none_match": "Nothing matches this status.",
-        "apps_filter_all": "All",
-        "apps_open_company": "Open company card",
-        "apps_col_fit": "Fit",
-        "apps_col_role": "Role",
-        "apps_col_company": "Company",
-        "apps_col_stage": "Stage",
-        "apps_col_sent": "Sent",
+        # Application status labels — shared by the company profile's own
+        # applications list (companies.js) and the company review-status pill
+        # (apps_col_status). The standalone Applications dashboard section
+        # these once also fed was deleted (0 real usage; Triage's applied
+        # column is the tracker).
         "apps_col_status": "Status",
-        "apps_col_artifacts": "Artifacts",
         "app_status_draft": "Draft",
         "app_status_applied": "Applied",
         "app_status_interview": "Interview",
@@ -433,10 +427,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "tab_today": "Сегодня",
         "tab_companies": "Компании",
         "tab_vacancies": "Вакансии",
-        "tab_applications": "Отклики",
+        "tab_triage": "Триаж",
         "tab_boards": "Доски",
         "tab_settings": "Настройки",
-        "tab_triage": "Триаж",
         "tab_geo": "Гео",
         "tab_archive": "Архив",
         "vsub_browse": "Список",
@@ -585,20 +578,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "boards_yield_nodata": "пока нет данных",
         "boards_yield_note": "Отдача — по твоей истории: сколько вакансий с доски дошло до оценки, сколько прошли планку отклика (≥60) и сколько тебе понравилось.",
         "boards_suggest": "Знаешь доску, которую стоит добавить? Предложи →",
-        # Applications section
-        "apps_title": "Отклики",
-        "apps_sub": "Отправленные отклики и их текущий статус.",
-        "apps_empty": "Откликов пока нет. Отметьте вакансию «Отправлено» в Триаже или Сегодня.",
-        "apps_none_match": "Нет откликов с таким статусом.",
-        "apps_filter_all": "Все",
-        "apps_open_company": "Открыть карточку компании",
-        "apps_col_fit": "Балл",
-        "apps_col_role": "Вакансия",
-        "apps_col_company": "Компания",
-        "apps_col_stage": "Статус",
-        "apps_col_sent": "Отправлено",
         "apps_col_status": "Статус",
-        "apps_col_artifacts": "Артефакты",
         "app_status_draft": "Черновик",
         "app_status_applied": "Отправлено",
         "app_status_interview": "Интервью",
