@@ -70,14 +70,29 @@ _PEOPLE_PAGE_SEGMENTS = re.compile(
     r"/(?:about|team|people|leadership|staff|our-people|who-we-are|meet-the-team|management)(?:/|$)",
     re.IGNORECASE,
 )
+# A careers-like segment ANYWHERE in the path wins over people segments:
+# /about/careers and /who-we-are/careers are careers pages nested under an
+# About section, not people pages.
+_CAREERS_PAGE_SEGMENTS = re.compile(
+    r"/(?:careers?|jobs?|vacancies|vacancy|positions?|opportunities|join(?:-us)?"
+    r"|work-with-us|work-for-us)(?:/|$)",
+    re.IGNORECASE,
+)
 
 
 def _is_people_page_url(url: str) -> bool:
     """Return True if the scraped SOURCE page is an about/team/people/leadership
-    page — a block extracted from one is a probable staff bio, not a vacancy."""
+    page — a block extracted from one is a probable staff bio, not a vacancy.
+
+    A careers/jobs segment anywhere in the path overrides: /about/careers is a
+    careers page, not a people page.
+    """
     if not url:
         return False
-    return bool(_PEOPLE_PAGE_SEGMENTS.search(urllib.parse.urlparse(url).path))
+    path = urllib.parse.urlparse(url).path
+    if _CAREERS_PAGE_SEGMENTS.search(path):
+        return False
+    return bool(_PEOPLE_PAGE_SEGMENTS.search(path))
 
 
 def _sanitize_board_title(title: str) -> str:
@@ -245,25 +260,28 @@ def parse_markdown_jobs(markdown: str, org_name: str, *, url_filter: str = "") -
 # A scraped people/leadership page turns a staff bio into a phantom "vacancy":
 # the snippet reads as prose ABOUT a named person who already HOLDS the title,
 # not a role being advertised. Each pattern targets the start of the snippet,
-# where a bio leads with the person's name.
+# where a bio leads with the person's name. Deliberately case-SENSITIVE and
+# name-shaped: job-ad boilerplate ("The successful candidate has managed…",
+# "The Director is responsible for…", "the postholder has led…",
+# "who has served in a similar capacity") must NOT match.
 _BIO_PATTERNS = (
     # "Marieke Hounjet joined Porticus in 2017"
     re.compile(r"\b(?:[A-Z][a-z]+\s+){1,3}joined\s+\w+\s+in\s+\d{4}\b"),
-    # "Katy Hartley is the Director of ..." / "Jane Doe is a / an / our ..."
+    # "Katy Hartley is the Director of ..." — a PERSON name (2+ title-case
+    # words, not a sentence starter like "The Director is responsible…" and
+    # not an org blurb like "Acme Foundation is a leading nonprofit…")
+    # followed by "is the/a/an/our" + a Capitalized role word.
     re.compile(
-        r"^[A-Z][a-z]+(?:\s+[A-Z][a-z.'-]+){1,3}\s+is\s+(?:the|a|an|our|currently|responsible)\b"
+        r"^(?!(?:The|This|Our|Each|Every|All|As|At|In|On)\b)"
+        r"[A-Z][a-z]+(?:\s+[A-Z][a-z.'-]+){1,3}\s+is\s+(?:the|an?|our)\s+[A-Z][a-z]+"
     ),
     # "... Katy has worked ...", "She has led ...", "He has served ..." —
-    # a person (named or pronoun) narrating career history.
+    # a named person (Capitalized) or a literal lowercase pronoun narrating
+    # career history. No IGNORECASE: "candidate has managed" / "postholder
+    # has led" / "who has served" are standard job-ad phrasing, not a bio.
     re.compile(
-        r"\b(?:[A-Z][a-z]+|she|he|they)\s+has\s+"
-        r"(?:worked|led|joined|served|held|spent|overseen|managed|founded)\b",
-        re.IGNORECASE,
-    ),
-    # "In the last 25 years, Katy has ..." / "Over 20 years ... he/she ..."
-    re.compile(
-        r"\b(?:in the last|over|with(?: more than)?)\s+\d+\s+years\b[^.]{0,60}"
-        r"\b(?:[A-Z][a-z]+|she|he|they)\b"
+        r"\b(?:[A-Z][a-z]+|she|he|they)\s+ha(?:s|ve)\s+"
+        r"(?:worked|led|joined|served|held|spent|overseen|managed|founded)\b"
     ),
 )
 

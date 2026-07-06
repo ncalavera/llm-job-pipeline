@@ -589,6 +589,52 @@ class TestBioSnippetDetection:
             is False
         )
 
+    # --- Standard job-ad phrasings that must NOT flag as bios (review finding:
+    # IGNORECASE + loose name shape wrongly flagged all of these) ---
+
+    def test_candidate_has_managed_not_bio(self):
+        assert (
+            _is_bio_snippet(
+                "The successful candidate has managed multi-million dollar "
+                "portfolios across several regions."
+            )
+            is False
+        )
+
+    def test_director_is_responsible_not_bio(self):
+        assert (
+            _is_bio_snippet(
+                "The Director is responsible for leading our regional strategy and networks."
+            )
+            is False
+        )
+
+    def test_org_blurb_not_bio(self):
+        assert (
+            _is_bio_snippet(
+                "Acme Foundation is a leading nonprofit working on global "
+                "health. We are hiring a Director of Strategy."
+            )
+            is False
+        )
+
+    def test_postholder_has_led_not_bio(self):
+        assert (
+            _is_bio_snippet(
+                "Reporting to the CEO, the postholder has led cross-functional "
+                "teams in previous roles."
+            )
+            is False
+        )
+
+    def test_who_has_served_not_bio(self):
+        assert (
+            _is_bio_snippet(
+                "We seek a leader who has served in a similar capacity at an international NGO."
+            )
+            is False
+        )
+
 
 class TestPeoplePageDetection:
     """_is_people_page_url flags about/team/people/leadership source pages."""
@@ -598,6 +644,7 @@ class TestPeoplePageDetection:
         [
             "https://porticus.com/who-we-are/leadership",
             "https://example.org/about/",
+            "https://example.org/about/team",
             "https://example.org/team",
             "https://example.org/our-people/",
             "https://example.org/leadership/katy",
@@ -613,6 +660,12 @@ class TestPeoplePageDetection:
             "https://example.org/jobs/analyst",
             "https://boards.greenhouse.io/example",
             "",
+            # Careers pages nested under an About section are careers pages —
+            # the careers segment must win (review finding).
+            "https://example.org/about/careers",
+            "https://example.org/who-we-are/careers",
+            "https://example.org/team/careers",
+            "https://example.org/about/join-us",
         ],
     )
     def test_allows_careers_pages(self, url):

@@ -10,6 +10,7 @@ Usage:
 import re
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -201,6 +202,10 @@ _GENERIC_ORG_TOKENS = {
 # (handles history.com → "history" and example.co.uk → "example").
 _TLD_LABELS = {"com", "org", "net", "edu", "gov", "int", "co", "ac", "io", "ngo"}
 
+# Connector words skipped when building the acronym: real-world org acronyms
+# drop them (International Committee of the Red Cross → ICRC, not ICOTRC).
+_ACRONYM_STOPWORDS = {"of", "the", "for", "and"}
+
 
 def _domain_label(url: str) -> str:
     """Return the registrable domain label (e.g. history.com → 'history')."""
@@ -234,7 +239,11 @@ def _domain_matches_company(company_name: str, url: str) -> bool:
     label = _domain_label(url)
     if not label:
         return False
-    words = re.findall(r"[a-z0-9]+", company_name.lower())
+    # NFKD-fold diacritics first: "Médecins Sans Frontières" → "medecins sans
+    # frontieres", so accented org names tokenize cleanly and can match their
+    # ASCII domains (msf.org).
+    folded = unicodedata.normalize("NFKD", company_name).encode("ascii", "ignore").decode("ascii")
+    words = re.findall(r"[a-z0-9]+", folded.lower())
     significant = [w for w in words if len(w) >= 3 and w not in _GENERIC_ORG_TOKENS]
     for w in significant:
         if w in label or label in w:
@@ -246,9 +255,10 @@ def _domain_matches_company(company_name: str, url: str) -> bool:
     compressed = "".join(words)
     if compressed and (compressed == label or compressed in label):
         return True
-    # Acronym from the words' initials, skipping 1-char tokens so a possessive
-    # "'s" (Children's → children + s) doesn't corrupt the acronym.
-    acronym = "".join(w[0] for w in words if len(w) >= 2)
+    # Acronym from the words' initials, skipping 1-char tokens (a possessive
+    # "'s" — Children's → children + s — must not corrupt the acronym) and
+    # connector stopwords (International Committee OF THE Red Cross → icrc).
+    acronym = "".join(w[0] for w in words if len(w) >= 2 and w not in _ACRONYM_STOPWORDS)
     if len(acronym) >= 2 and acronym == label:
         return True
     return False

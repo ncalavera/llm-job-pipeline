@@ -41,6 +41,18 @@ class TestDomainMatchesCompany:
             "Children's Investment Fund Foundation", "https://ciff.org"
         )
 
+    def test_accepts_acronym_skipping_stopwords(self):
+        # Real-world acronyms drop connector words: International Committee of
+        # the Red Cross → ICRC (not ICOTRC).
+        assert f._domain_matches_company(
+            "International Committee of the Red Cross", "https://www.icrc.org"
+        )
+
+    def test_accepts_diacritics_folded(self):
+        # NFKD fold: Médecins Sans Frontières must tokenize cleanly and match
+        # its ASCII acronym domain.
+        assert f._domain_matches_company("Médecins Sans Frontières", "https://www.msf.org")
+
     def test_accepts_co_uk_suffix(self):
         assert f._domain_matches_company("Wellcome Trust", "https://wellcome.org.uk")
 
