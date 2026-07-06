@@ -21,6 +21,7 @@ keep working under both backends.
 import os
 import re
 import sqlite3
+import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -542,6 +543,137 @@ class _SqliteConn:
 
 
 # ---------------------------------------------------------------------------
+# Prod write guard (Postgres only — the SQLite path below is never "prod")
+#
+# An ad-hoc script run with SUPABASE_DB_URL set in the shell (a stray export,
+# or a debug one-off with no pytest fixtures to clean up after it) can INSERT/
+# UPDATE/DELETE straight into the live Supabase DB with nothing to undo it —
+# this is exactly how a "test company" once ended up in prod overnight. Writes
+# are blocked unless the caller is one of three recognized contexts:
+#
+#   1. pytest       — PYTEST_CURRENT_TEST is set by pytest itself for every
+#                      running test; the offline suite forces SQLite anyway
+#                      (tests/conftest.py), so this only matters for the
+#                      opt-in Postgres parity suite (tests/parity/).
+#   2. a pipeline script — this repo's own scripts/*.py, identified by
+#                      argv[0] resolving inside scripts/. Covers run_daily.py
+#                      AND every stage it subprocesses (fetch, enrich, filter,
+#                      score --save, ...), and the jobs-review/triage CLIs,
+#                      with no per-script wiring needed.
+#   3. explicit override — JOBSEARCH_ALLOW_PROD_WRITE=1, for a genuine one-off
+#                      ad-hoc write the operator has thought about.
+#
+# Reads are never touched: the check only fires for INSERT/UPDATE/DELETE.
+# scripts/migrate.py connects via _connect_supabase() directly (bypassing
+# get_conn()'s wrapper below) and is left unguarded on purpose — it is already
+# a deliberate, backed-up, hand-run admin tool with its own destructive-
+# statement scanner (see migrate.py's _DESTRUCTIVE_RE).
+# ---------------------------------------------------------------------------
+
+JOBSEARCH_ALLOW_PROD_WRITE_ENV = "JOBSEARCH_ALLOW_PROD_WRITE"
+
+_WRITE_RE = re.compile(r"^\s*(INSERT|UPDATE|DELETE)\b", re.IGNORECASE)
+
+
+class ProdWriteBlocked(RuntimeError):
+    """Raised when an unrecognized caller tries to write to prod Postgres."""
+
+
+def _is_write_statement(sql: str) -> bool:
+    return bool(_WRITE_RE.match(sql))
+
+
+def _running_as_pipeline_script() -> bool:
+    """True when this process was launched as one of this repo's own
+    ``scripts/*.py`` files (``python3 scripts/run_daily.py``, and every stage
+    it subprocesses — each inherits its own ``argv[0]`` pointing back into
+    ``scripts/``). A scratch/ad-hoc script living anywhere else (a tmp file, a
+    REPL, ``python3 -c ...``) is NOT trusted by this check."""
+    try:
+        argv0 = sys.argv[0]
+        if not argv0:
+            return False
+        return Path(argv0).resolve().parent == (PROJECT_ROOT / "scripts").resolve()
+    except Exception:
+        return False
+
+
+def _prod_write_context_ok() -> bool:
+    if IS_SQLITE:
+        return True
+    if os.environ.get("PYTEST_CURRENT_TEST") is not None:
+        return True
+    if _running_as_pipeline_script():
+        return True
+    return os.environ.get(JOBSEARCH_ALLOW_PROD_WRITE_ENV) == "1"
+
+
+def _check_write_allowed(sql: str) -> None:
+    if not _is_write_statement(sql):
+        return
+    if _prod_write_context_ok():
+        return
+    first_line = sql.strip().splitlines()[0][:80] if sql.strip() else sql
+    raise ProdWriteBlocked(
+        "Refusing to INSERT/UPDATE/DELETE against the live Supabase (prod) "
+        "database from an unrecognized script.\n"
+        f"  Statement: {first_line!r}\n"
+        f"  Fix: if this write is deliberate, set {JOBSEARCH_ALLOW_PROD_WRITE_ENV}=1 "
+        "in the environment and re-run."
+    )
+
+
+class _GuardedCursor:
+    """Thin proxy around a real psycopg2 cursor that runs every ``execute``/
+    ``executemany`` through ``_check_write_allowed`` first. Everything else
+    (fetchone/fetchall/rowcount/description/mogrify/...) passes straight
+    through via ``__getattr__`` so real psycopg2 behavior is untouched."""
+
+    def __init__(self, cur):
+        self._cur = cur
+
+    def execute(self, sql, params=None):
+        _check_write_allowed(sql)
+        return self._cur.execute(sql) if params is None else self._cur.execute(sql, params)
+
+    def executemany(self, sql, seq_of_params):
+        _check_write_allowed(sql)
+        return self._cur.executemany(sql, seq_of_params)
+
+    def __getattr__(self, name):
+        return getattr(self._cur, name)
+
+    def __enter__(self):
+        self._cur.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return self._cur.__exit__(exc_type, exc, tb)
+
+    def __iter__(self):
+        return iter(self._cur)
+
+
+class _GuardedConn:
+    """Wraps the real psycopg2 connection so every cursor it hands out is a
+    ``_GuardedCursor``. commit/rollback/close/closed/autocommit/... all pass
+    straight through via ``__getattr__``."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def cursor(self, cursor_factory=None):
+        if cursor_factory is not None:
+            real = self._conn.cursor(cursor_factory=cursor_factory)
+        else:
+            real = self._conn.cursor()
+        return _GuardedCursor(real)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+# ---------------------------------------------------------------------------
 # Connection singletons
 # ---------------------------------------------------------------------------
 
@@ -649,7 +781,7 @@ def get_conn():
                 pass
             _conn = None
 
-    _conn = _connect_supabase()
+    _conn = _GuardedConn(_connect_supabase())
     return _conn
 
 

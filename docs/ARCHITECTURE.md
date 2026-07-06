@@ -128,6 +128,16 @@ digest, or multi-device sync. Simple mode upgrades to full at any time — point
 `.env` at Supabase and the same scripts switch to Postgres, no code changes
 (the one extra step is installing `psycopg2`, which simple mode skips).
 
+Because Postgres is always the live prod database (there is no separate
+staging project), `db_backend.get_conn()` blocks INSERT/UPDATE/DELETE against
+it from anything it doesn't recognize as pytest or one of this repo's own
+`scripts/*.py` entrypoints — the guard that stops a stray ad-hoc script (a
+debug one-off with `SUPABASE_DB_URL` in its environment) from writing test
+data into prod, since unlike pytest it has no fixture to clean up after
+itself. A genuine one-off write needs `JOBSEARCH_ALLOW_PROD_WRITE=1` set
+explicitly; reads are never affected, and SQLite (simple mode) is never
+guarded since it isn't prod.
+
 ## Data model & migrations
 
 The schema ships as `sql/schema.sql` (Postgres) and `sql/schema.sqlite.sql`
