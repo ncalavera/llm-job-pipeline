@@ -789,7 +789,7 @@ def test_full_rescore_stays_single_pass_oneshot(rd, monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 4b. DHA-437 — no role re-scored by the same model
+# 4b. Same-model guard — no role re-scored by the same model
 # ---------------------------------------------------------------------------
 
 

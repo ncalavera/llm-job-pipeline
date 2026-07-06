@@ -417,10 +417,11 @@ def _vacancy_scores(target_ids: list[str]) -> dict[str, int]:
 
 
 def _vacancy_scored_by(target_ids: list[str]) -> dict[str, str]:
-    """Current ``scored_by`` model tier for each target member id — the DHA-437
-    guard reads this so a role already scored by the STRONG model is never
-    re-sent to it (see ``select_escalation_payloads``). Missing/unset values
-    (pre-migration installs, or a row with no score yet) are simply absent."""
+    """Current ``scored_by`` model tier for each target member id — the
+    same-model guard reads this so a role already scored by the STRONG model is
+    never re-sent to it (see ``select_escalation_payloads``). Missing/unset
+    values (pre-migration installs, or a row with no score yet) are simply
+    absent."""
     from database_supabase import load_vacancies
 
     vacs = load_vacancies(include_candidate_companies=True, include_inactive_companies=True)
@@ -635,7 +636,7 @@ def select_escalation_payloads(
     scored at/above the floor (members of one deduped role share a score). Roles
     with no recorded screen score (e.g. archived at save time) never escalate.
 
-    DHA-437 same-model guard: when ``scored_by_member`` + ``escalate_model`` are
+    Same-model guard: when ``scored_by_member`` + ``escalate_model`` are
     given, a role is EXCLUDED if any of its members' current score already came
     from ``escalate_model`` — that role was already scored by the strong model
     (e.g. a stale run-state, or a profile changed mid-run), so re-sending it
@@ -827,8 +828,8 @@ def _vacancy_gate_text(
 ) -> str:
     """Instructions for a vacancy-scoring gate, tailored to which two-pass pass
     it is. ``pass_kind`` is 'screen' (cheap, first pass of a real two-pass run),
-    'single' (screen_model == scoring_model — ONE pass, no escalate gate,
-    DHA-437), 'escalate' (strong, finalists only) or 'rescore' (the deliberate
+    'single' (screen_model == scoring_model — ONE pass, no escalate gate),
+    'escalate' (strong, finalists only) or 'rescore' (the deliberate
     full re-score)."""
     if pass_kind == "single":
         head = (
@@ -1196,7 +1197,7 @@ def _h_vacancy_scoring(state, entry, opts):
     the STRONG model re-scores only the finalists that clear the calibrated
     escalation floor; everything else keeps its cheap score, sorted out of view.
 
-    DHA-437: when the profile's ``screen_model`` and ``scoring_model`` are the
+    When the profile's ``screen_model`` and ``scoring_model`` are the
     SAME tier, the escalate gate would just re-send a role to the model that
     already scored it — same result, paid twice. In that case the run does
     ONE pass and says so explicitly (no escalate gate at all). Even in a real
@@ -1304,10 +1305,10 @@ def _h_vacancy_scoring(state, entry, opts):
 
         screened = len(payloads)
 
-        # DHA-437: screen_model == scoring_model -> one pass, no escalate gate.
+        # screen_model == scoring_model -> one pass, no escalate gate.
         if single_pass:
             # Durable run history reads screen_counts from this stage entry
-            # (run observability, DHA-434) — a single-pass run must record its
+            # (run observability) — a single-pass run must record its
             # scored count too, not just the two-pass path. kept_cheap mirrors
             # the two-pass invariant (screened == escalated + kept_cheap):
             # every role keeps its one (and only) score.
