@@ -63,7 +63,12 @@ the scorer. The loop:
    hard_requirements, short_summary).
 3. Collect results as a JSON array and pipe it to
    `python3 scripts/score_vacancies.py --save` (stdin). Use `member_ids` from
-   step 1 to address vacancies — not your own ids.
+   step 1 to address vacancies — not your own ids. If you saved each
+   subagent's raw result to its own file, pass them as `--files r1.json
+   r2.json ...` instead of assembling one array — a malformed file (a kill
+   mid-write, an unescaped quote) is then named and skipped, the rest still
+   save, instead of one bad file failing the whole batch (`score_companies.py
+   --save` takes the same `--files` flag).
 4. Keep the full `short_summary` text (4–6 sentences) — short summaries break
    the dashboard cards.
 

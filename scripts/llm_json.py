@@ -10,6 +10,7 @@ logic lives in exactly one place.
 
 import json
 import re
+from pathlib import Path
 
 #: Vacancy scoring fallback — a flat object containing a numeric ``score`` key.
 FLAT_SCORE_OBJECT = r'\{[^{}]*"score"\s*:\s*\d+[^{}]*\}'
@@ -42,3 +43,37 @@ def parse_llm_json(text: str, brace_pattern: str = OUTERMOST_BRACES) -> dict:
         except json.JSONDecodeError:
             pass
     return {"error": "JSON parse failed", "raw": text[:500]}
+
+
+def read_result_files(paths) -> tuple[list, list[str]]:
+    """Read individual scoring-subagent result files for a ``--save`` batch,
+    tolerating a malformed one (BUG-5: a spend-limit kill mid-write, or an
+    unescaped quote in a string value, can leave one file's JSON invalid).
+
+    The historical ``--save`` contract is one JSON blob (array or object) on
+    stdin, assembled from every subagent's raw output — a single bad entry
+    there corrupts the surrounding syntax and fails the ``json.load`` for the
+    WHOLE batch (all-or-nothing). Reading files individually sidesteps that:
+    each file is parsed on its own, so one bad file can never block the rest.
+
+    Each file holds either a single JSON object (one vacancy/company result)
+    or a JSON array of them. Returns ``(items, bad)``: ``items`` is every
+    object that parsed cleanly, in file order; ``bad`` is a list of
+    ``"<filename>: <error>"`` strings for files that failed to read or parse
+    — printed by the caller so the bad ones are named and can be re-scored,
+    never silently dropped. Never raises.
+    """
+    items: list = []
+    bad: list[str] = []
+    for path in paths:
+        p = Path(path)
+        try:
+            obj = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            bad.append(f"{p.name}: {exc}")
+            continue
+        if isinstance(obj, list):
+            items.extend(obj)
+        else:
+            items.append(obj)
+    return items, bad

@@ -460,3 +460,99 @@ def test_cmd_save_empty_member_ids_is_error_not_saved(sqlite_dal, monkeypatch, c
     assert db.load_vacancies()[vid]["llm_score"] is None  # 0 rows touched
     assert "Saved 0 scores" in out.out  # NOT counted as a successful save
     assert "missing member_ids" in out.err
+
+
+# ---------------------------------------------------------------------------
+# cmd_save — BUG-5: one malformed result must not kill the whole batch
+# ---------------------------------------------------------------------------
+
+
+def _write_flat_result_file(path, vid, score, title="Head of Community"):
+    path.write_text(
+        json.dumps(
+            {
+                "member_ids": [vid],
+                "org": "Acme Robotics",
+                "title": title,
+                "score": score,
+                "reasoning": "r",
+                "short_summary": "A " * 120,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_cmd_save_files_mode_skips_malformed_and_saves_rest(
+    sqlite_dal, monkeypatch, tmp_path, capsys
+):
+    """--files reads each subagent result file independently: one malformed
+    file (truncated by a kill / unescaped quote) is named and skipped, the
+    rest still save — no all-or-nothing failure."""
+    db = sqlite_dal
+    vid = _seed_one_vacancy(db)
+    monkeypatch.setitem(
+        sys.modules, "report", types.SimpleNamespace(generate_dashboard=lambda *a, **k: None)
+    )
+
+    good = tmp_path / "c1.json"
+    _write_flat_result_file(good, vid, 78)
+    bad = tmp_path / "c2.json"
+    bad.write_text('{"member_ids": ["x", "score": 40}', encoding="utf-8")  # malformed
+
+    import score_vacancies
+
+    importlib.reload(score_vacancies)
+    score_vacancies.cmd_save(types.SimpleNamespace(archive=False, files=[str(good), str(bad)]))
+
+    saved = db.load_vacancies()[vid]
+    assert saved["llm_score"] == 78  # the good file saved despite the bad one
+
+    out = capsys.readouterr()
+    assert "c2.json" in out.err  # bad file named
+    assert "malformed" in out.err.lower()
+    assert "Skipped 1 malformed file" in out.out  # summary lists it
+
+
+def test_cmd_save_files_mode_truncated_json_is_reported_not_crashed(
+    sqlite_dal, monkeypatch, tmp_path, capsys
+):
+    """A file truncated mid-write (e.g. by a spend-limit kill) fails its own
+    parse, is reported by name, and does not raise out of cmd_save."""
+    db = sqlite_dal
+    vid = _seed_one_vacancy(db)
+    monkeypatch.setitem(
+        sys.modules, "report", types.SimpleNamespace(generate_dashboard=lambda *a, **k: None)
+    )
+
+    good = tmp_path / "c1.json"
+    _write_flat_result_file(good, vid, 60)
+    truncated = tmp_path / "c39.json"
+    truncated.write_text('{"member_ids": ["x"], "score": 4', encoding="utf-8")  # cut mid-write
+
+    import score_vacancies
+
+    importlib.reload(score_vacancies)
+    # Must not raise.
+    score_vacancies.cmd_save(
+        types.SimpleNamespace(archive=False, files=[str(good), str(truncated)])
+    )
+
+    assert db.load_vacancies()[vid]["llm_score"] == 60
+    out = capsys.readouterr()
+    assert "c39.json" in out.err
+
+
+def test_cmd_save_stdin_invalid_json_reports_error_not_crash(sqlite_dal, monkeypatch, capsys):
+    """Without --files, stdin must still be one valid JSON blob (can't split a
+    corrupted array after the fact) — but a parse failure there is reported
+    cleanly, not an unhandled traceback."""
+    monkeypatch.setattr(sys, "stdin", io.StringIO('[{"member_ids": ["x", "score": 1}]'))
+    import score_vacancies
+
+    importlib.reload(score_vacancies)
+    score_vacancies.cmd_save(types.SimpleNamespace(archive=False))  # no 'files' attr, no crash
+
+    out = capsys.readouterr()
+    assert "not valid JSON" in out.err
+    assert "--files" in out.err

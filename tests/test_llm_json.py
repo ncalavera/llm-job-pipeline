@@ -4,6 +4,7 @@ The two scorers delegate to parse_llm_json; this pins the shared behaviour and
 the one difference between them — the brace-fallback pattern.
 """
 
+import json
 import os
 import sys
 
@@ -13,6 +14,7 @@ from llm_json import (  # noqa: E402
     FLAT_SCORE_OBJECT,
     OUTERMOST_BRACES,
     parse_llm_json,
+    read_result_files,
 )
 
 
@@ -55,3 +57,53 @@ def test_flat_pattern_does_not_span_nested_braces():
     text = 'noise {"about": {"x": 1}, "score": 5} noise'
     out = parse_llm_json(text, FLAT_SCORE_OBJECT)
     assert out["error"] == "JSON parse failed"
+
+
+# ---------------------------------------------------------------------------
+# read_result_files — BUG-5: one malformed result file must not kill the batch
+# ---------------------------------------------------------------------------
+
+
+def test_read_result_files_all_valid(tmp_path):
+    f1 = tmp_path / "c1.json"
+    f1.write_text('{"score": 70, "member_ids": ["a"]}', encoding="utf-8")
+    f2 = tmp_path / "c2.json"
+    f2.write_text('{"score": 40, "member_ids": ["b"]}', encoding="utf-8")
+
+    items, bad = read_result_files([f1, f2])
+    assert bad == []
+    assert [i["member_ids"][0] for i in items] == ["a", "b"]
+
+
+def test_read_result_files_skips_malformed_and_keeps_the_rest(tmp_path):
+    good1 = tmp_path / "c27.json"
+    good1.write_text('{"score": 70, "member_ids": ["a"]}', encoding="utf-8")
+    bad = tmp_path / "c39.json"
+    bad.write_text('{"score": 40, "member_ids": ["b"', encoding="utf-8")  # truncated
+    good2 = tmp_path / "c42.json"
+    good2.write_text('{"score": 90, "member_ids": ["c"]}', encoding="utf-8")
+
+    items, bad_list = read_result_files([good1, bad, good2])
+    assert [i["member_ids"][0] for i in items] == ["a", "c"]
+    assert len(bad_list) == 1
+    assert "c39.json" in bad_list[0]  # bad file named
+    assert "Expecting" in bad_list[0] or "line" in bad_list[0].lower()  # parse error surfaced
+
+
+def test_read_result_files_accepts_a_file_holding_an_array(tmp_path):
+    f = tmp_path / "batch.json"
+    f.write_text(
+        json.dumps([{"score": 1, "member_ids": ["a"]}, {"score": 2, "member_ids": ["b"]}]),
+        encoding="utf-8",
+    )
+    items, bad = read_result_files([f])
+    assert bad == []
+    assert len(items) == 2
+
+
+def test_read_result_files_missing_file_is_reported_as_bad(tmp_path):
+    missing = tmp_path / "does_not_exist.json"
+    items, bad = read_result_files([missing])
+    assert items == []
+    assert len(bad) == 1
+    assert "does_not_exist.json" in bad[0]
