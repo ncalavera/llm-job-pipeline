@@ -1,5 +1,5 @@
 """Company-level dedup: a board-sourced NAME VARIANT of a company we already
-track must MERGE into that row, not fork a new candidate (DHA-438 BUG-2).
+track must MERGE into that row, not fork a new candidate.
 
 Two layers:
 
