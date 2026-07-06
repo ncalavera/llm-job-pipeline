@@ -99,8 +99,12 @@ def test_unchanged_page_refreshes_own_live_rows(dal):
     its status untouched — the page is unchanged so all roles are still listed."""
     dal.ensure_company("Wikimedia Foundation", status="active")
     stale = (_pipeline_today(dal) - timedelta(days=21)).isoformat()
-    d_unseen = _insert_row(dal, "Wikimedia Foundation", "Data Engineer", status="unseen", last_seen=stale)
-    d_liked = _insert_row(dal, "Wikimedia Foundation", "Product Lead", status="liked", last_seen=stale)
+    d_unseen = _insert_row(
+        dal, "Wikimedia Foundation", "Data Engineer", status="unseen", last_seen=stale
+    )
+    d_liked = _insert_row(
+        dal, "Wikimedia Foundation", "Product Lead", status="liked", last_seen=stale
+    )
 
     refreshed = dal.refresh_unchanged_company_last_seen("Wikimedia Foundation")
     dal.get_conn().commit()
@@ -117,8 +121,12 @@ def test_unchanged_refresh_leaves_archived_tombstone_untouched(dal):
     tombstone; only live rows get the 'still listed' touch."""
     dal.ensure_company("Wikimedia Foundation", status="active")
     stale = (_pipeline_today(dal) - timedelta(days=30)).isoformat()
-    d_live = _insert_row(dal, "Wikimedia Foundation", "Data Engineer", status="unseen", last_seen=stale)
-    d_dead = _insert_row(dal, "Wikimedia Foundation", "Old Role", status="archived", last_seen=stale)
+    d_live = _insert_row(
+        dal, "Wikimedia Foundation", "Data Engineer", status="unseen", last_seen=stale
+    )
+    d_dead = _insert_row(
+        dal, "Wikimedia Foundation", "Old Role", status="archived", last_seen=stale
+    )
 
     refreshed = dal.refresh_unchanged_company_last_seen("Wikimedia Foundation")
     dal.get_conn().commit()
@@ -137,7 +145,9 @@ def test_unchanged_refresh_scoped_to_company(dal):
     company_id is the provenance boundary)."""
     dal.ensure_company("Wikimedia Foundation", status="active")
     stale = (_pipeline_today(dal) - timedelta(days=21)).isoformat()
-    d_own = _insert_row(dal, "Wikimedia Foundation", "Data Engineer", status="unseen", last_seen=stale)
+    d_own = _insert_row(
+        dal, "Wikimedia Foundation", "Data Engineer", status="unseen", last_seen=stale
+    )
     # A different employer, e.g. discovered via a job board.
     d_other = _insert_row(dal, "Some Board Employer", "Analyst", status="unseen", last_seen=stale)
 
