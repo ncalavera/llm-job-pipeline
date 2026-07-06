@@ -638,6 +638,44 @@ body::after {
   opacity: 1;
 }
 
+/* --- Fallback banner (DHA-422) — offline snapshot notice --- */
+/* display:flex is author-origin, so it would beat the UA stylesheet's
+   [hidden] { display: none } on the default (live-mode) hidden banner —
+   restate the [hidden] rule here so el.hidden actually hides it. */
+.fallback-banner[hidden] {
+  display: none;
+}
+.fallback-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--q-moderate);
+  background: var(--q-moderate-bg);
+  border: 1px solid var(--q-moderate);
+}
+.fallback-banner.fallback-banner--warning {
+  color: var(--q-weak);
+  background: var(--q-weak-bg);
+  border-color: var(--q-weak);
+}
+.fallback-banner-text {
+  flex: 1;
+}
+.fallback-banner-dismiss {
+  background: none;
+  border: none;
+  padding: 0 4px;
+  font-size: var(--text-lg);
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
+}
+
 /* --- Toast notification --- */
 .toast {
   position: fixed;

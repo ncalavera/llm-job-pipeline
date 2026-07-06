@@ -335,6 +335,20 @@
 
       <div class="main-area">
         <div class="container">
+          <!-- Fallback banner (DHA-422): only shown when boot() loaded the
+               baked public/data.js because /api/vacancies wasn't reachable —
+               see app.js's renderFallbackBanner / nav.js's fallbackBannerState. -->
+          <div id="fallbackBanner" class="fallback-banner" hidden>
+            <span class="fallback-banner-text" id="fallbackBannerText"></span>
+            <button
+              class="fallback-banner-dismiss"
+              id="fallbackBannerDismiss"
+              type="button"
+              aria-label="Dismiss"
+            >
+              &times;
+            </button>
+          </div>
           <div id="syncIndicator" class="sync-indicator"></div>
 
           <!-- === VACANCIES SUB-NAV (Browse / Geo / Archive) ===
