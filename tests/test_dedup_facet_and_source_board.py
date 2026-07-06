@@ -1,7 +1,7 @@
 """Per-facet vacancy dedup + scored-row protection, and source_board
 provenance on board imports.
 
-Facet dedup: a role posted once per country in a SINGLE fetch (FundraiseUp lists one
+Facet dedup: a role posted once per country in a SINGLE fetch (an ATS lists one
 remote role as up to 8 Greenhouse listings, one per country, each with a
 slightly different body) used to fork into a parallel row per facet because the
 description fingerprints differed. The save layer now folds same-company +

@@ -54,7 +54,7 @@ class TestDomainMatchesCompany:
         assert f._domain_matches_company("Médecins Sans Frontières", "https://www.msf.org")
 
     def test_accepts_co_uk_suffix(self):
-        assert f._domain_matches_company("Wellcome Trust", "https://wellcome.org.uk")
+        assert f._domain_matches_company("Acme Trust", "https://acme.org.uk")
 
     def test_rejects_generic_only_overlap(self):
         # Only the generic suffix "Foundation" overlaps — not an identifying

@@ -37,35 +37,35 @@ MEDIC = FIXTURES / "profile_medic.md"
 
 
 # ---------------------------------------------------------------------------
-# 1. parse_decision — fail-safe to KEEP
+# 1. parse_screen_verdict — fail-safe to KEEP
 # ---------------------------------------------------------------------------
 
 
-def test_parse_decision_explicit_drop():
-    d = sc.parse_decision('{"keep": false, "reason": "staffing agency"}')
+def test_parse_screen_verdict_explicit_drop():
+    d = sc.parse_screen_verdict('{"keep": false, "reason": "staffing agency"}')
     assert d["keep"] is False
     assert d["reason"] == "staffing agency"
 
 
-def test_parse_decision_explicit_keep():
-    d = sc.parse_decision('{"keep": true, "reason": "plausible fit"}')
+def test_parse_screen_verdict_explicit_keep():
+    d = sc.parse_screen_verdict('{"keep": true, "reason": "plausible fit"}')
     assert d["keep"] is True
 
 
-def test_parse_decision_tolerates_fenced_json():
-    d = sc.parse_decision('```json\n{"keep": false, "reason": "car dealership"}\n```')
+def test_parse_screen_verdict_tolerates_fenced_json():
+    d = sc.parse_screen_verdict('```json\n{"keep": false, "reason": "car dealership"}\n```')
     assert d["keep"] is False and d["reason"] == "car dealership"
 
 
-def test_parse_decision_malformed_keeps():
+def test_parse_screen_verdict_malformed_keeps():
     # A screen must NOT drop on an unreadable response — that would silently hide
     # a real employer.
-    d = sc.parse_decision("the model rambled without any JSON")
+    d = sc.parse_screen_verdict("the model rambled without any JSON")
     assert d["keep"] is True
 
 
-def test_parse_decision_missing_keep_defaults_to_keep():
-    d = sc.parse_decision('{"reason": "no verdict field"}')
+def test_parse_screen_verdict_missing_keep_defaults_to_keep():
+    d = sc.parse_screen_verdict('{"reason": "no verdict field"}')
     assert d["keep"] is True
 
 

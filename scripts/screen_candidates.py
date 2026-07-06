@@ -127,7 +127,7 @@ def build_user_message(name: str, snippet: str = "") -> str:
     return msg
 
 
-def parse_decision(text: str) -> "dict":
+def parse_screen_verdict(text: str) -> "dict":
     """Parse a keep/drop decision from the model's text. Fail-safe to KEEP.
 
     A screen must never DROP on a parse failure — that would silently hide a real
@@ -196,7 +196,7 @@ def screen_candidates(candidates: "list[dict]", system_prompt: str, call_llm) ->
         user = build_user_message(row["canonical_name"], row.get("description", ""))
         try:
             text = call_llm(system_prompt, user)
-            decision = parse_decision(text)
+            decision = parse_screen_verdict(text)
         except Exception as exc:  # noqa: BLE001 — an API error must not drop a company
             decision = {
                 "keep": True,

@@ -530,7 +530,7 @@ def _find_existing_vacancy(
         TWO exceptions collapse instead of forking (per-facet dup fix):
           - the canonical hash was already CLAIMED earlier in THIS batch
             (``batch_claimed``): the two are per-facet variants of one posting
-            listed once per country in a single fetch (FundraiseUp posts a
+            listed once per country in a single fetch (an ATS can post a
             remote role 8×, one per country, each with a country-specific body).
           - the canonical row is already SETTLED (scored / decided): re-importing
             a variant of a role we already scored or acted on must fold onto it,
