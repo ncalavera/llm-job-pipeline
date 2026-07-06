@@ -2300,6 +2300,80 @@ def get_enabled_boards() -> list[str]:
     return ids
 
 
+def archive_board_vacancies(board_id: str) -> int:
+    """Archive a disabled board's still-unseen vacancies so they stop
+    lingering forever. Returns the archived count.
+
+    A disabled board stops fetching, but nothing else ever revisits its old
+    rows: gone-from-source detection (archive_gone_vacancies) only runs on a
+    direct-ATS re-fetch, never on a board. Without this, every 'unseen' row a
+    disabled board ever produced sits stuck in the pipeline permanently.
+    Mirrors archive_gone_vacancies's in-place UPDATE (status -> 'archived',
+    never a delete) and records status_reason = 'board_disabled' the same way
+    company.status_reason already records why a company's status changed.
+    Only status = 'unseen' rows are touched -- liked/to_apply/passed/applied/
+    expiring/already-archived rows (any real decision or prior scoring) are
+    never revisited.
+
+    vacancy.source_board stores the board's display NAME (stamped by
+    save_board_vacancies), not its config id, so board_id is resolved to a
+    name via the board catalog first -- this also lets a since-removed board
+    id (config no longer ships it, matching disable-board's own tolerance for
+    unknown ids) still match its historical rows. A board never synced to the
+    catalog (no row, or no name) has nothing to resolve against and archives
+    nothing.
+
+    Re-enabling the board later does NOT resurrect these rows: a fresh fetch
+    brings back whatever is still live on its own merits, exactly like any
+    other archived vacancy.
+
+    Commits internally, matching set_board_enabled: disabling a board is a
+    discrete user action whose effect must survive the process, not wait on a
+    caller's commit.
+
+    Degrades to a no-op (returns 0) on a schema that predates migration 0013
+    -- no source_board column means no board provenance to resolve against,
+    the same guard save_board_vacancies already uses for writing it.
+    """
+    if not _vacancy_has_column("source_board"):
+        return 0
+
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM board WHERE id = %s", (board_id,))
+    row = cur.fetchone()
+    board_name = row[0] if row else None
+    if not board_name:
+        cur.close()
+        return 0
+
+    cur.execute(
+        "SELECT id FROM vacancy WHERE source_board = %s AND status = 'unseen'",
+        (board_name,),
+    )
+    ids = [r[0] for r in cur.fetchall()]
+    if not ids:
+        cur.close()
+        return 0
+
+    placeholders = ", ".join(["%s"] * len(ids))
+    if _vacancy_has_column("status_reason"):
+        cur.execute(
+            "UPDATE vacancy SET status = 'archived', status_reason = 'board_disabled', "
+            f"status_updated_at = now() WHERE id IN ({placeholders})",
+            ids,
+        )
+    else:
+        cur.execute(
+            "UPDATE vacancy SET status = 'archived', status_updated_at = now() "
+            f"WHERE id IN ({placeholders})",
+            ids,
+        )
+    cur.close()
+    conn.commit()
+    return len(ids)
+
+
 # ---------------------------------------------------------------------------
 # Archive hash dedup
 # ---------------------------------------------------------------------------

@@ -103,7 +103,7 @@ fallback for agents not driven by the daily runner.
   the commit to the caller, so a direct caller that forgets `get_conn().commit()`
   silently loses its data. The fetch/score/filter scripts already commit at their
   logical checkpoints; if you call the DAL yourself (e.g. in a one-off script),
-  commit before exit. The rule has exactly three documented exceptions:
+  commit before exit. The rule has these documented exceptions:
     1. `archive_vacancies()` commits internally, then writes its on-disk JSON
        archive AFTER the commit — the delete and its disk artifact must stay
        atomic, so this function owns its transaction.
@@ -112,6 +112,10 @@ fallback for agents not driven by the daily runner.
        writes BEFORE calling it, or the snapshot commit sweeps them up by chance.
     3. `telegram_digest.py` opens its own separate `autocommit=True` connection
        (the digest poller), not the shared DAL singleton.
+    4. `set_board_enabled()` and `archive_board_vacancies()` each commit
+       internally — both back a discrete, durable user action (enabling/
+       disabling a board, and the unseen-vacancy archive that disabling now
+       triggers), so a forgotten caller commit must not silently lose it.
   Consequence for `--report-only`: `fetch_vacancies.py --report-only` must NOT
   stage any source-data mutation (e.g. `pass_expired_vacancies()` stays inside
   the fetch guard) — a report run only re-renders the dashboard from the data,

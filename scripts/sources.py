@@ -13,6 +13,13 @@ applied ON TOP of this persisted set for a single run.
     python3 scripts/sources.py enable-board <id>   # make a board stick across runs
     python3 scripts/sources.py disable-board <id>  # stop a board fetching by default
 
+Disabling a board also archives its still-unseen vacancies (status_reason
+'board_disabled') so they stop lingering forever -- nothing else ever
+revisits a disabled board's old rows. Already-decided/scored rows (liked,
+to_apply, passed, applied, ...) are untouched. Re-enabling a board later does
+NOT bring those rows back; a fresh fetch surfaces whatever is still live on
+its own merits.
+
 Board ids come from config (config._ALL_JOB_BOARDS); an unknown id on enable is
 rejected with the known list, mirroring /jobs-add Mode B. Active-company status
 is managed in /jobs-review, not here -- this command only reports it.
@@ -34,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import _ALL_JOB_BOARDS  # noqa: E402
 from database_supabase import (  # noqa: E402
     BoardPersistenceUnavailable,
+    archive_board_vacancies,
     get_company_fitness_map,
     get_enabled_boards,
     set_board_enabled,
@@ -113,10 +121,17 @@ def cmd_disable(board_id: str) -> int:
     # Disable is tolerant of an unknown id on purpose: it's the clean-up path for
     # a board that config no longer ships but the DB still has enabled.
     set_board_enabled(board_id, False)
+    archived = archive_board_vacancies(board_id)
+    noun = "vacancy" if archived == 1 else "vacancies"
     print(
-        f"Disabled board '{board_id}'. It no longer fetches by default "
-        "(add it to --boards / JOB_BOARDS for a one-off run)."
+        f"Disabled board '{board_id}': {archived} unseen {noun} archived (board_disabled). "
+        "It no longer fetches by default (add it to --boards / JOB_BOARDS for a one-off run)."
     )
+    if archived:
+        print(
+            "Re-enabling this board later does not resurrect these rows -- a fresh "
+            "fetch brings back whatever is still live on its own merits."
+        )
     return 0
 
 
@@ -129,7 +144,13 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("recommend", help="Propose boards that fit your profile (enables nothing).")
     en = sub.add_parser("enable-board", help="Persist a board as enabled (survives sessions).")
     en.add_argument("board_id")
-    di = sub.add_parser("disable-board", help="Clear a board's enabled flag.")
+    di = sub.add_parser(
+        "disable-board",
+        help=(
+            "Clear a board's enabled flag and archive its still-unseen vacancies "
+            "(does not resurrect on a later re-enable)."
+        ),
+    )
     di.add_argument("board_id")
     args = p.parse_args(argv)
 

@@ -59,8 +59,9 @@ def bootstrap_sqlite(monkeypatch, tmp_path):
     frozen baseline), then the migrations SQLite genuinely still needs on
     top of that baseline -- the board table (0002), the scored_by provenance
     column (0009), the application table (0010), the board.enabled
-    persistence flag (0011), and the vacancy.source_board provenance column
-    (0013), none of which the frozen baseline declares.
+    persistence flag (0011), the vacancy.source_board provenance column
+    (0013), and the vacancy.status_reason column (0014), none of which the
+    frozen baseline declares.
 
     Deliberately NOT routed through migrate.py's ledger-driven replay: that
     path now works (migrate.py's SQLite runner tolerates the duplicate-column
@@ -97,6 +98,7 @@ def bootstrap_sqlite(monkeypatch, tmp_path):
         "0010_application",
         "0011_board_enabled",
         "0013_add_source_board",
+        "0014_add_vacancy_status_reason",
     ):
         sql = (REPO_ROOT / "sql" / "migrations" / f"{post_baseline}.sqlite.sql").read_text(
             encoding="utf-8"
