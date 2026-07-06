@@ -1963,6 +1963,12 @@ body::after {
   color: var(--sky-text-faint);
   margin-bottom: 10px;
 }
+.vac-desc-block summary {
+  cursor: pointer;
+}
+.vac-desc-block .vac-desc {
+  margin-top: 10px;
+}
 .vac-desc {
   font-size: 14px;
   line-height: 1.75;
