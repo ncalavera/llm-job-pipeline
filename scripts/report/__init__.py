@@ -261,11 +261,15 @@ def generate_dashboard(db: dict = None) -> None:
     pack = _resolve_pack()
 
     # --- Build VACANCY_DATA payload for JS ---
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     vacancy_data = {
         "config": {
-            "last_updated": datetime.now().isoformat(timespec="seconds"),
+            # Timezone-aware UTC (ends in "+00:00"): browsers parse an
+            # offset-less ISO string as browser-LOCAL time, which would skew
+            # the fallback banner's 48h staleness check (DHA-422) by up to
+            # ±14h depending on the viewer's timezone.
+            "last_updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "api_base": "",  # Vercel uses relative paths
             "dashboard_style": _resolve_dashboard_style(),
             "language": language,
