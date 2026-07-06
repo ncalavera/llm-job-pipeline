@@ -254,10 +254,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "tier_b": "B — Monitor",
         "tier_c": "C — Low Priority",
         "tier_unscored": "— Unscored",
-        "csort_applyable": "Applyable",
-        "csort_liked": "Liked",
-        "csort_score": "Score",
-        "csort_interest": "Interest",
         # Companies stat cards (dynamic) — Approved tab's Total/With new/Needs
         # attention row was removed (post-ship fast fix); Pending/Archived
         # keep theirs.
@@ -644,10 +640,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "tier_b": "B — Monitor",
         "tier_c": "C — Low Priority",
         "tier_unscored": "— Без скора",
-        "csort_applyable": "Годные",
-        "csort_liked": "Выбранные",
-        "csort_score": "Скор",
-        "csort_interest": "Интерес",
         # Companies stat cards
         "stat_pending": "На ревью",
         "stat_enriched": "Обогащено",

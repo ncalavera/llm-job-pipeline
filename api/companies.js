@@ -16,19 +16,9 @@ const REVIEW_MAP = {
   candidate: "pending",
   inactive: "rejected",
 };
-const CUSTOM_BOOST_KEYS = ["career_narrative_boost", "mpa_narrative_boost"];
 
 function slugify(name) {
   return (name || "").toLowerCase().replace(/ /g, "-").replace(/\./g, "");
-}
-
-function customBoost(mission) {
-  if (!mission || typeof mission !== "object") return null;
-  for (const k of CUSTOM_BOOST_KEYS) {
-    const v = mission[k];
-    if (typeof v === "number") return v;
-  }
-  return null;
 }
 
 export default async function handler(req, res) {
@@ -133,7 +123,6 @@ export default async function handler(req, res) {
         review_status: REVIEW_MAP[(c.status || "").toLowerCase()] || "pending",
         calculated_tier: c.tier || null,
         alignment_score: alignmentScore,
-        mpa_prestige: customBoost(c.mission_fit),
         // website / careers_url are plain DB columns, not private-file fields —
         // serve them live so a company's profile links stay current even when
         // the snapshot is stale or lacks the row (e.g. pending/candidate orgs).

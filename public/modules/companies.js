@@ -3,7 +3,6 @@
 // =============================================================================
 
 import {
-  config,
   state,
   groups,
   getCompanies,
@@ -11,7 +10,6 @@ import {
   groupsById,
   STATUS_BASKET,
   STATUS_PRI,
-  CHIP_TO_COL,
   getGroupStatus,
   getCompanyStatusCounts,
   emit,
@@ -41,10 +39,6 @@ import { T } from "./i18n.js";
 // apply/…) — reused here so an open role's status reads identically whether
 // you're on its own detail page or in this company's role list (U7).
 import { statusChipLabel } from "./vacancy.js";
-
-// MPA Prestige is a personal metric (MPA/MPP application strategy), off by
-// default. Opt in with DASHBOARD_MPA=1 / [dashboard] show_mpa_column = true.
-const SHOW_MPA = !!(config && config.show_mpa_column);
 
 // ---------------------------------------------------------------------------
 // Companies table — init, render, sort, filter
@@ -142,17 +136,13 @@ export function switchCompanySubTab(tab) {
     state.companySortCol = "fit";
     state.companySortAsc = false;
   } else {
-    state.companySortCol = "applyable";
+    // approved — WANT score descending (DHA-409), same default as pending.
+    state.companySortCol = "fit";
     state.companySortAsc = false;
   }
   // Update tab button active state
   document.querySelectorAll(".company-sub-tab").forEach(function (btn) {
     btn.classList.toggle("active", btn.dataset.subtab === tab);
-  });
-  // Update sort chip active state
-  document.querySelectorAll(".chip-sort[data-csort]").forEach(function (c) {
-    var col = CHIP_TO_COL[c.dataset.csort] || c.dataset.csort;
-    c.classList.toggle("active", col === state.companySortCol);
   });
   renderCompanies();
 }
@@ -250,9 +240,6 @@ function getFilteredSortedCompanies() {
     } else if (col === "fit") {
       va = a.alignment_score != null ? a.alignment_score : -1;
       vb = b.alignment_score != null ? b.alignment_score : -1;
-    } else if (col === "mpa") {
-      va = a.mpa_prestige != null ? a.mpa_prestige : -1;
-      vb = b.mpa_prestige != null ? b.mpa_prestige : -1;
     } else if (col === "score") {
       va = a.avg_llm_score != null ? a.avg_llm_score : -1;
       vb = b.avg_llm_score != null ? b.avg_llm_score : -1;
@@ -549,9 +536,6 @@ function _getColumns() {
       sortable: true,
       cls: "ct-col-open",
     },
-    ...(SHOW_MPA
-      ? [{ key: "mpa", label: "MPA", sortable: true, cls: "ct-col-mpa" }]
-      : []),
     {
       key: "liked",
       label: T("col_liked", "Liked"),
@@ -1112,11 +1096,6 @@ function _buildApprovedRow(c) {
     '<td class="ct-td ct-col-open">' +
     (c.applyable_count || 0) +
     "</td>" +
-    (SHOW_MPA
-      ? '<td class="ct-td ct-col-mpa">' +
-        (c.mpa_prestige != null ? llmScoreBadge(c.mpa_prestige) : "\u2014") +
-        "</td>"
-      : "") +
     '<td class="ct-td ct-col-liked">' +
     likedHtml +
     "</td>" +
@@ -1259,20 +1238,6 @@ export function sortCompanyTable(col) {
     state.companySortCol = col;
     state.companySortAsc = col === "name";
   }
-  renderCompanies();
-}
-
-export function toggleCompanySort(btn) {
-  var col = CHIP_TO_COL[btn.dataset.csort] || btn.dataset.csort;
-  if (state.companySortCol === col) {
-    state.companySortAsc = !state.companySortAsc;
-  } else {
-    state.companySortCol = col;
-    state.companySortAsc = col === "name";
-  }
-  document.querySelectorAll(".chip-sort[data-csort]").forEach(function (c) {
-    c.classList.toggle("active", c === btn);
-  });
   renderCompanies();
 }
 
@@ -1611,23 +1576,12 @@ function companyWantBarsHtml(c, t) {
       "</div>";
   }
   if (!rows) return "";
-  var mpaNote = "";
-  if (SHOW_MPA && c.mpa_prestige != null) {
-    mpaNote =
-      '<div class="cp-mpa-note">MPA ' +
-      c.mpa_prestige +
-      (c.composite_score != null
-        ? " · composite " + Math.round(c.composite_score)
-        : "") +
-      "</div>";
-  }
   return (
     '<div class="cp-block">' +
     '<div class="vac-section-label">' +
     escHtml(t("cp_want_breakdown", "Want breakdown")) +
     "</div>" +
     rows +
-    mpaNote +
     "</div>"
   );
 }
