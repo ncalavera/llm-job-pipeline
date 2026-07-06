@@ -64,6 +64,8 @@ from fetchers.parsing import (
     parse_markdown_jobs,
     _parse_json_jobs,
     _is_non_job_url,
+    _is_people_page_url,
+    _is_bio_snippet,
     _looks_like_job_title,
     _blacklist_filter,
     _is_generic_pipeline_title,
@@ -75,6 +77,7 @@ from fetchers.firecrawl import (
     FIRECRAWL_JOBS_SCHEMA,
     _fetch_local_scrape,
     _enrich_blind_jobs,
+    _drop_content_empty,
 )
 from fetchers.ats.greenhouse import fetch_greenhouse
 from fetchers.ats.workday import fetch_workday_api

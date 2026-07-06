@@ -3,7 +3,13 @@ and _parse_json_jobs url_filter behavior.
 """
 
 import pytest
-from fetchers import parse_markdown_jobs, _is_non_job_url, _parse_json_jobs
+from fetchers import (
+    parse_markdown_jobs,
+    _is_non_job_url,
+    _parse_json_jobs,
+    _is_bio_snippet,
+    _is_people_page_url,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -529,3 +535,237 @@ class TestParseMarkdownJobsRejectsDeptHeadings:
             "Year-in-parens should not be confused with dept count suffix "
             "(implementation must distinguish (1)/(12) from (2026))"
         )
+
+
+# ---------------------------------------------------------------------------
+# BUG-8 — reject phantom vacancies fabricated from staff bios
+#
+# A firecrawl company-site scrape of an about/people/leadership page turned a
+# leadership bio into a "vacancy" (Porticus — "Director of Organisational
+# Strategy and Regional Networks"): empty description, a snippet that is a bio
+# of the person who already holds the title, and NO apply URL. It still reached
+# the DB and Sonnet scored it 62. These guards reject such blocks before save.
+# ---------------------------------------------------------------------------
+
+
+# The real Porticus snippet that Sonnet scored 62.
+PORTICUS_BIO = (
+    "Katy Hartley is the Director of Organisational Strategy and Regional "
+    "Networks for Porticus. In the last 25 years, Katy has worked across the "
+    "philanthropic and non-profit sector."
+)
+
+
+class TestBioSnippetDetection:
+    """_is_bio_snippet catches staff-bio prose, not role descriptions."""
+
+    def test_porticus_is_the_title_bio(self):
+        assert _is_bio_snippet(PORTICUS_BIO) is True
+
+    def test_joined_in_year_bio(self):
+        assert _is_bio_snippet("Marieke Hounjet joined Porticus in 2017.") is True
+
+    def test_person_has_worked_bio(self):
+        assert _is_bio_snippet("Before this, Jane has worked at three NGOs.") is True
+
+    def test_pronoun_has_led_bio(self):
+        assert _is_bio_snippet("She has led the strategy team since 2015.") is True
+
+    def test_real_job_snippet_not_bio(self):
+        assert (
+            _is_bio_snippet(
+                "We are looking for a Director to lead our strategy team and "
+                "manage a portfolio of regional programmes."
+            )
+            is False
+        )
+
+    def test_role_responsibilities_not_bio(self):
+        assert (
+            _is_bio_snippet(
+                "The postholder will design and deliver our organisational "
+                "strategy across regional networks."
+            )
+            is False
+        )
+
+
+class TestPeoplePageDetection:
+    """_is_people_page_url flags about/team/people/leadership source pages."""
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://porticus.com/who-we-are/leadership",
+            "https://example.org/about/",
+            "https://example.org/team",
+            "https://example.org/our-people/",
+            "https://example.org/leadership/katy",
+        ],
+    )
+    def test_flags_people_pages(self, url):
+        assert _is_people_page_url(url) is True
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://example.org/careers",
+            "https://example.org/jobs/analyst",
+            "https://boards.greenhouse.io/example",
+            "",
+        ],
+    )
+    def test_allows_careers_pages(self, url):
+        assert _is_people_page_url(url) is False
+
+
+class TestParseJsonJobsBugEight:
+    """_parse_json_jobs rejects the Porticus phantom and keeps real postings."""
+
+    def test_porticus_bio_rejected(self):
+        """The exact BUG-8 case: no apply URL + bio snippet from a people page."""
+        data = {
+            "jobs": [
+                {
+                    "title": "Director of Organisational Strategy and Regional Networks",
+                    "url": "",
+                    "location": "",
+                    "department": "",
+                    "snippet": PORTICUS_BIO,
+                }
+            ]
+        }
+        jobs = _parse_json_jobs(data, "Porticus", "https://porticus.com/who-we-are/leadership")
+        assert jobs == []
+
+    def test_legit_posting_with_apply_url_kept(self):
+        """A real careers-page posting with an apply URL survives the guards."""
+        data = {
+            "jobs": [
+                {
+                    "title": "Research Analyst",
+                    "url": "https://acme.org/careers/analyst",
+                    "location": "London",
+                    "department": "Research",
+                    "snippet": "We are hiring a research analyst to conduct policy research.",
+                }
+            ]
+        }
+        jobs = _parse_json_jobs(data, "Acme", "https://acme.org/careers")
+        assert len(jobs) == 1
+        assert jobs[0]["title"] == "Research Analyst"
+        assert jobs[0]["url"] == "https://acme.org/careers/analyst"
+
+    def test_no_url_block_from_people_page_rejected(self):
+        """Documented policy: a URL-less block scraped from an about/team/people/
+        leadership page is page chrome or a bio, never an apply-able posting —
+        rejected. (A URL-less block from a real /careers page is kept; see
+        test_no_url_block_from_careers_page_kept and PJ05.)"""
+        data = {
+            "jobs": [
+                {
+                    "title": "Program Manager",
+                    "url": "",
+                    "snippet": "Lead our programs team and manage a portfolio of grants.",
+                }
+            ]
+        }
+        jobs = _parse_json_jobs(data, "Acme", "https://acme.org/about/leadership")
+        assert jobs == []
+
+    def test_no_url_block_from_careers_page_kept(self):
+        """A URL-less block from a real /careers page is left alone — some
+        boards list roles without a per-role link (parity with PJ05)."""
+        data = {
+            "jobs": [
+                {
+                    "title": "Program Manager",
+                    "url": "",
+                    "snippet": "Lead our programs team and manage a portfolio of grants.",
+                }
+            ]
+        }
+        jobs = _parse_json_jobs(data, "Acme", "https://acme.org/careers")
+        assert len(jobs) == 1
+        assert jobs[0]["title"] == "Program Manager"
+
+    def test_bio_with_url_still_rejected(self):
+        """Even with a URL, a snippet that reads as a staff bio is rejected."""
+        data = {
+            "jobs": [
+                {
+                    "title": "Director of Strategy",
+                    "url": "https://porticus.com/leadership/katy-hartley",
+                    "snippet": PORTICUS_BIO,
+                }
+            ]
+        }
+        jobs = _parse_json_jobs(data, "Porticus", "https://porticus.com/who-we-are/leadership")
+        assert jobs == []
+
+
+# ---------------------------------------------------------------------------
+# BUG-8 (extended) — emoji-fragment titles + content-empty blocks
+#
+# A 2026-06-24 bulk company-scrape fabricated 548 rows whose titles are
+# emoji-decorated about-page fragments ("🏛legitimacy provider",
+# "💪🔌🏰connection to power") with BOTH description and snippet empty. They can
+# never be scored honestly and can never be re-enriched. New ones must not be
+# created.
+# ---------------------------------------------------------------------------
+
+from fetchers import _looks_like_job_title, _drop_content_empty
+
+
+class TestEmojiFragmentTitles:
+    """_looks_like_job_title rejects emoji-decorated fragment titles."""
+
+    def test_rejects_building_emoji_fragment(self):
+        assert _looks_like_job_title("🏛legitimacy provider") is False
+
+    def test_rejects_multi_emoji_fragment(self):
+        assert _looks_like_job_title("💪🔌🏰connection to power") is False
+
+    def test_rejects_emoji_prefixed_real_word(self):
+        assert _looks_like_job_title("🚀 Senior Product Manager") is False
+
+    def test_accepts_plain_real_title(self):
+        assert _looks_like_job_title("Senior Product Manager") is True
+
+    def test_accepts_accented_latin_title(self):
+        # Accented Latin is not an emoji — a legit title must survive.
+        assert _looks_like_job_title("Directeur Général des Programmes") is True
+
+
+class TestDropContentEmpty:
+    """_drop_content_empty rejects blocks with no description AND no snippet."""
+
+    def test_drops_empty_description_and_snippet(self):
+        jobs = [
+            {"title": "🏛legitimacy provider", "url": "u", "full_description": "", "snippet": ""},
+        ]
+        assert _drop_content_empty(jobs, "Phantom Co") == []
+
+    def test_keeps_block_with_snippet_only(self):
+        jobs = [
+            {"title": "Analyst", "url": "u", "full_description": "", "snippet": "Do research."},
+        ]
+        kept = _drop_content_empty(jobs, "Real Co")
+        assert len(kept) == 1
+
+    def test_keeps_block_with_description_only(self):
+        jobs = [
+            {"title": "Analyst", "url": "u", "full_description": "Full role text.", "snippet": ""},
+        ]
+        kept = _drop_content_empty(jobs, "Real Co")
+        assert len(kept) == 1
+
+    def test_mixed_batch_drops_only_empties(self):
+        jobs = [
+            {"title": "Real", "url": "u1", "full_description": "text", "snippet": ""},
+            {"title": "Phantom", "url": "u2", "full_description": "", "snippet": ""},
+            {"title": "Real2", "url": "u3", "full_description": "", "snippet": "snippet"},
+        ]
+        kept = _drop_content_empty(jobs, "Mixed Co")
+        titles = [j["title"] for j in kept]
+        assert titles == ["Real", "Real2"]

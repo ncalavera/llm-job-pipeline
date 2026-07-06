@@ -434,7 +434,7 @@ def fetch_firecrawl_scrape(
                 _cache_markdown(org_name, getattr(result, "markdown", "") or "")
                 # Enrich blind jobs (no full_description) via individual page scrape
                 jobs = _enrich_blind_jobs(jobs, org_name)
-                return jobs
+                return _drop_content_empty(jobs, org_name)
             print(f"  [{org_name}] JSON extraction returned 0 valid jobs, trying markdown")
 
     # --- Fall back to markdown parsing ---
@@ -445,10 +445,36 @@ def fetch_firecrawl_scrape(
         print(f"  [{org_name}] Parsed {len(jobs)} vacancies from markdown")
         # Enrich blind jobs (no full_description) via individual page scrape
         jobs = _enrich_blind_jobs(jobs, org_name)
-        return jobs
+        return _drop_content_empty(jobs, org_name)
 
     print(f"  [{org_name}] No content returned from SDK — trying local scraper")
     return _pkg._fetch_local_scrape(org_name, url, url_filter=url_filter)
+
+
+def _drop_content_empty(jobs: list[dict], org_name: str) -> list[dict]:
+    """Drop scraped blocks with NO description AND NO snippet (BUG-8).
+
+    After blind-enrichment, a "vacancy" that still carries neither a
+    full_description nor a snippet is not a real posting — it is a fabricated
+    about-page fragment (e.g. the 548-row 2026-06-24 bulk scrape whose emoji
+    "titles" like "🏛legitimacy provider" had empty body and empty snippet).
+    Such a row can never be scored honestly and can never be re-enriched
+    (no careers_url / ats_slug on its company), so reject it before save and
+    log each drop so a wrong drop stays visible.
+    """
+    kept, dropped = [], 0
+    for j in jobs:
+        has_desc = bool((j.get("full_description") or "").strip())
+        has_snippet = bool((j.get("snippet") or "").strip())
+        if not has_desc and not has_snippet:
+            dropped += 1
+            print(
+                f"  [{org_name}] rejected non-posting "
+                f"(empty description + snippet): {j.get('title', '?')[:60]!r}"
+            )
+            continue
+        kept.append(j)
+    return kept
 
 
 def _enrich_blind_jobs(jobs: list[dict], org_name: str) -> list[dict]:
