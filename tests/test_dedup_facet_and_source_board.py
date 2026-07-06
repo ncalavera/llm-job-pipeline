@@ -142,6 +142,22 @@ def test_normalizer_strips_req_id_noise(dal):
     )
 
 
+def test_normalizer_keeps_new_city_parentheticals_distinct(dal):
+    """Bare "new" is NOT a noise word: "(New York)" and "(New Delhi)" are
+    distinguishing location parentheticals and must keep distinct norm keys
+    (a count phrase like "(3 new openings)" still strips via the count /
+    "openings" branch)."""
+    assert dal.make_normalized_id("Org", "Analyst (New York)") != dal.make_normalized_id(
+        "Org", "Analyst (New Delhi)"
+    )
+    assert dal.make_normalized_id("Org", "Analyst (New York)") != dal.make_normalized_id(
+        "Org", "Analyst"
+    )
+    assert dal.make_normalized_id("Org", "Analyst (3 new openings)") == dal.make_normalized_id(
+        "Org", "Analyst"
+    )
+
+
 # ===========================================================================
 # 2. Per-facet collapse: one remote role listed per country in ONE fetch
 # ===========================================================================
@@ -231,6 +247,69 @@ def test_distinct_titles_same_company_stay_two_rows(dal):
         "Communications Officer",
         "Data Engineer",
     ]
+
+
+def test_same_batch_same_exact_title_always_collapses_accepted_tradeoff(dal):
+    """PINNED TRADEOFF: within ONE save call the batch-fold keys on the exact
+    title hash make_vacancy_id(org, title) — NOT title+work_mode/location — so
+    even two genuinely distinct same-exact-title roles (same city, different
+    bodies and apply URLs) collapse to one row. Accepted deliberately: the save
+    layer cannot tell an 8-country facet spray from two same-title same-city
+    reqs, and the duplicate spray was the expensive failure. Cross-fetch
+    distinct siblings still fork (see tests/test_dedup_overmerge_siblings.py).
+    """
+    _seed_company(dal, "TradeoffCo")
+    jobs = [
+        _job(
+            "Product Manager",
+            org="TradeoffCo",
+            city="Berlin, Germany",
+            url="https://b.test/req1",
+            desc=_long_body("payments charter"),
+        ),
+        _job(
+            "Product Manager",
+            org="TradeoffCo",
+            city="Berlin, Germany",
+            url="https://b.test/req2",
+            desc=_long_body("growth charter"),
+        ),
+    ]
+    new = dal.save_board_vacancies(_board("TradeoffCo"), jobs)
+    dal.get_conn().commit()
+
+    assert new == 1  # same-batch same-title collapse, by design
+    assert len(_rows(dal)) == 1
+
+
+def test_same_location_fold_keeps_an_apply_url(dal):
+    """A same-title same-city facet folded onto the kept row must not lose its
+    apply URL: the board merge refreshes the existing location entry's url in
+    place (mirrors save_vacancies), so the row always keeps a working link."""
+    _seed_company(dal, "UrlCo")
+    jobs = [
+        _job(
+            "Ops Manager",
+            org="UrlCo",
+            city="Berlin, Germany",
+            url="https://b.test/first",
+            desc=_long_body("ops one"),
+        ),
+        _job(
+            "Ops Manager",
+            org="UrlCo",
+            city="Berlin, Germany",
+            url="https://b.test/second",
+            desc=_long_body("ops two"),
+        ),
+    ]
+    dal.save_board_vacancies(_board("UrlCo"), jobs)
+    dal.get_conn().commit()
+
+    row = _row_by_hash(dal, dal.make_vacancy_id("UrlCo", "Ops Manager"))
+    locs = _locations(row)
+    assert len(locs) == 1  # same loc_key folded, not duplicated
+    assert locs[0]["url"] == "https://b.test/second"  # folded facet's url kept
 
 
 # ===========================================================================

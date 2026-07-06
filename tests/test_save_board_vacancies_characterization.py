@@ -306,15 +306,16 @@ def test_resurrect_archived_vacancy(dal):
 
 
 # ===========================================================================
-# 6. Location merge — adds new loc_keys, but never refreshes an existing url
+# 6. Location merge — adds new loc_keys, refreshes an existing entry's url
 # ===========================================================================
 
 
-def test_location_merge_adds_new_key_but_no_url_refresh(dal):
+def test_location_merge_adds_new_key_and_refreshes_url(dal):
     """Re-merging the same org+title:
     - a NEW location key is appended to locations[],
-    - a repeat of an EXISTING loc_key with a changed url is a no-op for that
-      entry's url (board merge has no url-refresh branch, unlike save_vacancies).
+    - a repeat of an EXISTING loc_key with a changed url updates that entry's
+      url in place (mirrors save_vacancies — without this a same-title
+      same-location facet folded onto the row would lose its apply URL).
     """
     _seed_company(dal, "LocCo")
     dedup_hash = dal.make_vacancy_id("LocCo", "Loc Role")
@@ -334,7 +335,7 @@ def test_location_merge_adds_new_key_but_no_url_refresh(dal):
     dal.get_conn().commit()
     assert len(_locations(_vacancy_row(dal, dedup_hash))) == 2
 
-    # Same loc_key (Berlin) with a CHANGED url → no new entry, url NOT updated.
+    # Same loc_key (Berlin) with a CHANGED url → no new entry, url updated.
     dal.save_board_vacancies(
         _board("LocCo"),
         [_job("Loc Role", org="LocCo", city="Berlin, Germany", url="https://CHANGED.test")],
@@ -343,7 +344,7 @@ def test_location_merge_adds_new_key_but_no_url_refresh(dal):
     locs = _locations(_vacancy_row(dal, dedup_hash))
     assert len(locs) == 2  # still two — same key not re-added
     berlin = [l for l in locs if (l.get("city") or "").lower().startswith("berlin")]
-    assert berlin and berlin[0]["url"] == "https://orig.test"  # original url kept
+    assert berlin and berlin[0]["url"] == "https://CHANGED.test"  # url refreshed in place
 
 
 # ===========================================================================

@@ -300,11 +300,14 @@ _ABBREV_RE = re.compile(r"\b(" + "|".join(_TITLE_ABBREVIATIONS) + r")\b")
 # Parenthetical NOISE that annotates a posting's count/status, never the role
 # identity: "(3 Openings)", "(closed)", "(Reopened)", "(Multiple positions)".
 # Distinguishing parentheticals — "(Spanish)", "(Maternity Cover)" — are left
-# intact so genuinely different roles are never merged.
+# intact so genuinely different roles are never merged. Bare "new"/"updated"
+# are deliberately NOT noise words: "(New York)", "(New Delhi)", "(New Grad)"
+# must keep their distinguishing key ("(3 new openings)" still strips via the
+# count branch / "openings").
 _NOISE_PAREN_RE = re.compile(
     r"\s*\((?:\s*\d[\d\s,]*\s*(?:openings?|positions?|roles?|vacancies|posts?)?\s*"
     r"|[^)]*\b(?:openings?|positions?|vacancies|closed|reopened|re-opened|filled|"
-    r"on hold|urgent|multiple|new|updated)\b[^)]*)\)",
+    r"on hold|urgent|multiple)\b[^)]*)\)",
     re.I,
 )
 
@@ -326,26 +329,14 @@ def _normalize_title_core(title: str) -> str:
     On top of _normalize_title_for_dedup (geo-suffix strip + whitespace
     collapse): lowercase, strip count/req-id noise, expand common abbreviations
     (CEO -> chief executive officer), fold '&'->'and', drop punctuation, and
-    collapse whitespace. Seniority words survive here — the two callers layer on
-    top: _normalize_title_facet keeps them (a Senior/non-Senior pair is two live
-    roles, not one facet), _normalize_title_strong strips them (a level rename
-    over time is one role)."""
+    collapse whitespace. Seniority words survive here — _normalize_title_strong
+    layers their removal on top (a level rename over time is one role)."""
     base = _normalize_title_for_dedup(title).lower()
     base = _strip_title_noise(base)
     base = _ABBREV_RE.sub(lambda m: _TITLE_ABBREVIATIONS[m.group(1)], base)
     base = base.replace("&", " and ")
     base = _PUNCT_RE.sub(" ", base).replace("_", " ")
     return re.sub(r"\s+", " ", base).strip()
-
-
-def _normalize_title_facet(title: str) -> str:
-    """Facet key title: core normalization with seniority KEPT.
-
-    Used to recognise multiple location facets of ONE role inside a single fetch
-    (same company + same facet title + same work_mode) without collapsing a
-    genuine Senior/non-Senior pair that happens to be listed together.
-    """
-    return _normalize_title_core(title)
 
 
 def _normalize_title_strong(title: str) -> str:
@@ -1677,6 +1668,16 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
             existing_loc_keys = {_loc_key(l) for l in locs}
             if loc_key not in existing_loc_keys:
                 locs.append(loc_entry)
+                updates["locations"] = Json(locs)
+            elif loc_entry.get("url"):
+                # Same loc_key but a fresh apply URL — keep it (mirrors
+                # save_vacancies). Without this, a same-title same-location
+                # facet folded onto this row would lose its apply URL entirely.
+                for loc in locs:
+                    lk = loc.get("city") or loc.get("country") or loc.get("work_mode") or ""
+                    if lk == loc_key:
+                        loc["url"] = loc_entry["url"]
+                        break
                 updates["locations"] = Json(locs)
 
             # Backfill board provenance on a row that predates the column / was
