@@ -202,6 +202,65 @@ def test_disable_board_does_not_touch_other_boards_unseen_vacancies(env):
     assert _status_and_reason(dal, "Board B Role")[0] == "unseen"  # untouched
 
 
+def test_disable_board_archives_scored_but_unseen_row_too(env):
+    """'Unseen' is decided by status alone: a row that was LLM-scored but never
+    triaged (status still 'unseen') archives exactly like a never-scored one --
+    scoring is not a decision, so it earns no protection here."""
+    sources, dal = env
+    board = _a_known_board(sources)
+    board_name = sources._ALL_JOB_BOARDS[board]["name"]
+    dal.sync_boards({board: sources._ALL_JOB_BOARDS[board]})
+    dal.get_conn().commit()
+
+    company_id = dal.ensure_company("Fictive Robotics Guild", status="candidate")
+    dal.get_conn().commit()
+    _seed_vacancy(
+        dal,
+        company_id=company_id,
+        title="Scored Yet Unseen",
+        status="unseen",
+        source_board=board_name,
+        llm_score=64,
+    )
+    dal.get_conn().commit()
+
+    assert sources.main(["disable-board", board]) == 0
+    assert _status_and_reason(dal, "Scored Yet Unseen") == ("archived", "board_disabled")
+
+
+def test_disable_board_aborts_on_shared_display_name(env, capsys):
+    """board.name carries no UNIQUE constraint: when two catalog rows share one
+    display name, a name-keyed archive would sweep the OTHER board's rows too.
+    The guard aborts the archive (board still gets disabled) with exit 1."""
+    sources, dal = env
+    board = _a_known_board(sources)
+    board_name = sources._ALL_JOB_BOARDS[board]["name"]
+    dal.sync_boards({board: sources._ALL_JOB_BOARDS[board]})
+    cur = dal.get_conn().cursor()
+    cur.execute(
+        "INSERT INTO board (id, name) VALUES (%s, %s)",
+        ("impostor_board", board_name),  # same display name, different id
+    )
+    cur.close()
+    dal.get_conn().commit()
+
+    company_id = dal.ensure_company("Fictive Robotics Guild", status="candidate")
+    dal.get_conn().commit()
+    _seed_vacancy(
+        dal, company_id=company_id, title="Ambiguous Role", status="unseen", source_board=board_name
+    )
+    dal.get_conn().commit()
+
+    rc = sources.main(["disable-board", board])
+    out = capsys.readouterr().out
+
+    assert rc == 1
+    assert "archiving its unseen vacancies failed" in out
+    assert "is shared by boards" in out
+    assert dal.get_enabled_boards() == []  # the disable itself still landed
+    assert _status_and_reason(dal, "Ambiguous Role")[0] == "unseen"  # nothing swept
+
+
 def test_reenabling_a_board_does_not_resurrect_archived_rows(env):
     sources, dal = env
     board = _a_known_board(sources)
@@ -335,6 +394,81 @@ def test_disable_board_without_source_board_column_does_not_crash(env_pre_source
     out = capsys.readouterr().out
     assert rc == 0
     assert "0 unseen vacancies archived (board_disabled)" in out
+
+
+@pytest.fixture()
+def env_pre_status_reason(tmp_path, monkeypatch):
+    """Same chain as `env`, but WITHOUT the status_reason migration -- exactly
+    the production shape at the moment this feature ships: vacancy.source_board
+    exists (0013 already applied), vacancy.status_reason does not (0014 not yet
+    run)."""
+    db_file = tmp_path / "jobsearch.db"
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
+    monkeypatch.delenv("JOB_BOARDS", raising=False)
+    monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
+    for mod in (
+        "sources",
+        "database_supabase",
+        "config",
+        "company_registry",
+        "db_conn",
+        "db_backend",
+    ):
+        sys.modules.pop(mod, None)
+
+    import db_backend
+
+    importlib.reload(db_backend)
+    assert db_backend.IS_SQLITE
+
+    conn = db_backend.get_conn()
+    cur = conn.cursor()
+    for m in ("0002_board_table", "0011_board_enabled", "0013_add_source_board"):
+        cur.execute((MIGRATIONS / f"{m}.sqlite.sql").read_text(encoding="utf-8"))
+    cur.close()
+    conn.commit()
+
+    import database_supabase
+    import sources
+
+    yield sources, database_supabase
+    database_supabase.close_conn()
+
+
+def test_disable_board_without_status_reason_column_still_archives(env_pre_status_reason, capsys):
+    """On a schema with source_board but not yet status_reason (0013 applied,
+    0014 pending -- the exact prod shape this ships into), the archive still
+    happens; only the reason recording is skipped (the guarded fallback
+    branch)."""
+    sources, dal = env_pre_status_reason
+    board = _a_known_board(sources)
+    board_name = sources._ALL_JOB_BOARDS[board]["name"]
+    dal.sync_boards({board: sources._ALL_JOB_BOARDS[board]})
+    dal.get_conn().commit()
+    sources.main(["enable-board", board])
+
+    company_id = dal.ensure_company("Fictive Robotics Guild", status="candidate")
+    dal.get_conn().commit()
+    _seed_vacancy(
+        dal,
+        company_id=company_id,
+        title="Pre-Reason Role",
+        status="unseen",
+        source_board=board_name,
+    )
+    dal.get_conn().commit()
+
+    capsys.readouterr()  # drop the enable message
+    rc = sources.main(["disable-board", board])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "1 unseen vacancy archived (board_disabled)" in out
+    cur = dal.get_conn().cursor()
+    cur.execute("SELECT status FROM vacancy WHERE title = %s", ("Pre-Reason Role",))
+    assert cur.fetchone()[0] == "archived"
+    cur.close()
 
 
 def test_list_reports_active_companies(env, capsys):

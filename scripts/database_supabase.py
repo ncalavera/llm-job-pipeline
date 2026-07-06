@@ -2321,7 +2321,16 @@ def archive_board_vacancies(board_id: str) -> int:
     id (config no longer ships it, matching disable-board's own tolerance for
     unknown ids) still match its historical rows. A board never synced to the
     catalog (no row, or no name) has nothing to resolve against and archives
-    nothing.
+    nothing. Rows whose source_board IS NULL (imported before the stamping
+    change, or via direct ATS) are unreachable by this function -- permanently,
+    not just until some later run: they carry no board provenance to ever
+    match on.
+
+    CAVEAT: board.name carries no UNIQUE constraint, so two catalog rows could
+    in principle share one display name -- and a name-keyed archive would then
+    sweep the OTHER board's unseen rows too. Guarded by a reverse lookup: when
+    the resolved name maps back to more than one board id, the archive aborts
+    with a RuntimeError instead of proceeding.
 
     Re-enabling the board later does NOT resurrect these rows: a fresh fetch
     brings back whatever is still live on its own merits, exactly like any
@@ -2329,7 +2338,10 @@ def archive_board_vacancies(board_id: str) -> int:
 
     Commits internally, matching set_board_enabled: disabling a board is a
     discrete user action whose effect must survive the process, not wait on a
-    caller's commit.
+    caller's commit. Any failure rolls the staged UPDATE back (mirroring
+    set_board_enabled's rollback-then-raise) so the connection is left clean
+    and no partial archive is ever committed; cmd_disable reports the error
+    and exits non-zero.
 
     Degrades to a no-op (returns 0) on a schema that predates migration 0013
     -- no source_board column means no board provenance to resolve against,
@@ -2340,36 +2352,51 @@ def archive_board_vacancies(board_id: str) -> int:
 
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT name FROM board WHERE id = %s", (board_id,))
-    row = cur.fetchone()
-    board_name = row[0] if row else None
-    if not board_name:
-        cur.close()
-        return 0
+    try:
+        cur.execute("SELECT name FROM board WHERE id = %s", (board_id,))
+        row = cur.fetchone()
+        board_name = row[0] if row else None
+        if not board_name:
+            return 0
 
-    cur.execute(
-        "SELECT id FROM vacancy WHERE source_board = %s AND status = 'unseen'",
-        (board_name,),
-    )
-    ids = [r[0] for r in cur.fetchall()]
-    if not ids:
-        cur.close()
-        return 0
+        # Reverse check: board.name is not UNIQUE, so refuse to archive when
+        # the display name is shared -- a name-keyed UPDATE would hit the
+        # other board's rows too.
+        cur.execute("SELECT id FROM board WHERE name = %s", (board_name,))
+        sharing_ids = sorted(r[0] for r in cur.fetchall())
+        if len(sharing_ids) > 1:
+            raise RuntimeError(
+                f"board name '{board_name}' is shared by boards "
+                f"{', '.join(sharing_ids)} -- refusing to archive by name; "
+                "rename the duplicate catalog rows first"
+            )
 
-    placeholders = ", ".join(["%s"] * len(ids))
-    if _vacancy_has_column("status_reason"):
         cur.execute(
-            "UPDATE vacancy SET status = 'archived', status_reason = 'board_disabled', "
-            f"status_updated_at = now() WHERE id IN ({placeholders})",
-            ids,
+            "SELECT id FROM vacancy WHERE source_board = %s AND status = 'unseen'",
+            (board_name,),
         )
-    else:
-        cur.execute(
-            "UPDATE vacancy SET status = 'archived', status_updated_at = now() "
-            f"WHERE id IN ({placeholders})",
-            ids,
-        )
-    cur.close()
+        ids = [r[0] for r in cur.fetchall()]
+        if not ids:
+            return 0
+
+        placeholders = ", ".join(["%s"] * len(ids))
+        if _vacancy_has_column("status_reason"):
+            cur.execute(
+                "UPDATE vacancy SET status = 'archived', status_reason = 'board_disabled', "
+                f"status_updated_at = now() WHERE id IN ({placeholders})",
+                ids,
+            )
+        else:
+            cur.execute(
+                "UPDATE vacancy SET status = 'archived', status_updated_at = now() "
+                f"WHERE id IN ({placeholders})",
+                ids,
+            )
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
     conn.commit()
     return len(ids)
 

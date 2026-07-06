@@ -121,7 +121,17 @@ def cmd_disable(board_id: str) -> int:
     # Disable is tolerant of an unknown id on purpose: it's the clean-up path for
     # a board that config no longer ships but the DB still has enabled.
     set_board_enabled(board_id, False)
-    archived = archive_board_vacancies(board_id)
+    # The disable above is already committed (set_board_enabled owns its
+    # transaction), so an archive failure must say exactly that -- the board IS
+    # off, only the leftover sweep didn't happen -- rather than surface as a
+    # raw traceback of unclear outcome. archive_board_vacancies rolls its own
+    # staged UPDATE back on failure, so nothing partial is committed either.
+    try:
+        archived = archive_board_vacancies(board_id)
+    except Exception as exc:
+        print(f"Disabled board '{board_id}', but archiving its unseen vacancies failed: {exc}")
+        print("The board no longer fetches; re-run disable-board to retry the archive.")
+        return 1
     noun = "vacancy" if archived == 1 else "vacancies"
     print(
         f"Disabled board '{board_id}': {archived} unseen {noun} archived (board_disabled). "
