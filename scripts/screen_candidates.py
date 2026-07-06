@@ -2,8 +2,8 @@
 """Cheap relevance screen for newly discovered candidate companies.
 
 Board-discovered candidates otherwise flow straight into PAID enrichment
-(Firecrawl scrape + Exa search, twice each) and then Sonnet WANT-scoring. Most
-are commercial / staffing / board noise that a human would reject on sight. This
+(Firecrawl scrape + Exa search, twice each) and then WANT-scoring. Most are
+commercial / staffing / board noise that a human would reject on sight. This
 screen reads the user's OWN profile targeting and drops the CLEAR mismatches
 with the cheapest model tier BEFORE any Firecrawl / Exa call runs, so paid
 enrichment only ever touches plausible fits.
@@ -16,6 +16,8 @@ Two cuts, cheapest first:
    company_name_variants_match`` (the same tolerance gate the save layer uses to
    MERGE board name variants); after that merge-on-save, most duplicates never
    even reach here, so this is a cheap second line, not the primary defense.
+   Dedup drops carry the ``screen-dup:`` status_reason prefix so they are
+   filterable apart from the LLM screen's ``screen:`` drops.
 
 2. Relevance screen (cheap LLM). Each remaining candidate gets a keep/drop from
    the cheapest model tier on its NAME plus whatever short snippet a board
@@ -32,23 +34,37 @@ uses, never from a baked-in company-type blocklist. Kept companies still land in
 Pending for human review — the screen only cuts what reaches paid enrichment.
 
 Every keep / drop is logged with a reason so a wrong drop is visible. Drops are
-recorded on the candidate row (``status='inactive'``, ``status_reason`` prefixed
-``screen:``) and snapshotted to ``companies/archive/`` for review, mirroring
-``filter_companies.py``.
+recorded on the candidate row (``status='inactive'``, ``status_reason``
+prefixed ``screen:`` / ``screen-dup:``) and snapshotted to
+``companies/archive/`` for review, mirroring ``filter_companies.py``. A summary
+JSON (screened N, llm_ran yes/no, drops M) is written to
+``vacancies/screen_companies_summary.json`` so "ran and kept all" is auditable
+apart from "errored and kept all by fail-safe".
 
-If no Anthropic credentials are available, the LLM cut is skipped and every
-candidate is kept (the safe direction) — only the deterministic dedup still
-applies.
+No-API-key path (mirrors score_companies --local conventions): when no direct
+Anthropic client is available, ``--apply`` still applies the deterministic
+dedup cut, then writes the remaining candidates' screen payloads (one entry per
+company, each carrying its own system_prompt + user_msg + real DB id) to
+``vacancies/screen_companies_payload.json`` instead of calling a model.
+run_daily gates on that file so Claude Code subagents (cheap tier) screen the
+payloads and feed decisions back:
+
+    python3 scripts/screen_candidates.py --save < decisions.json
+    python3 scripts/screen_candidates.py --save --files r1.json r2.json ...
+
+Direct API stays the fast path when a key exists.
 
 Usage:
     python3 scripts/screen_candidates.py            # analyze + print, no writes
     python3 scripts/screen_candidates.py --apply    # drop clear mismatches
+    python3 scripts/screen_candidates.py --save     # apply subagent decisions
     python3 scripts/screen_candidates.py --limit N   # cap candidates this run
     python3 scripts/screen_candidates.py --model haiku   # override the tier
 """
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -59,9 +75,18 @@ from db_conn import get_conn
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# Reason-prefix that marks a row dropped by this screen (so drops are greppable
-# and distinguishable from filter_companies' structural drops).
-_DROP_PREFIX = "screen"
+#: Screen payloads for the no-API-key (subagent) path — same dir as the other
+#: gate payload files run_daily writes (vacancies/ is gitignored runtime state).
+SCREEN_PAYLOAD_PATH = PROJECT_ROOT / "vacancies" / "screen_companies_payload.json"
+
+#: Machine-readable run marker: screened N, llm_ran yes/no, drops M. Written on
+#: every run so a "zero drops" outcome is auditable after the fact ("ran, kept
+#: all" vs "errored, kept all by fail-safe" vs "deferred to subagents").
+SCREEN_SUMMARY_PATH = PROJECT_ROOT / "vacancies" / "screen_companies_summary.json"
+
+# status_reason prefixes — the two cut types are filterable apart.
+_DROP_PREFIX_LLM = "screen"
+_DROP_PREFIX_DUP = "screen-dup"
 
 # Tier name -> API model id. Only haiku is ever used by default; the strong
 # tiers exist because the config knob is clamped to <= the scoring model.
@@ -107,19 +132,24 @@ def parse_decision(text: str) -> "dict":
 
     A screen must never DROP on a parse failure — that would silently hide a real
     employer on a malformed response. Anything we cannot read as an explicit
-    ``keep: false`` is treated as a keep."""
+    ``keep: false`` is treated as a keep. ``fail_safe`` marks decisions that were
+    defaulted rather than made, so the run summary can report them apart."""
     from llm_json import parse_llm_json
 
     parsed = parse_llm_json(text)
     if not isinstance(parsed, dict) or "error" in parsed:
-        return {"keep": True, "reason": "unparseable screen response — kept (fail-safe)"}
+        return {
+            "keep": True,
+            "reason": "unparseable screen response — kept (fail-safe)",
+            "fail_safe": True,
+        }
     keep = parsed.get("keep", True)
     if not isinstance(keep, bool):
         keep = str(keep).strip().lower() not in ("false", "no", "0", "drop")
     reason = str(parsed.get("reason", "")).strip() or (
         "plausible fit" if keep else "clear mismatch"
     )
-    return {"keep": keep, "reason": reason}
+    return {"keep": keep, "reason": reason, "fail_safe": False}
 
 
 # ---------------------------------------------------------------------------
@@ -129,21 +159,22 @@ def parse_decision(text: str) -> "dict":
 
 def dedupe_tracked(
     candidates: "list[dict]", tracked_names: "list[str]"
-) -> "tuple[list[dict], list[tuple[dict, str]]]":
+) -> "tuple[list[dict], list[tuple[dict, str, str]]]":
     """Split fresh candidates into (to_screen, dup_drops).
 
     A candidate whose name variant-matches an already-tracked company is a
     duplicate and is dropped (never re-enriched). Reuses the save-layer matcher
-    so the dedup rule is defined in exactly one place."""
+    so the dedup rule is defined in exactly one place. Drop entries are
+    ``(row, reason, kind)`` with kind='dup'."""
     from company_registry import company_name_variants_match
 
     to_screen: list[dict] = []
-    dup_drops: list[tuple[dict, str]] = []
+    dup_drops: list[tuple[dict, str, str]] = []
     for row in candidates:
         name = row["canonical_name"]
         match = next((t for t in tracked_names if company_name_variants_match(name, t)), None)
         if match is not None:
-            dup_drops.append((row, f"already tracked as {match}"))
+            dup_drops.append((row, f"already tracked as {match}", "dup"))
         else:
             to_screen.append(row)
     return to_screen, dup_drops
@@ -155,7 +186,7 @@ def dedupe_tracked(
 
 
 def screen_candidates(candidates: "list[dict]", system_prompt: str, call_llm) -> "list[dict]":
-    """Screen each candidate; return decisions ``[{row, keep, reason}, ...]``.
+    """Screen each candidate; return decisions ``[{row, keep, reason, fail_safe}]``.
 
     ``call_llm(system, user) -> str`` is injected so tests mock the model. One
     request per candidate (never batched — STRATEGY guardrail 6). Any per-call
@@ -170,9 +201,33 @@ def screen_candidates(candidates: "list[dict]", system_prompt: str, call_llm) ->
             decision = {
                 "keep": True,
                 "reason": f"screen error, kept (fail-safe): {type(exc).__name__}",
+                "fail_safe": True,
             }
-        decisions.append({"row": row, "keep": decision["keep"], "reason": decision["reason"]})
+        decisions.append(
+            {
+                "row": row,
+                "keep": decision["keep"],
+                "reason": decision["reason"],
+                "fail_safe": decision.get("fail_safe", False),
+            }
+        )
     return decisions
+
+
+def build_screen_payloads(candidates: "list[dict]", system_prompt: str) -> "list[dict]":
+    """Subagent-screening payloads for the no-API-key path — one entry per
+    candidate, same shape conventions as score_companies --local (each entry
+    carries its own system_prompt + user_msg + the real DB id)."""
+    return [
+        {
+            "payload_kind": "company_screen",
+            "id": str(row["id"]),
+            "canonical_name": row["canonical_name"],
+            "system_prompt": system_prompt,
+            "user_msg": build_user_message(row["canonical_name"], row.get("description", "")),
+        }
+        for row in candidates
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -215,8 +270,9 @@ def load_tracked_names(conn) -> "list[str]":
     return names
 
 
-def apply_drops(conn, drops: "list[tuple[dict, str]]") -> None:
-    """Set dropped candidates inactive with a ``screen:`` status_reason, after
+def apply_drops(conn, drops: "list[tuple[dict, str, str]]") -> None:
+    """Set dropped candidates inactive with a kind-prefixed status_reason
+    (``screen-dup:`` for dedup drops, ``screen:`` for LLM drops), after
     snapshotting them to companies/archive/ (mirrors filter_companies.py). Only
     candidate rows are touched; a kept company is never modified."""
     if not drops:
@@ -230,15 +286,16 @@ def apply_drops(conn, drops: "list[tuple[dict, str]]") -> None:
         json.dumps(
             {
                 "archived_at": datetime.now().isoformat(),
-                "source": "screen_candidates.py --apply",
+                "source": "screen_candidates.py",
                 "count": len(drops),
                 "companies": [
                     {
                         "id": str(row["id"]),
                         "canonical_name": row["canonical_name"],
                         "reason": reason,
+                        "kind": kind,
                     }
-                    for row, reason in drops
+                    for row, reason, kind in drops
                 ],
             },
             indent=2,
@@ -248,11 +305,12 @@ def apply_drops(conn, drops: "list[tuple[dict, str]]") -> None:
     )
 
     cur = conn.cursor()
-    for row, reason in drops:
+    for row, reason, kind in drops:
+        prefix = _DROP_PREFIX_DUP if kind == "dup" else _DROP_PREFIX_LLM
         cur.execute(
             "UPDATE company SET status = 'inactive', status_reason = %s "
             "WHERE id = %s AND status = 'candidate'",
-            (f"{_DROP_PREFIX}: {reason}", row["id"]),
+            (f"{prefix}: {reason}", row["id"]),
         )
     conn.commit()
     cur.close()
@@ -266,33 +324,80 @@ def apply_drops(conn, drops: "list[tuple[dict, str]]") -> None:
 def run_screen(conn, call_llm, limit: int = 0) -> "dict":
     """Dedup + screen the fresh candidates; return a decision summary.
 
-    Never writes — the caller applies drops when ``--apply`` is set. ``call_llm``
-    may be ``None`` (no credentials): then the LLM cut is skipped and every
-    non-duplicate candidate is kept (the safe direction)."""
+    Never writes — the caller applies drops when ``--apply`` is set.
+
+    ``call_llm`` may be ``None`` (no direct-API credentials): then the LLM cut
+    does not run here — the remaining candidates are returned under ``pending``
+    so the caller can write subagent payloads for them (the --local-style path).
+    They stay candidates (kept — the safe direction) until decisions come back
+    via ``--save``."""
     candidates = load_fresh_candidates(conn, limit)
+    base = {
+        "total": len(candidates),
+        "keep": [],
+        "drop": [],
+        "pending": [],
+        "screened": 0,
+        "fail_safe_keeps": 0,
+        "llm_ran": call_llm is not None,
+    }
     if not candidates:
-        return {"total": 0, "keep": [], "drop": [], "screened": 0, "llm_ran": call_llm is not None}
+        return base
 
     tracked = load_tracked_names(conn)
     to_screen, dup_drops = dedupe_tracked(candidates, tracked)
 
     keep: list[tuple[dict, str]] = []
-    drop: list[tuple[dict, str]] = list(dup_drops)
+    drop: list[tuple[dict, str, str]] = list(dup_drops)
+    pending: list[dict] = []
+    fail_safe = 0
 
     if call_llm is None:
-        keep.extend((row, "kept — no LLM credentials, screen skipped") for row in to_screen)
+        pending = to_screen
     else:
         system_prompt = screen_system_prompt()
         for d in screen_candidates(to_screen, system_prompt, call_llm):
-            (keep if d["keep"] else drop).append((d["row"], d["reason"]))
+            if d["keep"]:
+                keep.append((d["row"], d["reason"]))
+                fail_safe += 1 if d.get("fail_safe") else 0
+            else:
+                drop.append((d["row"], d["reason"], "llm"))
 
-    return {
-        "total": len(candidates),
-        "keep": keep,
-        "drop": drop,
-        "screened": len(to_screen),
-        "llm_ran": call_llm is not None,
+    base.update(
+        keep=keep,
+        drop=drop,
+        pending=pending,
+        screened=len(to_screen) if call_llm is not None else 0,
+        fail_safe_keeps=fail_safe,
+    )
+    return base
+
+
+def write_summary(summary: dict, applied: bool, path: Path = SCREEN_SUMMARY_PATH) -> dict:
+    """Persist the one-line run marker (screened N, llm_ran yes/no, drops M) so a
+    zero-drop run is auditable: ``llm_ran`` false means the LLM cut did not run
+    here (no credentials — decisions deferred to subagents), and
+    ``fail_safe_keeps`` counts keeps that were defaults on an error, not real
+    decisions."""
+    dup_drops = sum(1 for _, _, k in summary["drop"] if k == "dup")
+    llm_drops = len(summary["drop"]) - dup_drops
+    record = {
+        "at": datetime.now().isoformat(),
+        "applied": applied,
+        "total": summary["total"],
+        "screened": summary["screened"],
+        "llm_ran": summary["llm_ran"],
+        "kept": len(summary["keep"]),
+        "drops": len(summary["drop"]),
+        "dup_drops": dup_drops,
+        "llm_drops": llm_drops,
+        "fail_safe_keeps": summary["fail_safe_keeps"],
+        "pending_count": len(summary["pending"]),
+        "payload_path": str(SCREEN_PAYLOAD_PATH) if summary["pending"] else "",
     }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
+    return record
 
 
 # ---------------------------------------------------------------------------
@@ -302,20 +407,30 @@ def run_screen(conn, call_llm, limit: int = 0) -> "dict":
 
 def build_call_llm(model_tier: str):
     """Return a ``call_llm(system, user) -> str`` bound to the cheap model, or
-    ``None`` if the Anthropic client can't be constructed (no package / no
-    credentials). Returning None keeps every candidate — the safe direction."""
+    ``None`` if no direct API key is configured (or the package is missing).
+    Returning None routes the run to the subagent (--local-style) path —
+    candidates stay kept until decisions come back via --save.
+
+    The explicit ANTHROPIC_API_KEY check matters: the SDK client constructs
+    fine without a key and only fails per-request, which would burn one
+    fail-safe keep per candidate instead of cleanly deferring to subagents."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print(
+            "  screen: ANTHROPIC_API_KEY unset — deferring to subagent screening",
+            file=sys.stderr,
+        )
+        return None
     try:
         import anthropic
     except ImportError:
-        print("  screen: anthropic package not installed — keeping all candidates", file=sys.stderr)
+        print(
+            "  screen: anthropic package not installed — deferring to subagent screening",
+            file=sys.stderr,
+        )
         return None
 
     model = _TIER_TO_MODEL.get(model_tier, _TIER_TO_MODEL["haiku"])
-    try:
-        client = anthropic.Anthropic()
-    except Exception as exc:  # noqa: BLE001 — no credentials is a keep-all, not a crash
-        print(f"  screen: no Anthropic client ({exc}) — keeping all candidates", file=sys.stderr)
-        return None
+    client = anthropic.Anthropic()
 
     def call_llm(system: str, user: str) -> str:
         resp = client.messages.create(
@@ -330,32 +445,111 @@ def build_call_llm(model_tier: str):
 
 
 # ---------------------------------------------------------------------------
+# Mode: --save (subagent decisions back into the DB)
+# ---------------------------------------------------------------------------
+
+
+def cmd_save(files: "list[str] | None") -> int:
+    """Apply subagent screen decisions: stdin JSON array, or --files (one result
+    file per subagent, parsed independently via llm_json.read_result_files so a
+    malformed one is named and skipped, never failing the rest — same contract
+    as score_companies --save).
+
+    Each decision: {"id": "<company id>", "keep": true|false, "reason": "..."}.
+    Only keep=false rows are written (kept candidates are simply left alone);
+    a missing/unknown id is reported and skipped, and anything unreadable
+    defaults to keep — the fail-safe direction."""
+    from llm_json import read_result_files
+
+    if files:
+        data, bad_files = read_result_files(files)
+        for b in bad_files:
+            print(f"  WARNING: malformed result file skipped (its companies stay kept): {b}")
+    else:
+        try:
+            data = json.load(sys.stdin)
+        except json.JSONDecodeError as exc:
+            print(
+                f"ERROR: stdin is not valid JSON ({exc}) — nothing applied (all kept). "
+                "Save each subagent's raw output to its own file and pass --files.",
+                file=sys.stderr,
+            )
+            return 1
+
+    if not isinstance(data, list):
+        data = [data]
+
+    conn = get_conn()
+    known = {str(r["id"]): r for r in load_fresh_candidates(conn)}
+
+    drops: list[tuple[dict, str, str]] = []
+    kept = 0
+    skipped = 0
+    for item in data:
+        if not isinstance(item, dict):
+            skipped += 1
+            continue
+        cid = str(item.get("id", "")).strip()
+        row = known.get(cid)
+        if row is None:
+            print(f"  SKIP unknown/already-decided id: {cid or '(missing)'}")
+            skipped += 1
+            continue
+        keep = item.get("keep", True)
+        if not isinstance(keep, bool):
+            keep = str(keep).strip().lower() not in ("false", "no", "0", "drop")
+        reason = str(item.get("reason", "")).strip() or (
+            "plausible fit" if keep else "clear mismatch"
+        )
+        if keep:
+            kept += 1
+            print(f"  keep  {row['canonical_name']}: {reason}")
+        else:
+            drops.append((row, reason, "llm"))
+            print(f"  DROP  {row['canonical_name']}: {reason}")
+
+    apply_drops(conn, drops)
+    print(f"Applied {len(drops)} drop(s), {kept} keep(s), {skipped} skipped")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 
-def _print_summary(summary: dict, applied: bool) -> None:
-    kept, dropped = summary["keep"], summary["drop"]
+def _print_report(summary: dict, applied: bool) -> None:
+    kept, dropped, pending = summary["keep"], summary["drop"], summary["pending"]
     head = "APPLIED" if applied else "DRY-RUN"
+    llm_note = "LLM screen ran" if summary["llm_ran"] else "no API key — LLM screen deferred"
     print(
-        f"[{head}] {summary['total']} fresh candidate(s): "
-        f"{len(kept)} kept, {len(dropped)} dropped "
-        f"({'LLM screen ran' if summary['llm_ran'] else 'LLM screen SKIPPED — no credentials'})"
+        f"[{head}] {summary['total']} fresh candidate(s): {len(kept)} kept, "
+        f"{len(dropped)} dropped, {len(pending)} pending subagent screen ({llm_note})"
     )
-    for row, reason in dropped:
-        print(f"  DROP  {row['canonical_name']}: {reason}")
+    for row, reason, kind in dropped:
+        tag = _DROP_PREFIX_DUP if kind == "dup" else _DROP_PREFIX_LLM
+        print(f"  DROP [{tag}] {row['canonical_name']}: {reason}")
     for row, reason in kept:
         print(f"  keep  {row['canonical_name']}: {reason}")
+    for row in pending:
+        print(f"  pend  {row['canonical_name']}: awaiting subagent decision")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Cheap relevance screen before company enrichment")
     parser.add_argument("--apply", action="store_true", help="Drop clear mismatches (writes DB)")
+    parser.add_argument(
+        "--save", action="store_true", help="Apply subagent decisions (stdin/--files)"
+    )
+    parser.add_argument("--files", nargs="+", help="With --save: per-subagent result files")
     parser.add_argument("--limit", type=int, default=0, help="Cap candidates screened this run")
     parser.add_argument(
         "--model", type=str, default="", help="Model tier override (haiku/sonnet/opus)"
     )
     args = parser.parse_args()
+
+    if args.save:
+        return cmd_save(args.files)
 
     from scoring_settings import company_screen_model
 
@@ -367,7 +561,28 @@ def main() -> int:
 
     if args.apply:
         apply_drops(conn, summary["drop"])
-    _print_summary(summary, applied=args.apply)
+        if summary["pending"]:
+            # No direct-API client: hand the remaining candidates to subagent
+            # screening (run_daily gates on this file; decisions return via --save).
+            SCREEN_PAYLOAD_PATH.parent.mkdir(parents=True, exist_ok=True)
+            SCREEN_PAYLOAD_PATH.write_text(
+                json.dumps(
+                    build_screen_payloads(summary["pending"], screen_system_prompt()),
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            print(f"  Wrote {len(summary['pending'])} screen payload(s) to {SCREEN_PAYLOAD_PATH}")
+
+    record = write_summary(summary, applied=args.apply)
+    _print_report(summary, applied=args.apply)
+    print(
+        f"screen summary: screened {record['screened']} of {record['total']}, "
+        f"llm_ran {'yes' if record['llm_ran'] else 'no'}, drops {record['drops']} "
+        f"(dup {record['dup_drops']} + screen {record['llm_drops']}), "
+        f"fail-safe keeps {record['fail_safe_keeps']}, pending {record['pending_count']}"
+    )
     return 0
 
 
