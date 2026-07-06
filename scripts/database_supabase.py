@@ -273,20 +273,80 @@ _DECIDED_STATUSES = frozenset(
     {"applied", "liked", "to_apply", "to_research", "to_network", "passed", "skipped"}
 )
 
+# Common title abbreviations expanded to their long form so a spelled-out role
+# and an abbreviated one collapse to ONE dedup key ("Office of the CEO" ==
+# "Office of the Chief Executive Officer"). Deliberately small and unambiguous:
+# only acronyms whose expansion never renames a genuinely different role.
+_TITLE_ABBREVIATIONS = {
+    "ceo": "chief executive officer",
+    "cfo": "chief financial officer",
+    "coo": "chief operating officer",
+    "cto": "chief technology officer",
+    "cmo": "chief marketing officer",
+    "cpo": "chief product officer",
+    "cio": "chief information officer",
+    "ciso": "chief information security officer",
+    "vp": "vice president",
+    "svp": "senior vice president",
+    "evp": "executive vice president",
+    "hr": "human resources",
+    "comms": "communications",
+    "ops": "operations",
+    "mgr": "manager",
+    "exec": "executive",
+}
+_ABBREV_RE = re.compile(r"\b(" + "|".join(_TITLE_ABBREVIATIONS) + r")\b")
+
+# Parenthetical NOISE that annotates a posting's count/status, never the role
+# identity: "(3 Openings)", "(closed)", "(Reopened)", "(Multiple positions)".
+# Distinguishing parentheticals — "(Spanish)", "(Maternity Cover)" — are left
+# intact so genuinely different roles are never merged. Bare "new"/"updated"
+# are deliberately NOT noise words: "(New York)", "(New Delhi)", "(New Grad)"
+# must keep their distinguishing key ("(3 new openings)" still strips via the
+# count branch / "openings").
+_NOISE_PAREN_RE = re.compile(
+    r"\s*\((?:\s*\d[\d\s,]*\s*(?:openings?|positions?|roles?|vacancies|posts?)?\s*"
+    r"|[^)]*\b(?:openings?|positions?|vacancies|closed|reopened|re-opened|filled|"
+    r"on hold|urgent|multiple)\b[^)]*)\)",
+    re.I,
+)
+
+# Requisition-id noise: "#12345", "#REQ-2024-01" — a '#' followed by a token
+# that contains at least one digit.
+_REQ_ID_RE = re.compile(r"#\s*[A-Za-z0-9-]*\d[A-Za-z0-9-]*")
+
+
+def _strip_title_noise(text: str) -> str:
+    """Drop count/status parentheticals and req-id tokens from a lowercased title."""
+    text = _NOISE_PAREN_RE.sub(" ", text)
+    text = _REQ_ID_RE.sub(" ", text)
+    return text
+
+
+def _normalize_title_core(title: str) -> str:
+    """Shared dedup normalization, seniority KEPT.
+
+    On top of _normalize_title_for_dedup (geo-suffix strip + whitespace
+    collapse): lowercase, strip count/req-id noise, expand common abbreviations
+    (CEO -> chief executive officer), fold '&'->'and', drop punctuation, and
+    collapse whitespace. Seniority words survive here — _normalize_title_strong
+    layers their removal on top (a level rename over time is one role)."""
+    base = _normalize_title_for_dedup(title).lower()
+    base = _strip_title_noise(base)
+    base = _ABBREV_RE.sub(lambda m: _TITLE_ABBREVIATIONS[m.group(1)], base)
+    base = base.replace("&", " and ")
+    base = _PUNCT_RE.sub(" ", base).replace("_", " ")
+    return re.sub(r"\s+", " ", base).strip()
+
 
 def _normalize_title_strong(title: str) -> str:
     """Aggressively normalize a title for cross-variant dedup.
 
-    On top of _normalize_title_for_dedup (geo-suffix strip + whitespace
-    collapse): lowercase, fold '&'->'and', drop punctuation, and remove
-    standalone seniority words. An empty result (the title was only level
-    words) falls back to the punctuation-normalized form so unrelated stub
-    titles don't all collapse together.
+    Core normalization (see _normalize_title_core) plus removal of standalone
+    seniority words. An empty result (the title was only level words) falls back
+    to the core form so unrelated stub titles don't all collapse together.
     """
-    base = _normalize_title_for_dedup(title).lower()
-    base = base.replace("&", " and ")
-    base = _PUNCT_RE.sub(" ", base).replace("_", " ")
-    base = re.sub(r"\s+", " ", base).strip()
+    base = _normalize_title_core(title)
     stripped = re.sub(r"\s+", " ", _LEVEL_RE.sub(" ", base)).strip()
     return stripped or base
 
@@ -416,8 +476,29 @@ def _row_apply_urls(row) -> set:
     return urls
 
 
+def _row_already_settled(row) -> bool:
+    """True when a row already carries a user decision OR a real LLM score.
+
+    Re-importing a (company, normalized-title) that maps onto such a row must
+    NOT create a re-scoreable copy (per-facet dup fix): fold onto the settled row instead of
+    forking / inserting a parallel one that scoring would pay to re-evaluate.
+    A negative sentinel score (awaiting scoring) does not count as settled.
+    """
+    if row.get("status") in _DECIDED_STATUSES:
+        return True
+    score = row.get("llm_score")
+    return score is not None and score >= 0
+
+
 def _find_existing_vacancy(
-    cur, index: dict, batch_hashes: set, dedup_hash: str, norm_hash: str, desc_fp, candidate_url
+    cur,
+    index: dict,
+    batch_hashes: set,
+    dedup_hash: str,
+    norm_hash: str,
+    desc_fp,
+    candidate_url,
+    batch_claimed: set,
 ):
     """Return (existing row, match_kind, insert_hash) for this signature.
 
@@ -446,6 +527,15 @@ def _find_existing_vacancy(
         role's several location-specific URLs onto one row (multi-location
         posting), so a differing URL is not a distinct-role signal.
 
+        TWO exceptions collapse instead of forking (per-facet dup fix):
+          - the canonical hash was already CLAIMED earlier in THIS batch
+            (``batch_claimed``): the two are per-facet variants of one posting
+            listed once per country in a single fetch (FundraiseUp posts a
+            remote role 8×, one per country, each with a country-specific body).
+          - the canonical row is already SETTLED (scored / decided): re-importing
+            a variant of a role we already scored or acted on must fold onto it,
+            never spawn a re-scoreable copy.
+
     The additive normalized-title / description keys model a rename OVER TIME
     (the old title vanished, a new one appeared), so they only fire when that
     story holds:
@@ -456,7 +546,10 @@ def _find_existing_vacancy(
         (A fund can list "Program Officer" and "Senior Program Officer" at once
         — losing one would drop a genuinely open role.)
       * URL guard — if both the candidate and the existing row carry non-empty
-        apply URLs and none overlap, they are two distinct reqs: skip.
+        apply URLs and none overlap, they are two distinct reqs: skip — UNLESS
+        the matched row is already settled (scored/decided), in which case a
+        differing URL is just a re-posted variant of a role we already scored
+        and it folds rather than spawning a re-scoreable copy (per-facet dup fix).
 
     A claimed inexact match is consumed from the index so a second batch variant
     of the same vanished title forks its own row instead of collapsing again.
@@ -467,9 +560,15 @@ def _find_existing_vacancy(
     if row is not None:
         row_fp = description_fingerprint(row.get("full_description"))
         if desc_fp and row_fp and desc_fp != row_fp:
-            # Same org+title, DIFFERENT full description: two distinct roles
-            # colliding on the canonical hash. Re-match this role's own salted
-            # row, else fork so the live sibling is not merged away.
+            # Same org+title, DIFFERENT full description. Normally two distinct
+            # roles colliding on the canonical hash → fork. But fold instead when
+            # this is a per-facet variant of a posting already claimed in THIS
+            # batch, or the canonical row is already settled (scored/decided):
+            # both cases must not spawn a re-scoreable parallel row (per-facet dup fix).
+            if dedup_hash in batch_claimed or _row_already_settled(row):
+                return row, "exact", dedup_hash
+            # Re-match this role's own salted row, else fork so the live sibling
+            # is not merged away.
             salted = make_sibling_vacancy_id(dedup_hash, desc_fp)
             cur.execute("SELECT * FROM vacancy WHERE dedup_hash = %s", (salted,))
             sibling = cur.fetchone()
@@ -492,7 +591,11 @@ def _find_existing_vacancy(
             continue
         existing_urls = _row_apply_urls(cand)
         if candidate_url and existing_urls and candidate_url not in existing_urls:
-            continue  # two distinct reqs — do not merge
+            # Two distinct reqs — do not merge — unless the matched row is
+            # already scored/decided: then this is a re-titled variant of a role
+            # we already settled and folding it prevents a re-scoreable copy.
+            if not _row_already_settled(cand):
+                continue
         _consume_index_entry(index, hit["id"])
         return cand, kind, dedup_hash
     return None, None, dedup_hash
@@ -738,6 +841,33 @@ def _scored_by_supported() -> bool:
     finally:
         cur.close()
     return _scored_by_supported_cache
+
+
+def _vacancy_has_column(col: str) -> bool:
+    """True when ``vacancy`` has ``col`` on the active backend.
+
+    Used to write ``source_board`` (migration 0013) only where the column
+    exists. Prod already carries it; a fresh/pre-migration install degrades to
+    not writing provenance rather than raising "no such column". Cheap, called
+    once per board save (not per row), so no module-level cache is needed."""
+    from db_backend import IS_SQLITE
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        if IS_SQLITE:
+            cur.execute("PRAGMA table_info(vacancy)")
+            cols = {row[1] for row in cur.fetchall()}
+        else:
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'vacancy'"
+            )
+            cols = {row[0] for row in cur.fetchall()}
+        return col in cols
+    except Exception:
+        return False
+    finally:
+        cur.close()
 
 
 def load_vacancies(
@@ -1227,6 +1357,11 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     # title is in here it is still live, so a variant of it is a same-time pair
     # (keep both), not a rename (see _find_existing_vacancy's batch-alive guard).
     batch_hashes = {make_vacancy_id(org_name, _sanitize_title(j.get("title", ""))) for j in jobs}
+    # Canonical dedup_hashes this batch has already inserted/merged onto — a
+    # later same-title job with a per-facet body folds onto that row instead of
+    # forking a parallel per-country copy (per-facet dup fix). Populated AFTER each job so a
+    # role's FIRST appearance still uses the normal distinct-sibling fork.
+    batch_claimed: set = set()
 
     skipped_archived = 0
     skipped_junk = 0
@@ -1266,8 +1401,16 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
 
         # Check existing: exact hash first, then a same-company renamed/language variant.
         existing, match_kind, insert_hash = _find_existing_vacancy(
-            cur, dedup_index, batch_hashes, dedup_hash, norm_hash, desc_fp, job.get("url")
+            cur,
+            dedup_index,
+            batch_hashes,
+            dedup_hash,
+            norm_hash,
+            desc_fp,
+            job.get("url"),
+            batch_claimed,
         )
+        batch_claimed.add(dedup_hash)
 
         if existing:
             updates = {"last_seen": today}
@@ -1378,6 +1521,10 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
     new_count = 0
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
+    # Board provenance: stamp which board a vacancy came from (board-yield analytics).
+    # Only the direct-ATS path (save_vacancies) leaves it empty. Guarded once so
+    # a pre-migration install (no source_board column) still saves, unstamped.
+    write_source_board = bool(board_name) and _vacancy_has_column("source_board")
 
     # Board path: full archived set (include_gone=True) so a lagging feed cannot
     # resurrect a posting the source already closed. Loaded once (not per row).
@@ -1394,6 +1541,10 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
         batch_hashes_by_org.setdefault(o, set()).add(
             make_vacancy_id(o, _sanitize_title(j.get("title", "")))
         )
+    # Canonical dedup_hashes already inserted/merged in THIS board fetch — a
+    # later same-title job with a per-facet body folds rather than forking a
+    # per-country copy (per-facet dup fix). Populated after each job (see save_vacancies).
+    batch_claimed: set = set()
 
     seen_ext_ids: set[str] = set()
 
@@ -1479,7 +1630,9 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
             norm_hash,
             desc_fp,
             job.get("url"),
+            batch_claimed,
         )
+        batch_claimed.add(dedup_hash)
 
         if existing:
             updates = {"last_seen": today}
@@ -1516,30 +1669,58 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
             if loc_key not in existing_loc_keys:
                 locs.append(loc_entry)
                 updates["locations"] = Json(locs)
+            elif loc_entry.get("url"):
+                # Same loc_key but a fresh apply URL — keep it (mirrors
+                # save_vacancies). Without this, a same-title same-location
+                # facet folded onto this row would lose its apply URL entirely.
+                for loc in locs:
+                    lk = loc.get("city") or loc.get("country") or loc.get("work_mode") or ""
+                    if lk == loc_key:
+                        loc["url"] = loc_entry["url"]
+                        break
+                updates["locations"] = Json(locs)
+
+            # Backfill board provenance on a row that predates the column / was
+            # first saved by another source but is now confirmed on this board.
+            if write_source_board and not (existing.get("source_board") or ""):
+                updates["source_board"] = board_name
 
             set_parts = [f"{k} = %s" for k in updates]
             vals = list(updates.values()) + [existing["id"]]
             cur.execute(f"UPDATE vacancy SET {', '.join(set_parts)} WHERE id = %s", vals)
         else:
             parsed_deadline = _resolve_new_deadline(job)
+            cols = [
+                "dedup_hash",
+                "company_id",
+                "title",
+                "snippet",
+                "full_description",
+                "compensation",
+                "deadline",
+                "first_seen",
+                "last_seen",
+                "locations",
+            ]
+            vals = [
+                insert_hash,
+                company_id,
+                title,
+                job.get("snippet", ""),
+                job.get("full_description", ""),
+                job.get("compensation", ""),
+                parsed_deadline,
+                today,
+                today,
+                Json([loc_entry]),
+            ]
+            if write_source_board:
+                cols.append("source_board")
+                vals.append(board_name)
+            placeholders = ", ".join(["%s"] * len(cols))
             cur.execute(
-                """INSERT INTO vacancy (
-                       dedup_hash, company_id, title, snippet,
-                       full_description, compensation, deadline,
-                       first_seen, last_seen, locations
-                   ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (
-                    insert_hash,
-                    company_id,
-                    title,
-                    job.get("snippet", ""),
-                    job.get("full_description", ""),
-                    job.get("compensation", ""),
-                    parsed_deadline,
-                    today,
-                    today,
-                    Json([loc_entry]),
-                ),
+                f"INSERT INTO vacancy ({', '.join(cols)}) VALUES ({placeholders})",
+                vals,
             )
             new_count += 1
 

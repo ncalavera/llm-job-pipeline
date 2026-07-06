@@ -13,7 +13,7 @@ The apply URL is deliberately NOT the signal: the board save folds one role's
 several location-specific URLs onto one row (multi-location posting), so a
 differing URL is not a distinct-role signal — see
 tests/test_save_board_vacancies_characterization.py::
-test_location_merge_adds_new_key_but_no_url_refresh.
+test_location_merge_adds_new_key_and_refreshes_url.
 
 This is the INVERSE of the under-merge guard against a whitespace-mangled org
 forking a true duplicate (see tests/test_dedup_org_whitespace.py); the two goals
