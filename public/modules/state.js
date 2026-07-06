@@ -153,7 +153,10 @@ export const state = {
   // lifted so sub-threshold roles show. Shared state (not a catalog-local flag)
   // so the Geo table honours the SAME show-all as the Catalog — the two browse
   // surfaces read one visible set and can't disagree (DHA-376 Nit B).
-  catalogShowAll: false,
+  // Default ON: every scored role is visible in Browse; toggle to "Top only"
+  // re-applies the floor. The floor was hiding sub-40 roles the user paid to
+  // score and wants to review (recall-first).
+  catalogShowAll: true,
   catalogSortDesc: true,
   // Default sort: WANT score descending (DHA-409) — the table's header-click
   // sort now covers every column the old green sort chips duplicated.
