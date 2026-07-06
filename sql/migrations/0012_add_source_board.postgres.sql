@@ -1,0 +1,13 @@
+-- 0012_add_source_board — record which job board a vacancy was imported from.
+--
+-- Board-yield analytics (which board actually surfaces roles worth scoring)
+-- need per-vacancy provenance. The column already exists in production with
+-- historical data (80,000 Hours, LinkedIn, Impactpool …), but the CURRENT
+-- import path never wrote it because the column was missing from the checked-in
+-- schema and the INSERT did not set it (DHA-423). This migration adds it to the
+-- schema so a fresh install has it, and save_board_vacancies now stamps the
+-- board name on every board-sourced save (direct-ATS saves leave it empty).
+--
+-- Guarded with IF NOT EXISTS so replaying against production (which already has
+-- the column) is a clean no-op — matches 0006/0009.
+ALTER TABLE vacancy ADD COLUMN IF NOT EXISTS source_board TEXT;
