@@ -280,6 +280,124 @@ def resolve_canonical_name(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Fuzzy company-name matching (board-variant dedup)
+# ---------------------------------------------------------------------------
+#
+# The exact canonical_name / alias lookups above miss the board-sourced name
+# VARIANTS of a company we already track — "EBRD - European Bank for
+# Reconstruction and Development" for an existing "EBRD", "Save the Children
+# International" for "Save the Children". Without a tolerance match those land
+# as brand-new candidate rows that get re-enriched and re-WANT-scored (wasted
+# Firecrawl/Exa/LLM spend). ``company_name_variants_match`` is the tolerance
+# gate: the save layer (``ensure_company``) uses it to MERGE an incoming board
+# name into the existing row instead of inserting a duplicate.
+#
+# Precision over recall on purpose: a wrong merge folds a real company into
+# another and reassigns its vacancies, while a miss only re-scores a duplicate
+# (today's status quo). So the rule stays tight — normalized-token equality, or
+# an "ACRONYM - Full Name" containment where the single extra token is exactly
+# the acronym of the shorter name — and nothing looser.
+
+# Dropped before matching: articles/prepositions that never distinguish orgs.
+_MATCH_STOPWORDS = frozenset(
+    {"the", "of", "for", "and", "a", "an", "de", "la", "to", "in", "on", "at", "by", "with"}
+)
+
+# Trailing legal/org suffixes stripped so "Resolution Foundation" == "Resolution"
+# and "Save the Children International" == "Save the Children". Trailing-only:
+# a suffix word buried mid-name (e.g. leading "International Fund…") is kept.
+_MATCH_ORG_SUFFIXES = frozenset(
+    {
+        "foundation",
+        "international",
+        "inc",
+        "incorporated",
+        "llc",
+        "ltd",
+        "limited",
+        "gmbh",
+        "corp",
+        "corporation",
+        "co",
+        "company",
+        "plc",
+        "ag",
+        "sa",
+        "ev",
+        "bv",
+        "nv",
+        "kg",
+        "group",
+        "holdings",
+        "worldwide",
+    }
+)
+
+_MATCH_PUNCT_RE = re.compile(r"[^0-9a-z]+")
+
+
+def _normalize_name_tokens(name: str) -> list[str]:
+    """Lowercase, strip punctuation, drop stopwords / trailing digit / trailing
+    org suffixes, and return the remaining significant tokens (order preserved).
+
+    Examples:
+      "EBRD - European Bank for Reconstruction and Development"
+          → [ebrd, european, bank, reconstruction, development]
+      "Save the Children International" → [save, children]
+      "Resolution Foundation"          → [resolution]
+      "Code.X 0"                       → [code, x]
+    """
+    lowered = _normalize_org_whitespace(name).lower()
+    tokens = [t for t in _MATCH_PUNCT_RE.sub(" ", lowered).split() if t]
+    tokens = [t for t in tokens if t not in _MATCH_STOPWORDS]
+    # Drop a stray trailing pure-digit token ("Code.X 0" → "Code.X").
+    while len(tokens) > 1 and tokens[-1].isdigit():
+        tokens.pop()
+    # Strip trailing org suffixes ("Resolution Foundation" → "Resolution").
+    while len(tokens) > 1 and tokens[-1] in _MATCH_ORG_SUFFIXES:
+        tokens.pop()
+    return tokens
+
+
+def company_name_variants_match(a: str, b: str) -> bool:
+    """True if two raw company-name strings denote the same organisation.
+
+    Matches on either:
+      * normalized-token equality — same significant tokens after lowercase /
+        punctuation / stopword / suffix normalization (word order ignored); or
+      * "ACRONYM - Full Name" containment — one token set is a proper subset of
+        the other and the single extra token is exactly the acronym (initials)
+        of the shorter set, e.g. "IFAD - International Fund for Agricultural
+        Development" ↔ "International Fund for Agricultural Development".
+
+    Deliberately does NOT match on generic single-token containment (guards
+    "Via" ↔ "[via Fast Forward]", "Apple" ↔ "Apple CSR") or on partial token
+    overlap ("Henley & Partners" ↔ "Global Partners").
+    """
+    sa = set(_normalize_name_tokens(a))
+    sb = set(_normalize_name_tokens(b))
+    if not sa or not sb:
+        return False
+    if sa == sb:
+        return True
+    if sa < sb:
+        small, big = sa, sb
+    elif sb < sa:
+        small, big = sb, sa
+    else:
+        return False
+    extra = big - small
+    if len(extra) != 1:
+        return False
+    acronym = next(iter(extra))
+    # The extra token must be an acronym (2–6 letters) of the shorter name;
+    # this needs ≥2 words, so single-token containment can never match here.
+    if not acronym.isalpha() or not (2 <= len(acronym) <= 6):
+        return False
+    return sorted(acronym) == sorted(t[0] for t in small)
+
+
+# ---------------------------------------------------------------------------
 # Registry validation (runs on import — warnings only)
 # ---------------------------------------------------------------------------
 
