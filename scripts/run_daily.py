@@ -646,6 +646,23 @@ def _prefilter_junk_companies(opts: Opts) -> None:
         print("  ⚠  company junk pre-filter exited non-zero — continuing", flush=True)
 
 
+def _screen_candidates(opts: Opts) -> None:
+    """Cheap relevance screen BEFORE any paid enrichment: drop clearly-irrelevant
+    board-discovered candidates (staffing agencies, purely commercial businesses
+    outside the profile, already-tracked duplicates) with the cheapest model tier
+    on name + board snippet — no scrape — so Firecrawl/Exa and the strong scorer
+    only ever touch plausible fits (STRATEGY guardrail 3: cost). Runs after the
+    structural junk cut and before the paid website backfill, so a dropped
+    candidate also skips the paid URL search. Kept companies still go to Pending
+    for human review — the screen only cuts what reaches PAID enrichment.
+
+    Best-effort: a screen failure (no credentials, an API error) keeps every
+    candidate — the safe direction — so it can never block scoring."""
+    rc = _run(_py("screen_candidates.py") + ["--apply"], opts)
+    if rc != 0:
+        print("  ⚠  candidate relevance screen exited non-zero — continuing", flush=True)
+
+
 def _backfill_candidate_websites(opts: Opts) -> None:
     """Find official websites for ghost candidates (board-discovered, no URL) so
     they enter scoring instead of hanging unscored. Capped at the same per-run
@@ -1223,11 +1240,14 @@ def _h_company_scoring(state, entry, opts):
 
     # Enrichment chain — make new candidates scorable before scoring:
     #   1. drop structural junk so we don't pay to enrich it,
-    #   2. find websites for ghost candidates (board-discovered, no URL),
-    #   3. count what is now scorable,
-    #   4. scrape about-pages + collect primary-source evidence for that set,
-    #   5. build the WANT-scoring payloads for the gate.
+    #   2. cheap relevance screen: drop clear mismatches + duplicates before any
+    #      paid call, so Firecrawl/Exa only ever touch plausible fits,
+    #   3. find websites for ghost candidates (board-discovered, no URL),
+    #   4. count what is now scorable,
+    #   5. scrape about-pages + collect primary-source evidence for that set,
+    #   6. build the WANT-scoring payloads for the gate.
     _prefilter_junk_companies(opts)
+    _screen_candidates(opts)
     _backfill_candidate_websites(opts)
 
     n = _candidates_to_score()
