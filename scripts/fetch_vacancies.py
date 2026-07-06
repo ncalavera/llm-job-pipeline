@@ -357,6 +357,70 @@ def _auto_enrich_candidates():
         )
 
 
+# Vacancy statuses that mark a company as "engaged" — the user has a live
+# liked/decided role there. An engaged company must refresh at its TTL and
+# outranks never-fetched newcomers in the fetch rotation, so an inflow of new
+# candidate companies can never starve it (an active org with liked/decided
+# roles was going un-fetched for weeks). Negative decisions (passed/skipped)
+# are NOT engagement.
+ENGAGED_STATUSES = ("liked", "to_apply", "to_research", "to_network", "applied")
+
+
+def _engaged_company_names(conn) -> set[str]:
+    """Canonical names of companies with at least one live liked/decided role.
+
+    Read-only. Drives the top fetch-priority cohort in ``_order_due_companies``
+    so a company the user actually engaged with refreshes at its TTL instead of
+    being crowded out indefinitely by never-fetched candidates."""
+    cur = conn.cursor()
+    placeholders = ", ".join(["%s"] * len(ENGAGED_STATUSES))
+    cur.execute(
+        f"""
+        SELECT DISTINCT c.canonical_name
+        FROM vacancy v
+        JOIN company c ON v.company_id = c.id
+        WHERE v.status IN ({placeholders})
+        """,
+        ENGAGED_STATUSES,
+    )
+    names = {row[0] for row in cur.fetchall()}
+    cur.close()
+    return names
+
+
+def _order_due_companies(records: list[dict], now: float) -> list[str]:
+    """Order the due-for-fetch companies by priority (most urgent first).
+
+    Pure (unit-tested). Each record: ``name``, ``last_fetched`` (epoch seconds
+    or ``None`` if never fetched), ``ttl_days`` (positive int), ``engaged``
+    (bool — has a live liked/decided role). Returns the names in fetch order.
+
+    Guaranteed cohort precedence, so a flood of never-fetched newcomers can
+    never crowd out an overdue tracked org:
+
+      cohort 0 — overdue AND engaged: a live liked/decided role, so it MUST
+                 refresh at its TTL — beats every newcomer;
+      cohort 1 — overdue tracked (previously fetched, past its TTL);
+      cohort 2 — never fetched (new candidates), lowest priority.
+
+    Inside a tracked cohort the overdue RATIO (age / ttl) ranks, so the most
+    overdue wins regardless of tier TTL (an S-tier at 4d beats an A-tier at 4d,
+    because S refreshes every 3d and A every 5d). Name breaks ties for a stable,
+    deterministic order the caller can cap reproducibly.
+    """
+
+    def key(r: dict) -> tuple[int, float, str]:
+        last = r["last_fetched"]
+        if last is None:
+            return (2, 0.0, r["name"])
+        ttl_seconds = max(int(r["ttl_days"]), 1) * 86400
+        overdue_ratio = (now - last) / ttl_seconds
+        cohort = 0 if r["engaged"] else 1
+        return (cohort, -overdue_ratio, r["name"])
+
+    return [r["name"] for r in sorted(records, key=key)]
+
+
 def _apply_company_cap(ordered_names: list[str], companies: dict, cap: int) -> tuple[dict, int]:
     """Keep at most ``cap`` companies, chosen from the front of ``ordered_names``.
 
@@ -408,24 +472,35 @@ def _filter_companies(args) -> dict:
     if not args.force_all and not args.companies:
         _TTL_BY_TIER = {"S": 3, "A": 5}  # days; default = 7
         conn = get_conn()
+        engaged = _engaged_company_names(conn)
         cur = conn.cursor()
         stale = {}
         skipped_count = 0
-        staleness: dict[str, float] = {}  # name -> last_fetched epoch (never = 0.0)
+        due: list[dict] = []  # priority records for _order_due_companies
+        now = datetime.now().timestamp()
         for n, c in filtered.items():
             cur.execute("SELECT last_fetched FROM company WHERE canonical_name = %s", (n,))
             row = cur.fetchone()
+            tier = enriched_tiers.get(n)
+            ttl = _TTL_BY_TIER.get(tier, 7)
             if not row or not row[0]:
                 stale[n] = c  # never fetched
-                staleness[n] = 0.0
+                due.append(
+                    {"name": n, "last_fetched": None, "ttl_days": ttl, "engaged": n in engaged}
+                )
             else:
                 last_dt = row[0]
                 days = (datetime.now(last_dt.tzinfo) - last_dt).days
-                tier = enriched_tiers.get(n)
-                ttl = _TTL_BY_TIER.get(tier, 7)
                 if days >= ttl:
                     stale[n] = c
-                    staleness[n] = last_dt.timestamp()
+                    due.append(
+                        {
+                            "name": n,
+                            "last_fetched": last_dt.timestamp(),
+                            "ttl_days": ttl,
+                            "engaged": n in engaged,
+                        }
+                    )
                 else:
                     skipped_count += 1
         cur.close()
@@ -433,11 +508,13 @@ def _filter_companies(args) -> dict:
             print(f"  Skipped {skipped_count} companies (fetched recently), fetching {len(stale)}")
 
         # Per-run volume cap ([volume] max_active_companies): if more companies are
-        # due than the cap, fetch the MOST OVERDUE ones (oldest last_fetched first,
-        # never-fetched first) and defer the rest to the next run — so the set
-        # rotates instead of starving late-alphabet orgs. A cap, never a delete.
+        # due than the cap, fetch the MOST OVERDUE ones first and defer the rest to
+        # the next run — so the set rotates instead of starving. Engaged companies
+        # (live liked/decided roles) and overdue tracked orgs outrank never-fetched
+        # candidates, so a wave of newcomers can't starve them. A cap, never a
+        # delete.
         cap = int(settings.volume()["max_active_companies"])
-        ordered = sorted(stale, key=lambda n: (staleness.get(n, 0.0), n))
+        ordered = _order_due_companies(due, now)
         stale, deferred = _apply_company_cap(ordered, stale, cap)
         if deferred:
             print(
