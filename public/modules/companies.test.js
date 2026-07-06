@@ -78,7 +78,6 @@ const scoredCompany = {
   experience_reasoning: "Background in econ research maps directly.",
   mission_verdict: "A strong, low-risk application for this candidate.",
   md_content: "## Deep dive\n\nMore detail here.",
-  mpa_prestige: 70,
   composite_score: 75,
   strategy: "greenhouse",
   last_fetched: "2026-07-01T00:00:00Z",
