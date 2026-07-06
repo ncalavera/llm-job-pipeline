@@ -331,6 +331,24 @@ def test_company_label_maps_hand_verdicts():
     assert g.company_label("inactive", "strictly commercial, not interested") == "nofit"
 
 
+def test_company_label_accepts_local_dashboard_variant():
+    # rows written by scripts/dashboard_local.py before its status_reason was
+    # canonicalized keep the historical wording forever — both spellings are
+    # the user's own click and must label identically
+    assert g.company_label("active", "approved via local dashboard") == "fit"
+    assert g.company_label("inactive", "rejected via local dashboard") == "nofit"
+
+
+def test_dashboard_local_writes_the_canonical_reason():
+    # golden_set keys the fit side on the exact canonical string; pin the
+    # dashboard's actual write (its _review_reason helper) to the labels so
+    # the two can't drift apart again
+    import dashboard_local
+
+    assert g.company_label("active", dashboard_local._review_reason("approve")) == "fit"
+    assert g.company_label("inactive", dashboard_local._review_reason("reject")) == "nofit"
+
+
 def test_company_label_excludes_machine_status_changes():
     # auto-approve / auto-reject are the model's own call, not a hand verdict
     assert g.company_label("active", "auto-approved: alignment=72.0") is None

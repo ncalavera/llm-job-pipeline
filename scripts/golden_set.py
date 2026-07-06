@@ -268,9 +268,17 @@ _MACHINE_REASON_PREFIXES = (
     "screen",
 )
 
-#: A hand-APPROVE reason: the user clicked approve in the dashboard. Kept as an
-#: exact match (not a prefix) so it can't be confused with machine reasons.
-_HAND_APPROVE_REASON = "approved via dashboard"
+#: Hand-APPROVE reasons: the user clicked approve in a dashboard. Exact matches
+#: (not prefixes) so they can't be confused with machine reasons. Two spellings:
+#: the canonical "approved via dashboard" plus the historical string
+#: scripts/dashboard_local.py wrote before it was canonicalized — old rows keep
+#: the old wording forever, so both must count as a fit verdict.
+_HAND_APPROVE_REASONS = frozenset(
+    {
+        "approved via dashboard",
+        "approved via local dashboard",
+    }
+)
 
 #: Minimum frozen evidence length for a company to be scorable (below this the
 #: scorer has nothing to judge, same spirit as _has_description for vacancies).
@@ -294,7 +302,7 @@ def company_label(status: str | None, status_reason: str | None) -> str | None:
     when the row carries no usable user verdict (still a candidate, or the status
     was set by the machine rather than a hand click)."""
     reason = (status_reason or "").strip().lower()
-    if status == "active" and reason == _HAND_APPROVE_REASON:
+    if status == "active" and reason in _HAND_APPROVE_REASONS:
         return LABEL_FIT
     if status == "inactive" and _is_hand_reject_reason(status_reason):
         return LABEL_NOFIT
@@ -361,6 +369,10 @@ def select_company_seed_records(
     else:
         chosen = (fit_pool + nofit_pool)[:limit]
 
+    # Same env-aware boundary `measure --kind company` uses (AUTO_REVIEW_APPROVE),
+    # resolved once per call so the flag heuristic can't drift from the eval's
+    # own threshold when the env var is overridden.
+    flag_boundary = _company_threshold_default()
     records = []
     for c in chosen:
         label = c["label"]
@@ -371,7 +383,7 @@ def select_company_seed_records(
         # not model (geography, visa sponsorship) rather than mission fit — flag
         # it so the user can flip or drop it before trusting the number.
         score = c.get("alignment_score")
-        if label == LABEL_NOFIT and score is not None and float(score) >= DEFAULT_THRESHOLD:
+        if label == LABEL_NOFIT and score is not None and float(score) >= flag_boundary:
             flag = (
                 "review: hand-rejected but stored WANT is high — the reject may be "
                 "geo/visa (a separate layer), not the mission fit this prompt scores"
@@ -742,6 +754,7 @@ def _load_labelable_companies(exclude_ids: set) -> list[dict]:
                status, status_reason, alignment_score
         FROM company
         WHERE status IN ('active', 'inactive')
+        ORDER BY canonical_name, id
         """
     )
     columns = [desc[0] for desc in cur.description]

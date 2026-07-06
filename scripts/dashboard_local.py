@@ -48,6 +48,17 @@ VALID_STATUSES = {
 }
 VALID_ACTIONS = {"approve", "reject"}
 
+
+def _review_reason(action: str) -> str:
+    """The canonical status_reason a dashboard review writes ("approved via
+    dashboard" / "rejected via dashboard") — the same wording the hosted
+    dashboard uses. golden_set.company_label keys the fit side of the company
+    eval on this exact string, so the two must not drift apart (the eval also
+    accepts the historical "... via local dashboard" this module wrote before
+    it was canonicalized)."""
+    return f"{action}d via dashboard"
+
+
 _COMPANY_REVIEW_MAP = {"active": "approved", "candidate": "pending", "inactive": "rejected"}
 
 # The server is single-threaded (HTTPServer, not ThreadingHTTPServer): the DAL
@@ -208,7 +219,7 @@ class Handler(BaseHTTPRequestHandler):
         if action not in VALID_ACTIONS:
             return self._send_json(400, {"error": "Invalid action"})
         new_status = "active" if action == "approve" else "inactive"
-        reason = f"{action}d via local dashboard"
+        reason = _review_reason(action)
         try:
             from db_conn import get_conn
 
