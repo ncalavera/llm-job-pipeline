@@ -78,7 +78,6 @@ const scoredCompany = {
   experience_reasoning: "Background in econ research maps directly.",
   mission_verdict: "A strong, low-risk application for this candidate.",
   md_content: "## Deep dive\n\nMore detail here.",
-  mpa_prestige: 70,
   composite_score: 75,
   strategy: "greenhouse",
   last_fetched: "2026-07-01T00:00:00Z",
@@ -634,5 +633,51 @@ test("_buildRow: an XSS payload in the company name is inert in both text and th
       "must not fall back to the basket-empty copy while a filter is active",
     );
     search.value = ""; // leave the shared fake clean for any later test
+  });
+
+  // --- default sort: WANT score descending (DHA-409) -------------------------
+  //
+  // The four green sort chips (Applyable/Liked/Score/Interest) are gone —
+  // every column, including WANT, now sorts on a header click instead. The
+  // approved tab's default must still land on a sensible order with zero
+  // clicks: WANT ("fit") score, descending.
+
+  test("companies table: state defaults to WANT ('fit') score, descending, with no sort chips to set it", () => {
+    assert.equal(
+      state.companySortCol,
+      "fit",
+      "default sort column should be WANT ('fit'), not the old 'applyable' chip default",
+    );
+    assert.equal(
+      state.companySortAsc,
+      false,
+      "default direction should be descending",
+    );
+  });
+
+  test("companies table: approved tab renders rows in WANT-descending order by default", () => {
+    setCompanies([
+      { ...companyFixture("c1", "LowCo", "approved"), alignment_score: 20 },
+      { ...companyFixture("c2", "HighCo", "approved"), alignment_score: 90 },
+      { ...companyFixture("c3", "MidCo", "approved"), alignment_score: 55 },
+    ]);
+    search.value = "";
+    tierFilter.value = "";
+    state.companySubTab = "approved";
+    // Deliberately untouched: companySortCol/companySortAsc stay at the
+    // module default (asserted above) rather than being reset here — that's
+    // the behavior being pinned.
+    renderCompanies();
+    const iHigh = grid.innerHTML.indexOf("HighCo");
+    const iMid = grid.innerHTML.indexOf("MidCo");
+    const iLow = grid.innerHTML.indexOf("LowCo");
+    assert.ok(
+      iHigh >= 0 && iMid >= 0 && iLow >= 0,
+      "all three rows should render, got: " + grid.innerHTML,
+    );
+    assert.ok(
+      iHigh < iMid && iMid < iLow,
+      "expected HighCo > MidCo > LowCo WANT order, got: " + grid.innerHTML,
+    );
   });
 }

@@ -490,54 +490,6 @@ body::after {
   padding: 4px 0 0;
 }
 
-/* --- Filters --- */
-.chip {
-  padding: 5px 14px;
-  border-radius: 9999px;
-  border: 1px solid var(--surface);
-  background: transparent;
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--muted);
-  cursor: pointer;
-  transition: all 0.15s;
-  font-family: "Onest", sans-serif;
-}
-
-.chip:hover {
-  border-color: var(--coral);
-  color: var(--text);
-}
-.chip.active {
-  background: var(--coral);
-  color: white;
-  border-color: var(--coral);
-}
-.chip.active:hover {
-  background: var(--terracotta);
-  border-color: var(--terracotta);
-}
-.chip:focus-visible {
-  outline: 2px solid var(--cobalt);
-  outline-offset: 2px;
-}
-/* Sort chips are pure interaction controls — they reorder the table, they do
-   not signal quality — so they're cobalt, never green (design-protocol.md §1:
-   "cobalt = interaction ONLY, green = quality"). DHA-412 item #1. */
-.chip.chip-sort {
-  border-color: var(--cobalt);
-  color: var(--cobalt);
-}
-.chip.chip-sort:hover {
-  background: var(--cobalt);
-  color: white;
-}
-.chip.chip-sort.active {
-  background: var(--cobalt);
-  color: white;
-  border-color: var(--cobalt);
-}
-
 /* --- Location chips (shared: Browse, Archive, company profile) --- */
 .loc-chip {
   display: inline-block;
@@ -1318,13 +1270,6 @@ body::after {
   position: sticky;
   top: 0;
   z-index: 10;
-}
-
-.company-sort-chips {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: center;
 }
 
 /* Company sub-tabs (.company-sub-tabs/.company-sub-tab/.sub-tab-count) —
@@ -2808,12 +2753,6 @@ body::after {
   font-size: 11px;
   font-weight: 700;
 }
-.cp-mpa-note {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 11px;
-  color: var(--sky-text-faint);
-  margin-top: 4px;
-}
 
 /* --- Strengths / risks --- */
 .cp-block-title--good {
@@ -3428,10 +3367,6 @@ body::after {
 }
 .ct-col-open {
   width: 4%;
-  text-align: center;
-}
-.ct-col-mpa {
-  width: 55px;
   text-align: center;
 }
 .ct-col-liked {
