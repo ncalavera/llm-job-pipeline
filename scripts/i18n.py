@@ -124,7 +124,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "time_day_ago": "{n}d ago",
         "time_month_ago": "{n}mo ago",
         "time_year_ago": "{n}y ago",
-        # Today cockpit — six hide-when-empty action blocks (DHA-410)
+        # Today cockpit — six hide-when-empty action blocks
         "today_subtitle": "The few things that need a decision today.",
         "today_committed": "Committed — send it",
         "today_awaiting": "Awaiting reply",
@@ -528,7 +528,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "time_day_ago": "{n} дн назад",
         "time_month_ago": "{n} мес назад",
         "time_year_ago": "{n} г назад",
-        # Today cockpit — six hide-when-empty action blocks (DHA-410)
+        # Today cockpit — six hide-when-empty action blocks
         "today_subtitle": "То немногое, что требует решения сегодня.",
         "today_committed": "Решено — отправить",
         "today_awaiting": "Ждём ответа",
