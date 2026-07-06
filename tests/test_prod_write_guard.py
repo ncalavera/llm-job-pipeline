@@ -63,6 +63,11 @@ def _as_ad_hoc_script(monkeypatch, tmp_path):
         "  \n  UPDATE vacancy SET status = %s WHERE id = %s",
         "DELETE FROM vacancy WHERE id = ANY(%s::uuid[])",
         "insert into company (canonical_name) values (%s)",
+        # A leading comment must not smuggle a write past the guard.
+        "-- backfill\nUPDATE vacancy SET status = %s WHERE id = %s",
+        "/* one-off fix */ INSERT INTO company (canonical_name) VALUES (%s)",
+        "-- a\n-- b\n  /* c */\nDELETE FROM vacancy WHERE id = %s",
+        "/* multi\n   line */-- and a line comment\nINSERT INTO board (id) VALUES (%s)",
     ],
 )
 def test_is_write_statement_true_for_dml(sql):
@@ -76,6 +81,8 @@ def test_is_write_statement_true_for_dml(sql):
         "SELECT * FROM vacancy WHERE status = %s",
         "",
         "WITH x AS (SELECT 1) SELECT * FROM x",  # not INSERT/UPDATE/DELETE-led
+        "-- what would an UPDATE hit?\nSELECT * FROM vacancy",  # comment stays a comment
+        "/* DELETE nothing */ SELECT 1",
     ],
 )
 def test_is_write_statement_false_for_reads(sql):
@@ -115,6 +122,10 @@ def test_unrecognized_ad_hoc_script_is_blocked(monkeypatch, tmp_path):
     with pytest.raises(db_backend.ProdWriteBlocked):
         db_backend._check_write_allowed("DELETE FROM vacancy WHERE id = %s")
 
+    # A leading comment must not slip a write through in a blocked context.
+    with pytest.raises(db_backend.ProdWriteBlocked):
+        db_backend._check_write_allowed("-- backfill\nUPDATE vacancy SET status = %s WHERE id = %s")
+
 
 def test_reads_unaffected_even_when_blocked_context(monkeypatch, tmp_path):
     """SELECT never raises, even in an otherwise-blocked context."""
@@ -153,22 +164,67 @@ def test_pytest_context_allows_write(monkeypatch, tmp_path):
     db_backend._check_write_allowed("INSERT INTO company (canonical_name) VALUES (%s)")
 
 
-def test_pipeline_entrypoint_context_allows_write(monkeypatch):
-    """run_daily.py (and every scripts/*.py stage it subprocesses) is
-    identified by argv[0] resolving inside this repo's scripts/ directory."""
+@pytest.mark.parametrize("entrypoint", sorted(db_backend._PIPELINE_ENTRYPOINTS))
+def test_pipeline_entrypoint_context_allows_write(monkeypatch, entrypoint):
+    """Every KNOWN entrypoint (run_daily.py and each stage/CLI it covers) is
+    identified by argv[0]: allowlisted basename AND inside repo scripts/."""
     _not_pytest(monkeypatch)
     monkeypatch.setattr(db_backend, "IS_SQLITE", False)
     monkeypatch.delenv(db_backend.JOBSEARCH_ALLOW_PROD_WRITE_ENV, raising=False)
     scripts_dir = db_backend.PROJECT_ROOT / "scripts"
-    monkeypatch.setattr("sys.argv", [str(scripts_dir / "run_daily.py")])
+    monkeypatch.setattr("sys.argv", [str(scripts_dir / entrypoint)])
 
     assert db_backend._running_as_pipeline_script() is True
     assert db_backend._prod_write_context_ok() is True
-    db_backend._check_write_allowed("UPDATE vacancy SET llm_score = NULL WHERE id = ANY(%s::uuid[])")
+    db_backend._check_write_allowed(
+        "UPDATE vacancy SET llm_score = NULL WHERE id = ANY(%s::uuid[])"
+    )
+
+
+def test_allowlisted_entrypoints_actually_exist():
+    """The allowlist names real files — a renamed/deleted entrypoint would
+    otherwise silently lose its write access (or keep trusting a ghost)."""
+    scripts_dir = db_backend.PROJECT_ROOT / "scripts"
+    for name in db_backend._PIPELINE_ENTRYPOINTS:
+        assert (scripts_dir / name).exists(), f"allowlisted entrypoint missing: scripts/{name}"
+
+
+def test_unknown_script_inside_scripts_dir_is_blocked(monkeypatch):
+    """Location is not identity (the incident's exact shape): a NEW scratch
+    one-off dumped into scripts/ is NOT trusted until deliberately
+    allowlisted."""
+    _not_pytest(monkeypatch)
+    monkeypatch.setattr(db_backend, "IS_SQLITE", False)
+    monkeypatch.delenv(db_backend.JOBSEARCH_ALLOW_PROD_WRITE_ENV, raising=False)
+    scripts_dir = db_backend.PROJECT_ROOT / "scripts"
+    monkeypatch.setattr("sys.argv", [str(scripts_dir / "scratch_expire_inc_debug.py")])
+
+    assert db_backend._running_as_pipeline_script() is False
+    with pytest.raises(db_backend.ProdWriteBlocked):
+        db_backend._check_write_allowed("INSERT INTO company (canonical_name) VALUES (%s)")
+
+
+def test_allowlisted_basename_outside_scripts_dir_is_blocked(monkeypatch, tmp_path):
+    """A same-named file elsewhere (e.g. /tmp/run_daily.py) can't borrow trust:
+    the directory check must hold alongside the basename allowlist."""
+    _not_pytest(monkeypatch)
+    monkeypatch.setattr(db_backend, "IS_SQLITE", False)
+    monkeypatch.delenv(db_backend.JOBSEARCH_ALLOW_PROD_WRITE_ENV, raising=False)
+    monkeypatch.setattr("sys.argv", [str(tmp_path / "run_daily.py")])
+
+    assert db_backend._running_as_pipeline_script() is False
+    with pytest.raises(db_backend.ProdWriteBlocked):
+        db_backend._check_write_allowed("INSERT INTO company (canonical_name) VALUES (%s)")
 
 
 def test_running_as_pipeline_script_false_for_empty_argv0(monkeypatch):
     monkeypatch.setattr("sys.argv", [""])
+    assert db_backend._running_as_pipeline_script() is False
+
+
+def test_running_as_pipeline_script_false_for_python_dash_c(monkeypatch):
+    """``python3 -c "..."`` one-liners have argv[0] == "-c" — never trusted."""
+    monkeypatch.setattr("sys.argv", ["-c"])
     assert db_backend._running_as_pipeline_script() is False
 
 
@@ -207,10 +263,14 @@ class _FakeCursor:
 class _FakeConn:
     def __init__(self):
         self.cursors = []
+        self.cursor_kwargs = []
         self.closed = 0
         self.committed = False
+        self.entered = False
+        self.exited = False
 
-    def cursor(self, cursor_factory=None):
+    def cursor(self, *args, **kwargs):
+        self.cursor_kwargs.append((args, kwargs))
         cur = _FakeCursor()
         self.cursors.append(cur)
         return cur
@@ -220,6 +280,14 @@ class _FakeConn:
 
     def close(self):
         self.closed = 1
+
+    def __enter__(self):
+        self.entered = True
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.exited = True
+        return False
 
 
 def test_guarded_cursor_blocks_write_before_touching_real_cursor(monkeypatch, tmp_path):
@@ -273,3 +341,32 @@ def test_guarded_conn_wraps_cursor_and_passes_through_commit_close():
     assert guarded.closed == 0  # __getattr__ passthrough
     guarded.close()
     assert fake_conn.closed == 1
+
+
+def test_guarded_conn_cursor_forwards_args_and_kwargs():
+    """cursor(cursor_factory=...) and psycopg2 extras like cursor(name=...)
+    (server-side cursors) must pass through untouched."""
+    fake_conn = _FakeConn()
+    guarded = db_backend._GuardedConn(fake_conn)
+
+    guarded.cursor()
+    guarded.cursor(cursor_factory="RealDictCursor-marker")
+    guarded.cursor(name="server_side")
+
+    assert fake_conn.cursor_kwargs == [
+        ((), {}),
+        ((), {"cursor_factory": "RealDictCursor-marker"}),
+        ((), {"name": "server_side"}),
+    ]
+
+
+def test_guarded_conn_is_a_context_manager():
+    """``with conn:`` looks up __enter__/__exit__ on the TYPE, bypassing
+    __getattr__ — the wrapper must delegate them explicitly."""
+    fake_conn = _FakeConn()
+    guarded = db_backend._GuardedConn(fake_conn)
+
+    with guarded as ctx:
+        assert ctx is guarded
+    assert fake_conn.entered is True
+    assert fake_conn.exited is True

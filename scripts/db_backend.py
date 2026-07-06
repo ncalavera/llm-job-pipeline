@@ -555,11 +555,16 @@ class _SqliteConn:
 #                      running test; the offline suite forces SQLite anyway
 #                      (tests/conftest.py), so this only matters for the
 #                      opt-in Postgres parity suite (tests/parity/).
-#   2. a pipeline script — this repo's own scripts/*.py, identified by
-#                      argv[0] resolving inside scripts/. Covers run_daily.py
-#                      AND every stage it subprocesses (fetch, enrich, filter,
-#                      score --save, ...), and the jobs-review/triage CLIs,
-#                      with no per-script wiring needed.
+#   2. a pipeline script — one of the KNOWN entrypoints in the explicit
+#                      allowlist below, identified by argv[0]: basename in the
+#                      allowlist AND resolving inside this repo's scripts/.
+#                      Covers run_daily.py AND every stage it subprocesses
+#                      (fetch, enrich, filter, score --save, ...), and the
+#                      jobs-review/triage CLIs, with no per-script wiring.
+#                      Location alone is NOT identity: a new scratch one-off
+#                      saved under scripts/ (the natural dumping ground for
+#                      ad-hoc debug scripts — the incident's exact shape) is
+#                      still blocked until it is deliberately allowlisted.
 #   3. explicit override — JOBSEARCH_ALLOW_PROD_WRITE=1, for a genuine one-off
 #                      ad-hoc write the operator has thought about.
 #
@@ -572,28 +577,84 @@ class _SqliteConn:
 
 JOBSEARCH_ALLOW_PROD_WRITE_ENV = "JOBSEARCH_ALLOW_PROD_WRITE"
 
+# The known write-capable entrypoints of this repo — every scripts/*.py with an
+# ``if __name__ == "__main__"`` block that performs DB writes (enumerated by
+# grepping INSERT/UPDATE/DELETE + the DAL write helpers). Read-only entrypoints
+# (run_card.py, audit_low_scores.py, filter_vacancies.py, golden_set.py, ...)
+# are deliberately absent: the guard only fires on writes, so they never need
+# trusting. Library modules (database_supabase.py, triage.py, applications.py,
+# learning helpers) are also absent — they are never argv[0]; their writes run
+# inside one of these entrypoint processes (or under pytest / the env flag).
+_PIPELINE_ENTRYPOINTS = frozenset(
+    {
+        "audit_companies.py",
+        "collect_company_evidence.py",
+        "dashboard_local.py",
+        "dedup_sweep.py",
+        "discover_ats.py",
+        "enrich_blind_vacancies.py",
+        "fetch_companies.py",
+        "fetch_vacancies.py",
+        "filter_companies.py",
+        "find_company_urls.py",
+        "learning.py",
+        "migrate.py",
+        "run_daily.py",
+        "score_companies.py",
+        "score_vacancies.py",
+        "sources.py",
+        "telegram_digest.py",
+        "vac.py",
+    }
+)
+
+# Deliberately narrow: only a statement whose FIRST keyword (after leading
+# whitespace/comments are stripped) is INSERT/UPDATE/DELETE counts as a write.
+# Writable CTEs (WITH ... INSERT), multi-statement strings, COPY, and DDL are
+# not covered — none of them are used through get_conn() in this codebase
+# today, and migrate.py (the DDL path) bypasses this wrapper anyway.
 _WRITE_RE = re.compile(r"^\s*(INSERT|UPDATE|DELETE)\b", re.IGNORECASE)
+
+# Leading noise a write keyword can hide behind: whitespace, ``-- line`` and
+# ``/* block */`` comments. Stripped iteratively so stacked comments
+# ("-- a\n-- b\nUPDATE ...") can't smuggle a write past the regex.
+_LEADING_SQL_NOISE_RE = re.compile(r"^(?:\s+|--[^\n]*(?:\n|$)|/\*.*?\*/)", re.DOTALL)
 
 
 class ProdWriteBlocked(RuntimeError):
     """Raised when an unrecognized caller tries to write to prod Postgres."""
 
 
+def _strip_leading_sql_noise(sql: str) -> str:
+    while True:
+        m = _LEADING_SQL_NOISE_RE.match(sql)
+        if not m or m.end() == 0:
+            return sql
+        sql = sql[m.end() :]
+
+
 def _is_write_statement(sql: str) -> bool:
-    return bool(_WRITE_RE.match(sql))
+    return bool(_WRITE_RE.match(_strip_leading_sql_noise(sql)))
 
 
 def _running_as_pipeline_script() -> bool:
-    """True when this process was launched as one of this repo's own
-    ``scripts/*.py`` files (``python3 scripts/run_daily.py``, and every stage
-    it subprocesses — each inherits its own ``argv[0]`` pointing back into
-    ``scripts/``). A scratch/ad-hoc script living anywhere else (a tmp file, a
-    REPL, ``python3 -c ...``) is NOT trusted by this check."""
+    """True when this process was launched as one of the KNOWN entrypoints in
+    ``_PIPELINE_ENTRYPOINTS`` living in this repo's ``scripts/`` directory
+    (``python3 scripts/run_daily.py``, and every stage it subprocesses — each
+    inherits its own ``argv[0]`` pointing back into ``scripts/``). Both checks
+    matter: the basename allowlist stops a NEW scratch one-off dumped into
+    scripts/ from being silently trusted, and the directory check stops a
+    same-named file elsewhere (e.g. /tmp/run_daily.py) from borrowing trust.
+    A REPL or ``python3 -c ...`` (argv[0] == "-c") is never trusted."""
     try:
         argv0 = sys.argv[0]
         if not argv0:
             return False
-        return Path(argv0).resolve().parent == (PROJECT_ROOT / "scripts").resolve()
+        path = Path(argv0).resolve()
+        return (
+            path.name in _PIPELINE_ENTRYPOINTS
+            and path.parent == (PROJECT_ROOT / "scripts").resolve()
+        )
     except Exception:
         return False
 
@@ -657,20 +718,27 @@ class _GuardedCursor:
 class _GuardedConn:
     """Wraps the real psycopg2 connection so every cursor it hands out is a
     ``_GuardedCursor``. commit/rollback/close/closed/autocommit/... all pass
-    straight through via ``__getattr__``."""
+    straight through via ``__getattr__``. Dunders are looked up on the TYPE,
+    not the instance, so ``with conn:`` needs explicit ``__enter__``/
+    ``__exit__`` delegation — ``__getattr__`` alone can't provide them."""
 
     def __init__(self, conn):
         self._conn = conn
 
-    def cursor(self, cursor_factory=None):
-        if cursor_factory is not None:
-            real = self._conn.cursor(cursor_factory=cursor_factory)
-        else:
-            real = self._conn.cursor()
-        return _GuardedCursor(real)
+    def cursor(self, *args, **kwargs):
+        # Pass everything through untouched (cursor_factory=, name= for
+        # server-side cursors, ...) so real psycopg2 behavior is preserved.
+        return _GuardedCursor(self._conn.cursor(*args, **kwargs))
 
     def __getattr__(self, name):
         return getattr(self._conn, name)
+
+    def __enter__(self):
+        self._conn.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return self._conn.__exit__(exc_type, exc, tb)
 
 
 # ---------------------------------------------------------------------------
