@@ -63,6 +63,38 @@ def _is_non_job_url(url: str) -> bool:
     return False
 
 
+# Source pages whose blocks are staff bios far more often than job postings
+# (BUG-8). A block extracted from one of these deserves stricter scrutiny than
+# a /careers or /jobs page.
+_PEOPLE_PAGE_SEGMENTS = re.compile(
+    r"/(?:about|team|people|leadership|staff|our-people|who-we-are|meet-the-team|management)(?:/|$)",
+    re.IGNORECASE,
+)
+# A careers-like segment ANYWHERE in the path wins over people segments:
+# /about/careers and /who-we-are/careers are careers pages nested under an
+# About section, not people pages.
+_CAREERS_PAGE_SEGMENTS = re.compile(
+    r"/(?:careers?|jobs?|vacancies|vacancy|positions?|opportunities|join(?:-us)?"
+    r"|work-with-us|work-for-us)(?:/|$)",
+    re.IGNORECASE,
+)
+
+
+def _is_people_page_url(url: str) -> bool:
+    """Return True if the scraped SOURCE page is an about/team/people/leadership
+    page — a block extracted from one is a probable staff bio, not a vacancy.
+
+    A careers/jobs segment anywhere in the path overrides: /about/careers is a
+    careers page, not a people page.
+    """
+    if not url:
+        return False
+    path = urllib.parse.urlparse(url).path
+    if _CAREERS_PAGE_SEGMENTS.search(path):
+        return False
+    return bool(_PEOPLE_PAGE_SEGMENTS.search(path))
+
+
 def _sanitize_board_title(title: str) -> str:
     """Clean board-specific artifacts from job titles.
 
@@ -224,17 +256,63 @@ def parse_markdown_jobs(markdown: str, org_name: str, *, url_filter: str = "") -
     return jobs
 
 
-# Pre-compiled pattern for bio detection
-_BIO_PATTERN = re.compile(r"\b(?:[A-Z][a-z]+\s+){1,3}joined\s+\w+\s+in\s+\d{4}\b")
+# Pre-compiled patterns for staff-bio detection (BUG-8).
+# A scraped people/leadership page turns a staff bio into a phantom "vacancy":
+# the snippet reads as prose ABOUT a named person who already HOLDS the title,
+# not a role being advertised. Each pattern targets the start of the snippet,
+# where a bio leads with the person's name. Deliberately case-SENSITIVE and
+# name-shaped: job-ad boilerplate ("The successful candidate has managed…",
+# "The Director is responsible for…", "the postholder has led…",
+# "who has served in a similar capacity") must NOT match.
+_BIO_PATTERNS = (
+    # "Marieke Hounjet joined Porticus in 2017"
+    re.compile(r"\b(?:[A-Z][a-z]+\s+){1,3}joined\s+\w+\s+in\s+\d{4}\b"),
+    # "Katy Hartley is the Director of ..." — a PERSON name (2+ title-case
+    # words, not a sentence starter like "The Director is responsible…" and
+    # not an org blurb like "Acme Foundation is a leading nonprofit…")
+    # followed by "is the/a/an/our" + a Capitalized role word.
+    re.compile(
+        r"^(?!(?:The|This|Our|Each|Every|All|As|At|In|On)\b)"
+        r"[A-Z][a-z]+(?:\s+[A-Z][a-z.'-]+){1,3}\s+is\s+(?:the|an?|our)\s+[A-Z][a-z]+"
+    ),
+    # "... Katy has worked ...", "She has led ...", "He has served ..." —
+    # a named person (Capitalized) or a literal lowercase pronoun narrating
+    # career history. No IGNORECASE: "candidate has managed" / "postholder
+    # has led" / "who has served" are standard job-ad phrasing, not a bio.
+    re.compile(
+        r"\b(?:[A-Z][a-z]+|she|he|they)\s+ha(?:s|ve)\s+"
+        r"(?:worked|led|joined|served|held|spent|overseen|managed|founded)\b"
+    ),
+)
+
+
+# Emoji / pictograph / dingbat ranges — presence in a "title" marks a
+# fabricated about-page fragment, not a real vacancy (BUG-8).
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001f000-\U0001faff"  # symbols, pictographs, emoji, supplemental
+    "\U00002600-\U000027bf"  # misc symbols + dingbats
+    "\U00002190-\U000021ff"  # arrows
+    "\U00002300-\U000023ff"  # technical (⌂ ⏻ …)
+    "\U00002b00-\U00002bff"  # misc symbols and arrows
+    "\U0000fe00-\U0000fe0f"  # variation selectors
+    "\U0001f1e6-\U0001f1ff"  # regional indicators
+    "]"
+)
 
 
 def _is_bio_snippet(snippet: str) -> bool:
-    """Detect team member biography snippets (not job listings).
+    """Detect team-member biography snippets that are NOT job listings.
 
-    Catches patterns like "Marieke Hounjet joined Porticus in 2017"
-    that appear on combined people+careers pages.
+    Catches a staff bio scraped from a people/leadership page in place of a
+    real posting, e.g. "Katy Hartley is the Director of Organisational Strategy
+    and Regional Networks for Porticus. In the last 25 years, Katy has worked…"
+    (BUG-8) or "Marieke Hounjet joined Porticus in 2017". Only the opening of
+    the snippet is inspected — a bio leads with the person, a job describes the
+    role.
     """
-    return bool(_BIO_PATTERN.search(snippet[:200]))
+    head = (snippet or "")[:200]
+    return any(p.search(head) for p in _BIO_PATTERNS)
 
 
 def _looks_like_job_title(text: str) -> bool:
@@ -249,6 +327,12 @@ def _looks_like_job_title(text: str) -> bool:
     text_lower = text.lower()
 
     # --- Structural heuristics (reject before keyword check) ---
+    # Emoji / pictograph in a "title" is a strong phantom signal: the company
+    # scrape fabricated a fragment from about-page decoration, e.g.
+    # "🏛legitimacy provider" / "💪🔌🏰connection to power" (BUG-8). Real job
+    # titles are plain text.
+    if _EMOJI_RE.search(text):
+        return False
     if text.endswith("?"):
         return False
     if len(text.split()) > 8:
@@ -440,6 +524,10 @@ def _parse_json_jobs(
     if not isinstance(raw_jobs, list):
         return []
     url_filter_re = re.compile(url_filter) if url_filter else None
+    # Blocks pulled from an about/team/people/leadership page are staff bios far
+    # more often than real postings — note it so a rejection log is legible.
+    from_people_page = _is_people_page_url(base_url)
+    src_note = " [people-page source]" if from_people_page else ""
     jobs = []
     seen_titles = set()
     for j in raw_jobs:
@@ -460,6 +548,20 @@ def _parse_json_jobs(
             continue
         if job_url and _is_non_job_url(job_url):
             continue
+        # BUG-8 guard: the body reads as a biography of the person who already
+        # HOLDS the title (e.g. the Porticus leadership-bio phantom), not a role
+        # being advertised. Reject regardless of URL; log so a wrong drop shows.
+        snippet = (j.get("snippet") or "").strip()
+        if _is_bio_snippet(snippet):
+            print(f"  [{org_name}] rejected non-posting (staff bio): {title!r}{src_note}")
+            continue
+        # BUG-8 guard: a URL-less block scraped from an about/team/people/
+        # leadership page is page chrome or a bio, never an apply-able posting.
+        # (A URL-less block from a real careers/jobs page is left alone — some
+        # boards list roles without a per-role link.)
+        if not job_url and from_people_page:
+            print(f"  [{org_name}] rejected non-posting (no apply URL): {title!r}{src_note}")
+            continue
         jobs.append(
             {
                 "title": title,
@@ -469,7 +571,7 @@ def _parse_json_jobs(
                 "external_id": hashlib.md5((job_url or f"{org_name}:{title}").encode()).hexdigest()[
                     :12
                 ],
-                "snippet": (j.get("snippet") or "").strip(),
+                "snippet": snippet,
             }
         )
     return jobs

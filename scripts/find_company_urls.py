@@ -7,8 +7,10 @@ Usage:
     python3 scripts/find_company_urls.py [--dry-run] [--limit N]
 """
 
+import re
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -151,12 +153,130 @@ def _get_search_results(search_data) -> list:
     return []
 
 
+# Org-suffix / stopword tokens that carry no identifying signal for a domain
+# match — nearly every nonprofit name contains one, so matching on them would
+# accept almost any homepage.
+_GENERIC_ORG_TOKENS = {
+    "the",
+    "and",
+    "for",
+    "our",
+    "org",
+    "organization",
+    "organisation",
+    "foundation",
+    "fund",
+    "funds",
+    "institute",
+    "institution",
+    "trust",
+    "council",
+    "association",
+    "society",
+    "network",
+    "initiative",
+    "project",
+    "program",
+    "programme",
+    "center",
+    "centre",
+    "group",
+    "global",
+    "international",
+    "national",
+    "worldwide",
+    "company",
+    "inc",
+    "ltd",
+    "llc",
+    "gmbh",
+    "corp",
+    "limited",
+    "charity",
+    "charitable",
+    "nonprofit",
+    "ngo",
+}
+
+# Public-suffix labels to skip when picking the registrable domain label
+# (handles history.com → "history" and example.co.uk → "example").
+_TLD_LABELS = {"com", "org", "net", "edu", "gov", "int", "co", "ac", "io", "ngo"}
+
+# Connector words skipped when building the acronym: real-world org acronyms
+# drop them (International Committee of the Red Cross → ICRC, not ICOTRC).
+_ACRONYM_STOPWORDS = {"of", "the", "for", "and"}
+
+
+def _domain_label(url: str) -> str:
+    """Return the registrable domain label (e.g. history.com → 'history')."""
+    host = url.split("/")[2] if "://" in url else url.split("/")[0]
+    host = host.split(":")[0].lower().replace("www.", "")
+    parts = [p for p in host.split(".") if p]
+    if len(parts) < 2:
+        return host
+    label = parts[-2]
+    # example.co.uk / example.org.uk → step back past the second-level suffix.
+    if label in _TLD_LABELS and len(parts) >= 3:
+        label = parts[-3]
+    return label
+
+
+def _domain_matches_company(company_name: str, url: str) -> bool:
+    """Return True if ``url``'s domain plausibly belongs to ``company_name``.
+
+    Simple, conservative heuristics (BUG-7) — a wrong homepage feeds the
+    evidence scrape another org's content and corrupts the WANT score, so the
+    default when nothing matches is to REJECT (leave the site unresolved):
+
+    - a significant name token appears in the domain label (or vice versa);
+    - the whitespace-stripped full name equals / is contained in the label
+      ("80,000 Hours" → 80000hours);
+    - the acronym of the name words equals the label (Children's Investment
+      Fund Foundation → ciff).
+
+    Rejects the observed failures: ALONE → history.com, 01Health → vestbee.com.
+    """
+    label = _domain_label(url)
+    if not label:
+        return False
+    # NFKD-fold diacritics first: "Médecins Sans Frontières" → "medecins sans
+    # frontieres", so accented org names tokenize cleanly and can match their
+    # ASCII domains (msf.org).
+    folded = unicodedata.normalize("NFKD", company_name).encode("ascii", "ignore").decode("ascii")
+    words = re.findall(r"[a-z0-9]+", folded.lower())
+    significant = [w for w in words if len(w) >= 3 and w not in _GENERIC_ORG_TOKENS]
+    for w in significant:
+        if w in label or label in w:
+            return True
+    # Whitespace-stripped full name equals the label ("80,000 Hours" →
+    # 80000hours) or is contained in a longer label. NOT the reverse
+    # (label in compressed) — that would let a generic suffix substring like
+    # "foundation" match "acmehealthfoundation".
+    compressed = "".join(words)
+    if compressed and (compressed == label or compressed in label):
+        return True
+    # Acronym from the words' initials, skipping 1-char tokens (a possessive
+    # "'s" — Children's → children + s — must not corrupt the acronym) and
+    # connector stopwords (International Committee OF THE Red Cross → icrc).
+    acronym = "".join(w[0] for w in words if len(w) >= 2 and w not in _ACRONYM_STOPWORDS)
+    if len(acronym) >= 2 and acronym == label:
+        return True
+    return False
+
+
 def _search_website(client, company_name: str) -> str | None:
-    """Search for company's official website via Firecrawl."""
+    """Search for a company's official website via Firecrawl.
+
+    Only returns a URL whose domain plausibly matches the org
+    (``_domain_matches_company``). When no confident match is found the site is
+    left UNRESOLVED (returns None) with a visible flag, so the evidence scrape
+    skips instead of scraping a stranger's site (BUG-7).
+    """
     query = f"{company_name} official website"
     try:
         results = client.search(query=query, limit=5)
 
+        top_hit = None
         for item in _get_search_results(results):
             url = getattr(item, "url", None) or (
                 item.get("url") if isinstance(item, dict) else None
@@ -171,8 +291,18 @@ def _search_website(client, company_name: str) -> str | None:
             # Normalize to root domain
             parts = url.split("/")
             root = "/".join(parts[:3])  # https://domain.com
-            return root
+            if top_hit is None:
+                top_hit = root
+            # Verify the domain actually belongs to this org before trusting it.
+            if _domain_matches_company(company_name, root):
+                return root
 
+        if top_hit:
+            print(
+                f"    ⚠ website unresolved — needs manual check "
+                f"(top hit {top_hit} did not match '{company_name}')",
+                flush=True,
+            )
         return None
     except Exception as e:
         print(f"    ⚠ Search error: {e}", flush=True)

@@ -679,6 +679,7 @@ def test_two_pass_screen_then_escalate_flow(rd, monkeypatch, tmp_path):
         "escalated": 2,
         "kept_cheap": 1,
         "threshold": 40,
+        "already_strong": 0,
     }
     assert reset_calls == [["v1", "v3"]]  # only the finalists are nulled
     assert info["count"] == 2
@@ -785,6 +786,109 @@ def test_full_rescore_stays_single_pass_oneshot(rd, monkeypatch, tmp_path):
     kind, info = rd._h_vacancy_scoring(state, entry, opts)
     assert kind == "advance"
     assert "one-shot" in info
+
+
+# ---------------------------------------------------------------------------
+# 4b. Same-model guard — no role re-scored by the same model
+# ---------------------------------------------------------------------------
+
+
+def test_select_escalation_payloads_skips_role_already_scored_by_escalate_model(rd):
+    """A role that cleared the floor but whose current score already came
+    from the strong model must NOT be sent back to it — same model, same
+    result, paid twice."""
+    payloads = [{"member_ids": ["a"]}, {"member_ids": ["b"]}]
+    scores = {"a": 80, "b": 90}
+    scored_by = {"a": "sonnet", "b": "haiku"}  # a already strong-scored, b is cheap
+    out = rd.select_escalation_payloads(payloads, scores, 40, scored_by, "sonnet")
+    assert out == [payloads[1]]  # only b escalates; a is skipped
+
+
+def test_select_escalation_payloads_guard_is_opt_in(rd):
+    """Without scored_by/escalate_model args, behaviour is unchanged (the
+    guard is additive, not a breaking change to the existing call sites)."""
+    payloads = [{"member_ids": ["a"]}]
+    scores = {"a": 80}
+    assert rd.select_escalation_payloads(payloads, scores, 40) == payloads
+
+
+def test_two_pass_single_pass_when_screen_equals_scoring_model(rd, monkeypatch, tmp_path):
+    """screen_model == scoring_model -> ONE pass, no escalate gate at all,
+    and the gate text says so explicitly."""
+    import json as _json
+    import subprocess
+
+    _stub_two_pass(rd, monkeypatch, tmp_path, strong="sonnet", screen="sonnet")
+    payloads = [_payload("v1"), _payload("v2")]
+    monkeypatch.setattr(
+        rd,
+        "_run_capture",
+        lambda cmd, opts: subprocess.CompletedProcess(cmd, 0, _json.dumps(payloads), ""),
+    )
+
+    state = rd._new_state(rd.Opts())
+    entry = rd._stage(state, "vacancy_scoring")
+
+    kind, info = rd._h_vacancy_scoring(state, entry, rd.Opts())
+    assert kind == "gate"
+    assert "SCORE pass" in info["instructions"]
+    assert "ONE pass" in info["instructions"]
+    assert "no escalate gate" in info["instructions"]
+    assert '"sonnet"' in info["instructions"]
+    assert entry["phase"] == "screen"
+    assert entry["single_pass"] is True
+    entry["emitted"] = True
+
+    # Screen (single-pass) complete -> advance directly, no escalate gate ever.
+    monkeypatch.setattr(rd, "_unscored_vacancy_ids", lambda ids: set())
+    kind, info = rd._h_vacancy_scoring(state, entry, rd.Opts())
+    assert kind == "advance"
+    assert "single-pass" in info
+    assert "screen_model == scoring_model" in info
+    assert '"sonnet"' in info
+    # Durable run history (observability) reads screen_counts off this stage
+    # entry — a single-pass run must record its scored count too.
+    assert entry["screen_counts"] == {
+        "screened": 2,
+        "escalated": 0,
+        "kept_cheap": 2,
+        "threshold": None,
+        "already_strong": 0,
+    }
+
+
+def test_two_pass_escalate_reports_skipped_same_model_roles(rd, monkeypatch, tmp_path):
+    """When every finalist that cleared the floor was already scored by the
+    strong model (a stale run-state edge case), the run advances straight
+    through with zero escalated and says why."""
+    import json as _json
+    import subprocess
+
+    _stub_two_pass(rd, monkeypatch, tmp_path, strong="sonnet", screen="haiku", floor=40)
+    payloads = [_payload("v1")]
+    monkeypatch.setattr(
+        rd,
+        "_run_capture",
+        lambda cmd, opts: subprocess.CompletedProcess(cmd, 0, _json.dumps(payloads), ""),
+    )
+    resets = []
+    monkeypatch.setattr(rd, "_reset_escalation_scores", lambda ids: resets.append(list(ids)))
+
+    state = rd._new_state(rd.Opts())
+    entry = rd._stage(state, "vacancy_scoring")
+    rd._h_vacancy_scoring(state, entry, rd.Opts())  # emit screen
+    entry["emitted"] = True
+
+    monkeypatch.setattr(rd, "_unscored_vacancy_ids", lambda ids: set())
+    monkeypatch.setattr(rd, "_vacancy_scores", lambda ids: {"v1": 80})
+    monkeypatch.setattr(rd, "_vacancy_scored_by", lambda ids: {"v1": "sonnet"})
+
+    kind, info = rd._h_vacancy_scoring(state, entry, rd.Opts())
+    assert kind == "advance"
+    assert "0 escalated" in info
+    assert "already scored" in info
+    assert '"sonnet"' in info
+    assert resets == []  # nothing nulled — nothing was actually escalated
 
 
 # ---------------------------------------------------------------------------
