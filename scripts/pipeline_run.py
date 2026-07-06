@@ -69,7 +69,11 @@ def record(state: dict, boards: str | None = None, counts: dict | None = None) -
         "stages": Json([_stage_row(s) for s in state.get("stages", [])]),
         "counts": Json(counts),
         "errors": Json(
-            {s.get("name"): s.get("note") for s in state.get("stages", []) if s.get("status") == "error"}
+            {
+                s.get("name"): s.get("note")
+                for s in state.get("stages", [])
+                if s.get("status") == "error"
+            }
         ),
     }
     conn = None

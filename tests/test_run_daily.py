@@ -943,7 +943,9 @@ def test_bare_run_with_full_rescore_aborts_instead_of_silently_ignoring(rd, monk
     stale resume with the flag silently dropped."""
     state = _unfinished_run_on_disk(rd)
     ran = {"drive": False}
-    monkeypatch.setattr(rd, "drive", lambda s, o, observe=False: ran.__setitem__("drive", True) or rd.EXIT_DONE)
+    monkeypatch.setattr(
+        rd, "drive", lambda s, o, observe=False: ran.__setitem__("drive", True) or rd.EXIT_DONE
+    )
 
     rc = rd.main(["--full-rescore"])
     out = capsys.readouterr()
@@ -969,7 +971,9 @@ def test_bare_run_no_publish_still_auto_resumes(rd, monkeypatch, capsys):
     run resumes and applies it."""
     _unfinished_run_on_disk(rd)
     captured = {}
-    monkeypatch.setattr(rd, "drive", lambda s, o, observe=False: captured.__setitem__("opts", o) or rd.EXIT_DONE)
+    monkeypatch.setattr(
+        rd, "drive", lambda s, o, observe=False: captured.__setitem__("opts", o) or rd.EXIT_DONE
+    )
     monkeypatch.setattr(rd, "_print_summary", lambda s, opts: None)
 
     rc = rd.main(["--no-publish"])

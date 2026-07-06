@@ -129,6 +129,7 @@ STAGE_ABOUT = {
     "publish": "publishing the dashboard (clean runs only)",
 }
 
+
 # One-line preview of what a GATE will ask for, printed before the run pauses so
 # the operator knows the size of the judgment task up front (DHA-434).
 def _gate_preview(action: str | None, count) -> str:
@@ -730,7 +731,9 @@ def _emit_gate(stage: str, payload: dict) -> None:
     print(f"\n{bar}")
     print(f"  ⏸  GATE: {stage} — your judgment is needed")
     print(bar)
-    print(f"  This gate will ask you to: {_gate_preview(payload.get('action'), payload.get('count'))}")
+    print(
+        f"  This gate will ask you to: {_gate_preview(payload.get('action'), payload.get('count'))}"
+    )
     print("")
     print(payload["instructions"].strip())
     if payload.get("payload_path"):
@@ -1562,7 +1565,9 @@ def _health_lines(state: dict, opts: Opts) -> list[str]:
     elif history:
         lo, hi = min(history), max(history)
         if new < lo or new > hi:
-            verdict = f"OUT OF RANGE — {new} new vs recent {lo}-{hi} over last {len(history)} run(s)"
+            verdict = (
+                f"OUT OF RANGE — {new} new vs recent {lo}-{hi} over last {len(history)} run(s)"
+            )
         else:
             verdict = f"in range — {new} new (recent {lo}-{hi} over last {len(history)} run(s))"
     else:

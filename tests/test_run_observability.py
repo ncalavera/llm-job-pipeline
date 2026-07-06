@@ -104,7 +104,9 @@ def test_card_reports_a_finished_run(card):
 
 def test_card_shows_gate_pause_from_state_when_no_heartbeat(card):
     st = _state(run_id="R3", running="company_scoring")
-    st["stages"] = [{"name": "company_scoring", "status": "blocked_gate", "started_at": "2026-07-06T09:00:00"}]
+    st["stages"] = [
+        {"name": "company_scoring", "status": "blocked_gate", "started_at": "2026-07-06T09:00:00"}
+    ]
     _write(card.STATE_PATH, st)
     out = card.render()
     assert "paused at gate" in out
@@ -156,7 +158,14 @@ def _force_sqlite(monkeypatch, db_file):
     monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
     monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
     monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
-    for mod in ("database_supabase", "config", "company_registry", "db_conn", "db_backend", "pipeline_run"):
+    for mod in (
+        "database_supabase",
+        "config",
+        "company_registry",
+        "db_conn",
+        "db_backend",
+        "pipeline_run",
+    ):
         sys.modules.pop(mod, None)
     import db_backend
 
@@ -183,14 +192,22 @@ def test_pipeline_run_persists_per_stage_and_upserts(monkeypatch, tmp_path):
         "finished": False,
         "gate": None,
         "stages": [
-            {"name": "fetch", "status": "done", "note": "37 new vacancies", "started_at": "t0", "finished_at": "t1"},
+            {
+                "name": "fetch",
+                "status": "done",
+                "note": "37 new vacancies",
+                "started_at": "t0",
+                "finished_at": "t1",
+            },
             {"name": "filter", "status": "running", "started_at": "t2"},
         ],
     }
     pipeline_run.record(state, boards="linkedin,idealist", counts={"new_vacancies": 37})
 
     con = sqlite3.connect(str(db))
-    rows = con.execute("SELECT run_id, status, new_vacancies, boards, finished FROM pipeline_run").fetchall()
+    rows = con.execute(
+        "SELECT run_id, status, new_vacancies, boards, finished FROM pipeline_run"
+    ).fetchall()
     assert len(rows) == 1
     assert rows[0][0] == "20260706-1"
     assert rows[0][2] == 37
@@ -270,7 +287,9 @@ def test_health_flags_zero_new_with_boards_enabled(rd):
 
 
 def test_health_flags_out_of_range_vs_history(rd, monkeypatch):
-    rd.FETCH_STATS_PATH.write_text(json.dumps({"total_new": 500, "orgs": {"a": {"live": 3}}, "errors": {}}))
+    rd.FETCH_STATS_PATH.write_text(
+        json.dumps({"total_new": 500, "orgs": {"a": {"live": 3}}, "errors": {}})
+    )
     import pipeline_run
 
     monkeypatch.setattr(pipeline_run, "recent_new_vacancies", lambda **k: [40, 55, 60])
@@ -280,7 +299,9 @@ def test_health_flags_out_of_range_vs_history(rd, monkeypatch):
 
 
 def test_health_in_range(rd, monkeypatch):
-    rd.FETCH_STATS_PATH.write_text(json.dumps({"total_new": 50, "orgs": {"a": {"live": 3}}, "errors": {}}))
+    rd.FETCH_STATS_PATH.write_text(
+        json.dumps({"total_new": 50, "orgs": {"a": {"live": 3}}, "errors": {}})
+    )
     import pipeline_run
 
     monkeypatch.setattr(pipeline_run, "recent_new_vacancies", lambda **k: [40, 55, 60])
