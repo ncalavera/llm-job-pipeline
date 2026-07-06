@@ -746,7 +746,7 @@ def ensure_company(org_name: str, status: str = "candidate"):
     MERGED into that row — the variant is folded into its ``aliases`` and its
     id returned — instead of forking a new candidate. The existing row keeps
     its status and WANT score, so a duplicate never reaches the enrichment or
-    scoring gates (DHA-438 BUG-2).
+    scoring gates (board-variant merge).
     """
     cid = resolve_company_id(org_name)
     if cid is not None:
