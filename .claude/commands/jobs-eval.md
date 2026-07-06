@@ -20,6 +20,12 @@ in `evals/` (gitignored) and is never committed. Works the same in full mode
 
 Everything is one script: `python3 scripts/golden_set.py <subcommand>`.
 
+There are **two surfaces** to check, each with its own personal golden set:
+
+- **vacancy** (default) — the vacancy-scoring prompt vs your like/pass verdicts.
+- **company** — the company-scoring (WANT) prompt vs your keep/reject verdicts
+  on companies. Add `--kind company` to any subcommand below.
+
 ---
 
 ## 1. Build the set
@@ -99,6 +105,33 @@ reads it and shows your last measured agreement instead of "not yet measured".
 
 ---
 
+## Company mode (`--kind company`)
+
+Same three steps, one flag, a separate golden set
+(`evals/golden_set_companies.jsonl`, also gitignored):
+
+```bash
+python3 scripts/golden_set.py seed  --kind company --limit 30   # from your keep/reject verdicts
+python3 scripts/golden_set.py emit  --kind company > /tmp/co_payloads.json
+# score EACH company payload independently; the number to collect is the
+# response's mission_fit.alignment_score (0-100). Assemble [{"id":...,"score":...}].
+python3 scripts/golden_set.py measure --kind company < /tmp/co_scores.json
+```
+
+Where the labels come from: a company you **kept active by hand** (approved in
+the dashboard) is `fit`; one you **rejected/deactivated by hand** is `nofit`.
+Machine status changes — auto-approve/reject on the model's own score, `/filter`
+triage drops, dedup merges, audit sweeps, screen drops — are excluded, so the
+eval never measures the prompt against itself. The fit boundary defaults to
+`AUTO_REVIEW_APPROVE` (the score at/above which a candidate auto-activates).
+
+Payloads reuse the live `scripts/prompts/company-scoring.md` + the real user
+template, so you score exactly what a company run sends. Some `nofit` labels get
+a `flag` (visible in `stats`): a company you hand-rejected whose stored WANT is
+already high is often a **geo/visa** reject (a separate enforcement layer), not
+a mission-fit one this prompt models — sanity-check or drop those before
+trusting the number.
+
 ## Freezing a version
 
 The set is append-only and version-stamped: each batch that adds labels gets the
@@ -112,7 +145,9 @@ frozen data), pass `--version N` to `emit` / `measure` / `stats`.
 
 Any PR that touches `scripts/prompts/vacancy-scoring.md`, `scripts/prompts/company-scoring.md`,
 or `scripts/prompts.py` needs eval evidence in its body, or CI's eval-gate
-workflow fails the PR (it only runs when one of those paths changes). Measure
+workflow fails the PR (it only runs when one of those paths changes). Use the
+golden set for the surface you changed: `--kind company` when the PR touches
+`company-scoring.md`, the default (vacancy) otherwise. Measure
 **twice**: once on `main` before your edit, once on your branch after it —
 same golden set, same threshold, both from the steps above. Take the
 `AGREEMENT` percentage from each `measure` run and paste one line into the PR

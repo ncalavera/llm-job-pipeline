@@ -300,3 +300,178 @@ def test_threshold_default_reads_env(monkeypatch):
     assert g._threshold_default() == 55
     monkeypatch.delenv("APPLYABLE_SCORE", raising=False)
     assert g._threshold_default() == g.DEFAULT_THRESHOLD
+
+
+# ---------------------------------------------------------------------------
+# Company mode — labelling from status/status_reason, freezing, payloads.
+# Fake companies only (neutral names): the real set is personal + gitignored.
+# ---------------------------------------------------------------------------
+
+
+def _co(cid, status, reason, content="x" * 300, score=None, **extra):
+    c = {
+        "id": cid,
+        "canonical_name": f"Fake Org {cid}",
+        "website": "https://example.test",
+        "category": "Test category",
+        "status": status,
+        "status_reason": reason,
+        "content": content,
+    }
+    if score is not None:
+        c["alignment_score"] = score
+    c.update(extra)
+    return c
+
+
+def test_company_label_maps_hand_verdicts():
+    assert g.company_label("active", "approved via dashboard") == "fit"
+    assert g.company_label("inactive", "rejected via dashboard") == "nofit"
+    # a free-text hand reason on an inactive company is still the user's reject
+    assert g.company_label("inactive", "strictly commercial, not interested") == "nofit"
+
+
+def test_company_label_excludes_machine_status_changes():
+    # auto-approve / auto-reject are the model's own call, not a hand verdict
+    assert g.company_label("active", "auto-approved: alignment=72.0") is None
+    for reason in (
+        "auto-rejected: alignment=12.0",
+        "triage drop: drop_commercial",
+        "pre-filter: university",
+        "board noise — filtered",
+        "audit-242: small philanthropy",
+        "merged_into:abc123",
+        "merged into abc123",
+        "archived",
+        "cadence reset 2026-06",
+    ):
+        assert g.company_label("inactive", reason) is None, reason
+
+
+def test_company_label_screen_prefix_is_not_a_hand_label():
+    # mirrors the vacancy rule: a screen drop is a cheap pre-filter, not a verdict
+    assert g.company_label("inactive", "screen: off-thesis") is None
+    assert not g._is_hand_reject_reason("screen: whatever")
+
+
+def test_company_label_none_for_candidate_and_empty():
+    assert g.company_label("candidate", None) is None
+    assert g.company_label("inactive", None) is None
+    assert g.company_label("inactive", "   ") is None
+
+
+def test_freeze_company_keeps_only_scoring_input():
+    frozen = g._freeze_company(_co("a", "active", "approved via dashboard"), "some evidence text")
+    assert set(frozen) == {
+        "canonical_name",
+        "website",
+        "category",
+        "tier",
+        "product",
+        "experience_match",
+        "personal_interest",
+        "user_comments",
+        "content",
+    }
+    assert frozen["content"] == "some evidence text"
+    # no live status / status_reason / alignment_score leaks into the frozen input
+    assert "status" not in frozen and "alignment_score" not in frozen
+
+
+def test_make_company_record_shape_and_optional_flag():
+    rec = g.make_company_record(
+        _co("a", "active", "approved via dashboard"), "fit", "why", "seed:active", "content"
+    )
+    assert rec["id"] == "a" and rec["label"] == "fit" and rec["source"] == "seed:active"
+    assert "company" in rec and "flag" not in rec
+    flagged = g.make_company_record(
+        _co("b", "inactive", "rejected via dashboard"),
+        "nofit",
+        "",
+        "seed:inactive",
+        "c",
+        flag="check",
+    )
+    assert flagged["flag"] == "check"
+
+
+def test_select_company_seed_balances_and_flags_high_score_nofit():
+    fits = [_co(f"f{i}", "active", "approved via dashboard", score=80) for i in range(10)]
+    # one nofit the model liked (>=60 → flag), one it disliked (<60 → no flag)
+    nofits = [
+        _co("n_high", "inactive", "rejected via dashboard", score=75),
+        _co("n_low", "inactive", "rejected via dashboard", score=20),
+    ]
+    for c in fits + nofits:
+        c["label"] = g.company_label(c["status"], c["status_reason"])
+    recs = g.select_company_seed_records(fits + nofits, limit=4, balance=True)
+    labels = [r["label"] for r in recs]
+    assert labels.count("fit") == 2 and labels.count("nofit") == 2  # even split
+    by_id = {r["id"]: r for r in recs}
+    assert by_id["n_high"].get("flag")  # high stored WANT + hand reject → flagged
+    assert not by_id["n_low"].get("flag")
+
+
+def test_build_company_payloads_are_blind_and_use_the_real_prompt():
+    rec = g.make_company_record(
+        _co("a", "active", "approved via dashboard"),
+        "fit",
+        "secret reason",
+        "seed:active",
+        "Mission-driven work on global development outcomes.",
+    )
+    payloads = g.build_company_payloads([rec])
+    assert len(payloads) == 1
+    p = payloads[0]
+    assert p["id"] == "a"
+    assert p["payload_kind"] == "company"
+    # scorer must not see the ground truth
+    assert "label" not in p and "reason" not in p and "flag" not in p
+    assert "secret reason" not in json.dumps(p)
+    # real company scoring prompt + user message with the frozen content
+    assert p["system_prompt"].strip()
+    assert "Mission-driven work" in p["user_msg"]
+
+
+def test_company_metrics_round_trip_via_display():
+    recs = [
+        g.make_company_record(_co("a", "active", "approved via dashboard"), "fit", "", "s", "c"),
+        g.make_company_record(
+            _co("b", "inactive", "rejected via dashboard"), "nofit", "", "s", "c"
+        ),
+    ]
+    scores = {"a": 80, "b": 30}
+    m = g.compute_metrics(recs, scores, threshold=60)
+    assert m["agreement"] == 1.0
+    # display resolves company records to (canonical_name, category), not vacancy fields
+    org, title = g._display(recs[0])
+    assert org == "Fake Org a" and title == "Test category"
+
+
+def test_company_threshold_default_reads_env(monkeypatch):
+    monkeypatch.setenv("AUTO_REVIEW_APPROVE", "70")
+    assert g._company_threshold_default() == 70
+    monkeypatch.delenv("AUTO_REVIEW_APPROVE", raising=False)
+    assert g._company_threshold_default() == g.DEFAULT_THRESHOLD
+
+
+def test_cmd_measure_company_persists_to_company_summary(tmp_path, monkeypatch):
+    import argparse
+    import io
+
+    monkeypatch.setenv("GOLDEN_SET_DIR", str(tmp_path))
+    store = g._company_store_path()
+    recs = [
+        g.make_company_record(_co("a", "active", "approved via dashboard"), "fit", "", "s", "c")
+    ]
+    g.append_records(store, recs)
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps([{"id": "a", "score": 80}])))
+    args = argparse.Namespace(version=None, threshold=None, kind="company")
+    assert g.cmd_measure(args) == 0
+
+    # written to the COMPANY summary path, and the vacancy summary stays absent
+    assert g._company_summary_path().exists()
+    assert not g._summary_path().exists()
+    summary = json.loads(g._company_summary_path().read_text(encoding="utf-8"))
+    assert summary["agreement_pct"] == 100.0 and summary["set_size"] == 1
