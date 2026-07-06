@@ -1,4 +1,4 @@
--- 0012_add_source_board — SQLite variant (see .postgres.sql for the rationale).
+-- 0013_add_source_board — SQLite variant (see .postgres.sql for the rationale).
 --
 -- The frozen baseline (sql/schema.sqlite.sql) does not declare this column, so
 -- this ADD COLUMN applies cleanly on a fresh install — no baseline

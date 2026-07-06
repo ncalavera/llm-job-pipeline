@@ -265,7 +265,7 @@ class _Sqlite:
                 #   * a HALF-MIGRATED database — the column landed but its
                 #     ledger row was lost (an adopted DB whose schema advanced
                 #     past the runner, then replayed). For 0009 (scored_by),
-                #     0011 (board.enabled) and 0012 (vacancy.source_board) that
+                #     0011 (board.enabled) and 0013 (vacancy.source_board) that
                 #     otherwise aborts + auto-restores on EVERY run, leaving the
                 #     DB permanently stuck one migration short with no way
                 #     forward.
@@ -280,7 +280,7 @@ class _Sqlite:
                 # took effect. New migrations must be idempotent on their own
                 # terms (e.g. ``ADD COLUMN IF NOT EXISTS`` as in 0006) rather
                 # than relying on this catch.
-                if version not in ("0003", "0005", "0009", "0011", "0012") or (
+                if version not in ("0003", "0005", "0009", "0011", "0013") or (
                     "duplicate column name" not in str(e)
                 ):
                     raise

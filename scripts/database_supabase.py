@@ -855,7 +855,7 @@ def _scored_by_supported() -> bool:
 def _vacancy_has_column(col: str) -> bool:
     """True when ``vacancy`` has ``col`` on the active backend.
 
-    Used to write ``source_board`` (migration 0012) only where the column
+    Used to write ``source_board`` (migration 0013) only where the column
     exists. Prod already carries it; a fresh/pre-migration install degrades to
     not writing provenance rather than raising "no such column". Cheap, called
     once per board save (not per row), so no module-level cache is needed."""
@@ -1410,8 +1410,14 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
 
         # Check existing: exact hash first, then a same-company renamed/language variant.
         existing, match_kind, insert_hash = _find_existing_vacancy(
-            cur, dedup_index, batch_hashes, dedup_hash, norm_hash, desc_fp,
-            job.get("url"), batch_claimed,
+            cur,
+            dedup_index,
+            batch_hashes,
+            dedup_hash,
+            norm_hash,
+            desc_fp,
+            job.get("url"),
+            batch_claimed,
         )
         batch_claimed.add(dedup_hash)
 
@@ -1684,8 +1690,16 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
         else:
             parsed_deadline = _resolve_new_deadline(job)
             cols = [
-                "dedup_hash", "company_id", "title", "snippet", "full_description",
-                "compensation", "deadline", "first_seen", "last_seen", "locations",
+                "dedup_hash",
+                "company_id",
+                "title",
+                "snippet",
+                "full_description",
+                "compensation",
+                "deadline",
+                "first_seen",
+                "last_seen",
+                "locations",
             ]
             vals = [
                 insert_hash,

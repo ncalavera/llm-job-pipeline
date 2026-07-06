@@ -59,8 +59,10 @@ def _board(name):
 
 def _long_body(seed):
     # >1000 chars, role-specific → a trustworthy, distinct description fingerprint.
-    return (f"We are hiring for {seed}. You will own the {seed} charter end to "
-            f"end, ship reliably, and collaborate across the org on {seed}. ") * 20
+    return (
+        f"We are hiring for {seed}. You will own the {seed} charter end to "
+        f"end, ship reliably, and collaborate across the org on {seed}. "
+    ) * 20
 
 
 def _job(title, *, org=None, city="Berlin, Germany", url=None, desc=None, snippet=None):
@@ -113,7 +115,7 @@ def _add_source_board_column(dal):
 
 
 def test_normalizer_expands_ceo_abbreviation(dal):
-    """"…Office of the CEO" and "…Office of the Chief Executive Officer" are one
+    """ "…Office of the CEO" and "…Office of the Chief Executive Officer" are one
     role (the passed@24 vs today miss from BUG-6)."""
     assert dal.make_normalized_id(
         "Org", "Senior Operations Associate, Office of the CEO"
@@ -123,7 +125,7 @@ def test_normalizer_expands_ceo_abbreviation(dal):
 
 
 def test_normalizer_strips_count_parenthetical(dal):
-    """"Principal, Project Development (3 Openings)" == "Principal, Project
+    """ "Principal, Project Development (3 Openings)" == "Principal, Project
     Development" (the applied@66 vs today miss). A distinguishing parenthetical
     like "(Spanish)" is NOT stripped."""
     assert dal.make_normalized_id(
@@ -151,15 +153,27 @@ def test_multi_country_facets_collapse_to_one_row(dal):
     locations[] carries all three facets (BUG-6 FundraiseUp case)."""
     _seed_company(dal, "FacetCo")
     jobs = [
-        _job("Product Manager, Billing", org="FacetCo",
-             city="Remote - Berlin, Germany", url="https://gh.test/1",
-             desc=_long_body("billing PM cyprus")),
-        _job("Product Manager, Billing", org="FacetCo",
-             city="Remote - London, United Kingdom", url="https://gh.test/2",
-             desc=_long_body("billing PM armenia")),
-        _job("Product Manager, Billing", org="FacetCo",
-             city="Remote - Paris, France", url="https://gh.test/3",
-             desc=_long_body("billing PM georgia")),
+        _job(
+            "Product Manager, Billing",
+            org="FacetCo",
+            city="Remote - Berlin, Germany",
+            url="https://gh.test/1",
+            desc=_long_body("billing PM cyprus"),
+        ),
+        _job(
+            "Product Manager, Billing",
+            org="FacetCo",
+            city="Remote - London, United Kingdom",
+            url="https://gh.test/2",
+            desc=_long_body("billing PM armenia"),
+        ),
+        _job(
+            "Product Manager, Billing",
+            org="FacetCo",
+            city="Remote - Paris, France",
+            url="https://gh.test/3",
+            desc=_long_body("billing PM georgia"),
+        ),
     ]
     new = dal.save_board_vacancies(_board("FacetCo"), jobs)
     dal.get_conn().commit()
@@ -177,10 +191,20 @@ def test_multi_country_facets_are_idempotent_across_reruns(dal):
 
     def batch():
         return [
-            _job("Group PM", org="FacetCo", city="Remote - Berlin, Germany",
-                 url="https://gh.test/a", desc=_long_body("group pm cyprus")),
-            _job("Group PM", org="FacetCo", city="Remote - London, United Kingdom",
-                 url="https://gh.test/b", desc=_long_body("group pm armenia")),
+            _job(
+                "Group PM",
+                org="FacetCo",
+                city="Remote - Berlin, Germany",
+                url="https://gh.test/a",
+                desc=_long_body("group pm cyprus"),
+            ),
+            _job(
+                "Group PM",
+                org="FacetCo",
+                city="Remote - London, United Kingdom",
+                url="https://gh.test/b",
+                desc=_long_body("group pm armenia"),
+            ),
         ]
 
     dal.save_board_vacancies(_board("FacetCo"), batch())
@@ -220,23 +244,33 @@ def test_scored_decided_row_is_not_reinserted_for_normalized_variant(dal):
     than spawn a fresh, unscored, re-scoreable row (BUG-6)."""
     _seed_company(dal, "SettledCo")
     dal.save_vacancies(
-        "SettledCo", "B",
-        [_job("Senior Operations Associate, Office of the CEO",
-              org="SettledCo", url="https://ats.test/reqA")],
+        "SettledCo",
+        "B",
+        [
+            _job(
+                "Senior Operations Associate, Office of the CEO",
+                org="SettledCo",
+                url="https://ats.test/reqA",
+            )
+        ],
     )
     dal.get_conn().commit()
     h = dal.make_vacancy_id("SettledCo", "Senior Operations Associate, Office of the CEO")
     cur = dal.get_conn().cursor()
-    cur.execute(
-        "UPDATE vacancy SET status='passed', llm_score=24 WHERE dedup_hash=%s", (h,)
-    )
+    cur.execute("UPDATE vacancy SET status='passed', llm_score=24 WHERE dedup_hash=%s", (h,))
     dal.get_conn().commit()
     cur.close()
 
     new = dal.save_vacancies(
-        "SettledCo", "B",
-        [_job("Senior Operations Associate, Office of the Chief Executive Officer",
-              org="SettledCo", url="https://ats.test/reqB")],
+        "SettledCo",
+        "B",
+        [
+            _job(
+                "Senior Operations Associate, Office of the Chief Executive Officer",
+                org="SettledCo",
+                url="https://ats.test/reqB",
+            )
+        ],
     )
     dal.get_conn().commit()
 
@@ -255,8 +289,15 @@ def test_scored_row_absorbs_same_title_new_facet_without_forking(dal):
     _seed_company(dal, "ScoreCo")
     dal.save_board_vacancies(
         _board("ScoreCo"),
-        [_job("Staff Engineer", org="ScoreCo", city="Remote - Berlin, Germany",
-              url="https://b/1", desc=_long_body("staff eng one"))],
+        [
+            _job(
+                "Staff Engineer",
+                org="ScoreCo",
+                city="Remote - Berlin, Germany",
+                url="https://b/1",
+                desc=_long_body("staff eng one"),
+            )
+        ],
     )
     dal.get_conn().commit()
     h = dal.make_vacancy_id("ScoreCo", "Staff Engineer")
@@ -267,8 +308,15 @@ def test_scored_row_absorbs_same_title_new_facet_without_forking(dal):
 
     new = dal.save_board_vacancies(
         _board("ScoreCo"),
-        [_job("Staff Engineer", org="ScoreCo", city="Remote - London, United Kingdom",
-              url="https://b/2", desc=_long_body("staff eng two"))],
+        [
+            _job(
+                "Staff Engineer",
+                org="ScoreCo",
+                city="Remote - London, United Kingdom",
+                url="https://b/2",
+                desc=_long_body("staff eng two"),
+            )
+        ],
     )
     dal.get_conn().commit()
 

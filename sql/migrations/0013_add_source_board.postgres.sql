@@ -1,4 +1,4 @@
--- 0012_add_source_board — record which job board a vacancy was imported from.
+-- 0013_add_source_board — record which job board a vacancy was imported from.
 --
 -- Board-yield analytics (which board actually surfaces roles worth scoring)
 -- need per-vacancy provenance. The column already exists in production with
