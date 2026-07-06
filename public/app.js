@@ -12,6 +12,7 @@ import {
   getGroupStatus,
   isGroupCompanyApproved,
   getCompanies,
+  dashboardSource,
   on,
   emit,
   scheduleRender,
@@ -77,6 +78,7 @@ import {
   isApplicationsView,
   syncStatusLabelKey,
   DEFAULT_VACANCY_VIEW,
+  fallbackBannerState,
 } from "./modules/nav.js";
 import { parse, build } from "./modules/route.js";
 import {
@@ -115,6 +117,7 @@ renderLanguageSwitch();
 // renders the profile directly without going through switchMode().
 updateNavCounts();
 renderSyncFooter();
+renderFallbackBanner();
 
 // Render an EN/RU toggle into the sidebar footer. Hidden when only one
 // language is baked. Clicking persists the choice and reloads so every view
@@ -223,6 +226,64 @@ function renderSyncFooter() {
   var date =
     status === "ok" || status === "stale" ? formattedUpdatedDate() : "";
   label.textContent = date ? word + " · " + date : word;
+}
+
+// ---------------------------------------------------------------------------
+// Fallback banner (DHA-422) — a prominent, dismissible notice shown only when
+// boot() loaded the baked public/data.js instead of live /api/vacancies (see
+// nav.js's fallbackBannerState for why this reads `dashboardSource`, not the
+// sidebar's sync-status word). `dashboardSource` and `config.last_updated` are
+// both fixed for the life of the page (state.js: "immutable after init"), so
+// this renders once at load — no need to re-run it on every "render" tick the
+// way the sync footer does.
+// ---------------------------------------------------------------------------
+
+var fallbackBannerDismissed = false;
+
+function renderFallbackBanner() {
+  var el = document.getElementById("fallbackBanner");
+  var textEl = document.getElementById("fallbackBannerText");
+  if (!el || !textEl) return;
+  var result = fallbackBannerState(
+    dashboardSource,
+    config && config.last_updated,
+    Date.now(),
+  );
+  if (fallbackBannerDismissed || !result.show) {
+    el.hidden = true;
+    return;
+  }
+  el.className =
+    "fallback-banner" +
+    (result.level === "warning" ? " fallback-banner--warning" : "");
+  var message =
+    result.age === "unknown"
+      ? T(
+          "fallback_banner_unknown",
+          "Offline snapshot (age unknown) — live API unavailable.",
+        )
+      : T(
+          "fallback_banner_known",
+          "Offline snapshot from {date} — live API unavailable.",
+        ).replace("{date}", formattedUpdatedDate());
+  if (result.level === "warning" && result.age === "known") {
+    message +=
+      " " + T("fallback_banner_stale_suffix", "Data may be out of date.");
+  }
+  textEl.textContent = message;
+  el.hidden = false;
+}
+
+var fallbackBannerDismissBtn = document.getElementById("fallbackBannerDismiss");
+if (fallbackBannerDismissBtn) {
+  fallbackBannerDismissBtn.setAttribute(
+    "aria-label",
+    T("fallback_banner_dismiss", "Dismiss"),
+  );
+  fallbackBannerDismissBtn.addEventListener("click", function () {
+    fallbackBannerDismissed = true;
+    renderFallbackBanner();
+  });
 }
 
 // ---------------------------------------------------------------------------
