@@ -1,4 +1,4 @@
-"""Tests for the prod-write guard in db_backend (DHA-421).
+"""Tests for the prod-write guard in db_backend.
 
 An ad-hoc script run with SUPABASE_DB_URL set in the environment (a stray
 export, a debug one-off with no pytest fixture to clean up after it) used to

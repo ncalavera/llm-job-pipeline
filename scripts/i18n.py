@@ -41,7 +41,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "sync_live": "Live",
         "sync_stale": "Stale snapshot",
         "sync_error": "Sync error",
-        # Fallback banner (DHA-422): shown only when the page loaded the baked
+        # Fallback banner: shown only when the page loaded the baked
         # public/data.js because /api/vacancies wasn't reachable.
         "fallback_banner_known": "Offline snapshot from {date} — live API unavailable.",
         "fallback_banner_unknown": "Offline snapshot (age unknown) — live API unavailable.",
@@ -452,7 +452,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "sync_live": "Актуально",
         "sync_stale": "Устаревший снимок",
         "sync_error": "Ошибка синхронизации",
-        # Fallback banner (DHA-422): shown only when the page loaded the baked
+        # Fallback banner: shown only when the page loaded the baked
         # public/data.js because /api/vacancies wasn't reachable.
         "fallback_banner_known": "Офлайн-снимок от {date} — живой API недоступен.",
         "fallback_banner_unknown": "Офлайн-снимок (возраст неизвестен) — живой API недоступен.",
