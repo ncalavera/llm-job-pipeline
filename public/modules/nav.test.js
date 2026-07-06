@@ -8,11 +8,8 @@ import {
   SECTIONS,
   VACANCY_VIEWS,
   DEFAULT_VACANCY_VIEW,
-  APPLICATIONS_VIEWS,
-  DEFAULT_APPLICATIONS_VIEW,
   sectionForMode,
   isVacancyView,
-  isApplicationsView,
   SYNC_STALE_AFTER,
   initialSyncState,
   nextSyncState,
@@ -27,7 +24,7 @@ test("there are exactly six top-nav sections, in order", () => {
     "today",
     "vacancies",
     "companies",
-    "applications",
+    "triage",
     "boards",
     "settings",
   ]);
@@ -39,9 +36,9 @@ test("every leaf mode maps to its owning section", () => {
   assert.equal(sectionForMode("stats"), "vacancies");
   assert.equal(sectionForMode("archive"), "vacancies");
   assert.equal(sectionForMode("companies"), "companies");
-  assert.equal(sectionForMode("applications"), "applications");
-  // Triage moved from a Vacancies sub-view to an Applications sub-view.
-  assert.equal(sectionForMode("pipeline"), "applications");
+  // Triage (DHA-413: the Applications section it used to share a nav slot
+  // with was deleted) is its own top-nav section now.
+  assert.equal(sectionForMode("pipeline"), "triage");
   assert.equal(sectionForMode("boards"), "boards");
   assert.equal(sectionForMode("settings"), "settings");
 });
@@ -65,29 +62,11 @@ test("the three vacancy sub-views are recognised; nothing else is", () => {
   assert.equal(isVacancyView("pipeline"), false);
   assert.equal(isVacancyView("today"), false);
   assert.equal(isVacancyView("companies"), false);
-  assert.equal(isVacancyView("applications"), false);
   assert.equal(isVacancyView("settings"), false);
 });
 
 test("the default vacancy view is one of the vacancy views", () => {
   assert.ok(VACANCY_VIEWS.includes(DEFAULT_VACANCY_VIEW));
-});
-
-test("the two applications sub-views are recognised; nothing else is", () => {
-  assert.deepEqual(APPLICATIONS_VIEWS, ["applications", "pipeline"]);
-  for (const v of APPLICATIONS_VIEWS) assert.equal(isApplicationsView(v), true);
-  assert.equal(isApplicationsView("catalog"), false);
-  assert.equal(isApplicationsView("today"), false);
-  assert.equal(isApplicationsView("companies"), false);
-  assert.equal(isApplicationsView("settings"), false);
-});
-
-test("the default applications view is one of the applications views", () => {
-  assert.ok(APPLICATIONS_VIEWS.includes(DEFAULT_APPLICATIONS_VIEW));
-});
-
-test("the sidebar opens Triage directly, not the remembered sub-view (post-ship fast fix)", () => {
-  assert.equal(DEFAULT_APPLICATIONS_VIEW, "pipeline");
 });
 
 // --- Sidebar sync-status state machine (DHA-387, U3) ------------------------

@@ -793,8 +793,10 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
                 # Everything the user has done toward this company: applications
                 # (status + artifact KEYS only — values and notes stay private)
                 # and the research rows collected in company_evidence. Shown as a
-                # small block in the profile; the full standalone Applications
-                # section is a later ticket.
+                # small block in the company profile only — the standalone
+                # Applications dashboard section this projection once also fed
+                # was deleted (0 real usage; the Triage "applied" column is
+                # the tracker).
                 "applications": [_project_application(a) for a in company_applications],
                 "application_count": len(company_applications),
                 "research": company_research,
