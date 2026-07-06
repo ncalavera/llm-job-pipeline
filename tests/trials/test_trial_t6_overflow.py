@@ -75,20 +75,28 @@ def test_run_banner_shows_levers_and_cut_advice_under_overflow(monkeypatch):
 
 
 def test_today_cockpit_is_bounded_above_the_catalog_floor(monkeypatch, tmp_path):
-    """ "Today" surfaces only the loudest tier, so an overflow day can't dump into it."""
+    """ "Today" surfaces only high-signal unseen roles, so an overflow day can't dump into it.
+
+    The Today rework replaced the single "New 70+" list with score-gated
+    Closing-soon and Don't-rot strips; the gate for unseen roles now lives in
+    derive.js as APPLYABLE_MIN_SCORE (every other block is bounded by an explicit
+    user verdict, not the flood). The bound must still sit above the catalog
+    floor and at/above the protect line.
+    """
     h.use_persona(
         monkeypatch, profile="profile_engineer.md", db_path=tmp_path / "db", migrate=False
     )
 
-    with open(TODAY_JS, encoding="utf-8") as fh:
-        today_src = fh.read()
-    m = re.search(r"NEW_HIGH_FIT\s*=\s*(\d+)", today_src)
-    assert m, "today.js must define a NEW_HIGH_FIT gate for the cockpit"
-    new_high_fit = int(m.group(1))
+    derive_js = os.path.join(h.REPO_ROOT, "public", "modules", "derive.js")
+    with open(derive_js, encoding="utf-8") as fh:
+        derive_src = fh.read()
+    m = re.search(r"APPLYABLE_MIN_SCORE\s*=\s*(\d+)", derive_src)
+    assert m, "derive.js must define the APPLYABLE_MIN_SCORE gate for the cockpit"
+    unseen_gate = int(m.group(1))
 
     import config
 
-    # Today's "new" tier sits above the catalog floor and at/above the protect
+    # The unseen-role gate sits above the catalog floor and at/above the protect
     # line — the cockpit is a high-signal subset, never the full flood.
-    assert new_high_fit > config.CATALOG_MIN_SCORE
-    assert new_high_fit >= config.PROTECT_SCORE
+    assert unseen_gate > config.CATALOG_MIN_SCORE
+    assert unseen_gate >= config.PROTECT_SCORE
