@@ -41,6 +41,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "sync_live": "Live",
         "sync_stale": "Stale snapshot",
         "sync_error": "Sync error",
+        # Fallback banner (DHA-422): shown only when the page loaded the baked
+        # public/data.js because /api/vacancies wasn't reachable.
+        "fallback_banner_known": "Offline snapshot from {date} — live API unavailable.",
+        "fallback_banner_unknown": "Offline snapshot (age unknown) — live API unavailable.",
+        "fallback_banner_stale_suffix": "Data may be out of date.",
+        "fallback_banner_dismiss": "Dismiss",
         # Command palette (U17) — ⌘K jump-to search over vacancies + companies
         "palette_placeholder": "Search vacancies and companies…",
         "palette_hint": "Type to search vacancies and companies.",
@@ -446,6 +452,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "sync_live": "Актуально",
         "sync_stale": "Устаревший снимок",
         "sync_error": "Ошибка синхронизации",
+        # Fallback banner (DHA-422): shown only when the page loaded the baked
+        # public/data.js because /api/vacancies wasn't reachable.
+        "fallback_banner_known": "Офлайн-снимок от {date} — живой API недоступен.",
+        "fallback_banner_unknown": "Офлайн-снимок (возраст неизвестен) — живой API недоступен.",
+        "fallback_banner_stale_suffix": "Данные могут быть устаревшими.",
+        "fallback_banner_dismiss": "Скрыть",
         # Command palette (U17) — ⌘K jump-to search over vacancies + companies
         "palette_placeholder": "Поиск по вакансиям и компаниям…",
         "palette_hint": "Начните печатать, чтобы искать вакансии и компании.",

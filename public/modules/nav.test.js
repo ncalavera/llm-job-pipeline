@@ -17,6 +17,9 @@ import {
   initialSyncState,
   nextSyncState,
   syncStatusLabelKey,
+  FALLBACK_STALE_AFTER_MS,
+  fallbackBannerState,
+  parseSnapshotStamp,
 } from "./nav.js";
 
 test("there are exactly six top-nav sections, in order", () => {
@@ -172,4 +175,132 @@ test("syncStatusLabelKey maps every known status; unknown falls back to checking
   assert.equal(syncStatusLabelKey("stale"), "sync_stale");
   assert.equal(syncStatusLabelKey("error"), "sync_error");
   assert.equal(syncStatusLabelKey("nonsense"), "sync_checking");
+});
+
+// --- Fallback banner (DHA-422) -----------------------------------------------
+
+const NOW = Date.parse("2026-07-06T12:00:00Z");
+
+test("no banner when the source is live, regardless of the stamp", () => {
+  assert.deepEqual(fallbackBannerState("live", "2026-07-06T00:00:00Z", NOW), {
+    show: false,
+    level: "info",
+    age: "known",
+  });
+  assert.deepEqual(fallbackBannerState("live", null, NOW), {
+    show: false,
+    level: "info",
+    age: "known",
+  });
+});
+
+test("no banner for a hard error either — that's a full-page stop, not a fallback render", () => {
+  assert.equal(fallbackBannerState("error", null, NOW).show, false);
+});
+
+test("fallback with a fresh stamp (<48h old): info banner, known age", () => {
+  const oneHourAgo = new Date(NOW - 60 * 60 * 1000).toISOString();
+  assert.deepEqual(fallbackBannerState("fallback", oneHourAgo, NOW), {
+    show: true,
+    level: "info",
+    age: "known",
+  });
+});
+
+test("fallback exactly at the 48h boundary is still info, not warning", () => {
+  const exactly48hAgo = new Date(NOW - FALLBACK_STALE_AFTER_MS).toISOString();
+  assert.equal(
+    fallbackBannerState("fallback", exactly48hAgo, NOW).level,
+    "info",
+  );
+});
+
+test("fallback with a stamp older than 48h: warning banner, known age", () => {
+  const fortyNineHoursAgo = new Date(NOW - 49 * 60 * 60 * 1000).toISOString();
+  assert.deepEqual(fallbackBannerState("fallback", fortyNineHoursAgo, NOW), {
+    show: true,
+    level: "warning",
+    age: "known",
+  });
+});
+
+test("fallback with no stamp at all (old pre-DHA-422 bake): warning banner, unknown age", () => {
+  assert.deepEqual(fallbackBannerState("fallback", null, NOW), {
+    show: true,
+    level: "warning",
+    age: "unknown",
+  });
+  assert.deepEqual(fallbackBannerState("fallback", undefined, NOW), {
+    show: true,
+    level: "warning",
+    age: "unknown",
+  });
+  assert.deepEqual(fallbackBannerState("fallback", "", NOW), {
+    show: true,
+    level: "warning",
+    age: "unknown",
+  });
+});
+
+test("fallback with an unparseable stamp is treated the same as no stamp", () => {
+  assert.deepEqual(fallbackBannerState("fallback", "not-a-date", NOW), {
+    show: true,
+    level: "warning",
+    age: "unknown",
+  });
+});
+
+// --- Stamp parsing: naive vs timezone-aware (the generator's real formats) --
+
+test("a NAIVE offset-less stamp (pre-fix bakes) is pinned to UTC, not browser-local", () => {
+  // datetime.now().isoformat(timespec="seconds") — no Z, no offset. Browsers
+  // would parse this as LOCAL time, skewing the 48h check per viewer; the
+  // parser pins it to UTC instead, same instant everywhere.
+  assert.equal(
+    parseSnapshotStamp("2026-07-06T12:00:00"),
+    Date.parse("2026-07-06T12:00:00Z"),
+  );
+});
+
+test("timezone-aware stamps parse as-written: +00:00 (the generator's new format) and Z", () => {
+  // datetime.now(timezone.utc).isoformat(timespec="seconds") ends "+00:00".
+  assert.equal(parseSnapshotStamp("2026-07-06T12:00:00+00:00"), NOW);
+  assert.equal(parseSnapshotStamp("2026-07-06T12:00:00Z"), NOW);
+  // A non-UTC offset is respected, not double-shifted.
+  assert.equal(
+    parseSnapshotStamp("2026-07-06T14:00:00+02:00"),
+    Date.parse("2026-07-06T12:00:00Z"),
+  );
+});
+
+test("the 48h staleness check is exercised with the real naive format, not just toISOString", () => {
+  // 49h before NOW, written the way the pre-fix generator wrote it (naive,
+  // seconds precision, no designator). Must read as stale/warning.
+  const naive49hAgo = new Date(NOW - 49 * 60 * 60 * 1000)
+    .toISOString()
+    .replace(/\.\d{3}Z$/, "");
+  assert.deepEqual(fallbackBannerState("fallback", naive49hAgo, NOW), {
+    show: true,
+    level: "warning",
+    age: "known",
+  });
+  // And a fresh naive stamp stays info.
+  const naive1hAgo = new Date(NOW - 60 * 60 * 1000)
+    .toISOString()
+    .replace(/\.\d{3}Z$/, "");
+  assert.equal(fallbackBannerState("fallback", naive1hAgo, NOW).level, "info");
+});
+
+// --- CSS cascade guard (review blocker): .fallback-banner sets display:flex
+// (author origin), which beats the UA stylesheet's [hidden]{display:none}
+// regardless of specificity — without an explicit author-origin [hidden]
+// override, the default-hidden banner would render as an empty flex box on
+// EVERY load, including live mode. Guard that the override stays in style.css.
+
+test("style.css restates [hidden]{display:none} for the flex banner", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const css = await readFile(new URL("../style.css", import.meta.url), "utf8");
+  const rule = css.match(/\.fallback-banner\[hidden\]\s*\{[^}]*\}/);
+  assert.ok(rule, "expected a .fallback-banner[hidden] rule in style.css");
+  assert.match(rule[0], /display:\s*none/);
 });

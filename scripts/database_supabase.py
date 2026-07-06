@@ -14,6 +14,7 @@ from dateutil import parser as dateutil_parser
 
 from company_registry import (
     COMPANIES,
+    company_name_variants_match,
     resolve_canonical_name,
 )
 import settings
@@ -591,20 +592,71 @@ def _auto_discovery_status() -> str:
     return "active" if str(raw).strip().lower() == "active" else "candidate"
 
 
+_STATUS_MERGE_RANK = {"active": 0, "inactive": 1, "candidate": 2}
+
+
+def _find_mergeable_company(cur, org_name: str):
+    """Find an existing company an incoming board name is a VARIANT of.
+
+    Exact canonical_name / alias lookups (``resolve_company_id``) already ran
+    and missed; this is the tolerance pass that catches board name variants
+    ("EBRD - European Bank for Reconstruction and Development" for an existing
+    "EBRD") so they MERGE into the tracked row instead of forking a duplicate
+    candidate that gets re-enriched and re-WANT-scored. Matches against BOTH
+    canonical_name and every alias, across ANY status; when several rows match,
+    the most-established status wins (active > inactive > candidate) so a
+    duplicate can never shadow the already-scored row.
+
+    Returns ``(id, canonical_name, aliases_list)`` or ``None``.
+    """
+    cur.execute("SELECT id, canonical_name, aliases, status FROM company")
+    best = None  # (rank, id, canonical, aliases)
+    for cid, canonical, aliases, status in cur.fetchall():
+        names = [canonical, *(aliases or [])]
+        if any(company_name_variants_match(org_name, n) for n in names):
+            rank = _STATUS_MERGE_RANK.get(status, 3)
+            if best is None or rank < best[0]:
+                best = (rank, cid, canonical, list(aliases or []))
+    if best is None:
+        return None
+    return best[1], best[2], best[3]
+
+
 def ensure_company(org_name: str, status: str = "candidate"):
     """Find or create a company. Returns UUID.
 
     ``status`` is honoured verbatim — callers that want a candidate get one.
     The board/ATS auto-discovery path passes ``_auto_discovery_status()`` so
     the same, configurable status lands on both backends (see save_vacancies).
+
+    Before inserting, an incoming board name that is a VARIANT of a company we
+    already track (fuzzy match on canonical_name + aliases, any status) is
+    MERGED into that row — the variant is folded into its ``aliases`` and its
+    id returned — instead of forking a new candidate. The existing row keeps
+    its status and WANT score, so a duplicate never reaches the enrichment or
+    scoring gates (DHA-438 BUG-2).
     """
     cid = resolve_company_id(org_name)
     if cid is not None:
         return cid
 
-    canonical = resolve_canonical_name(org_name)
     conn = get_conn()
     cur = conn.cursor()
+
+    match = _find_mergeable_company(cur, org_name)
+    if match is not None:
+        existing_id, canonical, aliases = match
+        variant = resolve_canonical_name(org_name)
+        known = {canonical.lower(), *(a.lower() for a in aliases)}
+        if variant.lower() not in known:
+            cur.execute(
+                "UPDATE company SET aliases = %s WHERE id = %s",
+                (aliases + [variant], existing_id),
+            )
+        cur.close()
+        return existing_id
+
+    canonical = resolve_canonical_name(org_name)
     cur.execute(
         """INSERT INTO company (canonical_name, status, aliases)
            VALUES (%s, %s, ARRAY[%s]::text[])
