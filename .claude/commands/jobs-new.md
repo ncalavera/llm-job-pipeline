@@ -218,9 +218,11 @@ local `public/data.js`. Both go through the same driver — no mode branching.
 - **Scope one run** without touching persisted state: `--tier S` (or A/B/C)
   fetches only companies of that importance tier, and `--skip-boards "linkedin"`
   drops boards from this run's effective set (subtracted after `--boards` and the
-  persisted set resolve). Both apply to a single fetch only — no company tier and
-  no `board.enabled` flag is changed. Example: only S-tier employers on the
-  social-impact boards, no LinkedIn → `--new --tier S --skip-boards linkedin`.
+  persisted set resolve). An unknown board name in `--skip-boards` warns loudly
+  (it never silently no-ops), and `--skip-boards all` skips every board for the
+  run (companies still fetch). Both apply to a single fetch only — no company
+  tier and no `board.enabled` flag is changed. Example: only S-tier employers on
+  the social-impact boards, no LinkedIn → `--new --tier S --skip-boards linkedin`.
 - `--no-publish` — run every stage but never publish (use from a git worktree).
 - `--full-rescore` — explicit opt-in that LIFTS the per-run scoring cap and
   re-scores far more vacancies, with a loud warning. A normal run keeps the cap

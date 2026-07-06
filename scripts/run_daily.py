@@ -502,6 +502,34 @@ def _board_id_set(raw: str | None) -> set[str]:
     return {t.strip() for t in (raw or "").split(",") if t.strip()}
 
 
+def _skip_board_set(raw: str | None) -> tuple[set[str], bool]:
+    """Parse ``--skip-boards`` into ``(ids_to_skip, skip_all)``.
+
+    A typo'd skip that silently no-ops defeats the whole flag — the board still
+    runs and the user never learns — so every token is validated against the
+    known board catalog (the same source config._select_enabled_boards warns
+    from) and an unknown one warns LOUDLY. Warn, don't abort: consistent with
+    how an unknown ``--boards`` id is handled downstream. ``all`` mirrors
+    ``--boards all`` symmetrically: skip every board (boards off this run;
+    companies still fetch)."""
+    tokens = _board_id_set(raw)
+    if not tokens:
+        return set(), False
+    if any(t.lower() == "all" for t in tokens):
+        return tokens, True
+    from config import _ALL_JOB_BOARDS
+
+    for tok in sorted(tokens):
+        if tok not in _ALL_JOB_BOARDS:
+            print(
+                f"  WARNING: unknown board in --skip-boards: {tok} "
+                f"(known: {', '.join(_ALL_JOB_BOARDS)})",
+                file=sys.stderr,
+                flush=True,
+            )
+    return tokens, False
+
+
 def _resolve_boards(cli_boards: str | None, skip_boards: str | None = None) -> str | None:
     """The effective JOB_BOARDS value for a fresh run.
 
@@ -536,7 +564,12 @@ def _resolve_boards(cli_boards: str | None, skip_boards: str | None = None) -> s
     finally:
         _close_db()
 
-    skip = _board_id_set(skip_boards)
+    skip, skip_all = _skip_board_set(skip_boards)
+    if skip_all:
+        # --skip-boards all mirrors --boards all: every board is dropped for
+        # THIS run (companies still fetch); the persisted set is untouched.
+        return None
+
     tokens = list(persisted)
     saw_all = False
     for raw in (cli_boards, os.environ.get("JOB_BOARDS")):
@@ -1895,7 +1928,8 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Boards to DROP from this run's effective set (e.g. 'linkedin'), subtracted after "
-            "--boards / the persisted enabled set resolve. This run only — the persisted "
+            "--boards / the persisted enabled set resolve. 'all' skips every board (companies "
+            "still fetch); an unknown board name warns loudly. This run only — the persisted "
             "enabled set is never modified."
         ),
     )

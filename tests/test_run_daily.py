@@ -1148,6 +1148,50 @@ def test_resolve_boards_is_read_only_never_persists(rd, monkeypatch):
     assert rd._resolve_boards("80k_hours", "linkedin") == "idealist,80k_hours"
 
 
+def test_skip_boards_unknown_token_warns_loudly(rd, monkeypatch, capsys):
+    """A typo'd skip must never silently no-op — the board would still run and
+    the user would never learn. Unknown ids warn (not abort), consistent with
+    how config warns on an unknown --boards id downstream."""
+    _patch_persisted(rd, monkeypatch, ["linkedin"])
+    result = rd._resolve_boards(None, "linkedln")  # typo: missing 'i'
+    err = capsys.readouterr().err
+    assert "WARNING" in err and "--skip-boards" in err and "linkedln" in err
+    assert result == "linkedin"  # the real board still runs; only the typo warned
+
+
+def test_skip_boards_known_token_does_not_warn(rd, monkeypatch, capsys):
+    _patch_persisted(rd, monkeypatch, ["linkedin", "idealist"])
+    assert rd._resolve_boards(None, "linkedin") == "idealist"
+    assert "WARNING" not in capsys.readouterr().err
+
+
+def test_skip_boards_all_turns_boards_off_for_the_run(rd, monkeypatch, capsys):
+    """--skip-boards all mirrors --boards all: every board is dropped for THIS
+    run. The resolved value is None — exactly the boards-off state in which
+    fetch still pulls all active companies (see _h_fetch: --no-boards is only
+    ever added on first_run; a None board set simply leaves JOB_BOARDS unset)."""
+    _patch_persisted(rd, monkeypatch, ["idealist", "linkedin"])
+    assert rd._resolve_boards(None, "all") is None
+    assert rd._resolve_boards("80k_hours", "all") is None  # skip-all beats the union
+    assert rd._resolve_boards("all", "all") is None
+    assert "WARNING" not in capsys.readouterr().err  # 'all' is not an unknown id
+
+
+def test_skip_boards_all_companies_still_fetch(rd, monkeypatch):
+    """Boards-off scoping must not suppress the company fetch: the fetch command
+    carries no --no-boards / --boards-only flag on a normal (non-first) run —
+    boards stay off purely because JOB_BOARDS is unset in the child env."""
+    monkeypatch.delenv("JOB_BOARDS", raising=False)
+    seen = _capture_fetch_cmd(rd, monkeypatch)
+    opts = rd.Opts(job_boards=None)  # what --skip-boards all resolves to
+    state = rd._new_state(opts)
+    state["first_run"] = False
+    kind, _ = rd._h_fetch(state, rd._stage(state, "fetch"), opts)
+    assert kind == "advance"
+    assert "--no-boards" not in seen["cmd"] and "--boards-only" not in seen["cmd"]
+    assert "JOB_BOARDS" not in rd._child_env(opts)
+
+
 def _capture_fetch_cmd(rd, monkeypatch):
     """Run the fetch handler with the subprocess stubbed, returning its argv."""
     seen = {}
