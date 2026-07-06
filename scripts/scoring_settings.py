@@ -84,6 +84,13 @@ def _default_max_per_run() -> int:
 DEFAULT_SCREEN_MODEL = "haiku"
 DEFAULT_ESCALATION_THRESHOLD = 50
 
+# The cheap company pre-filter model — a low-cost relevance screen that drops
+# clearly-irrelevant board-discovered companies BEFORE any paid enrichment
+# (Firecrawl scrape + Exa search). Same cost lever as the vacancy screen (the
+# model tier is the dial), defaults to the cheapest tier, and is clamped so it
+# can never cost more than the strong scoring model.
+DEFAULT_COMPANY_SCREEN_MODEL = "haiku"
+
 # Model tiers the runbook knows how to launch as a subagent.
 _ALLOWED_MODELS = {"haiku", "sonnet", "opus"}
 
@@ -148,6 +155,25 @@ def screen_model() -> str:
     val = _volume_fields().get("screen_model", "").strip().lower()
     if val in _EMPTY_TOKENS or val not in _ALLOWED_MODELS:
         val = DEFAULT_SCREEN_MODEL
+    strong = scoring_model()
+    if _MODEL_RANK[val] > _MODEL_RANK[strong]:
+        return strong
+    return val
+
+
+def company_screen_model() -> str:
+    """Return the CHEAP model tier for the company pre-filter screen.
+
+    Every newly discovered candidate company gets a fast keep/drop relevance
+    check from this model BEFORE any paid enrichment runs on it, so the strong
+    scoring model (and Firecrawl/Exa) only ever see plausible fits. Unknown /
+    empty / placeholder values fall back to the default (haiku, the cheapest
+    tier). Clamped to be no pricier than ``scoring_model`` — a screen that costs
+    as much as the final pass defeats the saving.
+    """
+    val = _volume_fields().get("company_screen_model", "").strip().lower()
+    if val in _EMPTY_TOKENS or val not in _ALLOWED_MODELS:
+        val = DEFAULT_COMPANY_SCREEN_MODEL
     strong = scoring_model()
     if _MODEL_RANK[val] > _MODEL_RANK[strong]:
         return strong

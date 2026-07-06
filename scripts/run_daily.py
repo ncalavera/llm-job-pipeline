@@ -53,6 +53,11 @@ FETCH_STATS_PATH = PROJECT_ROOT / "vacancies" / "fetch_stats.json"
 VAC_PAYLOAD_PATH = PROJECT_ROOT / "vacancies" / "score_vacancies_payload.json"
 CO_PAYLOAD_PATH = PROJECT_ROOT / "vacancies" / "score_companies_payload.json"
 LEARNING_PAYLOAD_PATH = PROJECT_ROOT / "vacancies" / "learning_review.json"
+# Written by screen_candidates.py (keep the paths in sync with its constants):
+# the payload feeds the no-API-key subagent screen gate; the summary is the
+# per-run audit marker (screened N, llm_ran yes/no, drops M).
+SCREEN_CO_PAYLOAD_PATH = PROJECT_ROOT / "vacancies" / "screen_companies_payload.json"
+SCREEN_SUMMARY_PATH = PROJECT_ROOT / "vacancies" / "screen_companies_summary.json"
 
 EXIT_DONE = 0
 EXIT_GATE = 10
@@ -137,6 +142,7 @@ def _gate_preview(action: str | None, count) -> str:
     return {
         "onboard": "onboard starter companies (the pipeline needs a seed list)",
         "learning_review": f"review {n} verdict-driven proposal(s)",
+        "screen_companies": f"relevance-screen {n} new company(ies) with cheap subagents",
         "score_companies": f"WANT-score {n} candidate company(ies)",
         "score_vacancies": f"score {n} role(s)",
         "verdicts": f"give a like / pass verdict on {n} role(s)",
@@ -646,6 +652,35 @@ def _prefilter_junk_companies(opts: Opts) -> None:
         print("  ⚠  company junk pre-filter exited non-zero — continuing", flush=True)
 
 
+def _screen_candidates(opts: Opts) -> "dict | None":
+    """Cheap relevance screen BEFORE any paid enrichment: drop clearly-irrelevant
+    board-discovered candidates (staffing agencies, purely commercial businesses
+    outside the profile, already-tracked duplicates) with the cheapest model tier
+    on name + board snippet — no scrape — so Firecrawl/Exa and the strong scorer
+    only ever touch plausible fits (STRATEGY guardrail 3: cost). Runs after the
+    structural junk cut and before the paid website backfill, so a dropped
+    candidate also skips the paid URL search. Kept companies still go to Pending
+    for human review — the screen only cuts what reaches PAID enrichment.
+
+    Returns the screen's summary record (screened N, llm_ran yes/no, drops M —
+    the per-run audit marker screen_candidates writes to SCREEN_SUMMARY_PATH),
+    or None if the screen failed before writing one. When the record says the
+    LLM cut was deferred (no direct API key) and payloads are pending, the
+    caller gates so cheap subagents make the keep/drop calls instead.
+
+    Best-effort: a screen failure keeps every candidate — the safe direction —
+    so it can never block scoring."""
+    SCREEN_SUMMARY_PATH.unlink(missing_ok=True)  # never act on a stale marker
+    rc = _run(_py("screen_candidates.py") + ["--apply"], opts)
+    if rc != 0:
+        print("  ⚠  candidate relevance screen exited non-zero — continuing", flush=True)
+    try:
+        record = json.loads(SCREEN_SUMMARY_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return record if isinstance(record, dict) else None
+
+
 def _backfill_candidate_websites(opts: Opts) -> None:
     """Find official websites for ghost candidates (board-discovered, no URL) so
     they enter scoring instead of hanging unscored. Capped at the same per-run
@@ -1008,6 +1043,33 @@ def _company_gate_text(payloads: list) -> str:
     )
 
 
+def _screen_gate_text(count: int, model: str) -> str:
+    """Instructions for the no-API-key relevance-screen gate: cheap subagents
+    make the keep/drop calls the direct-API path would have made, then feed
+    decisions back through screen_candidates --save."""
+    return (
+        f"RELEVANCE SCREEN — no direct Anthropic API key is available, so screen\n"
+        f"{count} newly discovered candidate company(ies) with subagents instead:\n"
+        f'ONE subagent per company, CHEAP model "{model}". Each payload entry\n'
+        f"carries its own system_prompt + user_msg and the real DB id.\n\n"
+        f"This decides only what reaches PAID enrichment (Firecrawl/Exa + WANT\n"
+        f"scoring) — kept companies still land in Pending for human review. Drop\n"
+        f"ONLY clear mismatches; borderline or unknown from the name alone → keep.\n\n"
+        f"Each subagent answers with ONE JSON object (copy the id from its payload\n"
+        f"entry):\n"
+        f'  {{"id": "<id>", "keep": true|false, "reason": "<one short sentence>"}}\n\n'
+        f"Save the decisions (drops are archived with their reason; kept rows are\n"
+        f"left untouched):\n"
+        f"  python3 scripts/screen_candidates.py --save < decisions.json\n\n"
+        f"If you saved each subagent's raw result to its own file, pass them as\n"
+        f"--files instead — a malformed file is then named and skipped (its\n"
+        f"companies stay kept), the rest still apply:\n"
+        f"  python3 scripts/screen_candidates.py --save --files r1.json r2.json ...\n\n"
+        f"Then --resume — the driver continues into enrichment with only the kept\n"
+        f"companies (an unanswered company simply stays kept — the safe direction)."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Stage handlers. Each returns one of:
 #   ("advance", note) | ("skip", note) | ("gate", payload)
@@ -1191,8 +1253,16 @@ def _h_filter(state, entry, opts):
 
 
 def _h_company_scoring(state, entry, opts):
-    # Idempotent resume: only re-prompt for companies still missing a score.
-    if entry.get("emitted"):
+    # Screen-gate resume: the agent screened the pending payloads with cheap
+    # subagents and applied decisions via screen_candidates --save (an
+    # unanswered company simply stays kept — the safe direction). Mark the
+    # screen done and fall through to the rest of the chain.
+    if entry.get("emitted") and entry.get("phase") == "screen":
+        entry["phase"] = "screened"
+    # Idempotent SCORE-gate resume: only re-prompt for companies still missing
+    # a score. (phase is "screened" — or unset on a pre-screen run state — by
+    # the time the scoring gate emits, never "screen".)
+    elif entry.get("emitted"):
         remaining = _unscored_company_ids(entry.get("target_ids", []))
         if not remaining:
             return (
@@ -1223,11 +1293,43 @@ def _h_company_scoring(state, entry, opts):
 
     # Enrichment chain — make new candidates scorable before scoring:
     #   1. drop structural junk so we don't pay to enrich it,
-    #   2. find websites for ghost candidates (board-discovered, no URL),
-    #   3. count what is now scorable,
-    #   4. scrape about-pages + collect primary-source evidence for that set,
-    #   5. build the WANT-scoring payloads for the gate.
+    #   2. cheap relevance screen: drop clear mismatches + duplicates before any
+    #      paid call, so Firecrawl/Exa only ever touch plausible fits — direct
+    #      cheap-model API when a key exists, else a GATE so subagents decide,
+    #   3. find websites for ghost candidates (board-discovered, no URL),
+    #   4. count what is now scorable,
+    #   5. scrape about-pages + collect primary-source evidence for that set,
+    #   6. build the WANT-scoring payloads for the gate.
     _prefilter_junk_companies(opts)
+    if entry.get("phase") != "screened":
+        screen = _screen_candidates(opts)
+        if screen is not None:
+            # Run marker: distinguishes "ran, kept all" from "errored/deferred,
+            # kept all by fail-safe" after the fact.
+            entry["screen"] = screen
+            print(
+                f"  screen: screened {screen.get('screened', 0)} of "
+                f"{screen.get('total', 0)}, llm_ran "
+                f"{'yes' if screen.get('llm_ran') else 'no'}, "
+                f"drops {screen.get('drops', 0)} "
+                f"(dup {screen.get('dup_drops', 0)} + screen {screen.get('llm_drops', 0)})",
+                flush=True,
+            )
+            if not screen.get("llm_ran") and screen.get("pending_count", 0) > 0:
+                # No direct API key — the screen wrote per-company payloads
+                # instead of calling a model. Gate so cheap subagents make the
+                # keep/drop calls, then --resume continues past the screen.
+                from scoring_settings import company_screen_model
+
+                entry["phase"] = "screen"
+                return "gate", {
+                    "action": "screen_companies",
+                    "count": screen["pending_count"],
+                    "payload_path": screen.get("payload_path") or str(SCREEN_CO_PAYLOAD_PATH),
+                    "instructions": _screen_gate_text(
+                        screen["pending_count"], company_screen_model()
+                    ),
+                }
     _backfill_candidate_websites(opts)
 
     n = _candidates_to_score()
