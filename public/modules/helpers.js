@@ -844,7 +844,8 @@ export const EXPIRABLE_STATUSES = new Set([
 // Decide which Triage board column a deduped entry (carrying _status) belongs
 // to, given the set of real column keys. Returns null when the entry has no
 // place on the board:
-//   - DB status 'expiring' lives in the Today tab, never on the board;
+//   - DB status 'expiring' lives in Today's Closing-soon block, never on the
+//     board;
 //   - unseen/passed and any unknown status have no column.
 // Gone EXPIRABLE_STATUSES collapse into 'expired'; everything else maps 1:1.
 export function triageColumnFor(entry, columnKeys) {

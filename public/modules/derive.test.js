@@ -455,9 +455,10 @@ test("Today: closing soon = unseen, score ≥60, deadline ≤7d — and wins the
     todayOpts(todayStatuses),
   );
   assert.deepEqual(
-    closingSoon.map((g) => g.id),
+    closingSoon.map((r) => r.g.id),
     ["cs", "both"], // both are 5d out; equal deadline → stable order
   );
+  assert.ok(closingSoon.every((r) => r.expiring === false));
   // `both` qualifies for both closing-soon and don't-rot, but shows only in
   // closing soon (dedupe upward); `rt` is the only pure don't-rot role.
   assert.deepEqual(
@@ -473,7 +474,34 @@ test("Today: closingSoonHidden counts the weak/unscored near-deadline roles the 
   );
   assert.equal(closingSoonHidden, 2); // hi (score 30) + un (unscored)
   // The hidden ones are NOT in the visible closing-soon list.
-  assert.ok(!closingSoon.some((g) => g.id === "hi" || g.id === "un"));
+  assert.ok(!closingSoon.some((r) => r.g.id === "hi" || r.g.id === "un"));
+});
+
+test("Today: protected 'expiring' roles lead the Closing-soon block, flagged (never lost)", () => {
+  const groups = todaySample();
+  groups.push({ id: "px", approved: true, llm_score: 72 }); // status expiring
+  const { closingSoon } = selectTodayRoles(
+    groups,
+    todayOpts({ ...todayStatuses, px: "expiring" }),
+  );
+  // px leads despite having no deadline; the unseen deadline rows follow.
+  assert.deepEqual(
+    closingSoon.map((r) => r.g.id),
+    ["px", "cs", "both"],
+  );
+  assert.equal(closingSoon[0].expiring, true);
+});
+
+test("Today: an 'expiring' role is never score-gated — a weak protected role still surfaces", () => {
+  const groups = [{ id: "weak", approved: true, llm_score: 12 }];
+  const { closingSoon } = selectTodayRoles(
+    groups,
+    todayOpts({ weak: "expiring" }),
+  );
+  assert.deepEqual(
+    closingSoon.map((r) => r.g.id),
+    ["weak"],
+  );
 });
 
 test("Today: working = to_research / to_network, live only", () => {
@@ -487,7 +515,7 @@ test("Today: an unapproved role never appears in any block", () => {
     ...all.committed.map((r) => r.g.id),
     ...all.awaiting.map((g) => g.id),
     ...all.liked.map((g) => g.id),
-    ...all.closingSoon.map((g) => g.id),
+    ...all.closingSoon.map((r) => r.g.id),
     ...all.dontRot.map((g) => g.id),
     ...all.working.map((g) => g.id),
   ];
@@ -537,8 +565,8 @@ test("Today: closing-soon reacts to a deadline lapsing with no run", () => {
     groups,
     todayOpts({}, { today: "2026-07-09" }),
   );
-  assert.ok(before.closingSoon.some((g) => g.id === "cs"));
-  assert.ok(!after.closingSoon.some((g) => g.id === "cs")); // deadline passed
+  assert.ok(before.closingSoon.some((r) => r.g.id === "cs"));
+  assert.ok(!after.closingSoon.some((r) => r.g.id === "cs")); // deadline passed
 });
 
 // A stale-source-aware isLiveRole, mirroring today.js `_isLiveRole`: a role whose
@@ -580,6 +608,31 @@ test("Today: a stale-source liked role drops, a fresh one stays (STALE_SOURCE_DA
     liked.map((g) => g.id),
     ["fresh"], // stale dropped by the staleness branch
   );
+});
+
+test("Today keeps a protected 'expiring' role even when its source is stale", () => {
+  // A protected role gone stale 30 days ago must still surface — it exists to
+  // demand a decision, so the staleness branch is bypassed for status
+  // 'expiring' and it leads the Closing-soon block.
+  const groups = [
+    { id: "prot", approved: true, llm_score: 50, last_seen: "2026-06-03" },
+  ];
+  const opts = staleAwareTodayOpts({ prot: "expiring" });
+  const { closingSoon } = selectTodayRoles(groups, opts);
+  assert.ok(closingSoon.some((r) => r.g.id === "prot" && r.expiring === true));
+});
+
+test("Today: a stale-source committed role stays, flagged overdue (never silently dropped)", () => {
+  const groups = [
+    { id: "fresh", approved: true, llm_score: 80, last_seen: "2026-07-03" },
+    { id: "stale", approved: true, llm_score: 80, last_seen: "2026-06-13" },
+  ];
+  const opts = staleAwareTodayOpts({ fresh: "to_apply", stale: "to_apply" });
+  const { committed } = selectTodayRoles(groups, opts);
+  const byId = Object.fromEntries(committed.map((r) => [r.g.id, r]));
+  assert.equal(committed.length, 2); // both kept — the user committed to them
+  assert.equal(byId.fresh.overdue, false);
+  assert.equal(byId.stale.overdue, true); // stale source → flagged, not hidden
 });
 
 // ---------------------------------------------------------------------------

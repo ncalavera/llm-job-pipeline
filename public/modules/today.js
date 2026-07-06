@@ -8,12 +8,15 @@
 // (approved roles + live statuses + today's date) — the badge on each block
 // equals the length of the list it labels by construction (guardrail #9).
 //
-//   1. Committed      — status to_apply → mark applied
+//   1. Committed      — status to_apply → mark applied (lapsed rows flagged
+//                       overdue, never dropped — the user committed to them)
 //   2. Awaiting reply — status applied (read-only; awaiting a reply)
 //   3. Liked, undecided — status liked → queue / pass
-//   4. Closing soon   — unseen, score ≥60, deadline ≤7d → like / pass
-//                       + one link-out line counting the weak/unscored deadline
-//                         rows the score gate deliberately hides
+//   4. Closing soon   — protected status='expiring' roles lead (the pipeline
+//                       kept them alive for a decision; flagged source-gone /
+//                       deadline-passed), then unseen score ≥60 deadline ≤7d
+//                       → like / pass; + one link-out line counting the
+//                       weak/unscored deadline rows the score gate hides
 //      Don't let good ones rot — unseen, score ≥60, undecided >7d (hidden when
 //                                empty; costs nothing given the derive shape)
 //   5. Working        — to_research / to_network (read-only in-flight work)
@@ -278,8 +281,8 @@ export function todayGroupHtml(title, items) {
 
 // The honest link-out line below Closing soon: names the weak/unscored roles
 // with a near deadline the score gate hides. There is no deadline-filtered
-// Browse view (DHA-428), so this stays a plain count rather than a link that
-// would open a floor-filtered surface that can't even show these rows.
+// Browse view (DHA-428), so this stays a plain count rather than a link — a
+// bare Browse jump couldn't isolate these rows among everything else it shows.
 export function closingHiddenLine(n) {
   if (!n) return "";
   const parts = [
@@ -372,7 +375,8 @@ export function renderToday() {
       ]
     : [];
 
-  // Block 1 — Committed (to_apply). Past-deadline entries kept, flagged overdue.
+  // Block 1 — Committed (to_apply). Lapsed entries (deadline passed or source
+  // gone stale) kept, flagged overdue — the user committed to them.
   const committedRows = committed.map((r) =>
     todayRowHtml(
       r.g,
@@ -386,10 +390,22 @@ export function renderToday() {
   const likedRows = liked.map((g) =>
     todayRowHtml(g, _deadlineSub(g), likedActions),
   );
-  // Block 4 — Closing soon (score ≥60, deadline ≤7d).
-  const closingRows = closingSoon.map((g) =>
-    todayRowHtml(g, _deadlineSub(g), decideActions),
-  );
+  // Block 4 — Closing soon. Protected 'expiring' rows lead with a why-flag
+  // (deadline passed vs source gone) and Queue/Pass — liking a role that is
+  // already past deadline would lapse it straight to Passed, so queueing to
+  // Committed is the affirmative action here. Plain unseen rows keep the
+  // deadline chip and Like/Pass.
+  const closingRows = closingSoon.map((r) => {
+    if (r.expiring) {
+      const d = daysUntil(r.g.deadline);
+      const why =
+        d != null && d < 0
+          ? T("today_deadline_passed", "deadline passed")
+          : T("today_source_gone", "source gone");
+      return todayRowHtml(r.g, why, likedActions);
+    }
+    return todayRowHtml(r.g, _deadlineSub(r.g), decideActions);
+  });
   // Don't let good ones rot — high-fit, undecided, no near deadline.
   const rotRows = dontRot.map((g) => todayRowHtml(g, null, decideActions));
   // Block 5 — Working (to_research / to_network). Read-only in-flight work.
@@ -407,9 +423,14 @@ export function renderToday() {
     todayCompanyRowHtml(c, companyWritable),
   );
 
-  const closingBlock =
-    todayGroupHtml(T("today_closing", "Closing soon"), closingRows) +
-    closingHiddenLine(closingSoonHidden);
+  // The hidden-count line renders only under a populated Closing-soon block —
+  // an orphan count with no header above it reads as noise. The one exception:
+  // when the whole board is empty the count folds in under the all-clear line,
+  // so the completion state stays honest about what the gate is hiding.
+  const closingBlock = closingRows.length
+    ? todayGroupHtml(T("today_closing", "Closing soon"), closingRows) +
+      closingHiddenLine(closingSoonHidden)
+    : "";
 
   const inbox =
     todayGroupHtml(T("today_committed", "Committed — send it"), committedRows) +
@@ -428,7 +449,8 @@ export function renderToday() {
       escHtml(
         T("today_all_clear", "All clear — nothing needs a decision now."),
       ) +
-      "</p>";
+      "</p>" +
+      closingHiddenLine(closingSoonHidden);
 
   root.innerHTML =
     '<div class="today-header">' +

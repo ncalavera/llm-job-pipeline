@@ -138,6 +138,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "today_networking": "networking",
         "today_overdue": "overdue",
         "today_deadline_in": "deadline in",
+        "today_deadline_passed": "deadline passed",
+        "today_source_gone": "source gone",
         "today_all_clear": "All clear — nothing needs a decision now.",
         # Closing-soon link-out: "<pre> N <post>" — pre is empty in English.
         "today_closing_hidden_pre": "",
@@ -542,6 +544,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "today_networking": "нетворкинг",
         "today_overdue": "просрочено",
         "today_deadline_in": "дедлайн через",
+        "today_deadline_passed": "дедлайн прошёл",
+        "today_source_gone": "источник пропал",
         "today_all_clear": "Всё чисто — сейчас ничего решать не нужно.",
         # Ссылка «скрыто» под «Скоро дедлайн»: "<pre> N <post>".
         "today_closing_hidden_pre": "ещё",

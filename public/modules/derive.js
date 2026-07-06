@@ -286,10 +286,17 @@ function _undecidedAge(g, opts) {
 // Injected opts:
 //   isApproved(g), getStatus(g), isLiveRole(g), daysUntil(dateStr), soonDays.
 // Returns:
-//   committed:   [{ g, overdue }]  status to_apply (past-deadline kept, flagged)
+//   committed:   [{ g, overdue }]  status to_apply. Never dropped for lapsing —
+//                                  a committed role whose deadline passed or
+//                                  whose source went stale stays, flagged.
 //   awaiting:    [g]               status applied (awaiting a reply)
 //   liked:       [g]               status liked, still live (expired ones drop)
-//   closingSoon: [g]               unseen, score ≥60, deadline within soonDays
+//   closingSoon: [{ g, expiring }] "about to disappear, decide now": protected
+//                                  status='expiring' roles lead (expiring:true —
+//                                  never score-gated, never dropped for
+//                                  staleness: they exist to demand a decision),
+//                                  then unseen score ≥60 with deadline within
+//                                  soonDays.
 //   closingSoonHidden: N           unseen low/unscored roles with a near
 //                                  deadline the score gate deliberately hides
 //   dontRot:     [g]               unseen, score ≥60, undecided >soonDays, no
@@ -310,7 +317,9 @@ export function selectTodayRoles(groups, opts) {
     const dleft = opts.daysUntil(g.deadline);
 
     if (status === "to_apply") {
-      committed.push({ g, overdue: dleft != null && dleft < 0 });
+      // Overdue = no longer live (deadline passed or source stale). The row is
+      // kept — the user committed to it — but flagged so lapsing is visible.
+      committed.push({ g, overdue: !opts.isLiveRole(g) });
       continue;
     }
     if (status === "applied") {
@@ -325,6 +334,14 @@ export function selectTodayRoles(groups, opts) {
       if (opts.isLiveRole(g)) working.push(g);
       continue;
     }
+    if (status === "expiring") {
+      // Protected status: the pipeline flipped a high-fit role to 'expiring'
+      // instead of archiving it (source gone / deadline passed) precisely so
+      // it surfaces here for an explicit decision. Same product meaning as
+      // Closing soon — "about to disappear" — so it leads that block.
+      closingSoon.push({ g, expiring: true });
+      continue;
+    }
     if (status !== "unseen") continue;
 
     const soon = dleft != null && dleft >= 0 && dleft <= opts.soonDays;
@@ -332,7 +349,7 @@ export function selectTodayRoles(groups, opts) {
     if (soon) {
       // A near deadline routes to Closing soon (score-gated) or, when the role
       // is weak/unscored, to the honest link-out count below the block.
-      if (scored) closingSoon.push(g);
+      if (scored) closingSoon.push({ g, expiring: false });
       else closingSoonHidden += 1;
       continue;
     }
@@ -356,7 +373,12 @@ export function selectTodayRoles(groups, opts) {
   committed.sort((a, b) => byDeadline(a.g, b.g));
   awaiting.sort(byScoreDesc);
   liked.sort(byDeadline);
-  closingSoon.sort(byDeadline);
+  // Protected expiring rows lead (they're already lapsing), then soonest
+  // deadline first within each half.
+  closingSoon.sort((a, b) => {
+    if (a.expiring !== b.expiring) return a.expiring ? -1 : 1;
+    return byDeadline(a.g, b.g);
+  });
   working.sort(byScoreDesc);
   dontRot.sort(byScoreDesc);
 
