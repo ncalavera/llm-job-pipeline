@@ -126,6 +126,43 @@ def test_migrated_schema_has_us_eligibility_column(backend):
     assert value == "outside_us_ok"
 
 
+def test_migrated_schema_has_status_reason_column(backend):
+    """vacancy.status_reason -- migration 0014, shipped as a dialect pair --
+    must exist and round-trip on both backends after the chain runs. Written
+    by archive_board_vacancies (scripts/sources.py disable-board) to record
+    why a board-disable archived a still-unseen row."""
+    dal = backend
+    company_id = dal.ensure_company("Fictive Robotics Guild", status="active")
+    dal.get_conn().commit()
+
+    conn = dal.get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO vacancy
+               (dedup_hash, company_id, title, first_seen, last_seen, status, status_reason)
+           VALUES (%s, %s, %s, %s, %s, 'archived', %s)""",
+        (
+            "parity-status-reason-hash",
+            company_id,
+            "Programme Lead",
+            "2026-01-01",
+            "2026-01-01",
+            "board_disabled",
+        ),
+    )
+    cur.close()
+    conn.commit()
+
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT status_reason FROM vacancy WHERE dedup_hash = %s",
+        ("parity-status-reason-hash",),
+    )
+    (value,) = cur.fetchone()
+    cur.close()
+    assert value == "board_disabled"
+
+
 # ---------------------------------------------------------------------------
 # Direct side-by-side: both backends bootstrapped in ONE test, columns diffed
 # ---------------------------------------------------------------------------

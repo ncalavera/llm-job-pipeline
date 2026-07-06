@@ -80,6 +80,7 @@ class Vacancy(BaseModel):
     llm_summary: Optional[str] = None
     llm_reasoning: Optional[str] = None
     status: VacancyStatus = VacancyStatus.unseen
+    status_reason: Optional[str] = None
     status_updated_at: Optional[datetime] = None
     first_seen: date
     last_seen: date

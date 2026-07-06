@@ -1,0 +1,13 @@
+-- 0014_add_vacancy_status_reason — record why a vacancy row was archived.
+--
+-- Disabling a job board (scripts/sources.py disable-board) needs to archive
+-- that board's still-unseen vacancies so they stop lingering forever -- the
+-- existing gone-from-source sweep only runs on a direct-ATS re-fetch and
+-- never covers boards. This adds the same status_reason column the
+-- `company` table already carries (see sql/schema.sql) to `vacancy`, so the
+-- archive can record why in place rather than inventing a second tracking
+-- mechanism. Free-text, no CHECK constraint, mirroring company.status_reason.
+--
+-- Guarded with IF NOT EXISTS so replaying the chain against a DB that already
+-- has the column is a clean no-op (matches 0006/0009/0011/0013).
+ALTER TABLE vacancy ADD COLUMN IF NOT EXISTS status_reason TEXT;
