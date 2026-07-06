@@ -9,13 +9,36 @@ scrollback is gone.
 
 Best-effort, exactly like ``run_status.py``: a history write must NEVER break the
 daily run (STRATEGY goal 1). Every DB touch is wrapped; a failure (table missing
-on a not-yet-migrated DB, outage, unexpected shape) is swallowed after a rollback
-so it can't poison the driver's shared connection. The read helper
-:func:`recent_new_vacancies` feeds the end-of-run expected-range check (DHA-415)
-and likewise degrades to an empty history rather than raising.
+on a not-yet-migrated DB, outage, unexpected shape) never raises — after a
+rollback so it can't poison the driver's shared connection. But NOT silently:
+best-effort with zero trace would defeat BUG-3 (history would just never
+accumulate, and the health check would say "no baseline yet" forever with no
+hint why), so the first failure per process prints ONE stderr warning naming the
+exception. The read helper :func:`recent_new_vacancies` feeds the end-of-run
+expected-range check (DHA-415) and likewise degrades to an empty history.
 """
 
 from __future__ import annotations
+
+import sys
+
+# One warning per process: enough to make a broken history loud without spamming
+# a line after every stage transition of the same run.
+_warned = False
+
+
+def _warn_once(op: str, exc: Exception) -> None:
+    global _warned
+    if _warned:
+        return
+    _warned = True
+    print(
+        f"  ⚠  pipeline_run history {op} failed ({type(exc).__name__}: {exc}) — "
+        "the run continues, but no durable history accumulates until this is fixed "
+        "(missing table? run scripts/migrate.py).",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def _status_of(state: dict) -> str:
@@ -117,9 +140,11 @@ def record(state: dict, boards: str | None = None, counts: dict | None = None) -
             )
         conn.commit()
         cur.close()
-    except Exception:
+    except Exception as exc:
         # A history write must never break the run; undo the partial write so the
-        # driver's shared connection is not left in a poisoned transaction.
+        # driver's shared connection is not left in a poisoned transaction — but
+        # say so once, or BUG-3 quietly comes back as an always-empty history.
+        _warn_once("write", exc)
         if conn is not None:
             try:
                 conn.rollback()
@@ -130,7 +155,7 @@ def record(state: dict, boards: str | None = None, counts: dict | None = None) -
 def recent_new_vacancies(limit: int = 10, exclude_run_id: str | None = None) -> list[int]:
     """The ``new_vacancies`` counter of the last ``limit`` FINISHED runs (newest
     first), excluding ``exclude_run_id`` (this run). Feeds the expected-range
-    check. Returns ``[]`` on any failure — no history simply means no verdict."""
+    check. Returns ``[]`` on any failure (warned once) — no history, no verdict."""
     try:
         from db_conn import get_conn
 
@@ -144,5 +169,6 @@ def recent_new_vacancies(limit: int = 10, exclude_run_id: str | None = None) -> 
         rows = cur.fetchall()
         cur.close()
         return [int(r[0]) for r in rows if r and r[0] is not None]
-    except Exception:
+    except Exception as exc:
+        _warn_once("read", exc)
         return []

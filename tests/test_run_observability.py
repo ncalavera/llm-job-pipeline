@@ -116,6 +116,40 @@ def test_card_no_run(card):
     assert card.render() == "no run in progress"
 
 
+def test_card_surfaces_an_errored_stage(card):
+    """After a crash the card must say WHICH stage errored, not 'no run in
+    progress' — an errored stage is where the run stopped."""
+    st = _state(run_id="R4", running=None)
+    st["stages"] = [
+        {"name": "validate_profile", "status": "done"},
+        {"name": "fetch", "status": "error", "started_at": "2026-07-06T09:00:00"},
+    ]
+    _write(card.STATE_PATH, st)
+    out = card.render()
+    assert "fetch" in out and "error" in out and "✗" in out
+
+
+def test_card_prefers_error_over_a_bound_live_heartbeat(card):
+    """A stage that crashed mid-heartbeat: the driver board (error) is more
+    current than the stage's own last heartbeat — show the error."""
+    st = _state(run_id="R5", running=None)
+    st["stages"] = [{"name": "fetch", "status": "error", "started_at": "2026-07-06T09:00:00"}]
+    _write(card.STATE_PATH, st)
+    _write(
+        card.STATUS_PATH,
+        {
+            "run_id": "R5",
+            "stage": "fetch",
+            "finished": False,
+            "total": 85,
+            "done": 18,
+            "started_at": "2026-07-06T09:00:00",
+        },
+    )
+    out = card.render()
+    assert "error" in out and "18/85" not in out
+
+
 # ---------------------------------------------------------------------------
 # run_status — heartbeats carry the run id from the env
 # ---------------------------------------------------------------------------
@@ -251,16 +285,22 @@ def test_recent_new_vacancies_returns_finished_history(monkeypatch, tmp_path):
     assert sorted(hist) == [40, 55]
 
 
-def test_record_is_best_effort_without_table(monkeypatch, tmp_path):
+def test_record_is_best_effort_without_table(monkeypatch, tmp_path, capsys):
     """No pipeline_run table (DB not yet migrated) must NOT raise — a history
-    write can never break the daily run."""
+    write can never break the daily run. But not SILENTLY either: the first
+    failure per process prints one stderr warning (else history would just
+    never accumulate with zero trace, quietly re-opening BUG-3)."""
     db = tmp_path / "jobsearch.db"
     _force_sqlite(monkeypatch, db)
     import pipeline_run
 
-    # No table created — record must swallow the error silently.
+    # No table created — record must not raise, and must warn exactly ONCE.
+    pipeline_run.record({"run_id": "x", "stages": []}, counts={})
     pipeline_run.record({"run_id": "x", "stages": []}, counts={})
     assert pipeline_run.recent_new_vacancies(exclude_run_id="x") == []
+    err = capsys.readouterr().err
+    assert err.count("pipeline_run history") == 1
+    assert "no durable history" in err
 
 
 # ---------------------------------------------------------------------------

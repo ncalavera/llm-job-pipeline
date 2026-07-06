@@ -61,9 +61,13 @@ def _load(path: Path):
 
 
 def _active_stage(state: dict) -> dict | None:
-    """The stage the driver is on now: the first one still running or gated."""
+    """The stage the driver is on now: the first one running, gated, or errored.
+
+    "error" counts as active: it is where the run STOPPED, and hiding it would
+    make a crashed run read as "no run in progress". At most one stage can be in
+    any of these states — an error/gate halts the driver."""
     for s in state.get("stages", []):
-        if s.get("status") in ("running", "blocked_gate"):
+        if s.get("status") in ("running", "blocked_gate", "error"):
             return s
     return None
 
@@ -103,6 +107,8 @@ def _driver_card(state: dict) -> str | None:
     elapsed = _fmt_elapsed(active.get("started_at", ""))
     if active.get("status") == "blocked_gate":
         return f"{stage:<6} ⏸ paused at gate · {elapsed}"
+    if active.get("status") == "error":
+        return f"{stage:<6} ✗ error · {elapsed}"
     return f"{stage:<6} … starting · {elapsed}"
 
 
@@ -122,10 +128,13 @@ def render() -> str:
     # A heartbeat is only trustworthy when it belongs to THIS run. Otherwise it
     # is a leftover from a previous run — ignore it and show the driver's board.
     if bound:
-        # If the driver has moved on to a gate, the stage board is more current
-        # than a long stage's finished heartbeat — prefer it.
+        # If the driver has moved on to a gate — or a stage crashed — the stage
+        # board is more current than the stage's own heartbeat; prefer it.
         active = _active_stage(state) if state else None
-        if status.get("finished") and active and active.get("status") == "blocked_gate":
+        if active and (
+            active.get("status") == "error"
+            or (status.get("finished") and active.get("status") == "blocked_gate")
+        ):
             return _driver_card(state)
         return _live_card(status)
 
