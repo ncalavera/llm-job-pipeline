@@ -81,7 +81,7 @@ def test_final_summary_explains_every_number(monkeypatch, tmp_path, capsys):
 
     state = rd._new_state(rd.Opts())
     rd._stage(state, "publish")["note"] = "published to public/data.js"
-    rd._print_summary(state)
+    rd._print_summary(state, rd.Opts())
 
     out = capsys.readouterr().out
     # Every figure arrives with the word that explains it (English persona).

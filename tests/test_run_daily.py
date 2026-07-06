@@ -796,7 +796,7 @@ def test_corrupt_state_resume_does_not_lie_no_run(rd, monkeypatch, capsys):
     """--resume on a present-but-unreadable checkpoint must NOT report "No run
     to resume" (which would send the user off to start fresh and lose it)."""
     rd.STATE_PATH.write_text("{ corrupt json ", encoding="utf-8")
-    monkeypatch.setattr(rd, "drive", lambda state, opts: rd.EXIT_DONE)
+    monkeypatch.setattr(rd, "drive", lambda state, opts, observe=False: rd.EXIT_DONE)
 
     rc = rd.main(["--resume"])
     out = capsys.readouterr()
@@ -812,7 +812,7 @@ def test_corrupt_state_bare_run_does_not_clobber(rd, monkeypatch, capsys):
     fresh run and overwrite the (possibly recoverable) file."""
     rd.STATE_PATH.write_text("{ corrupt json ", encoding="utf-8")
     # If the guard fails and it proceeds, drive is a no-op so no real work runs.
-    monkeypatch.setattr(rd, "drive", lambda state, opts: rd.EXIT_DONE)
+    monkeypatch.setattr(rd, "drive", lambda state, opts, observe=False: rd.EXIT_DONE)
 
     rc = rd.main([])
     out = capsys.readouterr()
@@ -828,14 +828,14 @@ def test_corrupt_state_new_run_is_allowed_to_discard(rd, monkeypatch, capsys):
     rd.STATE_PATH.write_text("{ corrupt json ", encoding="utf-8")
     captured = {}
 
-    def fake_drive(state, opts):
+    def fake_drive(state, opts, observe=False):
         captured["state"] = state  # the corrupt guard let us build a fresh state
         return rd.EXIT_DONE
 
     monkeypatch.setattr(rd, "drive", fake_drive)
     monkeypatch.setattr(rd, "_resolve_boards", lambda b: None)
     monkeypatch.setattr(rd, "_print_run_banner", lambda opts: None)
-    monkeypatch.setattr(rd, "_print_summary", lambda state: None)
+    monkeypatch.setattr(rd, "_print_summary", lambda state, opts: None)
 
     rc = rd.main(["--new"])
     out = capsys.readouterr()
@@ -922,12 +922,12 @@ def test_bare_run_auto_resumes_with_a_loud_banner(rd, monkeypatch, capsys):
     state = _unfinished_run_on_disk(rd)
     seen = {}
 
-    def fake_drive(s, o):
+    def fake_drive(s, o, observe=False):
         seen["state"] = s
         return rd.EXIT_DONE
 
     monkeypatch.setattr(rd, "drive", fake_drive)
-    monkeypatch.setattr(rd, "_print_summary", lambda s: None)
+    monkeypatch.setattr(rd, "_print_summary", lambda s, opts: None)
 
     rc = rd.main([])
     out = capsys.readouterr().out
@@ -943,7 +943,7 @@ def test_bare_run_with_full_rescore_aborts_instead_of_silently_ignoring(rd, monk
     stale resume with the flag silently dropped."""
     state = _unfinished_run_on_disk(rd)
     ran = {"drive": False}
-    monkeypatch.setattr(rd, "drive", lambda s, o: ran.__setitem__("drive", True) or rd.EXIT_DONE)
+    monkeypatch.setattr(rd, "drive", lambda s, o, observe=False: ran.__setitem__("drive", True) or rd.EXIT_DONE)
 
     rc = rd.main(["--full-rescore"])
     out = capsys.readouterr()
@@ -956,7 +956,7 @@ def test_bare_run_with_full_rescore_aborts_instead_of_silently_ignoring(rd, monk
 
 def test_bare_run_with_boards_aborts_instead_of_silently_ignoring(rd, monkeypatch, capsys):
     _unfinished_run_on_disk(rd)
-    monkeypatch.setattr(rd, "drive", lambda s, o: rd.EXIT_DONE)
+    monkeypatch.setattr(rd, "drive", lambda s, o, observe=False: rd.EXIT_DONE)
 
     rc = rd.main(["--boards", "80k_hours"])
     out = capsys.readouterr()
@@ -969,8 +969,8 @@ def test_bare_run_no_publish_still_auto_resumes(rd, monkeypatch, capsys):
     run resumes and applies it."""
     _unfinished_run_on_disk(rd)
     captured = {}
-    monkeypatch.setattr(rd, "drive", lambda s, o: captured.__setitem__("opts", o) or rd.EXIT_DONE)
-    monkeypatch.setattr(rd, "_print_summary", lambda s: None)
+    monkeypatch.setattr(rd, "drive", lambda s, o, observe=False: captured.__setitem__("opts", o) or rd.EXIT_DONE)
+    monkeypatch.setattr(rd, "_print_summary", lambda s, opts: None)
 
     rc = rd.main(["--no-publish"])
     assert rc == rd.EXIT_DONE
