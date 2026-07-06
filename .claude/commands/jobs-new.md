@@ -220,3 +220,31 @@ local `public/data.js`. Both go through the same driver — no mode branching.
   stages are not re-run.
 - **Never** run `fetch_vacancies.py --report-only` from a git worktree (it
   clobbers the main copy's `public/data.js`) — use `--no-publish`.
+
+---
+
+## Bug-log routine (every run)
+
+Treat each `/jobs-new` run as a self-iterating loop that also hunts for pipeline
+bugs. Standing routine, no need to be asked:
+
+1. **Open a bug log at the start** — `docs/jobs-new-bugs-<YYYY-MM-DD>.md` (the
+   `docs/` tree is gitignored except a whitelist, so it stays local). Append as
+   you go; don't wait until the end.
+2. **Log every bug you hit** during the run — a stage crash, a scraper returning
+   0 valid jobs when the page clearly has roles, a stale/nonsensical progress
+   card, a wrong count, a driver exit that doesn't match reality, a payload that
+   won't parse. One entry each: what happened, expected, impact, repro, suspected
+   cause, severity. Fix inline only if it's blocking the run; otherwise log and
+   keep going.
+3. **At the end, route the bugs where your profile says** — read the
+   `## BUG_TRACKER` section of `config/user_profile.md`. It names your issue
+   tracker and destination (e.g. a Linear team, a GitHub repo, an Obsidian
+   inbox). File ONE item there collecting that run's bugs, linking the log file,
+   one checkbox per bug. If the section is empty or absent (the shipped default),
+   the bug log file IS the record — don't invent a tracker; just tell the user
+   where the log is.
+
+Distinguish a *bug* (the pipeline misbehaved) from *expected noise* (a company
+genuinely has no open roles, a board legitimately empty) — only real defects go
+in the log.

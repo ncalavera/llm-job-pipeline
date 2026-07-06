@@ -298,3 +298,22 @@ when you run `/jobs-review apply`.
 -->
 
 (your case bank lives in JOBSEARCH_PRIVATE_DIR/case_bank — see the note above)
+
+## BUG_TRACKER
+
+<!--
+Where /jobs-new files the bugs it finds during a run. Every run writes a bug log
+to docs/jobs-new-bugs-<date>.md; at the end it also opens ONE item in the tracker
+you name here, linking that log.
+
+LEAVE THIS EMPTY (the shipped default) and there is no tracker step — the dated
+log file is the record. Fill it only if you actually track issues somewhere.
+
+Free text: name the tool and the exact destination so the agent knows where to
+file. Examples:
+  - "Linear, team <Your Team> (key <KEY>)"
+  - "GitHub issues in <owner>/<repo>, label: pipeline-bug"
+  - "Obsidian, append to vault/inbox/jobs-bugs.md"
+-->
+
+(empty — bugs stay in the dated log file only)
