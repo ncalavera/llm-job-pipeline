@@ -122,3 +122,36 @@ const SYNC_LABEL_KEYS = {
 export function syncStatusLabelKey(status) {
   return SYNC_LABEL_KEYS[status] || SYNC_LABEL_KEYS.checking;
 }
+
+// =============================================================================
+// Fallback banner (DHA-422) — a prominent, dismissible notice that the page is
+// running off the baked public/data.js snapshot, not live /api/vacancies.
+//
+// Deliberately keyed on bootstrap.js's boot-time `source` ("fallback"), NOT on
+// the sync-status machine above: `state.sync.status` also turns "stale" after
+// a few polling blips on an otherwise-live session (SYNC_STALE_AFTER) — that's
+// a live-loaded page whose refresh is lagging, not the offline snapshot this
+// banner warns about. `source` is set once in boot() and never changes for the
+// life of the page, so it's the honest signal for "are we even looking at
+// data.js".
+// =============================================================================
+
+// A fallback snapshot older than this reads as a warning, not an info note —
+// ~48h, per DHA-422.
+export const FALLBACK_STALE_AFTER_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * Decide the fallback banner's state. Pure — unit-tested without DOM/Date.now.
+ * @param {string} source - window.__DASHBOARD_SYNC_SOURCE__ ("live"|"fallback"|…)
+ * @param {string|null|undefined} lastUpdated - config.last_updated (ISO), absent on a pre-stamp bake
+ * @param {number} now - Date.now(), injected for deterministic tests
+ * @returns {{show: boolean, level: "info"|"warning", age: "known"|"unknown"}}
+ */
+export function fallbackBannerState(source, lastUpdated, now) {
+  if (source !== "fallback")
+    return { show: false, level: "info", age: "known" };
+  const t = lastUpdated ? Date.parse(lastUpdated) : NaN;
+  if (Number.isNaN(t)) return { show: true, level: "warning", age: "unknown" };
+  const isStale = now - t > FALLBACK_STALE_AFTER_MS;
+  return { show: true, level: isStale ? "warning" : "info", age: "known" };
+}

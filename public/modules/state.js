@@ -34,6 +34,14 @@ export const API_BASE =
     ? location.origin
     : config.api_base || "";
 
+// How the initial payload was sourced (bootstrap.js's boot()), stashed on
+// window before this module loads. "fallback" means the baked public/data.js
+// was used because /api/vacancies wasn't available — the fallback banner
+// (nav.js's fallbackBannerState, DHA-422) reads this directly rather than the
+// sync-status machine below, since that machine's "stale" also covers a
+// live-loaded session with a few polling blips, which is a different thing.
+export const dashboardSource = window.__DASHBOARD_SYNC_SOURCE__;
+
 // O(1) lookup maps
 export const groupsById = new Map(groups.map((g) => [g.id, g]));
 // Archived rows live in their OWN index, deliberately NOT in groupsById: the

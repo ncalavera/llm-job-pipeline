@@ -17,6 +17,8 @@ import {
   initialSyncState,
   nextSyncState,
   syncStatusLabelKey,
+  FALLBACK_STALE_AFTER_MS,
+  fallbackBannerState,
 } from "./nav.js";
 
 test("there are exactly six top-nav sections, in order", () => {
@@ -172,4 +174,77 @@ test("syncStatusLabelKey maps every known status; unknown falls back to checking
   assert.equal(syncStatusLabelKey("stale"), "sync_stale");
   assert.equal(syncStatusLabelKey("error"), "sync_error");
   assert.equal(syncStatusLabelKey("nonsense"), "sync_checking");
+});
+
+// --- Fallback banner (DHA-422) -----------------------------------------------
+
+const NOW = Date.parse("2026-07-06T12:00:00Z");
+
+test("no banner when the source is live, regardless of the stamp", () => {
+  assert.deepEqual(fallbackBannerState("live", "2026-07-06T00:00:00Z", NOW), {
+    show: false,
+    level: "info",
+    age: "known",
+  });
+  assert.deepEqual(fallbackBannerState("live", null, NOW), {
+    show: false,
+    level: "info",
+    age: "known",
+  });
+});
+
+test("no banner for a hard error either — that's a full-page stop, not a fallback render", () => {
+  assert.equal(fallbackBannerState("error", null, NOW).show, false);
+});
+
+test("fallback with a fresh stamp (<48h old): info banner, known age", () => {
+  const oneHourAgo = new Date(NOW - 60 * 60 * 1000).toISOString();
+  assert.deepEqual(fallbackBannerState("fallback", oneHourAgo, NOW), {
+    show: true,
+    level: "info",
+    age: "known",
+  });
+});
+
+test("fallback exactly at the 48h boundary is still info, not warning", () => {
+  const exactly48hAgo = new Date(NOW - FALLBACK_STALE_AFTER_MS).toISOString();
+  assert.equal(
+    fallbackBannerState("fallback", exactly48hAgo, NOW).level,
+    "info",
+  );
+});
+
+test("fallback with a stamp older than 48h: warning banner, known age", () => {
+  const fortyNineHoursAgo = new Date(NOW - 49 * 60 * 60 * 1000).toISOString();
+  assert.deepEqual(fallbackBannerState("fallback", fortyNineHoursAgo, NOW), {
+    show: true,
+    level: "warning",
+    age: "known",
+  });
+});
+
+test("fallback with no stamp at all (old pre-DHA-422 bake): warning banner, unknown age", () => {
+  assert.deepEqual(fallbackBannerState("fallback", null, NOW), {
+    show: true,
+    level: "warning",
+    age: "unknown",
+  });
+  assert.deepEqual(fallbackBannerState("fallback", undefined, NOW), {
+    show: true,
+    level: "warning",
+    age: "unknown",
+  });
+  assert.deepEqual(fallbackBannerState("fallback", "", NOW), {
+    show: true,
+    level: "warning",
+    age: "unknown",
+  });
+});
+
+test("fallback with an unparseable stamp is treated the same as no stamp", () => {
+  assert.deepEqual(fallbackBannerState("fallback", "not-a-date", NOW), {
+    show: true,
+    level: "warning",
+    age: "unknown",
+  });
 });
