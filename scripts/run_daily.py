@@ -416,6 +416,23 @@ def _vacancy_scores(target_ids: list[str]) -> dict[str, int]:
     return out
 
 
+def _vacancy_scored_by(target_ids: list[str]) -> dict[str, str]:
+    """Current ``scored_by`` model tier for each target member id — the
+    same-model guard reads this so a role already scored by the STRONG model is
+    never re-sent to it (see ``select_escalation_payloads``). Missing/unset
+    values (pre-migration installs, or a row with no score yet) are simply
+    absent."""
+    from database_supabase import load_vacancies
+
+    vacs = load_vacancies(include_candidate_companies=True, include_inactive_companies=True)
+    out: dict[str, str] = {}
+    for vid in target_ids:
+        v = vacs.get(vid)
+        if v and v.get("scored_by"):
+            out[vid] = v["scored_by"]
+    return out
+
+
 def _reset_escalation_scores(member_ids: list[str]) -> None:
     """Null the cheap screen score for the finalists so the escalate phase reuses
     the same IS-NULL idempotency the screen phase uses. Commits — the
@@ -608,22 +625,35 @@ def resolve_scoring_limit(full_rescore: bool) -> tuple[int | None, str | None]:
 
 
 def select_escalation_payloads(
-    payloads: list, scores_by_member: dict[str, int], threshold: int
+    payloads: list,
+    scores_by_member: dict[str, int],
+    threshold: int,
+    scored_by_member: dict[str, str] | None = None,
+    escalate_model: str | None = None,
 ) -> list:
     """The finalists for the strong pass: screen payloads whose cheap
     score reached ``threshold``. A role escalates if any of its member vacancies
     scored at/above the floor (members of one deduped role share a score). Roles
     with no recorded screen score (e.g. archived at save time) never escalate.
-    Pure — unit-tested directly; the escalation set is always a SUBSET of the
-    screened set, so the strong pass can never cost more than the cheap one.
+
+    Same-model guard: when ``scored_by_member`` + ``escalate_model`` are
+    given, a role is EXCLUDED if any of its members' current score already came
+    from ``escalate_model`` — that role was already scored by the strong model
+    (e.g. a stale run-state, or a profile changed mid-run), so re-sending it
+    would pay for an identical result. Pure — unit-tested directly; the
+    escalation set is always a SUBSET of the screened set, so the strong pass
+    can never cost more than the cheap one.
     """
+    scored_by_member = scored_by_member or {}
     out = []
     for p in payloads:
-        vals = [
-            scores_by_member[str(m)] for m in p.get("member_ids", []) if str(m) in scores_by_member
-        ]
-        if vals and max(vals) >= threshold:
-            out.append(p)
+        member_ids = [str(m) for m in p.get("member_ids", [])]
+        vals = [scores_by_member[m] for m in member_ids if m in scores_by_member]
+        if not (vals and max(vals) >= threshold):
+            continue
+        if escalate_model and any(scored_by_member.get(m) == escalate_model for m in member_ids):
+            continue
+        out.append(p)
     return out
 
 
@@ -797,9 +827,18 @@ def _vacancy_gate_text(
     payloads: list, model: str, pass_kind: str, threshold: int | None = None
 ) -> str:
     """Instructions for a vacancy-scoring gate, tailored to which two-pass pass
-    it is. ``pass_kind`` is 'screen' (cheap, everything), 'escalate'
-    (strong, finalists only) or 'rescore' (the deliberate full re-score)."""
-    if pass_kind == "screen":
+    it is. ``pass_kind`` is 'screen' (cheap, first pass of a real two-pass run),
+    'single' (screen_model == scoring_model — ONE pass, no escalate gate),
+    'escalate' (strong, finalists only) or 'rescore' (the deliberate
+    full re-score)."""
+    if pass_kind == "single":
+        head = (
+            f'SCORE pass — score {len(payloads)} new vacancy(ies) with "{model}". Your '
+            f'profile\'s [## VOLUME] screen_model and scoring_model are BOTH "{model}", so '
+            f"this run does ONE pass — there is no escalate gate, and no role is sent back "
+            f'to "{model}" a second time.'
+        )
+    elif pass_kind == "screen":
         head = (
             f"SCREEN pass — score {len(payloads)} new vacancy(ies) with the CHEAP model "
             f'"{model}" (from your profile\'s [## VOLUME] screen_model). This is the fast, '
@@ -811,8 +850,8 @@ def _vacancy_gate_text(
         head = (
             f"ESCALATION pass — re-score {len(payloads)} finalist(s) with the STRONG model "
             f'"{model}" (from your profile\'s [## VOLUME] scoring_model). Only roles that cleared '
-            f"the escalation threshold{floor} are here; everything else keeps its cheap screen "
-            f"score, sorted out of view."
+            f'the escalation threshold{floor} and were NOT already scored by "{model}" are '
+            f"here; everything else keeps its cheap screen score, sorted out of view."
         )
     else:  # rescore — the deliberate full re-score one-shot (cap lifted)
         head = (
@@ -829,6 +868,12 @@ def _vacancy_gate_text(
         f'finished work) — pass --scored-by "{model}" so the score\'s provenance is\n'
         "recorded (a kept-cheap score must never look identical to a confirmed one):\n"
         f'  python3 scripts/score_vacancies.py --save --scored-by "{model}" < chunk.json\n\n'
+        "If you saved each subagent's raw result to its own file, pass them as\n"
+        "--files instead of assembling one JSON array — a malformed file (a kill\n"
+        "mid-write, an unescaped quote) is then named and skipped, the rest still\n"
+        "save (BUG-5), instead of one bad file failing the whole batch:\n"
+        f'  python3 scripts/score_vacancies.py --save --scored-by "{model}" '
+        "--files r1.json r2.json ...\n\n"
         "Flat per-vacancy fields to save: member_ids, org, title, score, reasoning,\n"
         "tags, hard_requirements, short_summary. Then --resume — the driver\n"
         "re-checks and re-prompts only for any vacancy still unscored."
@@ -842,6 +887,10 @@ def _company_gate_text(payloads: list) -> str:
         f"+ user_msg. 1 company = 1 subagent; at most 5 at a time (rolling waves).\n\n"
         f"Wrap each result under 'enrichment' and save incrementally:\n"
         f"  python3 scripts/score_companies.py --save < chunk.json\n\n"
+        f"If you saved each subagent's raw result to its own file, pass them as\n"
+        f"--files instead — a malformed file is then named and skipped, the rest\n"
+        f"still save (BUG-5), instead of one bad file failing the whole batch:\n"
+        f"  python3 scripts/score_companies.py --save --files r1.json r2.json ...\n\n"
         f"Scored companies land in Companies -> Pending for approval (deeper review\n"
         f"in /jobs-review companies --status candidate). Then --resume.\n\n"
         f"These payloads were built from primary-source company_evidence collected\n"
@@ -1148,6 +1197,15 @@ def _h_vacancy_scoring(state, entry, opts):
     the STRONG model re-scores only the finalists that clear the calibrated
     escalation floor; everything else keeps its cheap score, sorted out of view.
 
+    When the profile's ``screen_model`` and ``scoring_model`` are the
+    SAME tier, the escalate gate would just re-send a role to the model that
+    already scored it — same result, paid twice. In that case the run does
+    ONE pass and says so explicitly (no escalate gate at all). Even in a real
+    two-pass run, a role whose current score already came from the escalate
+    model (``vacancy.scored_by``) is never re-sent to it — a defensive guard
+    for a stale run-state or a profile changed mid-run (``select_escalation_
+    payloads``).
+
     The split is deterministic Python; the agent only supplies scores at the two
     gates. ``--resume`` works mid-screen AND mid-escalate because both phases use
     the same ``llm_score IS NULL`` idempotency: at the screen->escalate handshake
@@ -1164,6 +1222,10 @@ def _h_vacancy_scoring(state, entry, opts):
         scoring_model,
         screen_model,
     )
+
+    strong_model = scoring_model()
+    cheap_model = screen_model()
+    single_pass = cheap_model == strong_model
 
     # ---- First entry: emit the SCREEN pass (or a full-rescore one-shot) ----
     if not entry.get("emitted"):
@@ -1197,15 +1259,19 @@ def _h_vacancy_scoring(state, entry, opts):
                 "action": "score_vacancies",
                 "count": len(payloads),
                 "payload_path": str(VAC_PAYLOAD_PATH),
-                "instructions": _vacancy_gate_text(payloads, scoring_model(), "rescore"),
+                "instructions": _vacancy_gate_text(payloads, strong_model, "rescore"),
             }
 
         entry["phase"] = "screen"
+        if single_pass:
+            entry["single_pass"] = True
         return "gate", {
             "action": "score_vacancies",
             "count": len(payloads),
             "payload_path": str(VAC_PAYLOAD_PATH),
-            "instructions": _vacancy_gate_text(payloads, screen_model(), "screen"),
+            "instructions": _vacancy_gate_text(
+                payloads, cheap_model, "single" if single_pass else "screen"
+            ),
         }
 
     if entry.get("oneshot"):
@@ -1217,8 +1283,9 @@ def _h_vacancy_scoring(state, entry, opts):
 
     payloads = _read_payload(VAC_PAYLOAD_PATH)
     phase = entry.get("phase", "screen")
+    single_pass = entry.get("single_pass", False)
 
-    # ---- SCREEN phase: cheap model scores everything ----
+    # ---- SCREEN (or SINGLE) phase: the first (and maybe only) pass ----
     if phase == "screen":
         remaining_ids = _unscored_vacancy_ids(entry.get("target_ids", []))
         remaining = [
@@ -1231,8 +1298,33 @@ def _h_vacancy_scoring(state, entry, opts):
                 "action": "score_vacancies",
                 "count": len(remaining),
                 "payload_path": str(VAC_PAYLOAD_PATH),
-                "instructions": _vacancy_gate_text(remaining, screen_model(), "screen"),
+                "instructions": _vacancy_gate_text(
+                    remaining, cheap_model, "single" if single_pass else "screen"
+                ),
             }
+
+        screened = len(payloads)
+
+        # screen_model == scoring_model -> one pass, no escalate gate.
+        if single_pass:
+            # Durable run history reads screen_counts from this stage entry
+            # (run observability) — a single-pass run must record its
+            # scored count too, not just the two-pass path. kept_cheap mirrors
+            # the two-pass invariant (screened == escalated + kept_cheap):
+            # every role keeps its one (and only) score.
+            entry["screen_counts"] = {
+                "screened": screened,
+                "escalated": 0,
+                "kept_cheap": screened,
+                "threshold": None,
+                "already_strong": 0,
+            }
+            run_status.finish()
+            return (
+                "advance",
+                f'single-pass scoring complete — {screened} scored with "{strong_model}" '
+                "(screen_model == scoring_model; no escalate gate needed)",
+            )
 
         # Screen complete — pick the finalists for the strong pass.
         threshold = escalation_threshold()
@@ -1240,21 +1332,28 @@ def _h_vacancy_scoring(state, entry, opts):
         if threshold_warn:
             print(threshold_warn, flush=True)
         scores = _vacancy_scores(entry.get("target_ids", []))
-        escalate = select_escalation_payloads(payloads, scores, threshold)
-        screened = len(payloads)
+        scored_by = _vacancy_scored_by(entry.get("target_ids", []))
+        cleared_floor = select_escalation_payloads(payloads, scores, threshold)
+        escalate = select_escalation_payloads(payloads, scores, threshold, scored_by, strong_model)
+        already_strong = len(cleared_floor) - len(escalate)
         n_esc = len(escalate)
         entry["screen_counts"] = {
             "screened": screened,
             "escalated": n_esc,
             "kept_cheap": screened - n_esc,
             "threshold": threshold,
+            "already_strong": already_strong,
         }
         if not escalate:
             run_status.finish()
+            if already_strong:
+                why = f'{already_strong} already scored by "{strong_model}" (not re-sent)'
+            else:
+                why = f"none scored >= {threshold}"
             return (
                 "advance",
-                f"two-pass scoring complete — screened {screened} with the cheap model, "
-                f"0 escalated (none scored >= {threshold}); {screened} kept their cheap score",
+                f'two-pass scoring complete — screened {screened} with "{cheap_model}", '
+                f'0 escalated to "{strong_model}" ({why}); {screened} kept their cheap score',
             )
         esc_member_ids = [str(m) for p in escalate for m in p.get("member_ids", [])]
         _reset_escalation_scores(esc_member_ids)
@@ -1266,7 +1365,7 @@ def _h_vacancy_scoring(state, entry, opts):
             "action": "score_vacancies",
             "count": len(escalate),
             "payload_path": str(VAC_PAYLOAD_PATH),
-            "instructions": _vacancy_gate_text(escalate, scoring_model(), "escalate", threshold),
+            "instructions": _vacancy_gate_text(escalate, strong_model, "escalate", threshold),
         }
 
     # ---- ESCALATE phase: strong model re-scores the finalists ----
@@ -1287,15 +1386,21 @@ def _h_vacancy_scoring(state, entry, opts):
             "action": "score_vacancies",
             "count": len(remaining),
             "payload_path": str(VAC_PAYLOAD_PATH),
-            "instructions": _vacancy_gate_text(remaining, scoring_model(), "escalate", threshold),
+            "instructions": _vacancy_gate_text(remaining, strong_model, "escalate", threshold),
         }
     run_status.finish()
     c = entry.get("screen_counts", {})
+    already_strong = c.get("already_strong") or 0
+    skip_note = (
+        f', {already_strong} already scored by "{strong_model}" and skipped'
+        if already_strong
+        else ""
+    )
     return (
         "advance",
-        f"two-pass scoring complete — screened {c.get('screened', '?')} with the cheap model, "
-        f"escalated {c.get('escalated', '?')} to the strong model (screen score >= "
-        f"{c.get('threshold', '?')}), {c.get('kept_cheap', '?')} kept their cheap score",
+        f'two-pass scoring complete — screened {c.get("screened", "?")} with "{cheap_model}", '
+        f'escalated {c.get("escalated", "?")} to "{strong_model}" (screen score >= '
+        f"{c.get('threshold', '?')}{skip_note}), {c.get('kept_cheap', '?')} kept their cheap score",
     )
 
 

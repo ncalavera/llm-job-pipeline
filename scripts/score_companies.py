@@ -52,6 +52,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip auto_review_candidates() — scored companies stay 'candidate'",
     )
+    parser.add_argument(
+        "--files",
+        nargs="+",
+        metavar="FILE",
+        help="With --save: read individual result files instead of stdin, "
+        "tolerating a malformed one (BUG-5) — a bad file is named and skipped, "
+        "the rest still save.",
+    )
     return parser
 
 
@@ -626,15 +634,49 @@ def cmd_local(args):
 # ---------------------------------------------------------------------------
 
 
-def cmd_save(_args):
-    """Read scored results from stdin JSON, save to DB."""
+def cmd_save(args):
+    """Read scored results from stdin JSON (or --files), save to DB.
+
+    With --files, each result file is parsed independently via
+    llm_json.read_result_files — a malformed one (truncated by a kill,
+    unescaped quotes) is named and skipped, never failing the rest of the
+    batch (BUG-5). Without --files, stdin must still be one valid JSON blob
+    (a single bad entry there corrupts the surrounding array syntax and can't
+    be split apart after the fact) — that failure is reported clearly instead
+    of crashing with a raw traceback.
+    """
     from db_conn import get_conn
     from database_supabase import auto_review_candidates
     from db_backend import Json
+    from llm_json import read_result_files
 
-    data = json.load(sys.stdin)
+    bad_files: list[str] = []
+    files = getattr(args, "files", None)
+    if files:
+        data, bad_files = read_result_files(files)
+        if bad_files:
+            print(
+                f"WARNING: {len(bad_files)} malformed result file(s) skipped — re-score these:",
+                file=sys.stderr,
+            )
+            for b in bad_files:
+                print(f"  - {b}", file=sys.stderr)
+    else:
+        try:
+            data = json.load(sys.stdin)
+        except json.JSONDecodeError as exc:
+            print(
+                f"ERROR: stdin is not valid JSON ({exc}) — nothing saved. Save "
+                "each subagent's raw output to its own file and pass "
+                "--files f1.json f2.json ... so one malformed result doesn't "
+                "block the rest.",
+                file=sys.stderr,
+            )
+            return
+
     if not data:
-        print("No results to save.")
+        if not bad_files:
+            print("No results to save.")
         return
 
     conn = get_conn()
@@ -751,7 +793,7 @@ def cmd_save(_args):
 
     # Auto-review scored companies
     review = {"approved": [], "rejected": [], "pending": []}
-    if saved > 0 and not getattr(_args, "no_auto_review", False):
+    if saved > 0 and not getattr(args, "no_auto_review", False):
         review = auto_review_candidates()
         # auto_review_candidates stages its UPDATEs; the caller commits (DAL
         # contract). Without this the approve/reject changes roll back at exit.
@@ -759,10 +801,13 @@ def cmd_save(_args):
 
     approved = len(review.get("approved", []))
     rejected = len(review.get("rejected", []))
-    print(
+    summary = (
         f"Saved {saved}/{len(data)} enrichments ({errors} errors). "
         f"Auto-review: {approved} approved, {rejected} rejected."
     )
+    if bad_files:
+        summary += f" Skipped {len(bad_files)} malformed file(s) — see warnings above."
+    print(summary)
 
 
 # ---------------------------------------------------------------------------

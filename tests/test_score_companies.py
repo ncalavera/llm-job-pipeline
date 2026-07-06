@@ -212,3 +212,48 @@ def test_cmd_save_persists_on_sqlite(sc):
     assert saved["mission_fit"]["alignment_label"] == "ok"
     assert saved["about"]["description"] == "x"
     assert saved["about"]["about_source"] == "llm_subagent"
+
+
+# ---------------------------------------------------------------------------
+# cmd_save — BUG-5: one malformed result file must not kill the whole batch
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_save_files_mode_skips_malformed_and_saves_rest(sc, tmp_path, capsys):
+    """--files reads each company result file independently: a malformed one
+    (truncated by a spend-limit kill) is named and skipped, the rest still
+    save — matches the observed BUG-5 failure (c27/c39/c42 in one run)."""
+    import json
+    import types
+
+    db = sc.dal
+    cid = db.ensure_company("Acme Robotics", status="candidate")
+    db.get_conn().commit()
+
+    good = tmp_path / "c27.json"
+    good.write_text(
+        json.dumps(
+            {
+                "payload_kind": "company",
+                "id": str(cid),
+                "canonical_name": "Acme Robotics",
+                "enrichment": {
+                    "about": {"description": "x", "sector": "Robotics"},
+                    "mission_fit": {"alignment_score": 70, "alignment_label": "ok"},
+                    "alignment_score": 70,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    bad = tmp_path / "c39.json"
+    bad.write_text('{"payload_kind": "company", "canonical_name": "Bad Co",', encoding="utf-8")
+
+    sc.mod.cmd_save(types.SimpleNamespace(no_auto_review=True, files=[str(good), str(bad)]))
+
+    saved = db.load_company_enrichment("Acme Robotics")
+    assert saved["alignment_score"] == 70  # the good file saved despite the bad one
+
+    out = capsys.readouterr()
+    assert "c39.json" in out.err
+    assert "Skipped 1 malformed file" in out.out
