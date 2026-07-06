@@ -112,6 +112,37 @@ STAGE_ORDER = [
 ]
 
 
+# Plain-language "about to" line for each stage, printed at its START so a
+# newcomer can tell what is happening without reading the code (STRATEGY
+# guardrail 4). The finish is reported by the existing per-stage note.
+STAGE_ABOUT = {
+    "validate_profile": "checking your profile is present and personalised",
+    "preflight": "checking the database and whether this is a first run",
+    "onboarding": "onboarding starter companies (first run only)",
+    "learning_review": "offering verdict-driven filter / scoring corrections",
+    "fetch": "pulling new vacancies from your companies and boards",
+    "enrich": "backfilling blind vacancy descriptions",
+    "filter": "quality-filtering the freshly fetched roles",
+    "company_scoring": "WANT-scoring new candidate companies",
+    "vacancy_scoring": "scoring new roles (cheap screen, then strong finalists)",
+    "verdicts": "collecting your like / pass verdicts",
+    "publish": "publishing the dashboard (clean runs only)",
+}
+
+
+# One-line preview of what a GATE will ask for, printed before the run pauses so
+# the operator knows the size of the judgment task up front.
+def _gate_preview(action: str | None, count) -> str:
+    n = count if count is not None else "?"
+    return {
+        "onboard": "onboard starter companies (the pipeline needs a seed list)",
+        "learning_review": f"review {n} verdict-driven proposal(s)",
+        "score_companies": f"WANT-score {n} candidate company(ies)",
+        "score_vacancies": f"score {n} role(s)",
+        "verdicts": f"give a like / pass verdict on {n} role(s)",
+    }.get(action, f"complete a {action} task")
+
+
 @dataclass
 class Opts:
     """Run options — persisted in the state so ``--resume`` keeps them."""
@@ -730,6 +761,10 @@ def _emit_gate(stage: str, payload: dict) -> None:
     print(f"\n{bar}")
     print(f"  ⏸  GATE: {stage} — your judgment is needed")
     print(bar)
+    print(
+        f"  This gate will ask you to: {_gate_preview(payload.get('action'), payload.get('count'))}"
+    )
+    print("")
     print(payload["instructions"].strip())
     if payload.get("payload_path"):
         print(f"\n  Machine-readable task: {payload['payload_path']}")
@@ -763,9 +798,11 @@ Show the user the freshly scored, still-unseen vacancies (highest score first)
 and capture a like / pass / skip verdict for each — writing EACH verdict
 immediately so an interruption keeps captured decisions:
 
-  python3 -c "import sys;sys.path.insert(0,'scripts');\\
-from database_supabase import update_vacancy_status; from db_conn import get_conn;\\
-update_vacancy_status('<VACANCY_ID>','liked'); get_conn().commit()"
+  python3 scripts/vac.py mark <VACANCY_ID> liked
+
+(<VACANCY_ID> may be a UUID prefix, 4+ chars; the command validates the status
+and commits. Do NOT use a `python3 -c` one-liner for this — ad-hoc one-liners
+are not an allowlisted entrypoint, so the prod-write guard blocks their writes.)
 
 Statuses: liked | passed | skipped | to_apply. A plain `passed` means "not for
 me" and calibrates scoring. If instead a role is GARBAGE — it should never have
@@ -1453,14 +1490,75 @@ HANDLERS = {
 # ---------------------------------------------------------------------------
 
 
-def drive(state: dict, opts: Opts) -> int:
-    """Run AUTO stages back-to-back; stop at the first unmet GATE. Idempotent."""
+def _safe_int(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _run_counts(state: dict) -> dict:
+    """Key run-level counters, harvested from stage state + fetch_stats, for the
+    durable pipeline_run row and the end-of-run health check. Best-effort — a
+    missing piece is simply omitted (never raises)."""
+    counts: dict = {}
+    new = _safe_int(_read_fetch_stats().get("total_new"))
+    if new is not None:
+        counts["new_vacancies"] = new
+    try:
+        screened = _stage(state, "vacancy_scoring").get("screen_counts", {}).get("screened")
+        if screened is not None:
+            counts["scored"] = _safe_int(screened)
+    except Exception:
+        pass
+    try:
+        tids = _stage(state, "company_scoring").get("target_ids")
+        if tids is not None:
+            counts["companies_scored"] = len(tids)
+    except Exception:
+        pass
+    return counts
+
+
+def _record_history(state: dict, opts: Opts) -> None:
+    """Persist the run's per-stage snapshot to pipeline_run (best-effort)."""
+    try:
+        import pipeline_run
+
+        pipeline_run.record(state, boards=opts.job_boards, counts=_run_counts(state))
+    except Exception:
+        pass
+
+
+def _announce_start(name: str) -> None:
+    """Print the stage's plain-language start line and stamp the live card so the
+    active stage (with a sane, freshly-reset elapsed) is visible even before a
+    long stage writes its own heartbeat (and a prior run's card can't linger)."""
+    about = STAGE_ABOUT.get(name, "")
+    print(f"\n▶ {name}: {about}" if about else f"\n▶ {name}", flush=True)
+    try:
+        import run_status
+
+        run_status.mark(name, note=about or None)
+    except Exception:
+        pass
+
+
+def drive(state: dict, opts: Opts, observe: bool = False) -> int:
+    """Run AUTO stages back-to-back; stop at the first unmet GATE. Idempotent.
+
+    ``observe`` turns on the reporting side-channels — stage start announcements,
+    the live-card heartbeat, and the durable pipeline_run history. main() sets it
+    for real runs; the stage-machine unit tests call drive() without it so the
+    ordering/gate logic is exercised with no console noise or DB writes."""
     while True:
         idx = state["cursor"]
         if idx >= len(STAGE_ORDER):
             state["finished"] = True
             state["gate"] = None
             _save_state(state)
+            if observe:
+                _record_history(state, opts)
             return EXIT_DONE
 
         name = STAGE_ORDER[idx]
@@ -1468,6 +1566,9 @@ def drive(state: dict, opts: Opts) -> int:
         entry.setdefault("started_at", _now())
         entry["status"] = "running"
         _save_state(state)
+        if observe:
+            _announce_start(name)
+            _record_history(state, opts)
 
         try:
             kind, info = HANDLERS[name](state, entry, opts)
@@ -1475,6 +1576,8 @@ def drive(state: dict, opts: Opts) -> int:
             entry["status"] = "error"
             entry["note"] = f"{type(exc).__name__}: {exc}"
             _save_state(state)
+            if observe:
+                _record_history(state, opts)
             print(f"\n✗ Stage '{name}' crashed: {entry['note']}", file=sys.stderr, flush=True)
             return EXIT_ERROR
 
@@ -1485,7 +1588,11 @@ def drive(state: dict, opts: Opts) -> int:
             state["cursor"] = idx + 1
             state["gate"] = None
             _save_state(state)
-            print(f"  ▸ {name}: {info}", flush=True)
+            if observe:
+                _record_history(state, opts)
+                print(f"  ▸ {name} done ({_age_str(entry.get('started_at'))}): {info}", flush=True)
+            else:
+                print(f"  ▸ {name}: {info}", flush=True)
             continue
 
         if kind == "gate":
@@ -1494,6 +1601,8 @@ def drive(state: dict, opts: Opts) -> int:
             entry["gate"] = info
             state["gate"] = {"stage": name, "action": info.get("action")}
             _save_state(state)
+            if observe:
+                _record_history(state, opts)
             _emit_gate(name, info)
             return EXIT_GATE
 
@@ -1501,6 +1610,8 @@ def drive(state: dict, opts: Opts) -> int:
             entry["status"] = "error"
             entry["note"] = info
             _save_state(state)
+            if observe:
+                _record_history(state, opts)
             print(f"\n✗ Stage '{name}' failed: {info}", file=sys.stderr, flush=True)
             return EXIT_ERROR
 
@@ -1508,6 +1619,8 @@ def drive(state: dict, opts: Opts) -> int:
             entry["status"] = "aborted"
             entry["note"] = info
             _save_state(state)
+            if observe:
+                _record_history(state, opts)
             print(f"\n✗ {info}", file=sys.stderr, flush=True)
             return EXIT_ABORT
 
@@ -1519,7 +1632,59 @@ def drive(state: dict, opts: Opts) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _print_summary(state: dict) -> None:
+def _health_lines(state: dict, opts: Opts) -> list[str]:
+    """The end-of-run expected-range check: an HONEST health signal that
+    catches a silent parser breakage instead of shrugging at a suspicious count.
+
+    Compares this run's key counter (new vacancies) against the recent historical
+    range from pipeline_run (simple min/max over the last K FINISHED runs — no ML)
+    and prints an explicit in-range / OUT-OF-RANGE verdict. Two hard rules fire
+    regardless of history: 0 new while sources are enabled, and every source
+    erroring (which the fetch handler still reports as rc=0 success) — both mean
+    the run is not healthy even though nothing crashed. Best-effort: any failure
+    yields no line rather than a misleading one."""
+    lines: list[str] = []
+    counts = _run_counts(state)
+    new = counts.get("new_vacancies")
+    if new is None:
+        return lines  # fetch never ran (e.g. an early gate) — nothing to judge
+
+    stats = _read_fetch_stats()
+    errored = len(stats.get("errors", {}) or {})
+    orgs = stats.get("orgs", {}) or {}
+    boards_on = bool(opts.job_boards)
+    all_sources_failed = errored > 0 and not any(int(d.get("live", 0) or 0) for d in orgs.values())
+
+    try:
+        import pipeline_run
+
+        history = pipeline_run.recent_new_vacancies(limit=10, exclude_run_id=state.get("run_id"))
+    except Exception:
+        history = []
+
+    if new == 0 and (boards_on or orgs):
+        verdict = (
+            "OUT OF RANGE — 0 new vacancies while sources are enabled; suspect a parser "
+            "breakage (a source silently returning nothing)"
+        )
+    elif all_sources_failed:
+        verdict = f"OUT OF RANGE — every source errored ({errored}); the run is not healthy"
+    elif history:
+        lo, hi = min(history), max(history)
+        if new < lo or new > hi:
+            verdict = (
+                f"OUT OF RANGE — {new} new vs recent {lo}-{hi} over last {len(history)} run(s)"
+            )
+        else:
+            verdict = f"in range — {new} new (recent {lo}-{hi} over last {len(history)} run(s))"
+    else:
+        verdict = f"no baseline yet — {new} new this run (history starts building now)"
+
+    lines.append(f"new vacancies: {verdict}")
+    return lines
+
+
+def _print_summary(state: dict, opts: Opts) -> None:
     stats = _read_fetch_stats()
     new = stats.get("total_new")
     try:
@@ -1547,6 +1712,9 @@ def _print_summary(state: dict) -> None:
     print("  • " + t("summary_verdicts", scored_unseen=scored_unseen, liked=liked))
     print("  • " + t("summary_publish", note=publish_note))
     print("  • " + t("summary_review_hint"))
+    for line in _health_lines(state, opts):
+        mark = "⚠ " if "OUT OF RANGE" in line else "✓ "
+        print(f"  {mark}run health — {line}")
     print(bar, flush=True)
 
 
@@ -1753,13 +1921,25 @@ def main(argv: list[str] | None = None) -> int:
         )
         return EXIT_ABORT
 
+    # Bind everything downstream to THIS run: run_status heartbeats (written by
+    # this process AND its stage subprocesses, which inherit the env) carry the
+    # id, so run_card.py can tell a live card from a prior run's leftover.
+    os.environ["JOBS_RUN_ID"] = str(state.get("run_id", ""))
     if fresh_run:
         _print_run_banner(opts)
+        # Replace any previous run's heartbeat immediately, stamped with this run
+        # id, so a card polled before the first long stage never shows stale state.
+        try:
+            import run_status
 
-    rc = drive(state, opts)
+            run_status.mark("starting", note="preparing the run")
+        except Exception:
+            pass
+
+    rc = drive(state, opts, observe=True)
 
     if rc == EXIT_DONE:
-        _print_summary(state)
+        _print_summary(state, opts)
     elif rc == EXIT_GATE:
         print(
             "\n⏸  Paused for your judgment (see the gate above). "
