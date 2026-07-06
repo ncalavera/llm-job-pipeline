@@ -215,6 +215,12 @@ local `public/data.js`. Both go through the same driver — no mode branching.
 - `--boards "a,b,c"` — extra job boards for THIS run, unioned ON TOP of the
   persisted enabled set (`scripts/sources.py`). Enabled boards fetch every run
   without this flag; use `sources.py enable-board <id>` to make one stick.
+- **Scope one run** without touching persisted state: `--tier S` (or A/B/C)
+  fetches only companies of that importance tier, and `--skip-boards "linkedin"`
+  drops boards from this run's effective set (subtracted after `--boards` and the
+  persisted set resolve). Both apply to a single fetch only — no company tier and
+  no `board.enabled` flag is changed. Example: only S-tier employers on the
+  social-impact boards, no LinkedIn → `--new --tier S --skip-boards linkedin`.
 - `--no-publish` — run every stage but never publish (use from a git worktree).
 - `--full-rescore` — explicit opt-in that LIFTS the per-run scoring cap and
   re-scores far more vacancies, with a loud warning. A normal run keeps the cap

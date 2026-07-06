@@ -937,7 +937,7 @@ def test_corrupt_state_new_run_is_allowed_to_discard(rd, monkeypatch, capsys):
         return rd.EXIT_DONE
 
     monkeypatch.setattr(rd, "drive", fake_drive)
-    monkeypatch.setattr(rd, "_resolve_boards", lambda b: None)
+    monkeypatch.setattr(rd, "_resolve_boards", lambda b, skip=None: None)
     monkeypatch.setattr(rd, "_print_run_banner", lambda opts: None)
     monkeypatch.setattr(rd, "_print_summary", lambda state, opts: None)
 
@@ -1083,3 +1083,126 @@ def test_bare_run_no_publish_still_auto_resumes(rd, monkeypatch, capsys):
     rc = rd.main(["--no-publish"])
     assert rc == rd.EXIT_DONE
     assert captured["opts"].no_publish is True
+
+
+# ---------------------------------------------------------------------------
+# Per-run scoping: --tier (fetch scope) + --skip-boards (board subtraction).
+# One-run knobs only: the persisted board.enabled set and stored company tiers
+# are never modified.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_boards_skip_subtracts_from_the_effective_set(rd, monkeypatch):
+    _patch_persisted(rd, monkeypatch, ["idealist", "80k_hours", "linkedin"])
+    # --skip-boards drops one persisted board for THIS run only.
+    assert rd._resolve_boards(None, "linkedin") == "idealist,80k_hours"
+
+
+def test_resolve_boards_skip_applies_after_the_union(rd, monkeypatch):
+    _patch_persisted(rd, monkeypatch, ["linkedin"])
+    # --boards adds idealist, --skip-boards removes the persisted linkedin.
+    assert rd._resolve_boards("idealist", "linkedin") == "idealist"
+
+
+def test_resolve_boards_skip_of_everything_is_none(rd, monkeypatch):
+    _patch_persisted(rd, monkeypatch, ["linkedin"])
+    # Subtracting the only board leaves boards-off (None), never an empty string.
+    assert rd._resolve_boards(None, "linkedin") is None
+
+
+def test_resolve_boards_all_with_skip_expands_and_subtracts(rd, monkeypatch):
+    _patch_persisted(rd, monkeypatch, [])
+    import config
+
+    first = next(iter(config._ALL_JOB_BOARDS))
+    result = rd._resolve_boards("all", first)
+    # "all" is materialised to the explicit known-board list so the skip bites.
+    assert result is not None
+    ids = result.split(",")
+    assert first not in ids
+    assert len(ids) == len(config._ALL_JOB_BOARDS) - 1
+
+
+def test_resolve_boards_all_without_skip_stays_the_wildcard(rd, monkeypatch):
+    _patch_persisted(rd, monkeypatch, ["idealist"])
+    # No subtraction -> "all" stays the compact wildcard (byte-identical default).
+    assert rd._resolve_boards("all") == "all"
+
+
+def test_resolve_boards_no_skip_is_unchanged(rd, monkeypatch):
+    _patch_persisted(rd, monkeypatch, ["idealist", "80k_hours"])
+    # The added skip_boards parameter defaults to no subtraction: identical output.
+    assert rd._resolve_boards("reliefweb") == "idealist,80k_hours,reliefweb"
+
+
+def test_resolve_boards_is_read_only_never_persists(rd, monkeypatch):
+    """Resolving a scoped board set must NEVER write the persisted enabled set —
+    the core acceptance that scoping affects one run only."""
+    _patch_persisted(rd, monkeypatch, ["idealist", "linkedin"])
+    import database_supabase
+
+    def _boom(*a, **k):
+        raise AssertionError("set_board_enabled must not be called during resolution")
+
+    monkeypatch.setattr(database_supabase, "set_board_enabled", _boom)
+    assert rd._resolve_boards("80k_hours", "linkedin") == "idealist,80k_hours"
+
+
+def _capture_fetch_cmd(rd, monkeypatch):
+    """Run the fetch handler with the subprocess stubbed, returning its argv."""
+    seen = {}
+
+    def _fake_run(cmd, opts):
+        seen["cmd"] = cmd
+        return 0
+
+    monkeypatch.setattr(rd, "_run", _fake_run)
+    monkeypatch.setattr(rd, "_read_fetch_stats", lambda: {"total_new": 3})
+    return seen
+
+
+def test_fetch_command_includes_tier_when_scoped(rd, monkeypatch):
+    seen = _capture_fetch_cmd(rd, monkeypatch)
+    state = rd._new_state(rd.Opts(tier="S"))
+    kind, _ = rd._h_fetch(state, rd._stage(state, "fetch"), rd.Opts(tier="S"))
+    assert kind == "advance"
+    cmd = seen["cmd"]
+    assert "--tier" in cmd and cmd[cmd.index("--tier") + 1] == "S"
+
+
+def test_fetch_command_has_no_tier_by_default(rd, monkeypatch):
+    seen = _capture_fetch_cmd(rd, monkeypatch)
+    state = rd._new_state(rd.Opts())
+    rd._h_fetch(state, rd._stage(state, "fetch"), rd.Opts())
+    assert "--tier" not in seen["cmd"]
+
+
+def test_new_state_persists_tier_and_resume_restores_it(rd):
+    state = rd._new_state(rd.Opts(tier="A", job_boards="idealist"))
+    assert state["options"]["tier"] == "A"
+    restored = rd._opts_from_state(state)
+    assert restored.tier == "A"
+    assert restored.job_boards == "idealist"
+
+
+def test_fetch_scope_phrase_reflects_tier_and_board_count(rd):
+    phrase = rd._fetch_scope_phrase(rd.Opts(tier="S", job_boards="idealist,80k_hours"))
+    assert "S-tier" in phrase and "2 board(s)" in phrase
+    default = rd._fetch_scope_phrase(rd.Opts())
+    assert "tier" not in default and "boards off" in default
+
+
+def test_tier_flag_parses_and_uppercases(rd):
+    args = rd._parser().parse_args(["--new", "--tier", "s"])
+    assert args.tier == "S"
+
+
+def test_tier_flag_rejects_an_unknown_tier(rd):
+    with pytest.raises(SystemExit):
+        rd._parser().parse_args(["--new", "--tier", "Z"])
+
+
+def test_tier_and_skip_boards_are_ignored_on_resume(rd):
+    args = rd._parser().parse_args(["--resume", "--tier", "S", "--skip-boards", "linkedin"])
+    ignored = rd._ignored_resume_flags(args)
+    assert "--tier" in ignored and "--skip-boards" in ignored
