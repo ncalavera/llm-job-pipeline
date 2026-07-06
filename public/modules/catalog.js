@@ -115,6 +115,15 @@ export function initCatalog() {
     opt.textContent = org;
     sel.appendChild(opt);
   });
+  // Sync the show-all toggle button to the current state (it defaults ON), so
+  // its label + active class match before the user ever clicks it.
+  const showAllBtn = document.querySelector(".browse-showall-btn");
+  if (showAllBtn) {
+    showAllBtn.classList.toggle("active", state.catalogShowAll);
+    showAllBtn.textContent = state.catalogShowAll
+      ? T("catalog_show_top", "Top only")
+      : T("catalog_show_all", "Show all");
+  }
   updateBasketCounts();
   renderCatalog();
 }
