@@ -4,7 +4,7 @@
 -- need per-vacancy provenance. The column already exists in production with
 -- historical data (80,000 Hours, LinkedIn, Impactpool …), but the CURRENT
 -- import path never wrote it because the column was missing from the checked-in
--- schema and the INSERT did not set it (DHA-423). This migration adds it to the
+-- schema and the INSERT did not set it. This migration adds it to the
 -- schema so a fresh install has it, and save_board_vacancies now stamps the
 -- board name on every board-sourced save (direct-ATS saves leave it empty).
 --

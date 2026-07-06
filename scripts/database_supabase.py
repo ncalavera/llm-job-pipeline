@@ -489,7 +489,7 @@ def _row_already_settled(row) -> bool:
     """True when a row already carries a user decision OR a real LLM score.
 
     Re-importing a (company, normalized-title) that maps onto such a row must
-    NOT create a re-scoreable copy (BUG-6): fold onto the settled row instead of
+    NOT create a re-scoreable copy (per-facet dup fix): fold onto the settled row instead of
     forking / inserting a parallel one that scoring would pay to re-evaluate.
     A negative sentinel score (awaiting scoring) does not count as settled.
     """
@@ -536,7 +536,7 @@ def _find_existing_vacancy(
         role's several location-specific URLs onto one row (multi-location
         posting), so a differing URL is not a distinct-role signal.
 
-        TWO exceptions collapse instead of forking (BUG-6):
+        TWO exceptions collapse instead of forking (per-facet dup fix):
           - the canonical hash was already CLAIMED earlier in THIS batch
             (``batch_claimed``): the two are per-facet variants of one posting
             listed once per country in a single fetch (FundraiseUp posts a
@@ -558,7 +558,7 @@ def _find_existing_vacancy(
         apply URLs and none overlap, they are two distinct reqs: skip — UNLESS
         the matched row is already settled (scored/decided), in which case a
         differing URL is just a re-posted variant of a role we already scored
-        and it folds rather than spawning a re-scoreable copy (BUG-6).
+        and it folds rather than spawning a re-scoreable copy (per-facet dup fix).
 
     A claimed inexact match is consumed from the index so a second batch variant
     of the same vanished title forks its own row instead of collapsing again.
@@ -573,7 +573,7 @@ def _find_existing_vacancy(
             # roles colliding on the canonical hash → fork. But fold instead when
             # this is a per-facet variant of a posting already claimed in THIS
             # batch, or the canonical row is already settled (scored/decided):
-            # both cases must not spawn a re-scoreable parallel row (BUG-6).
+            # both cases must not spawn a re-scoreable parallel row (per-facet dup fix).
             if dedup_hash in batch_claimed or _row_already_settled(row):
                 return row, "exact", dedup_hash
             # Re-match this role's own salted row, else fork so the live sibling
@@ -1368,7 +1368,7 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     batch_hashes = {make_vacancy_id(org_name, _sanitize_title(j.get("title", ""))) for j in jobs}
     # Canonical dedup_hashes this batch has already inserted/merged onto — a
     # later same-title job with a per-facet body folds onto that row instead of
-    # forking a parallel per-country copy (BUG-6). Populated AFTER each job so a
+    # forking a parallel per-country copy (per-facet dup fix). Populated AFTER each job so a
     # role's FIRST appearance still uses the normal distinct-sibling fork.
     batch_claimed: set = set()
 
@@ -1530,7 +1530,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
     new_count = 0
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
-    # DHA-423: stamp which board a vacancy came from (board-yield analytics).
+    # Board provenance: stamp which board a vacancy came from (board-yield analytics).
     # Only the direct-ATS path (save_vacancies) leaves it empty. Guarded once so
     # a pre-migration install (no source_board column) still saves, unstamped.
     write_source_board = bool(board_name) and _vacancy_has_column("source_board")
@@ -1552,7 +1552,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
         )
     # Canonical dedup_hashes already inserted/merged in THIS board fetch — a
     # later same-title job with a per-facet body folds rather than forking a
-    # per-country copy (BUG-6). Populated after each job (see save_vacancies).
+    # per-country copy (per-facet dup fix). Populated after each job (see save_vacancies).
     batch_claimed: set = set()
 
     seen_ext_ids: set[str] = set()

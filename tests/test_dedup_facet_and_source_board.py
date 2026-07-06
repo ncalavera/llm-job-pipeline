@@ -1,7 +1,7 @@
-"""BUG-6 (per-facet vacancy dedup + scored-row protection) and DHA-423
-(source_board provenance on board imports).
+"""Per-facet vacancy dedup + scored-row protection, and source_board
+provenance on board imports.
 
-BUG-6: a role posted once per country in a SINGLE fetch (FundraiseUp lists one
+Facet dedup: a role posted once per country in a SINGLE fetch (FundraiseUp lists one
 remote role as up to 8 Greenhouse listings, one per country, each with a
 slightly different body) used to fork into a parallel row per facet because the
 description fingerprints differed. The save layer now folds same-company +
@@ -10,7 +10,7 @@ spawns a re-scoreable copy of a role that is already scored/decided. The title
 normaliser also expands abbreviations (CEO -> Chief Executive Officer), strips
 count parentheticals ("(3 Openings)") and req-id noise ("#12345").
 
-DHA-423: board-sourced saves stamp vacancy.source_board with the board name;
+Board provenance: board-sourced saves stamp vacancy.source_board with the board name;
 direct-ATS saves leave it empty.
 
 Harness mirrors tests/test_save_board_vacancies_characterization.py: conftest
@@ -116,7 +116,7 @@ def _add_source_board_column(dal):
 
 def test_normalizer_expands_ceo_abbreviation(dal):
     """ "…Office of the CEO" and "…Office of the Chief Executive Officer" are one
-    role (the passed@24 vs today miss from BUG-6)."""
+    role (the passed@24 vs today miss from the 2026-07-06 run)."""
     assert dal.make_normalized_id(
         "Org", "Senior Operations Associate, Office of the CEO"
     ) == dal.make_normalized_id(
@@ -150,7 +150,7 @@ def test_normalizer_strips_req_id_noise(dal):
 def test_multi_country_facets_collapse_to_one_row(dal):
     """Same company + same title + remote, three country facets with distinct
     per-country bodies and URLs in ONE board fetch → ONE vacancy whose
-    locations[] carries all three facets (BUG-6 FundraiseUp case)."""
+    locations[] carries all three facets (the per-country multi-post case)."""
     _seed_company(dal, "FacetCo")
     jobs = [
         _job(
@@ -241,7 +241,7 @@ def test_distinct_titles_same_company_stay_two_rows(dal):
 def test_scored_decided_row_is_not_reinserted_for_normalized_variant(dal):
     """A role already PASSED (and scored) as "…Office of the CEO" must absorb a
     later "…Office of the Chief Executive Officer" (different apply URL) rather
-    than spawn a fresh, unscored, re-scoreable row (BUG-6)."""
+    than spawn a fresh, unscored, re-scoreable row."""
     _seed_company(dal, "SettledCo")
     dal.save_vacancies(
         "SettledCo",
@@ -327,7 +327,7 @@ def test_scored_row_absorbs_same_title_new_facet_without_forking(dal):
 
 
 # ===========================================================================
-# 4. DHA-423 — source_board written for board imports, empty for direct ATS
+# 4. source_board written for board imports, empty for direct ATS
 # ===========================================================================
 
 
