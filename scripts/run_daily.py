@@ -272,8 +272,7 @@ def _print_resume_banner(state: dict) -> None:
         )
         print(f"  picks up: at stage '{_resume_stage_name(state)}'", flush=True)
         print(
-            "  To DISCARD this run and start fresh instead: "
-            "python3 scripts/run_daily.py --new",
+            "  To DISCARD this run and start fresh instead: python3 scripts/run_daily.py --new",
             flush=True,
         )
         print(bar, flush=True)
