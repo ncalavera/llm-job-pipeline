@@ -145,9 +145,17 @@ def _gate_preview(action: str | None, count) -> str:
 
 @dataclass
 class Opts:
-    """Run options — persisted in the state so ``--resume`` keeps them."""
+    """Run options — persisted in the state so ``--resume`` keeps them.
+
+    ``job_boards`` is the ALREADY-resolved effective board set for this run
+    (persisted enabled UNION ``--boards`` MINUS ``--skip-boards``); ``tier``
+    scopes the fetch to one importance tier for this run only. Both are one-run
+    scoping knobs — they never touch the persisted board.enabled set or a
+    company's stored status/tier.
+    """
 
     job_boards: str | None = None
+    tier: str | None = None
     full_rescore: bool = False
     no_publish: bool = False
     extra: dict = field(default_factory=dict)
@@ -173,6 +181,7 @@ def _new_state(opts: Opts) -> dict:
         "gate": None,
         "options": {
             "job_boards": opts.job_boards,
+            "tier": opts.tier,
             "full_rescore": opts.full_rescore,
             "no_publish": opts.no_publish,
         },
@@ -224,6 +233,7 @@ def _opts_from_state(state: dict) -> Opts:
     o = state.get("options", {}) or {}
     return Opts(
         job_boards=o.get("job_boards"),
+        tier=o.get("tier"),
         full_rescore=bool(o.get("full_rescore")),
         no_publish=bool(o.get("no_publish")),
     )
@@ -231,11 +241,16 @@ def _opts_from_state(state: dict) -> Opts:
 
 def _ignored_resume_flags(args: argparse.Namespace) -> list[str]:
     """CLI flags whose effect a resume cannot honour: options are frozen at the
-    checkpoint, not re-read from the CLI, so ``--boards`` / ``--full-rescore``
-    have no effect on a resumed run."""
+    checkpoint, not re-read from the CLI, so ``--boards`` / ``--skip-boards`` /
+    ``--tier`` / ``--full-rescore`` have no effect on a resumed run (the fetch
+    they scope has already run)."""
     flags = []
     if args.boards is not None:
         flags.append("--boards")
+    if args.skip_boards is not None:
+        flags.append("--skip-boards")
+    if args.tier is not None:
+        flags.append("--tier")
     if args.full_rescore:
         flags.append("--full-rescore")
     return flags
@@ -482,15 +497,50 @@ def _reset_escalation_scores(member_ids: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_boards(cli_boards: str | None) -> str | None:
+def _board_id_set(raw: str | None) -> set[str]:
+    """The board ids in a comma-separated flag value (blanks dropped)."""
+    return {t.strip() for t in (raw or "").split(",") if t.strip()}
+
+
+def _skip_board_set(raw: str | None) -> tuple[set[str], bool]:
+    """Parse ``--skip-boards`` into ``(ids_to_skip, skip_all)``.
+
+    A typo'd skip that silently no-ops defeats the whole flag — the board still
+    runs and the user never learns — so every token is validated against the
+    known board catalog (the same source config._select_enabled_boards warns
+    from) and an unknown one warns LOUDLY. Warn, don't abort: consistent with
+    how an unknown ``--boards`` id is handled downstream. ``all`` mirrors
+    ``--boards all`` symmetrically: skip every board (boards off this run;
+    companies still fetch)."""
+    tokens = _board_id_set(raw)
+    if not tokens:
+        return set(), False
+    if any(t.lower() == "all" for t in tokens):
+        return tokens, True
+    from config import _ALL_JOB_BOARDS
+
+    for tok in sorted(tokens):
+        if tok not in _ALL_JOB_BOARDS:
+            print(
+                f"  WARNING: unknown board in --skip-boards: {tok} "
+                f"(known: {', '.join(_ALL_JOB_BOARDS)})",
+                file=sys.stderr,
+                flush=True,
+            )
+    return tokens, False
+
+
+def _resolve_boards(cli_boards: str | None, skip_boards: str | None = None) -> str | None:
     """The effective JOB_BOARDS value for a fresh run.
 
     The persisted enabled set (survives sessions -- see
-    database_supabase.set_board_enabled) UNION the manual override (the
-    ``--boards`` flag and any inherited ``JOB_BOARDS`` env), so an enabled board
-    keeps fetching with no reminder while the env var stays an override applied
-    ON TOP. Returns a comma-joined id list, ``"all"`` if any override says all,
-    or ``None`` when nothing is selected (fetch stays boards-off, unchanged).
+    database_supabase.set_board_enabled) UNION the manual add-on override (the
+    ``--boards`` flag and any inherited ``JOB_BOARDS`` env), MINUS the per-run
+    ``--skip-boards`` subtraction, so an enabled board keeps fetching with no
+    reminder, ``--boards`` adds more ON TOP for one run, and ``--skip-boards``
+    drops boards from THIS run only (the persisted set is never written). Returns
+    a comma-joined id list, ``"all"`` if any override says all (and nothing is
+    skipped), or ``None`` when nothing is selected (fetch stays boards-off).
 
     Resolved ONCE per fresh run and frozen into the run state, so ``--resume``
     replays a consistent board set. A schema that predates board persistence (a
@@ -514,7 +564,14 @@ def _resolve_boards(cli_boards: str | None) -> str | None:
     finally:
         _close_db()
 
+    skip, skip_all = _skip_board_set(skip_boards)
+    if skip_all:
+        # --skip-boards all mirrors --boards all: every board is dropped for
+        # THIS run (companies still fetch); the persisted set is untouched.
+        return None
+
     tokens = list(persisted)
+    saw_all = False
     for raw in (cli_boards, os.environ.get("JOB_BOARDS")):
         if not raw:
             continue
@@ -523,10 +580,25 @@ def _resolve_boards(cli_boards: str | None) -> str | None:
             if not tok:
                 continue
             if tok.lower() == "all":
-                return "all"
+                saw_all = True
+                continue
             if tok not in tokens:
                 tokens.append(tok)
 
+    if saw_all:
+        # With nothing to subtract, "all" stays the compact wildcard the fetcher
+        # already understands. When --skip-boards is present we must materialise
+        # "all" to the explicit known-board list so the skip can bite — otherwise
+        # the subtraction would be silently lost against the wildcard.
+        if not skip:
+            return "all"
+        from config import _ALL_JOB_BOARDS
+
+        tokens = [b for b in _ALL_JOB_BOARDS if b not in skip]
+        return ",".join(tokens) if tokens else None
+
+    if skip:
+        tokens = [t for t in tokens if t not in skip]
     return ",".join(tokens) if tokens else None
 
 
@@ -1069,6 +1141,11 @@ def _h_fetch(state, entry, opts):
         "--no-dashboard",
         "--no-auto-enrich",
     ]
+    # Per-run importance-tier scope: fetch_vacancies.py already knows how to keep
+    # only companies of one calculated tier. This scopes the fetch for THIS run
+    # only; no company's stored status/tier is touched.
+    if opts.tier:
+        cmd += ["--tier", opts.tier]
     if state.get("first_run"):
         cmd.append("--no-boards")  # keep the first run fast
     rc = _run(cmd, opts)
@@ -1530,11 +1607,30 @@ def _record_history(state: dict, opts: Opts) -> None:
         pass
 
 
-def _announce_start(name: str) -> None:
+def _fetch_scope_phrase(opts: Opts) -> str:
+    """The fetch stage's start line, made scope-aware so the announcement reflects
+    what THIS run actually pulls — the tier scope and the resolved board count —
+    e.g. 'pulling new S-tier vacancies from your companies across 2 board(s)'."""
+    boards = opts.job_boards
+    if not boards:
+        board_part = "your companies (boards off)"
+    elif boards == "all":
+        board_part = "your companies across all boards"
+    else:
+        n = len([b for b in boards.split(",") if b.strip()])
+        board_part = f"your companies across {n} board(s)"
+    tier_part = f"{opts.tier}-tier " if opts.tier else ""
+    return f"pulling new {tier_part}vacancies from {board_part}"
+
+
+def _announce_start(name: str, opts: Opts) -> None:
     """Print the stage's plain-language start line and stamp the live card so the
     active stage (with a sane, freshly-reset elapsed) is visible even before a
-    long stage writes its own heartbeat (and a prior run's card can't linger)."""
-    about = STAGE_ABOUT.get(name, "")
+    long stage writes its own heartbeat (and a prior run's card can't linger).
+
+    The fetch line is scope-aware (tier + board count); every other stage uses
+    its static STAGE_ABOUT phrasing."""
+    about = _fetch_scope_phrase(opts) if name == "fetch" else STAGE_ABOUT.get(name, "")
     print(f"\n▶ {name}: {about}" if about else f"\n▶ {name}", flush=True)
     try:
         import run_status
@@ -1567,7 +1663,7 @@ def drive(state: dict, opts: Opts, observe: bool = False) -> int:
         entry["status"] = "running"
         _save_state(state)
         if observe:
-            _announce_start(name)
+            _announce_start(name, opts)
             _record_history(state, opts)
 
         try:
@@ -1775,6 +1871,8 @@ def _print_run_banner(opts: Opts) -> None:
         print("  " + t("banner_title"))
         print(bar)
         print("  " + t("banner_active", n=active, cap=vol["max_active_companies"]))
+        if opts.tier:
+            print(f"  Scope: {opts.tier}-tier companies only (this run; stored tiers untouched)")
         print("  " + t("banner_boards", boards=_boards_summary(opts)))
         print("  " + t("banner_scoring", limit=max_per_run(), digest=vol["digest_size"]))
         advice = _overload_advice()
@@ -1825,6 +1923,27 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--skip-boards",
+        type=str,
+        default=None,
+        help=(
+            "Boards to DROP from this run's effective set (e.g. 'linkedin'), subtracted after "
+            "--boards / the persisted enabled set resolve. 'all' skips every board (companies "
+            "still fetch); an unknown board name warns loudly. This run only — the persisted "
+            "enabled set is never modified."
+        ),
+    )
+    p.add_argument(
+        "--tier",
+        type=str.upper,
+        default=None,
+        choices=["S", "A", "B", "C"],
+        help=(
+            "Scope THIS run to companies of one importance tier (S/A/B/C); other tiers are "
+            "skipped for this fetch. One run only — no stored company tier/status is changed."
+        ),
+    )
+    p.add_argument(
         "--full-rescore",
         action="store_true",
         help="Explicit opt-in: LIFT the per-run scoring cap and re-score (loud warning; costly).",
@@ -1863,7 +1982,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.new:
             opts = Opts(
-                job_boards=_resolve_boards(args.boards),
+                job_boards=_resolve_boards(args.boards, args.skip_boards),
+                tier=args.tier,
                 full_rescore=args.full_rescore,
                 no_publish=args.no_publish,
             )
@@ -1904,7 +2024,8 @@ def main(argv: list[str] | None = None) -> int:
                 opts.no_publish = True
         else:
             opts = Opts(
-                job_boards=_resolve_boards(args.boards),
+                job_boards=_resolve_boards(args.boards, args.skip_boards),
+                tier=args.tier,
                 full_rescore=args.full_rescore,
                 no_publish=args.no_publish,
             )

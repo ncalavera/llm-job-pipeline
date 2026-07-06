@@ -388,7 +388,7 @@ def test_drive_without_observe_writes_no_history(rd, monkeypatch):
 def test_drive_with_observe_records_history(rd, monkeypatch):
     calls = []
     monkeypatch.setattr(rd, "_record_history", lambda *a, **k: calls.append(1))
-    monkeypatch.setattr(rd, "_announce_start", lambda name: None)
+    monkeypatch.setattr(rd, "_announce_start", lambda name, opts: None)
     rd.HANDLERS = {name: (lambda s, e, o: ("advance", "ok")) for name in rd.STAGE_ORDER}
     state = rd._new_state(rd.Opts())
     assert rd.drive(state, rd.Opts(), observe=True) == rd.EXIT_DONE
