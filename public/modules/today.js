@@ -1,23 +1,32 @@
 // =============================================================================
-// today.js — the "Today" cockpit: the few things that need a decision today.
+// today.js — the "Today" cockpit: the few things that need a decision now.
 // =============================================================================
 //
-// Three action lists + the decision-SLA health panel:
-//   1. Expiring, needs a decision — status='expiring' + active roles with a
-//      deadline within SOON_DAYS.
-//   2. Ready to send — status='to_apply' (KTD7: v1 keys on status only).
-//   3. New 70+ — roles scoring >= NEW_HIGH_FIT first seen since the last visit
-//      (tracked in localStorage; advances on load).
-// The SLA panel (stuck + weekly leakage) comes from the server-computed
-// VACANCY_DATA.latency_metrics. All display copy resolves through T(); the
-// English fallbacks here keep the public shell Cyrillic-free.
+// DHA-410 rework: six ordered, hide-when-empty action blocks answer "what do I
+// do right now" without scrolling. Order is fixed; a block with zero rows does
+// not render at all (no empty skeletons). Populations derive in derive.js from
+// (approved roles + live statuses + today's date) — the badge on each block
+// equals the length of the list it labels by construction (guardrail #9).
+//
+//   1. Committed      — status to_apply → mark applied
+//   2. Awaiting reply — status applied (read-only; awaiting a reply)
+//   3. Liked, undecided — status liked → queue / pass
+//   4. Closing soon   — unseen, score ≥60, deadline ≤7d → like / pass
+//                       + one link-out line counting the weak/unscored deadline
+//                         rows the score gate deliberately hides
+//      Don't let good ones rot — unseen, score ≥60, undecided >7d (hidden when
+//                                empty; costs nothing given the derive shape)
+//   5. Working        — to_research / to_network (read-only in-flight work)
+//   6. Approve intake — pending candidate companies → approve / pass
+//
+// All display copy resolves through T(); the English fallbacks here keep the
+// public shell Cyrillic-free.
 
 import {
   state,
   groups,
   companiesList,
   getGroupStatus,
-  STATUS_BASKET,
   isGroupCompanyApproved,
   updateStatus,
 } from "./state.js";
@@ -34,25 +43,6 @@ import { T } from "./i18n.js";
 import { selectTodayRoles } from "./derive.js";
 
 const SOON_DAYS = 7; // a deadline this close is "decide now"
-const NEW_HIGH_FIT = 70; // the rarest, loudest tier
-const LAST_VISIT_KEY = "today_last_visit";
-
-// Captured ONCE per page load: the previous visit timestamp. We read it before
-// advancing it, so the "new since last visit" list stays stable while the user
-// is on the tab this session, and clears on the next page load.
-let _prevVisit = null;
-let _visitCaptured = false;
-
-function _captureVisit() {
-  if (_visitCaptured) return;
-  try {
-    _prevVisit = window.localStorage.getItem(LAST_VISIT_KEY);
-    window.localStorage.setItem(LAST_VISIT_KEY, new Date().toISOString());
-  } catch (_) {
-    _prevVisit = null; // private mode / no storage → treat everything as seen
-  }
-  _visitCaptured = true;
-}
 
 // Whole calendar days from today to dateStr (0 = today, negative = past).
 // Exported + pure so the "deadline == today must count as 0, not -1" boundary
@@ -135,8 +125,7 @@ function _actionBtns(g, actions) {
 // Row anatomy (design-protocol.md #6): tinted score tile · title + org/why
 // subline · quiet actions. Pure (no DOM read) so the escaping-regression suite
 // can assert on it directly, same shape as catalogRowHtml/vacancyPageHtml.
-// Clicking anywhere on the row opens the vacancy page (U6); the outbound
-// posting link that used to live here moved there too (R6) — actions keep
+// Clicking anywhere on the row opens the vacancy page; actions keep
 // stopPropagation so they don't also trigger the navigation.
 export function todayRowHtml(g, extra, actions) {
   const score = g.llm_score;
@@ -172,16 +161,68 @@ export function todayRowHtml(g, extra, actions) {
   );
 }
 
+// A pending-company intake row (block 6). Shares the .today-row anatomy so the
+// six blocks read as one template (guardrail #10). The tile carries the tier
+// letter (neutral, not a quality score); approve/pass call the existing global
+// reviewCompany channel — no new endpoint, optimistic + revert-on-failure. The
+// row opens the company profile on click; the buttons stopPropagation.
+export function todayCompanyRowHtml(c, writable) {
+  const tier = (c.calculated_tier || "").toUpperCase();
+  const tileTxt = tier || "—";
+  const slug = jsAttr(c.slug || "");
+  const cid = jsAttr(c.company_id || "");
+  let actions = "";
+  if (writable) {
+    const approve =
+      '<button class="today-act act-apply" onclick="event.stopPropagation();' +
+      "reviewCompany('" +
+      cid +
+      "','approve')\">" +
+      escHtml(T("today_act_approve", "Approve")) +
+      "</button>";
+    const pass =
+      '<button class="today-act act-pass" onclick="event.stopPropagation();' +
+      "reviewCompany('" +
+      cid +
+      "','reject')\">" +
+      escHtml(T("today_act_pass", "Pass")) +
+      "</button>";
+    actions = '<span class="today-actions">' + approve + pass + "</span>";
+  }
+  return (
+    '<div class="today-row today-row--company" data-cid="' +
+    escHtml(c.company_id || "") +
+    '" role="button" tabindex="0" onclick="openCompanyProfile(\'' +
+    slug +
+    "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openCompanyProfile('" +
+    slug +
+    "')}\">" +
+    '<div class="today-row-score vac-score--none">' +
+    escHtml(tileTxt) +
+    "</div>" +
+    '<div class="today-row-body">' +
+    '<div class="today-row-title">' +
+    escHtml(c.name || "") +
+    "</div>" +
+    '<div class="today-row-sub">' +
+    escHtml(T("today_intake_sub", "candidate awaiting review")) +
+    "</div>" +
+    "</div>" +
+    actions +
+    "</div>"
+  );
+}
+
 // Open a row's vacancy detail page. Non-"browse" context: vacancyMoveToApply
-// confirms in place instead of auto-advancing (F3) — Today has no queue to
-// advance through. Exposed on window (app.js) for the row's onclick.
+// confirms in place instead of auto-advancing — Today has no queue to advance
+// through. Exposed on window (app.js) for the row's onclick.
 export function openTodayRow(id) {
   window.openVacancyRoute(id, { context: "today" });
 }
 
 // Inline triage: flip a role's status through the same optimistic-update chain
 // the catalog uses. statusChanged (app.js) re-renders the Today tab, so the row
-// disappears once its new status no longer matches any list.
+// disappears once its new status no longer matches any block.
 export function todayAction(canonId, memberIds, action) {
   const target =
     action === "like"
@@ -204,9 +245,8 @@ export function todayAction(canonId, memberIds, action) {
   }
 }
 
-// Section-label rhythm shared by the three main groups and every rail block
-// (design-protocol.md #6): uppercase tracked title + quiet mono count. `count`
-// is omitted (no digit shown) when null, for rail blocks that don't carry one.
+// Section-label rhythm shared by every block (design-protocol.md #6):
+// uppercase tracked title + quiet mono count.
 function _sectionLabel(title, count) {
   const countHtml =
     count != null
@@ -221,223 +261,174 @@ function _sectionLabel(title, count) {
   );
 }
 
-// One of the three main groups: label + rows, or label + the (always-shown)
-// empty note — a group never disappears, so its count stays visible even at
-// zero (current behavior, preserved).
-export function todayGroupHtml(title, items, emptyMsg) {
-  const body = items.length
-    ? '<div class="today-rows">' + items.join("") + "</div>"
-    : '<p class="today-empty">' + escHtml(emptyMsg) + "</p>";
+// One block: label + rows. Hidden entirely when it has no rows (DHA-410: no
+// empty skeletons) — returns "" so the caller can concat blocks blindly. The
+// count shown always equals items.length (badge == list).
+export function todayGroupHtml(title, items) {
+  if (!items.length) return "";
   return (
     '<div class="today-group">' +
     _sectionLabel(title, items.length) +
-    body +
+    '<div class="today-rows">' +
+    items.join("") +
+    "</div>" +
     "</div>"
   );
 }
 
-// Rail block wrapper: a section label (with an optional mono count, same
-// helper the main groups use) followed by its body.
-function _railBlock(label, count, bodyHtml) {
-  return (
-    '<div class="today-rail-block">' +
-    _sectionLabel(label, count) +
-    bodyHtml +
-    "</div>"
-  );
-}
-
-function _metricsPanel() {
-  const m =
-    (window.VACANCY_DATA && window.VACANCY_DATA.latency_metrics) || null;
-  if (!m) return "";
-  const stuckItems = (m.stuck || []).map(
-    (s) =>
-      '<div class="today-stuck-row"><span class="today-stuck-score q-' +
-      qualityBand(s.llm_score) +
-      '">' +
-      escHtml(String(s.llm_score)) +
-      '</span><div class="today-stuck-body"><div class="today-stuck-title">' +
-      escHtml(s.org + " — " + s.title) +
-      '</div><div class="today-stuck-meta">' +
-      s.days_stuck +
-      " " +
-      escHtml(T("today_days_stuck", "d without movement")) +
-      " (" +
-      escHtml(s.status) +
-      ")</div></div></div>",
-  );
-  const stuckBody = stuckItems.length
-    ? '<div class="today-stuck-rows">' + stuckItems.join("") + "</div>"
-    : '<p class="today-empty">' +
-      escHtml(T("today_nothing_stuck", "nothing stuck")) +
-      "</p>";
-  const leak = m.leakage_count || 0;
-  const leakLine =
-    '<p class="today-leakage' +
-    (leak > 0 ? " warn" : "") +
-    '">' +
-    escHtml(T("today_leakage", "leaked to archive/passed this week, roles")) +
-    " " +
-    String(m.sla_score) +
-    "+: <strong>" +
-    leak +
-    "</strong></p>";
-  const hint =
-    '<p class="today-sla-hint">' +
-    escHtml(T("today_stuck_hint", "stuck (>=")) +
-    String(m.sla_score) +
-    ", >" +
-    String(m.sla_days) +
-    escHtml(T("today_stuck_hint_tail", " d):")) +
-    "</p>";
-  return _railBlock(
-    T("today_sla", "Decision discipline"),
-    m.stuck_count || 0,
-    hint + stuckBody + leakLine,
-  );
+// The honest link-out line below Closing soon: names the weak/unscored roles
+// with a near deadline the score gate hides. There is no deadline-filtered
+// Browse view (DHA-428), so this stays a plain count rather than a link that
+// would open a floor-filtered surface that can't even show these rows.
+export function closingHiddenLine(n) {
+  if (!n) return "";
+  const parts = [
+    T("today_closing_hidden_pre", ""),
+    String(n),
+    T("today_closing_hidden_post", "more deadlines at weak or unscored roles"),
+  ].filter(Boolean);
+  return '<p class="today-linkout">' + escHtml(parts.join(" ")) + "</p>";
 }
 
 // Companies still awaiting the user's approve/reject decision. Honors any live
-// approval the user just made this session (state.companyStatuses, keyed by
-// company_id) over the baked snapshot's review_status. A one-line nudge with a
-// cobalt text link that jumps straight to the Companies → Pending Review tab.
-function _pendingCompaniesBlock() {
-  const pending = (companiesList || []).filter(function (c) {
+// approval made this session (state.companyStatuses, keyed by company_id) over
+// the baked snapshot's review_status, so an approved company leaves the block
+// immediately. Rendered as inline intake rows (block 6).
+function _pendingCompanies() {
+  return (companiesList || []).filter(function (c) {
     const live = state.companyStatuses && state.companyStatuses[c.company_id];
     const status = live || c.review_status;
     return status === "pending";
   });
-  if (!pending.length) return "";
-  const label = T("today_pending_companies", "Companies awaiting approval");
-  const cta = T("today_pending_companies_cta", "Review");
-  return _railBlock(
-    label,
-    pending.length,
-    '<button type="button" class="today-pending-cta" ' +
-      "onclick=\"switchMode('companies');switchCompanySubTab('pending')\">" +
-      escHtml(cta) +
-      " →</button>",
-  );
 }
 
-// The learning cycle's "there are verdicts to fold in next run" hint, from the
-// server-computed VACANCY_DATA.learning (deterministic, no LLM). Only shown when
-// something is actually pending; the counts are the only thing baked (never the
-// proposal text).
-function _learningBlock() {
-  const l = (window.VACANCY_DATA && window.VACANCY_DATA.learning) || null;
-  if (!l || !l.pending) return "";
-  const parts = [];
-  if (l.verdicts) {
-    parts.push(
-      "<strong>" +
-        escHtml(String(l.verdicts)) +
-        "</strong> " +
-        escHtml(
-          T("today_learning_pending", "verdicts to review on the next run"),
-        ),
-    );
-  }
-  if (l.proposals) {
-    parts.push(
-      "<strong>" +
-        escHtml(String(l.proposals)) +
-        "</strong> " +
-        escHtml(T("today_learning_proposals", "proposals ready")),
-    );
-  }
-  if (!parts.length) return "";
-  return _railBlock(
-    T("today_learning", "Learning cycle"),
-    null,
-    '<p class="today-learning-line">' + parts.join(" · ") + "</p>",
-  );
+// The Today deadline subline, or null when a role has no live future deadline.
+function _deadlineSub(g) {
+  const d = daysUntil(g.deadline);
+  return d != null && d >= 0
+    ? T("today_deadline_in", "deadline in") + " " + d + "d"
+    : null;
 }
 
 export function renderToday() {
   const root = document.getElementById("todaySection");
   if (!root) return;
-  _captureVisit();
 
-  // Membership + urgency ordering are a pure derivation of (approved roles +
-  // live statuses + today's date) — see derive.js. Today is deliberately NOT
-  // score-floored: a role the user has liked/queued must surface regardless of
-  // score. The lists react to likes/passes and today's expiry with no run.
+  // Membership + ordering are a pure derivation of (approved roles + live
+  // statuses + today's date) — see derive.js selectTodayRoles. Today is
+  // deliberately NOT score-floored: a role the user liked/queued surfaces
+  // regardless of score. The blocks react to likes/passes and today's expiry
+  // with no run.
   const {
-    expiring: expiringRows,
-    ready: readyRows,
-    newHighFit: newRows,
+    committed,
+    awaiting,
+    liked,
+    closingSoon,
+    closingSoonHidden,
+    dontRot,
+    working,
   } = selectTodayRoles(groups, {
     isApproved: isGroupCompanyApproved,
     getStatus: getGroupStatus,
-    basketMap: STATUS_BASKET,
     isLiveRole: _isLiveRole,
     daysUntil,
     soonDays: SOON_DAYS,
-    newHighFit: NEW_HIGH_FIT,
-    prevVisit: _prevVisit,
   });
+
+  // Write affordances render only when the live overlay has loaded; static /
+  // fallback mode (file://) shows read-only rows (KTD7).
+  const writable = state.statusesLoaded;
+  const companyWritable = state.companyStatusesLoaded;
 
   const passAction = {
     action: "pass",
     label: T("today_act_pass", "Pass"),
     cls: "act-pass",
   };
-  const expiringActions = [
-    { action: "apply", label: T("today_act_apply", "Apply"), cls: "act-apply" },
-    passAction,
-  ];
-  const readyActions = [
-    {
-      action: "applied",
-      label: T("today_act_applied", "Mark applied"),
-      cls: "act-apply",
-    },
-    passAction,
-  ];
-  // Plain cobalt text links, no emoji glyphs — the calm sheet aesthetic the
-  // mock shows for every Today row (DHA-412 items #2/#3).
-  const newActions = [
-    {
-      action: "like",
-      label: T("today_act_like", "Like"),
-      cls: "act-like",
-    },
-    passAction,
-  ];
+  const committedActions = writable
+    ? [
+        {
+          action: "applied",
+          label: T("today_act_applied", "Mark applied"),
+          cls: "act-apply",
+        },
+        passAction,
+      ]
+    : [];
+  const likedActions = writable
+    ? [
+        {
+          action: "apply",
+          label: T("today_act_queue", "Queue"),
+          cls: "act-apply",
+        },
+        passAction,
+      ]
+    : [];
+  const decideActions = writable
+    ? [
+        { action: "like", label: T("today_act_like", "Like"), cls: "act-like" },
+        passAction,
+      ]
+    : [];
 
-  const expiring = expiringRows.map((r) =>
+  // Block 1 — Committed (to_apply). Past-deadline entries kept, flagged overdue.
+  const committedRows = committed.map((r) =>
     todayRowHtml(
       r.g,
-      r.kind === "protected"
-        ? T("today_protected", "protected, decide")
-        : T("today_deadline_in", "deadline in") + " " + r.daysLeft + "d",
-      expiringActions,
+      r.overdue ? T("today_overdue", "overdue") : _deadlineSub(r.g),
+      committedActions,
     ),
   );
-  const ready = readyRows.map((g) => todayRowHtml(g, null, readyActions));
-  // The score is already visible on the tile, so unlike the other two groups
-  // this one has no extra "why" text to add — surfacing here at all IS the why.
-  const newHighFit = newRows.map((g) => todayRowHtml(g, null, newActions));
+  // Block 2 — Awaiting reply (applied). Read-only: already sent, nothing to do.
+  const awaitingRows = awaiting.map((g) => todayRowHtml(g, null, []));
+  // Block 3 — Liked, undecided.
+  const likedRows = liked.map((g) =>
+    todayRowHtml(g, _deadlineSub(g), likedActions),
+  );
+  // Block 4 — Closing soon (score ≥60, deadline ≤7d).
+  const closingRows = closingSoon.map((g) =>
+    todayRowHtml(g, _deadlineSub(g), decideActions),
+  );
+  // Don't let good ones rot — high-fit, undecided, no near deadline.
+  const rotRows = dontRot.map((g) => todayRowHtml(g, null, decideActions));
+  // Block 5 — Working (to_research / to_network). Read-only in-flight work.
+  const workingRows = working.map((g) =>
+    todayRowHtml(
+      g,
+      getGroupStatus(g) === "to_research"
+        ? T("today_research", "researching")
+        : T("today_networking", "networking"),
+      [],
+    ),
+  );
+  // Block 6 — Approve intake (pending candidate companies).
+  const intakeRows = _pendingCompanies().map((c) =>
+    todayCompanyRowHtml(c, companyWritable),
+  );
 
-  const main =
-    todayGroupHtml(
-      T("today_expiring", "Expiring, needs a decision"),
-      expiring,
-      T("today_none_action", "nothing needs action"),
-    ) +
-    todayGroupHtml(
-      T("today_ready", "Ready to send"),
-      ready,
-      T("today_none_ready", "nothing ready to send"),
-    ) +
-    todayGroupHtml(
-      T("today_new", "New 70+ since last visit"),
-      newHighFit,
-      T("today_none_new", "nothing new"),
-    );
-  const rail = _metricsPanel() + _pendingCompaniesBlock() + _learningBlock();
+  const closingBlock =
+    todayGroupHtml(T("today_closing", "Closing soon"), closingRows) +
+    closingHiddenLine(closingSoonHidden);
+
+  const inbox =
+    todayGroupHtml(T("today_committed", "Committed — send it"), committedRows) +
+    todayGroupHtml(T("today_awaiting", "Awaiting reply"), awaitingRows) +
+    todayGroupHtml(T("today_liked", "Liked — decide"), likedRows) +
+    closingBlock +
+    todayGroupHtml(T("today_dont_rot", "Don't let good ones rot"), rotRows) +
+    todayGroupHtml(T("today_working", "In progress"), workingRows) +
+    todayGroupHtml(T("today_intake", "Approve intake"), intakeRows);
+
+  // Peak-End: an empty Today is a win, not a void — say so instead of rendering
+  // seven absent blocks and silence.
+  const main = inbox.trim()
+    ? inbox
+    : '<p class="today-allclear">' +
+      escHtml(
+        T("today_all_clear", "All clear — nothing needs a decision now."),
+      ) +
+      "</p>";
 
   root.innerHTML =
     '<div class="today-header">' +
@@ -451,9 +442,6 @@ export function renderToday() {
     '<div class="today-sheet">' +
     '<div class="today-main">' +
     main +
-    "</div>" +
-    '<div class="today-rail">' +
-    rail +
     "</div>" +
     "</div>";
 }

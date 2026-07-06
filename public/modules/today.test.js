@@ -25,8 +25,14 @@ globalThis.window = {
 };
 globalThis.location = { protocol: "file:", origin: "" };
 
-const { daysUntil, todayRowHtml, todayGroupHtml, openTodayRow } =
-  await import("./today.js");
+const {
+  daysUntil,
+  todayRowHtml,
+  todayGroupHtml,
+  openTodayRow,
+  todayCompanyRowHtml,
+  closingHiddenLine,
+} = await import("./today.js");
 
 const DAY = 86400000;
 // Date-only string offset from today, anchored to UTC (toISOString), so the
@@ -145,18 +151,61 @@ test("an id with quotes/HTML is escaped in the data-id AND the onclick attribute
   assert.doesNotMatch(html, /openTodayRow\('g"'\)/);
 });
 
-// --- todayGroupHtml: empty-group rendering (a group never disappears) ------
+// --- todayGroupHtml: hide-when-empty (DHA-410, R1) --------------------------
 
-test("todayGroupHtml: a populated group shows its rows and count", () => {
-  const html = todayGroupHtml("Ready to send", ["<row-html>"], "nothing ready");
-  assert.match(html, /today-section-count">1</);
-  assert.match(html, /today-rows">.*<row-html>/s);
-  assert.doesNotMatch(html, /today-empty/);
+test("todayGroupHtml: a populated group shows its rows, and the count equals the list length (badge == list)", () => {
+  const html = todayGroupHtml("Committed — send it", ["<row-a>", "<row-b>"]);
+  assert.match(html, /today-section-count">2</);
+  assert.match(html, /today-rows">.*<row-a>.*<row-b>/s);
 });
 
-test("todayGroupHtml: an empty group still renders its label (count 0) and the empty note", () => {
-  const html = todayGroupHtml("Ready to send", [], "nothing ready to send");
-  assert.match(html, /today-section-count">0</);
-  assert.match(html, /today-empty">nothing ready to send</);
-  assert.doesNotMatch(html, /today-rows/);
+test("todayGroupHtml: an empty group renders nothing at all — no label, no skeleton (R1)", () => {
+  const html = todayGroupHtml("Committed — send it", []);
+  assert.equal(html, "");
+});
+
+// --- todayCompanyRowHtml: intake rows (block 6, R8) -------------------------
+
+const pendingCompany = {
+  company_id: "c1",
+  name: "GiveWell",
+  slug: "givewell",
+  calculated_tier: "S",
+};
+
+test("todayCompanyRowHtml: writable renders approve + pass calling the reviewCompany channel; opens the profile on click", () => {
+  const html = todayCompanyRowHtml(pendingCompany, true);
+  assert.match(html, /today-row today-row--company/);
+  assert.match(html, /today-row-title">GiveWell</);
+  assert.match(html, /today-row-score vac-score--none">S</); // neutral tier tile
+  assert.match(html, /reviewCompany\('c1','approve'\)/);
+  assert.match(html, /reviewCompany\('c1','reject'\)/);
+  assert.match(html, /onclick="openCompanyProfile\('givewell'\)"/);
+});
+
+test("todayCompanyRowHtml: read-only mode (static) renders no action buttons", () => {
+  const html = todayCompanyRowHtml(pendingCompany, false);
+  assert.doesNotMatch(html, /reviewCompany/);
+  assert.doesNotMatch(html, /today-actions/);
+});
+
+test("todayCompanyRowHtml: a name with HTML is escaped in the title", () => {
+  const html = todayCompanyRowHtml(
+    { ...pendingCompany, name: "<img src=x onerror=alert(1)>" },
+    true,
+  );
+  assert.doesNotMatch(html, /<img src=x/);
+  assert.match(html, /&lt;img src=x/);
+});
+
+// --- closingHiddenLine: the honest link-out count (block 4, R4) -------------
+
+test("closingHiddenLine: zero hidden → nothing renders", () => {
+  assert.equal(closingHiddenLine(0), "");
+});
+
+test("closingHiddenLine: a positive count renders one quiet line containing the number", () => {
+  const html = closingHiddenLine(3);
+  assert.match(html, /today-linkout/);
+  assert.match(html, /3/);
 });

@@ -263,64 +263,110 @@ export function boardYield(groups, opts) {
 }
 
 // ---------------------------------------------------------------------------
-// Today cockpit — the few roles that need a decision now.
+// Today cockpit — the few things that need a decision now (DHA-410 rework).
+//
+// Six ordered, hide-when-empty populations replace the old three-list cockpit.
+// Every population is a pure function of (approved roles + live statuses +
+// today's date), read through the same soon/score gates the rest of the
+// dashboard uses, so a badge always equals the length of the list it labels
+// (guardrail #9). Unlike the discovery surfaces Today is NOT score-floored for
+// acted-on roles — a liked/queued role surfaces regardless of score.
 // ---------------------------------------------------------------------------
 
-// Select the three Today lists from the approved set. Unlike the discovery
-// surfaces, Today is NOT score-floored: a role the user has explicitly acted on
-// (liked / to_apply) must surface regardless of score. Everything else is read
-// live so the lists react to likes/passes and today's expiry with no run.
+// Whole days a role has been sitting undecided, from first_seen to today
+// (opts.daysUntil of a past date is negative, so age = -that). null when
+// first_seen is missing/unparseable — a role we can't age is never "rotting".
+function _undecidedAge(g, opts) {
+  const d = opts.daysUntil(g.first_seen);
+  return d == null ? null : -d;
+}
+
+// Select the Today populations from the approved set.
 //
 // Injected opts:
-//   isApproved(g), getStatus(g), basketMap, isLiveRole(g), daysUntil(dateStr),
-//   soonDays, newHighFit, prevVisit (ISO string or null).
-// Returns { expiring, ready, newHighFit } where:
-//   expiring: [{ g, kind: "protected" | "deadline", daysLeft }] sorted by
-//             urgency (protected first, then soonest deadline),
-//   ready:    [g] sorted by score desc,
-//   newHighFit: [g] sorted by score desc.
+//   isApproved(g), getStatus(g), isLiveRole(g), daysUntil(dateStr), soonDays.
+// Returns:
+//   committed:   [{ g, overdue }]  status to_apply (past-deadline kept, flagged)
+//   awaiting:    [g]               status applied (awaiting a reply)
+//   liked:       [g]               status liked, still live (expired ones drop)
+//   closingSoon: [g]               unseen, score ≥60, deadline within soonDays
+//   closingSoonHidden: N           unseen low/unscored roles with a near
+//                                  deadline the score gate deliberately hides
+//   dontRot:     [g]               unseen, score ≥60, undecided >soonDays, no
+//                                  near deadline (closing-soon wins the overlap)
+//   working:     [g]               status to_research / to_network, still live
 export function selectTodayRoles(groups, opts) {
-  const expiring = [];
-  const ready = [];
-  const newHighFit = [];
+  const committed = [];
+  const awaiting = [];
+  const liked = [];
+  const closingSoon = [];
+  const working = [];
+  const dontRot = [];
+  let closingSoonHidden = 0;
 
   for (const g of groups) {
     if (!opts.isApproved(g)) continue;
     const status = opts.getStatus(g);
-    const basket = opts.basketMap[status] || "unseen";
+    const dleft = opts.daysUntil(g.deadline);
 
-    if (status === "expiring") {
-      expiring.push({ g, kind: "protected", daysLeft: null });
-    } else if (basket === "liked" && opts.isLiveRole(g)) {
-      const dleft = opts.daysUntil(g.deadline);
-      if (dleft != null && dleft >= 0 && dleft <= opts.soonDays) {
-        expiring.push({ g, kind: "deadline", daysLeft: dleft });
-      }
+    if (status === "to_apply") {
+      committed.push({ g, overdue: dleft != null && dleft < 0 });
+      continue;
     }
+    if (status === "applied") {
+      awaiting.push(g);
+      continue;
+    }
+    if (status === "liked") {
+      if (opts.isLiveRole(g)) liked.push(g);
+      continue;
+    }
+    if (status === "to_research" || status === "to_network") {
+      if (opts.isLiveRole(g)) working.push(g);
+      continue;
+    }
+    if (status !== "unseen") continue;
 
-    if (status === "to_apply" && opts.isLiveRole(g)) {
-      ready.push(g);
+    const soon = dleft != null && dleft >= 0 && dleft <= opts.soonDays;
+    const scored = g.llm_score != null && g.llm_score >= APPLYABLE_MIN_SCORE;
+    if (soon) {
+      // A near deadline routes to Closing soon (score-gated) or, when the role
+      // is weak/unscored, to the honest link-out count below the block.
+      if (scored) closingSoon.push(g);
+      else closingSoonHidden += 1;
+      continue;
     }
-
-    if (
-      status === "unseen" &&
-      g.llm_score != null &&
-      g.llm_score >= opts.newHighFit &&
-      g.first_seen &&
-      (!opts.prevVisit || g.first_seen > opts.prevVisit.slice(0, 10)) &&
-      opts.isLiveRole(g)
-    ) {
-      newHighFit.push(g);
-    }
+    // Don't let good ones rot: high-fit roles aged past the soon window with no
+    // near deadline (a near-deadline high-fit role already shows in Closing
+    // soon, so the two never double-count).
+    const age = _undecidedAge(g, opts);
+    if (scored && age != null && age > opts.soonDays) dontRot.push(g);
   }
 
-  // Urgency order: protected (daysLeft null → sort -1) first, then soonest
-  // deadline; the action lists by best fit (score descending).
   const byScoreDesc = (a, b) => (b.llm_score || 0) - (a.llm_score || 0);
-  const urgency = (r) => (r.daysLeft == null ? -1 : r.daysLeft);
-  expiring.sort((a, b) => urgency(a) - urgency(b));
-  ready.sort(byScoreDesc);
-  newHighFit.sort(byScoreDesc);
+  const byDeadline = (a, b) => {
+    const da = opts.daysUntil(a.deadline);
+    const db = opts.daysUntil(b.deadline);
+    if (da == null && db == null) return 0;
+    if (da == null) return 1; // no deadline sorts after a dated one
+    if (db == null) return -1;
+    return da - db;
+  };
 
-  return { expiring, ready, newHighFit };
+  committed.sort((a, b) => byDeadline(a.g, b.g));
+  awaiting.sort(byScoreDesc);
+  liked.sort(byDeadline);
+  closingSoon.sort(byDeadline);
+  working.sort(byScoreDesc);
+  dontRot.sort(byScoreDesc);
+
+  return {
+    committed,
+    awaiting,
+    liked,
+    closingSoon,
+    closingSoonHidden,
+    dontRot,
+    working,
+  };
 }
