@@ -411,9 +411,10 @@ body::after {
    sidebar collapses to an icon rail — hide every text label, the search
    affordance's text, counts, inline sub-items, and the footer's language/sync
    words, keeping just the colourful section icons tappable. Icon tap still
-   opens the section's default leaf (switchVacancies()/switchApplications()
-   unchanged). The narrow-width pill row (vacancySubNav) takes over reaching
-   Vacancies' sub-views instead — Applications has none (post-ship fast fix). */
+   opens the section's default leaf (switchVacancies() unchanged; every other
+   section, Triage included, is a single leaf with no sub-view to remember).
+   The narrow-width pill row (vacancySubNav) takes over reaching Vacancies'
+   sub-views instead. */
 @media (max-width: 899px) {
   .sidebar {
     width: 56px;
@@ -472,7 +473,6 @@ body::after {
 .stats-section,
 .archive-section,
 .boards-section,
-.applications-section,
 .pipeline-section,
 .settings-section {
   background: var(--sky-sheet);
@@ -2268,8 +2268,9 @@ body::after {
   }
 }
 
-/* Applications & research — small blocks in the company profile. Full
-   standalone Applications section is later. */
+/* Applications & research — small blocks in the company profile (the
+   standalone Applications dashboard section this once also fed was deleted,
+   DHA-413; these company-profile blocks are a separate, unrelated feature). */
 .cp-app-list {
   display: flex;
   flex-direction: column;
@@ -2335,8 +2336,9 @@ body::after {
    the sheet that reaches Vacancies' sub-views once the sidebar collapses to
    an icon rail (see the responsive block near the end of this file). Active
    state is still toggled by app.js's switchMode(), via .active instead of an
-   inline display style. Applications had the same row (Applications /
-   Triage) until the post-ship fast fix collapsed its sub-nav entirely. */
+   inline display style. Triage used to share a top-nav section (and this
+   same row style) with the Applications section before it was deleted
+   (DHA-413); Triage is now its own single-leaf section. */
 .vacancy-sub-nav {
   display: none;
   gap: 0;
@@ -2371,12 +2373,9 @@ body::after {
   background: var(--cobalt-tint);
 }
 
-/* Applications section. */
-.applications-section,
 .settings-section {
   display: none;
 }
-.applications-section.active,
 .settings-section.active {
   display: block;
   position: relative;
@@ -2385,7 +2384,7 @@ body::after {
    removed here — settings.js (U14) now emits .settings-header/-header-title/
    -header-sub and .stg-empty instead (EOF block). The display/.active toggle
    above stays: Settings' new markup still lives in the same #settingsSection
-   element, and it's still shared with Applications. */
+   element (it used to be shared with the now-deleted Applications section). */
 
 /* === U10 Geo (redesign) ===================================================
    Geo (`#statsSection`) reuses the shared `.company-table` / `.ct-*` classes
@@ -4163,228 +4162,6 @@ body::after {
   font-size: 11px;
 }
 
-/* === U13 Applied (redesign) ================================================
-   Flat grid table in the new look (DHA-397): header on the material, rows in
-   a sheet, per design-protocol.md #6. The old grouped-by-company `.apps-*`
-   table styling is retired (see the stripped-down shared rules near
-   "Applications section." above); this is a fresh `.apl-*` namespace so the
-   parallel U14 (Settings) unit never touches it. */
-.apl-header {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 2px 10px 12px;
-  flex-wrap: wrap;
-}
-.apl-title {
-  font-size: 16px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  color: var(--sky-text);
-}
-.apl-hint {
-  font-size: 12.5px;
-  color: var(--sky-text-tertiary);
-}
-
-/* --- Status filter chips: cobalt-active recipe, matching Browse's
-   removable-pill language (U5) — cobalt marks the current selection, never
-   a stage/quality meaning (design-protocol.md #1). --- */
-.apl-filter {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 0 10px 12px;
-}
-.apl-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11.5px;
-  font-weight: 600;
-  padding: 3.5px 10px;
-  border-radius: var(--radius-pill);
-  border: none;
-  background: rgba(58, 56, 51, 0.06);
-  color: var(--sky-text-secondary);
-  cursor: pointer;
-  font-family: "Onest", sans-serif;
-}
-.apl-chip:hover {
-  background: rgba(58, 56, 51, 0.1);
-}
-.apl-chip.active {
-  background: var(--cobalt-tint);
-  color: var(--cobalt);
-}
-.apl-chip:focus-visible {
-  outline: 2px solid var(--cobalt);
-  outline-offset: 1px;
-}
-.apl-chip-count {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 10.5px;
-  opacity: 0.85;
-}
-
-/* --- Sheet + grid table. Scroll-guard (R12): the sheet scrolls horizontally
-   at narrow widths; the inner table keeps a min-width so the role column
-   never crushes. --- */
-.apl-sheet {
-  background: var(--sky-sheet);
-  border-radius: var(--radius-sheet);
-  box-shadow:
-    inset 0 0 0 1px var(--sky-hairline),
-    0 1px 3px rgba(58, 56, 51, 0.05);
-  overflow-x: auto;
-  display: flex;
-  flex-direction: column;
-}
-.apl-table {
-  min-width: 700px;
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-}
-.apl-row {
-  display: grid;
-  grid-template-columns: 44px minmax(220px, 1fr) 160px 130px 90px;
-  gap: 12px;
-  align-items: center;
-  padding: 11px 20px;
-  margin: 0 8px;
-  border-radius: var(--radius-row);
-}
-.apl-row-head {
-  padding: 10px 20px 8px;
-  margin: 0;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--sky-text-faint);
-}
-.apl-row:not(.apl-row-head) {
-  cursor: pointer;
-}
-.apl-row:not(.apl-row-head):hover {
-  background: var(--sky-row-hover);
-}
-.apl-row:not(.apl-row-head):focus-visible {
-  outline: 2px solid var(--cobalt);
-  outline-offset: -2px;
-}
-/* An application whose vacancy is no longer live has no route to open (its
-   vacancy page would 404) — dimmed like Archive's read-only rows (U11), the
-   same underlying situation: the role is gone, only the record remains. */
-.apl-row-unlinked {
-  cursor: default;
-  opacity: 0.78;
-}
-.apl-row-unlinked:hover {
-  background: none;
-}
-
-.apl-score {
-  width: 36px;
-  height: 26px;
-  border-radius: var(--radius-tile);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: "JetBrains Mono", monospace;
-  font-size: 12.5px;
-  font-weight: 700;
-}
-.apl-role {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--sky-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-/* Artifact-count badge (parity: the old dedicated Artifacts column, now a
-   compact tag next to the title — full key list is the title tooltip). Quiet
-   by design: it's metadata about the submission, not a quality signal. */
-.apl-artifacts {
-  display: inline-block;
-  font-family: "JetBrains Mono", monospace;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--sky-text-faint);
-  vertical-align: middle;
-}
-.apl-company {
-  font-size: 12.5px;
-  color: var(--sky-text-tertiary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.apl-company-link {
-  border: none;
-  background: none;
-  padding: 0;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.apl-company-link:hover {
-  color: var(--sky-text);
-  text-decoration: underline;
-}
-.apl-sent {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 11px;
-  color: var(--sky-text-faint);
-}
-
-/* --- Stage chip: 4 colors for 6 statuses (design-protocol.md #1) — see the
-   mapping comment above STAGE_CHIP_CLASS in applications.js. --- */
-.apl-stage {
-  display: inline-block;
-  font-size: 10.5px;
-  font-weight: 700;
-  padding: 2px 9px;
-  border-radius: var(--radius-pill);
-  white-space: nowrap;
-}
-.apl-stage-good {
-  background: var(--q-good-bg);
-  color: var(--q-good);
-}
-.apl-stage-moderate {
-  background: var(--q-moderate-bg);
-  color: var(--q-moderate);
-}
-.apl-stage-weak {
-  background: var(--q-weak-bg);
-  color: var(--q-weak);
-}
-.apl-stage-neutral {
-  background: var(--sky-row-hover);
-  color: var(--sky-text-tertiary);
-}
-
-.apl-empty-sheet {
-  padding: 40px 20px;
-}
-.apl-empty {
-  color: var(--sky-text-faint);
-  text-align: center;
-  padding: 24px 0;
-  font-size: 13px;
-}
-.apl-empty-icon {
-  font-size: 32px;
-  margin-bottom: 8px;
-}
-
 /* === U14 Boards+Settings (redesign) =========================================
    Boards + Settings (DHA-398): both read-mostly screens get the header-on-
    material + sheet-below anatomy (design-protocol.md #6), matching Archive
@@ -4884,7 +4661,7 @@ body::after {
    `:focus-visible` has lower specificity than any `.class:focus-visible`
    rule already in this file, so it never overrides them — it only fills the
    gaps. `.ct-row`/`.ct-th` get their own inset variant, matching the
-   existing row/cell pattern used by `.catalog-row`/`.today-row`/`.apl-row`
+   existing row/cell pattern used by `.catalog-row`/`.today-row`
    elsewhere in this file, since the outward 2px default here would be
    clipped or bleed into the adjacent cell/row inside a table. */
 :focus-visible {

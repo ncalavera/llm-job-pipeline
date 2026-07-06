@@ -1,13 +1,16 @@
 // =============================================================================
 // nav.js — Six-section navigation model (pure, unit-testable).
 //
-// The dashboard has SIX top-level sections. Several of them are single leaf
-// views; two are hubs that hold leaf views behind a sub-navigation:
-// "Vacancies" (Browse / Geo / Archive) and "Applications" (Applications /
-// Triage). `state.currentMode` stays the LEAF the render dispatch keys on
-// (unchanged for every existing module); this module only maps a leaf mode →
-// the top-nav section it belongs to, so the section chrome (active button,
-// sub-nav visibility) can follow along.
+// The dashboard has SIX top-level sections. Five are single leaf views; one
+// is a hub that holds leaf views behind a sub-navigation: "Vacancies" (Browse
+// / Geo / Archive). `state.currentMode` stays the LEAF the render dispatch
+// keys on (unchanged for every existing module); this module only maps a
+// leaf mode → the top-nav section it belongs to, so the section chrome
+// (active button, sub-nav visibility) can follow along.
+//
+// Triage ("pipeline") is its own single-leaf section (DHA-413 — the
+// Applications/Applied grid it used to share a nav slot with was deleted;
+// Triage now gets a plain top-nav button, same click path as before).
 // =============================================================================
 
 // The six top-nav sections, in display order.
@@ -15,7 +18,7 @@ export const SECTIONS = [
   "today",
   "vacancies",
   "companies",
-  "applications",
+  "triage",
   "boards",
   "settings",
 ];
@@ -25,16 +28,6 @@ export const VACANCY_VIEWS = ["catalog", "stats", "archive"];
 
 // The vacancy leaf shown when Vacancies is opened with no remembered view.
 export const DEFAULT_VACANCY_VIEW = "catalog";
-
-// Leaf views that live UNDER the Applications section. "applications"
-// (Applied) has no sidebar sub-item anymore (post-ship fast fix) — it stays
-// listed here because it's still a real leaf mode, reachable programmatically
-// (palette, nav parent mapping), just not from a sidebar affordance.
-export const APPLICATIONS_VIEWS = ["applications", "pipeline"];
-
-// The applications leaf the sidebar opens: always Triage now, direct with no
-// remembered sub-view (there's nothing left to remember between).
-export const DEFAULT_APPLICATIONS_VIEW = "pipeline";
 
 // Every leaf mode → the top-nav section that owns it. The last two entries are
 // not leaf modes but the deep-link DETAIL screens (route.js's route.screen
@@ -48,8 +41,7 @@ const MODE_TO_SECTION = {
   stats: "vacancies",
   archive: "vacancies",
   companies: "companies",
-  applications: "applications",
-  pipeline: "applications",
+  pipeline: "triage",
   boards: "boards",
   settings: "settings",
   // Detail-overlay screens (route.js).
@@ -65,11 +57,6 @@ export function sectionForMode(mode) {
 /** True when a leaf mode is one of the Vacancies sub-views. */
 export function isVacancyView(mode) {
   return VACANCY_VIEWS.indexOf(mode) !== -1;
-}
-
-/** True when a leaf mode is one of the Applications sub-views. */
-export function isApplicationsView(mode) {
-  return APPLICATIONS_VIEWS.indexOf(mode) !== -1;
 }
 
 // =============================================================================

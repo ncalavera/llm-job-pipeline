@@ -170,11 +170,6 @@ export const state = {
   // Remembered Vacancies sub-view (Browse/Geo/Archive) so re-opening the
   // Vacancies section returns to where the user was.
   vacancyView: "catalog",
-  // Remembered Applications sub-view (Applications/Triage) so re-opening the
-  // Applications section returns to where the user was.
-  applicationsView: "applications",
-  // Applications section status filter ("all" | applied | interview | …).
-  appStatusFilter: "all",
   companyStatuses: {},
   companyStatusesLoaded: false,
   companySubTab: "approved",

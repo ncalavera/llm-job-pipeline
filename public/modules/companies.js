@@ -1333,7 +1333,6 @@ var LEAF_SECTION_ID = {
   stats: "statsSection",
   archive: "archiveSection",
   boards: "boardsSection",
-  applications: "applicationsSection",
   settings: "settingsSection",
 };
 
