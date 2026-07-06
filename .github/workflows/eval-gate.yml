@@ -14,6 +14,13 @@ on:
     # PR, not just what changed in that event — so an `edited` event on a
     # prompt-touching PR still fires, and one on a non-prompt PR still doesn't.
     types: [opened, edited, synchronize, reopened]
+    # Both judging surfaces live under scripts/prompts/, so this one wildcard
+    # gates them equally: the vacancy-scoring prompt AND the company-scoring
+    # prompt (company-*.md). Either kind of prompt change requires the filled
+    # "Eval:" line below. NOTE the gate is a body-regex presence check only —
+    # it cannot verify WHICH golden set produced the numbers, so matching the
+    # eval mode to the surface you changed (`--kind company` for company-*.md,
+    # default vacancy otherwise) is a convention enforced by review, not CI.
     paths:
       - "scripts/prompts/**"
       - "scripts/prompts.py"
