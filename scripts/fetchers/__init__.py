@@ -113,6 +113,7 @@ from fetchers.boards.idealist import fetch_idealist_board
 from fetchers.boards.fastforward import fetch_fastforward_board
 from fetchers.boards.linkedin import fetch_linkedin_board
 from fetchers.boards.consultants_for_impact import fetch_cfi_board
+from fetchers.boards.probablygood import fetch_probablygood_board
 
 # Auto-discover any extra adapters dropped into ats/ or boards/ (one-file sources).
 from fetchers import ats as _ats  # noqa: F401
