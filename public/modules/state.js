@@ -139,14 +139,6 @@ export const TRIAGE_COLUMNS = [
   { key: "skipped", label: "Skipped", color: "var(--muted)" },
 ];
 
-export const CHIP_TO_COL = {
-  applyable: "applyable",
-  liked: "liked",
-  score: "score",
-  interest: "fit",
-  az: "name",
-};
-
 // ---------------------------------------------------------------------------
 // Mutable state — single object for all UI state
 // ---------------------------------------------------------------------------
@@ -166,7 +158,9 @@ export const state = {
   // score and wants to review (recall-first).
   catalogShowAll: true,
   catalogSortDesc: true,
-  companySortCol: "applyable",
+  // Default sort: WANT score descending (DHA-409) — the table's header-click
+  // sort now covers every column the old green sort chips duplicated.
+  companySortCol: "fit",
   companySortAsc: false,
   statsSortCol: "count",
   statsSortAsc: false,

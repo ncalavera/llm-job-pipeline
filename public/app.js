@@ -52,7 +52,6 @@ import {
   initCompanies,
   renderCompanies,
   sortCompanyTable,
-  toggleCompanySort,
   switchCompanySubTab,
   toggleMonitoringChip,
   reviewCompany,
@@ -697,7 +696,6 @@ window.renderCatalog = renderCatalog;
 window.renderCompanies = renderCompanies;
 window.initCompanies = initCompanies;
 window.sortCompanyTable = sortCompanyTable;
-window.toggleCompanySort = toggleCompanySort;
 window.switchCompanySubTab = switchCompanySubTab;
 window.toggleMonitoringChip = toggleMonitoringChip;
 window.reviewCompany = reviewCompany;

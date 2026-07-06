@@ -11,7 +11,6 @@ import {
   groupsById,
   STATUS_BASKET,
   STATUS_PRI,
-  CHIP_TO_COL,
   getGroupStatus,
   getCompanyStatusCounts,
   emit,
@@ -142,17 +141,13 @@ export function switchCompanySubTab(tab) {
     state.companySortCol = "fit";
     state.companySortAsc = false;
   } else {
-    state.companySortCol = "applyable";
+    // approved — WANT score descending (DHA-409), same default as pending.
+    state.companySortCol = "fit";
     state.companySortAsc = false;
   }
   // Update tab button active state
   document.querySelectorAll(".company-sub-tab").forEach(function (btn) {
     btn.classList.toggle("active", btn.dataset.subtab === tab);
-  });
-  // Update sort chip active state
-  document.querySelectorAll(".chip-sort[data-csort]").forEach(function (c) {
-    var col = CHIP_TO_COL[c.dataset.csort] || c.dataset.csort;
-    c.classList.toggle("active", col === state.companySortCol);
   });
   renderCompanies();
 }
@@ -1259,20 +1254,6 @@ export function sortCompanyTable(col) {
     state.companySortCol = col;
     state.companySortAsc = col === "name";
   }
-  renderCompanies();
-}
-
-export function toggleCompanySort(btn) {
-  var col = CHIP_TO_COL[btn.dataset.csort] || btn.dataset.csort;
-  if (state.companySortCol === col) {
-    state.companySortAsc = !state.companySortAsc;
-  } else {
-    state.companySortCol = col;
-    state.companySortAsc = col === "name";
-  }
-  document.querySelectorAll(".chip-sort[data-csort]").forEach(function (c) {
-    c.classList.toggle("active", c === btn);
-  });
   renderCompanies();
 }
 
