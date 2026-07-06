@@ -107,3 +107,35 @@ def test_read_result_files_missing_file_is_reported_as_bad(tmp_path):
     assert items == []
     assert len(bad) == 1
     assert "does_not_exist.json" in bad[0]
+
+
+def test_read_result_files_truncated_mid_multibyte_utf8_is_bad_not_crash(tmp_path):
+    """A kill mid-write can cut the file inside a multi-byte UTF-8 character —
+    read_text then raises UnicodeDecodeError BEFORE json even runs. That is the
+    exact BUG-5 spend-limit-kill scenario, so it must be reported as a bad
+    file, never raised out of the helper."""
+    good = tmp_path / "c1.json"
+    good.write_text('{"score": 70, "member_ids": ["a"]}', encoding="utf-8")
+    cut = tmp_path / "c2.json"
+    # "…é" is 0xC3 0xA9 in UTF-8; keep only the first byte — an invalid tail.
+    cut.write_bytes('{"reasoning": "caf'.encode("utf-8") + b"\xc3")
+
+    items, bad = read_result_files([good, cut])
+    assert [i["member_ids"][0] for i in items] == ["a"]
+    assert len(bad) == 1
+    assert "c2.json" in bad[0]
+
+
+def test_read_result_files_bare_scalar_is_reported_as_bad(tmp_path):
+    """Valid JSON that is not an object/array (a stray "null", a number) is
+    not a result — report it, don't pass junk downstream to --save."""
+    good = tmp_path / "c1.json"
+    good.write_text('{"score": 70, "member_ids": ["a"]}', encoding="utf-8")
+    scalar = tmp_path / "c2.json"
+    scalar.write_text("null", encoding="utf-8")
+
+    items, bad = read_result_files([good, scalar])
+    assert [i["member_ids"][0] for i in items] == ["a"]
+    assert len(bad) == 1
+    assert "c2.json" in bad[0]
+    assert "not a JSON object or array" in bad[0]

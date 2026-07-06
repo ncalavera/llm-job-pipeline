@@ -846,6 +846,15 @@ def test_two_pass_single_pass_when_screen_equals_scoring_model(rd, monkeypatch, 
     assert "single-pass" in info
     assert "screen_model == scoring_model" in info
     assert '"sonnet"' in info
+    # Durable run history (observability) reads screen_counts off this stage
+    # entry — a single-pass run must record its scored count too.
+    assert entry["screen_counts"] == {
+        "screened": 2,
+        "escalated": 0,
+        "kept_cheap": 2,
+        "threshold": None,
+        "already_strong": 0,
+    }
 
 
 def test_two_pass_escalate_reports_skipped_same_model_roles(rd, monkeypatch, tmp_path):

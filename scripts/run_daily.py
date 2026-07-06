@@ -1306,6 +1306,18 @@ def _h_vacancy_scoring(state, entry, opts):
 
         # DHA-437: screen_model == scoring_model -> one pass, no escalate gate.
         if single_pass:
+            # Durable run history reads screen_counts from this stage entry
+            # (run observability, DHA-434) — a single-pass run must record its
+            # scored count too, not just the two-pass path. kept_cheap mirrors
+            # the two-pass invariant (screened == escalated + kept_cheap):
+            # every role keeps its one (and only) score.
+            entry["screen_counts"] = {
+                "screened": screened,
+                "escalated": 0,
+                "kept_cheap": screened,
+                "threshold": None,
+                "already_strong": 0,
+            }
             run_status.finish()
             return (
                 "advance",

@@ -68,9 +68,17 @@ def read_result_files(paths) -> tuple[list, list[str]]:
     for path in paths:
         p = Path(path)
         try:
+            # UnicodeDecodeError matters here: a kill mid multi-byte UTF-8
+            # character makes read_text itself raise, before json even runs —
+            # the exact truncation scenario this helper exists to survive.
             obj = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             bad.append(f"{p.name}: {exc}")
+            continue
+        if not isinstance(obj, (dict, list)):
+            # A bare scalar (a stray "null", a number) is valid JSON but not a
+            # result — report it as bad rather than passing junk downstream.
+            bad.append(f"{p.name}: not a JSON object or array ({type(obj).__name__})")
             continue
         if isinstance(obj, list):
             items.extend(obj)

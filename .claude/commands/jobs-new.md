@@ -127,6 +127,9 @@ incrementally (each `--save` commits):
 
 ```bash
 python3 scripts/score_companies.py --save < chunk.json   # wrap each result under "enrichment"
+# or, if each subagent wrote its result to its own file — a malformed file is
+# named and skipped, the rest still save (never one bad file killing the batch):
+python3 scripts/score_companies.py --save --files r1.json r2.json ...
 ```
 
 Scored companies land in **Companies → Pending** for approval (deeper review in
@@ -144,6 +147,9 @@ At most **5 subagents at a time**. Save incrementally with the flat fields
 
 ```bash
 python3 scripts/score_vacancies.py --save < chunk.json
+# or, if each subagent wrote its result to its own file — a malformed file is
+# named and skipped, the rest still save (never one bad file killing the batch):
+python3 scripts/score_vacancies.py --save --files r1.json r2.json ...
 ```
 
 1. **Screen** — score every vacancy with `[## VOLUME] screen_model` (default
@@ -151,7 +157,10 @@ python3 scripts/score_vacancies.py --save < chunk.json
 2. **Escalate** — the driver keeps only the roles whose screen score clears
    `[## VOLUME] escalate_threshold` (default 50) and re-scores just those with the
    strong `scoring_model` (Sonnet on a budget plan, Opus on a bigger one).
-   Everything below the floor keeps its cheap score, sorted out of view.
+   Everything below the floor keeps its cheap score, sorted out of view. A role
+   already scored by the strong model is never re-sent to it; and when
+   `screen_model` equals `scoring_model`, the driver runs ONE pass and skips the
+   escalate gate entirely (no role is ever scored twice by the same model).
 
 The gate text names the model and pass for you; use exactly the one it prints (do
 not "upgrade" the screen to the strong model — that erases the saving). After each
