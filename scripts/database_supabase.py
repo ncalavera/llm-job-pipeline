@@ -843,24 +843,25 @@ def _scored_by_supported() -> bool:
     return _scored_by_supported_cache
 
 
-def _vacancy_has_column(col: str) -> bool:
-    """True when ``vacancy`` has ``col`` on the active backend.
+def _table_has_column(table: str, col: str) -> bool:
+    """True when ``table`` has ``col`` on the active backend.
 
-    Used to write ``source_board`` (migration 0013) only where the column
-    exists. Prod already carries it; a fresh/pre-migration install degrades to
-    not writing provenance rather than raising "no such column". Cheap, called
-    once per board save (not per row), so no module-level cache is needed."""
+    Lets a write degrade gracefully on a pre-migration schema (a fresh
+    simple-mode SQLite DB is baseline-only until ``migrate.py`` runs) instead of
+    raising "no such column". Same pattern as the migration-0013 source_board
+    gate; also used for the 0015 fetch-health telemetry columns."""
     from db_backend import IS_SQLITE
 
     conn = get_conn()
     cur = conn.cursor()
     try:
         if IS_SQLITE:
-            cur.execute("PRAGMA table_info(vacancy)")
+            cur.execute(f"PRAGMA table_info({table})")
             cols = {row[1] for row in cur.fetchall()}
         else:
             cur.execute(
-                "SELECT column_name FROM information_schema.columns WHERE table_name = 'vacancy'"
+                "SELECT column_name FROM information_schema.columns WHERE table_name = %s",
+                (table,),
             )
             cols = {row[0] for row in cur.fetchall()}
         return col in cols
@@ -868,6 +869,12 @@ def _vacancy_has_column(col: str) -> bool:
         return False
     finally:
         cur.close()
+
+
+def _vacancy_has_column(col: str) -> bool:
+    """True when ``vacancy`` has ``col`` — thin wrapper over _table_has_column
+    kept for the existing source_board (migration 0013) call site."""
+    return _table_has_column("vacancy", col)
 
 
 def load_vacancies(
@@ -2137,13 +2144,38 @@ def update_source_tracking(
     if fetch_status == FETCH_STATUS_OK and vacancy_count == 0:
         fetch_status = FETCH_STATUS_NO_DATA
 
-    cur.execute(
-        """UPDATE company SET
-               last_fetched = now(), vacancy_count = %s,
-               fetch_status = %s
-           WHERE canonical_name = %s""",
-        (vacancy_count, fetch_status, canonical),
-    )
+    # Health telemetry (migration 0015). last_fetched = last ATTEMPT; last_success
+    # = last time it actually worked (ok / genuinely-empty). consecutive_failures
+    # counts only real errors so a monitor can alert on a persistent break, not a
+    # one-off blip. is_fetch_error() treats no_data / render_ok_zero as healthy.
+    # Degrades on a pre-0015 schema (fresh simple-mode DB) to the base columns.
+    if _table_has_column("company", "last_success"):
+        if is_fetch_error(fetch_status):
+            cur.execute(
+                """UPDATE company SET
+                       last_fetched = now(), vacancy_count = %s,
+                       fetch_status = %s, fetch_error = %s,
+                       consecutive_failures = COALESCE(consecutive_failures, 0) + 1
+                   WHERE canonical_name = %s""",
+                (vacancy_count, fetch_status, fetch_status, canonical),
+            )
+        else:
+            cur.execute(
+                """UPDATE company SET
+                       last_fetched = now(), vacancy_count = %s,
+                       fetch_status = %s, fetch_error = NULL,
+                       last_success = now(), consecutive_failures = 0
+                   WHERE canonical_name = %s""",
+                (vacancy_count, fetch_status, canonical),
+            )
+    else:
+        cur.execute(
+            """UPDATE company SET
+                   last_fetched = now(), vacancy_count = %s,
+                   fetch_status = %s
+               WHERE canonical_name = %s""",
+            (vacancy_count, fetch_status, canonical),
+        )
     cur.close()
 
 
@@ -2200,21 +2232,72 @@ def should_fetch_board(board_id: str, ttl_days: int) -> bool:
     return True
 
 
-def mark_board_fetched(board_id: str):
-    """Record now as the last fetch date for a board.
+def mark_board_fetched(
+    board_id: str,
+    jobs_returned: int | None = None,
+    fetch_status: str = FETCH_STATUS_OK,
+):
+    """Record a board fetch outcome + health telemetry (migration 0015).
 
     Inserts a bare row if the board is not yet in the catalog (a fetch can run
     before sync_boards in edge cases); sync_boards backfills the metadata.
+
+    ``jobs_returned`` is the RAW count the fetcher returned this run (not the
+    post-dedup "new" count) — the honest signal for "is this board alive". A
+    board that returns 200 rows of which 0 are new is healthy; one that returns
+    0 is the problem. ``fetch_status`` is "ok" / a genuinely-empty reason /
+    an error string; is_fetch_error() decides which columns move.
     """
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(
-        """INSERT INTO board (id, name, last_fetched)
-           VALUES (%s, %s, now())
-           ON CONFLICT (id) DO UPDATE SET
-               last_fetched = now(), updated_at = now()""",
-        (board_id, board_id),
-    )
+
+    # Pre-0015 schema (fresh simple-mode DB): board has only last_fetched.
+    # Degrade to the original bare mark rather than raising "no such column".
+    if not _table_has_column("board", "vacancy_count"):
+        cur.execute(
+            """INSERT INTO board (id, name, last_fetched)
+               VALUES (%s, %s, now())
+               ON CONFLICT (id) DO UPDATE SET
+                   last_fetched = now(), updated_at = now()""",
+            (board_id, board_id),
+        )
+        cur.close()
+        return
+
+    # Streak: read the prior value and compute in Python so the UPSERT stays
+    # portable (referencing the existing row inside ON CONFLICT differs between
+    # Postgres and SQLite). is_fetch_error() treats a genuinely-empty board as
+    # healthy, so only real errors bump the streak.
+    if is_fetch_error(fetch_status):
+        cur.execute("SELECT consecutive_failures FROM board WHERE id = %s", (board_id,))
+        row = cur.fetchone()
+        streak = (row[0] or 0) + 1 if row else 1
+        cur.execute(
+            """INSERT INTO board (id, name, last_fetched, vacancy_count,
+                   fetch_status, last_error, consecutive_failures)
+               VALUES (%s, %s, now(), %s, %s, %s, %s)
+               ON CONFLICT (id) DO UPDATE SET
+                   last_fetched = now(), updated_at = now(),
+                   vacancy_count = EXCLUDED.vacancy_count,
+                   fetch_status = EXCLUDED.fetch_status,
+                   last_error = EXCLUDED.last_error,
+                   consecutive_failures = EXCLUDED.consecutive_failures""",
+            (board_id, board_id, jobs_returned, fetch_status, fetch_status, streak),
+        )
+    else:
+        cur.execute(
+            """INSERT INTO board (id, name, last_fetched, vacancy_count,
+                   fetch_status, last_error, last_success, consecutive_failures)
+               VALUES (%s, %s, now(), %s, %s, NULL, now(), 0)
+               ON CONFLICT (id) DO UPDATE SET
+                   last_fetched = now(), updated_at = now(),
+                   vacancy_count = EXCLUDED.vacancy_count,
+                   fetch_status = EXCLUDED.fetch_status,
+                   last_error = NULL,
+                   last_success = now(),
+                   consecutive_failures = 0""",
+            (board_id, board_id, jobs_returned, fetch_status),
+        )
     cur.close()
 
 

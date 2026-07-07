@@ -456,3 +456,79 @@ def test_direct_refetch_resurrects_gone_role(backend):
     _commit(dal)
     assert new == 0  # same dedup_hash, existing row -- not counted as new
     assert dal.load_vacancies(include_inactive_companies=True)[vid]["status"] == "unseen"
+
+
+# ---------------------------------------------------------------------------
+# Fetch-health telemetry (migration 0015) — same behaviour on both backends.
+# ---------------------------------------------------------------------------
+
+
+def _board_health(dal, board_id):
+    conn = dal.get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT vacancy_count, fetch_status, last_error, consecutive_failures, "
+        "last_success FROM board WHERE id = %s",
+        (board_id,),
+    )
+    row = cur.fetchone()
+    cur.close()
+    return row
+
+
+def test_board_health_telemetry_records_and_resets(backend):
+    dal = backend
+    dal.sync_boards({"fictive_board": _BOARD_CFG})
+    _commit(dal)
+
+    # Healthy fetch: rows + ok status, no error, streak 0, last_success set.
+    dal.mark_board_fetched("fictive_board", jobs_returned=42, fetch_status="ok")
+    _commit(dal)
+    vc, status, err, streak, success = _board_health(dal, "fictive_board")
+    assert (vc, status, err, streak) == (42, "ok", None, 0)
+    assert success is not None
+
+    # Two consecutive errors bump the streak and record the reason.
+    dal.mark_board_fetched("fictive_board", jobs_returned=0, fetch_status="error: timeout")
+    _commit(dal)
+    dal.mark_board_fetched("fictive_board", jobs_returned=0, fetch_status="error: timeout")
+    _commit(dal)
+    vc, status, err, streak, _ = _board_health(dal, "fictive_board")
+    assert (vc, status, err, streak) == (0, "error: timeout", "error: timeout", 2)
+
+    # Recovery clears the error and resets the streak.
+    dal.mark_board_fetched("fictive_board", jobs_returned=5, fetch_status="ok")
+    _commit(dal)
+    _, status, err, streak, _ = _board_health(dal, "fictive_board")
+    assert (status, err, streak) == ("ok", None, 0)
+
+
+def test_company_health_telemetry_tracks_failure_streak(backend):
+    dal = backend
+    dal.ensure_company("Fictive Robotics Guild", status="active")
+    _commit(dal)
+    conn = dal.get_conn()
+    cur = conn.cursor()
+
+    # A broken fetch: fetch_error set, streak 1, last_success stays null.
+    dal.update_source_tracking("Fictive Robotics Guild", "A", "greenhouse", 0, "js_required")
+    _commit(dal)
+    cur.execute(
+        "SELECT fetch_error, consecutive_failures, last_success FROM company "
+        "WHERE canonical_name = %s",
+        ("Fictive Robotics Guild",),
+    )
+    err, streak, success = cur.fetchone()
+    assert (err, streak, success) == ("js_required", 1, None)
+
+    # A clean fetch clears the error, resets the streak, stamps last_success.
+    dal.update_source_tracking("Fictive Robotics Guild", "A", "greenhouse", 0, "ok")
+    _commit(dal)
+    cur.execute(
+        "SELECT fetch_error, consecutive_failures, last_success FROM company "
+        "WHERE canonical_name = %s",
+        ("Fictive Robotics Guild",),
+    )
+    err, streak, success = cur.fetchone()
+    assert err is None and streak == 0 and success is not None
+    cur.close()
