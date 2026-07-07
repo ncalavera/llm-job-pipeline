@@ -52,7 +52,6 @@ import {
   initCompanies,
   renderCompanies,
   sortCompanyTable,
-  toggleCompanySort,
   switchCompanySubTab,
   toggleMonitoringChip,
   reviewCompany,
@@ -66,16 +65,10 @@ import { renderToday, todayAction, openTodayRow } from "./modules/today.js";
 import { initStats, renderStats } from "./modules/stats.js";
 import { initArchive, renderArchive } from "./modules/archive.js";
 import { initBoards, renderBoards, toggleBoard } from "./modules/boards.js";
-import {
-  initApplications,
-  renderApplications,
-  openApplicationRow,
-} from "./modules/applications.js";
 import { initSettings, renderSettings } from "./modules/settings.js";
 import {
   sectionForMode,
   isVacancyView,
-  isApplicationsView,
   syncStatusLabelKey,
   DEFAULT_VACANCY_VIEW,
   fallbackBannerState,
@@ -305,7 +298,6 @@ on("render", () => {
   if (state.currentMode === "companies") renderCompanies();
   if (state.currentMode === "pipeline") renderPipeline();
   if (state.currentMode === "stats") renderStats();
-  if (state.currentMode === "applications") renderApplications();
   if (state.currentMode === "settings") renderSettings();
   if (state.currentMode === "boards") renderBoards();
   if (state.currentProfileSlug) renderProfileForSlug(state.currentProfileSlug);
@@ -363,7 +355,6 @@ var LEAF_SECTION_ID = {
   stats: "statsSection",
   archive: "archiveSection",
   boards: "boardsSection",
-  applications: "applicationsSection",
   settings: "settingsSection",
 };
 
@@ -373,7 +364,7 @@ var NAV_BTNS = {
   today: "navToday",
   vacancies: "navVacancies",
   companies: "navCompanies",
-  applications: "navApplications",
+  triage: "navTriage",
   boards: "navBoards",
   settings: "navSettings",
 };
@@ -581,10 +572,8 @@ function switchMode(mode) {
   closeDetailOverlays();
 
   state.currentMode = mode;
-  // Remember the Vacancies/Applications sub-view so re-opening the section
-  // returns to it.
+  // Remember the Vacancies sub-view so re-opening the section returns to it.
   if (isVacancyView(mode)) state.vacancyView = mode;
-  if (isApplicationsView(mode)) state.applicationsView = mode;
   var section = sectionForMode(mode);
 
   // DOM section per leaf mode (each is a sibling under .container).
@@ -594,13 +583,13 @@ function switchMode(mode) {
   });
 
   // Sidebar section active state follows the SECTION, not the leaf (so the
-  // whole Vacancies/Applications hub stays highlighted across its sub-views).
-  // Shared by the desktop sidebar and the narrow icon rail (same elements).
+  // whole Vacancies hub stays highlighted across its sub-views). Shared by
+  // the desktop sidebar and the narrow icon rail (same elements).
   setNavActiveSection(section);
 
   // Sidebar sub-items are always expanded inline (Linear-style, protocol
   // section 4) — no visibility toggle, just the active state tracking the
-  // leaf. Applications has none (post-ship fast fix collapsed them).
+  // leaf. Every other section (Triage included) is a single leaf with none.
   var subBtns = {
     catalog: "navSubBrowse",
     stats: "navSubGeo",
@@ -612,8 +601,7 @@ function switchMode(mode) {
   });
 
   // Narrow-width (<900px) pill row: the sidebar collapses to an icon rail
-  // there, so this becomes the way to reach Vacancies' sub-views (Applications'
-  // own pill row was removed the same way as its inline sub-items above).
+  // there, so this becomes the way to reach Vacancies' sub-views.
   var subNav = document.getElementById("vacancySubNav");
   if (subNav) subNav.classList.toggle("active", section === "vacancies");
   var vsubBtns = {
@@ -651,8 +639,6 @@ function switchMode(mode) {
     initArchive();
   } else if (mode === "boards") {
     initBoards();
-  } else if (mode === "applications") {
-    initApplications();
   } else if (mode === "settings") {
     initSettings();
   }
@@ -661,14 +647,6 @@ function switchMode(mode) {
 // The Vacancies top-nav button opens the remembered sub-view (default Browse).
 function switchVacancies() {
   switchMode(state.vacancyView || "catalog");
-}
-
-// The Applications top-nav button opens Triage directly (post-ship fast fix —
-// its sub-nav affordances are gone, so there's no remembered sub-view to
-// return to). Applied stays reachable via whatever already routes to it
-// directly (palette, nav parent mapping) — see nav.js.
-function switchApplications() {
-  switchMode("pipeline");
 }
 
 // ---------------------------------------------------------------------------
@@ -683,7 +661,6 @@ window.addEventListener("popstate", applyRouteFromUrl);
 
 window.switchMode = switchMode;
 window.switchVacancies = switchVacancies;
-window.switchApplications = switchApplications;
 window.switchBasket = switchBasket;
 window.toggleCatalogLoc = toggleCatalogLoc;
 window.toggleCatalogSort = toggleCatalogSort;
@@ -692,12 +669,10 @@ window.catalogThumbAction = catalogThumbAction;
 window.todayAction = todayAction;
 window.openTodayRow = openTodayRow;
 window.openCatalogRow = openCatalogRow;
-window.openApplicationRow = openApplicationRow;
 window.renderCatalog = renderCatalog;
 window.renderCompanies = renderCompanies;
 window.initCompanies = initCompanies;
 window.sortCompanyTable = sortCompanyTable;
-window.toggleCompanySort = toggleCompanySort;
 window.switchCompanySubTab = switchCompanySubTab;
 window.toggleMonitoringChip = toggleMonitoringChip;
 window.reviewCompany = reviewCompany;
@@ -717,7 +692,6 @@ window.vacancyMoveToApply = vacancyMoveToApply;
 window.renderPipeline = renderPipeline;
 window.renderToday = renderToday;
 window.renderArchive = renderArchive;
-window.renderApplications = renderApplications;
 // Boards section (inline onclick on each board's enabled toggle).
 window.toggleBoard = toggleBoard;
 window.renderSettings = renderSettings;

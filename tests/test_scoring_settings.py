@@ -134,7 +134,7 @@ def test_screen_model_equal_tier_is_allowed(use_profile):
 
 def test_escalation_threshold_default(use_profile):
     use_profile("scoring_model: sonnet")
-    assert ss.escalation_threshold() == ss.DEFAULT_ESCALATION_THRESHOLD == 50
+    assert ss.escalation_threshold() == ss.DEFAULT_ESCALATION_THRESHOLD == 40
 
 
 def test_escalation_threshold_read_from_profile(use_profile):
@@ -144,7 +144,7 @@ def test_escalation_threshold_read_from_profile(use_profile):
 
 def test_escalation_threshold_garbage_is_default(use_profile):
     use_profile("escalate_threshold: lots")
-    assert ss.escalation_threshold() == 50
+    assert ss.escalation_threshold() == 40
 
 
 def test_escalation_threshold_clamped_to_0_100(use_profile):

@@ -106,6 +106,23 @@ def _summary_path(base_dir: Path | None = None) -> Path:
     return (base_dir or _default_dir()) / "golden_set_summary.json"
 
 
+# --- Company mode paths (a parallel, separately-versioned set for the company
+# scoring prompt). Same gitignored dir as the vacancy set; distinct filenames so
+# the two sets never collide. ------------------------------------------------
+
+
+def _company_store_path(base_dir: Path | None = None) -> Path:
+    return (base_dir or _default_dir()) / "golden_set_companies.jsonl"
+
+
+def _company_template_path(base_dir: Path | None = None) -> Path:
+    return (base_dir or _default_dir()) / "company_label_template.jsonl"
+
+
+def _company_summary_path(base_dir: Path | None = None) -> Path:
+    return (base_dir or _default_dir()) / "golden_set_companies_summary.json"
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -214,6 +231,177 @@ def select_seed_records(
 
 
 # ---------------------------------------------------------------------------
+# Company labelling — the company-scoring prompt's own golden set.
+#
+# Vacancy labels come from like/pass verdicts. Company labels come from the
+# user's own keep/reject verdicts on companies: a hand-APPROVED (kept active)
+# company is "fit", a hand-REJECTED (deactivated) one is "nofit". The signal is
+# in status + status_reason, so this classifier reads both and deliberately
+# skips machine-made status changes (auto-approve/reject on the model's own
+# score, /filter triage drops, dedup merges, audit sweeps) — those are not the
+# user's judgement and would just measure the prompt against itself. Company
+# content (evidence) is frozen INTO the record, so the set is self-contained.
+# ---------------------------------------------------------------------------
+
+#: status_reason prefixes that mark a MACHINE status change, not a hand verdict.
+#: Anything starting with one of these is excluded from company labels (the
+#: "screen" prefix is here per the same rule the vacancy path uses — a screen
+#: drop is a cheap pre-filter, not a considered verdict).
+_MACHINE_REASON_PREFIXES = (
+    "auto-approved",
+    "auto-rejected",
+    "triage drop",
+    "pre-filter",
+    "board noise",
+    "board_disabled",
+    "mass-rejected",
+    "mass-approved",
+    "audit-",
+    "cadence reset",
+    "merged into",
+    "merged_into",
+    "archived",
+    "sheet:",
+    "deactivated",
+    "manual_check",
+    "monitor-only",
+    "screen",
+)
+
+#: Hand-APPROVE reasons: the user clicked approve in a dashboard. Exact matches
+#: (not prefixes) so they can't be confused with machine reasons. Two spellings:
+#: the canonical "approved via dashboard" plus the historical string
+#: scripts/dashboard_local.py wrote before it was canonicalized — old rows keep
+#: the old wording forever, so both must count as a fit verdict.
+_HAND_APPROVE_REASONS = frozenset(
+    {
+        "approved via dashboard",
+        "approved via local dashboard",
+    }
+)
+
+#: Minimum frozen evidence length for a company to be scorable (below this the
+#: scorer has nothing to judge, same spirit as _has_description for vacancies).
+_MIN_COMPANY_CONTENT = 200
+
+
+def _is_hand_reject_reason(status_reason: str | None) -> bool:
+    """True when an *inactive* company's status_reason reads as the user's own
+    reject, not a machine status change. Empty reason is treated as unknown →
+    not a hand label."""
+    reason = (status_reason or "").strip().lower()
+    if not reason:
+        return False
+    if any(reason.startswith(p) for p in _MACHINE_REASON_PREFIXES):
+        return False
+    return True
+
+
+def company_label(status: str | None, status_reason: str | None) -> str | None:
+    """Map a company's (status, status_reason) to a binary golden label, or None
+    when the row carries no usable user verdict (still a candidate, or the status
+    was set by the machine rather than a hand click)."""
+    reason = (status_reason or "").strip().lower()
+    if status == "active" and reason in _HAND_APPROVE_REASONS:
+        return LABEL_FIT
+    if status == "inactive" and _is_hand_reject_reason(status_reason):
+        return LABEL_NOFIT
+    return None
+
+
+def _freeze_company(company: dict, content: str) -> dict:
+    """The minimal, frozen scoring input stored with a company label. Mirrors the
+    csv-context fields score_companies._build_csv_context reads, plus the frozen
+    evidence ``content`` so the measurement is reproducible without re-querying."""
+    return {
+        "canonical_name": company.get("canonical_name", ""),
+        "website": company.get("website", "") or "",
+        "category": company.get("category"),
+        "tier": company.get("tier"),
+        "product": company.get("product"),
+        "experience_match": company.get("experience_match"),
+        "personal_interest": company.get("personal_interest"),
+        "user_comments": company.get("user_comments"),
+        "content": content,
+    }
+
+
+def make_company_record(
+    company: dict, label: str, reason: str, source: str, content: str, flag: str | None = None
+) -> dict:
+    """Build a company golden record (without version/labeled_at — set at append).
+    ``flag``, when set, marks a label the user should sanity-check by hand."""
+    rec = {
+        "id": str(company.get("id") or company.get("canonical_name", "")),
+        "source": source,
+        "label": label,
+        "reason": reason,
+        "company": _freeze_company(company, content),
+    }
+    if flag:
+        rec["flag"] = flag
+    return rec
+
+
+def select_company_seed_records(
+    companies: list[dict], *, limit: int, balance: bool = True
+) -> list[dict]:
+    """Turn labelled+scorable company dicts into golden records.
+
+    Each input dict must already carry ``label`` (fit/nofit), ``content`` (frozen
+    evidence, >= _MIN_COMPANY_CONTENT chars) and, optionally, ``alignment_score``
+    (the CURRENT stored score, used only to FLAG a likely-ambiguous label — never
+    to score). balance=True aims for an even split so precision/recall are
+    meaningful; richest-evidence companies are preferred within each class.
+    """
+    fit_pool = [c for c in companies if c.get("label") == LABEL_FIT]
+    nofit_pool = [c for c in companies if c.get("label") == LABEL_NOFIT]
+    fit_pool.sort(key=lambda c: len(c.get("content", "")), reverse=True)
+    nofit_pool.sort(key=lambda c: len(c.get("content", "")), reverse=True)
+
+    if balance:
+        half = max(1, limit // 2)
+        chosen = fit_pool[:half] + nofit_pool[:half]
+        # top up from whichever class has spare rows if one was short
+        if len(chosen) < limit:
+            spare = fit_pool[half:] + nofit_pool[half:]
+            chosen += spare[: limit - len(chosen)]
+    else:
+        chosen = (fit_pool + nofit_pool)[:limit]
+
+    # Same env-aware boundary `measure --kind company` uses (AUTO_REVIEW_APPROVE),
+    # resolved once per call so the flag heuristic can't drift from the eval's
+    # own threshold when the env var is overridden.
+    flag_boundary = _company_threshold_default()
+    records = []
+    for c in chosen:
+        label = c["label"]
+        reason = c.get("reason") or f"user verdict: {c.get('status_reason', label)}"
+        flag = None
+        # A nofit whose CURRENT stored score is already at/above the fit boundary
+        # is exactly the case most likely driven by a factor the WANT prompt does
+        # not model (geography, visa sponsorship) rather than mission fit — flag
+        # it so the user can flip or drop it before trusting the number.
+        score = c.get("alignment_score")
+        if label == LABEL_NOFIT and score is not None and float(score) >= flag_boundary:
+            flag = (
+                "review: hand-rejected but stored WANT is high — the reject may be "
+                "geo/visa (a separate layer), not the mission fit this prompt scores"
+            )
+        records.append(
+            make_company_record(
+                c,
+                label,
+                reason,
+                f"seed:{'active' if label == LABEL_FIT else 'inactive'}",
+                c.get("content", ""),
+                flag=flag,
+            )
+        )
+    return records
+
+
+# ---------------------------------------------------------------------------
 # Store — append-only, version-stamped JSONL
 # ---------------------------------------------------------------------------
 
@@ -282,11 +470,26 @@ def append_records(path: Path, new_records: list[dict]) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _display(rec: dict) -> tuple[str, str]:
+    """The (headline, subtitle) pair a disagreement row shows, regardless of kind.
+
+    Vacancy records carry a frozen ``vacancy`` (org / title); company records
+    carry a frozen ``company`` (canonical_name / category). Kept here so the
+    kind-agnostic metrics + report code below reads one accessor, not two shapes.
+    """
+    v = rec.get("vacancy")
+    if v is not None:
+        return v.get("org", ""), v.get("title", "")
+    c = rec.get("company") or {}
+    return c.get("canonical_name", ""), c.get("category", "") or ""
+
+
 def compute_metrics(records: list[dict], scores: dict[str, int], threshold: int) -> dict:
     """Join golden labels with model scores and compute the quality report.
 
     ``scores`` maps record id → model score. "fit" is the positive class. A model
-    score >= threshold is the model predicting "fit".
+    score >= threshold is the model predicting "fit". Works for both vacancy and
+    company records — the only kind-specific bit is the display pair (``_display``).
     """
     matched = [(r, scores[r["id"]]) for r in records if r["id"] in scores]
     missing = [r["id"] for r in records if r["id"] not in scores]
@@ -300,11 +503,12 @@ def compute_metrics(records: list[dict], scores: dict[str, int], threshold: int)
         if model_label == user_label:
             agree += 1
         else:
+            disp_org, disp_title = _display(rec)
             disagreements.append(
                 {
                     "id": rec["id"],
-                    "org": rec["vacancy"].get("org", ""),
-                    "title": rec["vacancy"].get("title", ""),
+                    "org": disp_org,
+                    "title": disp_title,
                     "user_label": user_label,
                     "reason": rec.get("reason", ""),
                     "model_score": score,
@@ -470,6 +674,37 @@ def build_payloads(records: list[dict]) -> list[dict]:
     return payloads
 
 
+def build_company_payloads(records: list[dict]) -> list[dict]:
+    """One scoring payload per company record, using the SAME system prompt +
+    user-message template the pipeline uses (score_companies), so the eval scores
+    exactly what a real company-scoring run would. The frozen evidence content is
+    fed straight into the real user template; label/reason/flag are excluded so
+    the scorer stays blind to the ground truth."""
+    import score_companies
+
+    system_prompt = score_companies._get_system_prompt()
+    payloads = []
+    for rec in records:
+        c = rec["company"]
+        user_msg = score_companies.COMPANY_SCORING_USER_TEMPLATE.format(
+            name=c.get("canonical_name", ""),
+            url=c.get("website", "") or "",
+            csv_context=score_companies._build_csv_context(c),
+            content=c.get("content", ""),
+        )
+        payloads.append(
+            {
+                "payload_kind": "company",
+                "id": rec["id"],
+                "canonical_name": c.get("canonical_name", ""),
+                "url": c.get("website", "") or "",
+                "system_prompt": system_prompt,
+                "user_msg": user_msg,
+            }
+        )
+    return payloads
+
+
 # ---------------------------------------------------------------------------
 # DB access (read-only) — kept in functions so the pure logic imports cleanly
 # ---------------------------------------------------------------------------
@@ -501,12 +736,63 @@ def _load_labelable_vacancies(limit: int, exclude_ids: set) -> list[dict]:
     return pool[:limit]
 
 
+def _load_labelable_companies(exclude_ids: set) -> list[dict]:
+    """All companies that carry a hand verdict (approved/kept or rejected) AND
+    have enough frozen evidence to be scorable, with the assembled evidence
+    content attached. Read-only — reuses score_companies' own evidence assembly
+    so the frozen content matches what a real run would score. ``exclude_ids``
+    skips companies already in the golden set."""
+    import score_companies
+    from db_conn import get_conn
+
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, canonical_name, website, category, product, tier,
+               user_comments, experience_match, personal_interest,
+               status, status_reason, alignment_score
+        FROM company
+        WHERE status IN ('active', 'inactive')
+        ORDER BY canonical_name, id
+        """
+    )
+    columns = [desc[0] for desc in cur.description]
+    rows = [dict(zip(columns, r)) for r in cur.fetchall()]
+    cur.close()
+
+    labelled = []
+    for row in rows:
+        label = company_label(row.get("status"), row.get("status_reason"))
+        if label is None:
+            continue
+        if str(row.get("id")) in exclude_ids:
+            continue
+        row["label"] = label
+        labelled.append(row)
+
+    if not labelled:
+        return []
+
+    evidence_map = score_companies._load_company_evidence_map([r["id"] for r in labelled])
+    out = []
+    for row in labelled:
+        content = score_companies._assemble_evidence_content(evidence_map.get(str(row["id"]), []))
+        if len(content) < _MIN_COMPANY_CONTENT:
+            continue
+        row["content"] = content
+        out.append(row)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Subcommands
 # ---------------------------------------------------------------------------
 
 
 def cmd_seed(args) -> int:
+    if getattr(args, "kind", "vacancy") == "company":
+        return cmd_seed_company(args)
     path = _store_path()
     vacs = _load_verdict_vacancies()
     if not vacs:
@@ -537,6 +823,8 @@ def cmd_seed(args) -> int:
 
 
 def cmd_template(args) -> int:
+    if getattr(args, "kind", "vacancy") == "company":
+        return cmd_template_company(args)
     store = _store_path()
     tmpl = _template_path()
     known = {r["id"] for r in load_records(store)}
@@ -568,6 +856,8 @@ def cmd_template(args) -> int:
 
 
 def cmd_add_template(args) -> int:
+    if getattr(args, "kind", "vacancy") == "company":
+        return cmd_add_template_company(args)
     store = _store_path()
     tmpl = Path(args.path).expanduser() if args.path else _template_path()
     if not tmpl.exists():
@@ -609,7 +899,8 @@ def cmd_add_template(args) -> int:
 
 
 def cmd_emit(args) -> int:
-    store = _store_path()
+    is_company = getattr(args, "kind", "vacancy") == "company"
+    store = _company_store_path() if is_company else _store_path()
     records = load_records(store, version=args.version)
     if not records:
         print(
@@ -626,23 +917,31 @@ def cmd_emit(args) -> int:
     real_stdout = sys.stdout
     sys.stdout = sys.stderr
     try:
-        payloads = build_payloads(records)
+        payloads = build_company_payloads(records) if is_company else build_payloads(records)
     finally:
         sys.stdout = real_stdout
     version_shown = args.version if args.version else current_version(store)
+    unit = "company" if is_company else "vacancy"
     print(
         f"Emitting {len(payloads)} scoring payloads "
         f"(golden set version <= {version_shown}). "
-        "Score EACH independently — one request per vacancy — and pipe "
+        f"Score EACH independently — one request per {unit} — and pipe "
         '[{"id":..., "score":...}] to `measure`.',
         file=sys.stderr,
     )
+    if is_company:
+        print(
+            "  Company payloads carry the company-scoring prompt; the score to "
+            "collect is the response's mission_fit.alignment_score (0-100).",
+            file=sys.stderr,
+        )
     json.dump(payloads, real_stdout, ensure_ascii=False)
     return 0
 
 
 def cmd_measure(args) -> int:
-    store = _store_path()
+    is_company = getattr(args, "kind", "vacancy") == "company"
+    store = _company_store_path() if is_company else _store_path()
     records = load_records(store, version=args.version)
     if not records:
         print("Golden set is empty — nothing to measure.", file=sys.stderr)
@@ -658,15 +957,20 @@ def cmd_measure(args) -> int:
             file=sys.stderr,
         )
         return 1
-    m = compute_metrics(records, scores, args.threshold)
+    threshold = args.threshold
+    if threshold is None:
+        threshold = _company_threshold_default() if is_company else _threshold_default()
+    m = compute_metrics(records, scores, threshold)
     version_shown = args.version if args.version is not None else current_version(store)
-    write_summary(_summary_path(), m, version_shown)
+    summary_path = _company_summary_path() if is_company else _summary_path()
+    write_summary(summary_path, m, version_shown)
     print(format_report(m))
     return 0
 
 
 def cmd_stats(args) -> int:
-    store = _store_path()
+    is_company = getattr(args, "kind", "vacancy") == "company"
+    store = _company_store_path() if is_company else _store_path()
     records = load_records(store, version=args.version)
     if not records:
         print("Golden set is empty. Run `seed` or `template` + `add-template`.", file=sys.stderr)
@@ -680,6 +984,124 @@ def cmd_stats(args) -> int:
     print(f"  labels: {len(records)}  ({n_fit} fit / {len(records) - n_fit} nofit)")
     print(f"  versions: {versions}  (current: {max(versions)})")
     print("  by source: " + ", ".join(f"{k}={v}" for k, v in sorted(by_source.items())))
+    flagged = sum(1 for r in records if r.get("flag"))
+    if flagged:
+        print(f"  flagged for review: {flagged} (see the 'flag' field — verify or drop)")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Company subcommands — same UX, backed by the company golden set + prompt.
+# ---------------------------------------------------------------------------
+
+
+def cmd_seed_company(args) -> int:
+    path = _company_store_path()
+    known = {r["id"] for r in load_records(path)}
+    companies = _load_labelable_companies(known)
+    if not companies:
+        print(
+            "No hand-verdict companies found (approved/kept or hand-rejected, with "
+            "enough evidence to score). Approve/reject some companies in the dashboard "
+            "or /jobs-review first, then re-run `seed --kind company`.",
+            file=sys.stderr,
+        )
+        return 0
+    records = select_company_seed_records(companies, limit=args.limit, balance=not args.no_balance)
+    n_fit = sum(1 for r in records if r["label"] == LABEL_FIT)
+    n_flag = sum(1 for r in records if r.get("flag"))
+    print(
+        f"Selected {len(records)} company labels ({n_fit} fit / {len(records) - n_fit} nofit) "
+        f"from {len(companies)} hand-verdict companies. {n_flag} flagged for review.",
+        file=sys.stderr,
+    )
+    if args.dry_run:
+        print("--dry-run: nothing written.", file=sys.stderr)
+        return 0
+    summary = append_records(path, records)
+    print(
+        f"Company golden set: +{summary['added']} added, {summary['skipped']} already present. "
+        f"Now {summary['total']} labels at version {summary['version']}.\n{path}",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def cmd_template_company(args) -> int:
+    store = _company_store_path()
+    tmpl = _company_template_path()
+    known = {r["id"] for r in load_records(store)}
+    # Blind template: offer companies WITH evidence but drop the verdict-derived
+    # label, so the user can hand-label from the preview without seeing it.
+    pool = _load_labelable_companies(known)[: args.limit]
+    if not pool:
+        print("No scorable companies available to template.", file=sys.stderr)
+        return 0
+    tmpl.parent.mkdir(parents=True, exist_ok=True)
+    with tmpl.open("w", encoding="utf-8") as fh:
+        for c in pool:
+            row = {
+                "label": "",  # fill in: fit | nofit
+                "reason": "",  # one short line, WHY
+                "id": str(c.get("id")),
+                "canonical_name": c.get("canonical_name", ""),
+                "category": c.get("category", ""),
+                "preview": (c.get("content", ""))[:240],
+            }
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    print(
+        f"Wrote {len(pool)} companies to label (blind — no scores shown):\n  {tmpl}\n"
+        'Edit each line: set "label" to fit or nofit and add a short "reason". '
+        "Leave a line's label empty to skip it. Then run:\n"
+        "  python3 scripts/golden_set.py add-template --kind company",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def cmd_add_template_company(args) -> int:
+    store = _company_store_path()
+    tmpl = Path(args.path).expanduser() if args.path else _company_template_path()
+    if not tmpl.exists():
+        print(f"No template at {tmpl}. Run `template --kind company` first.", file=sys.stderr)
+        return 1
+    # Re-load the scorable companies so we can freeze their evidence content.
+    by_id = {str(c.get("id")): c for c in _load_labelable_companies(set())}
+
+    records = []
+    bad = 0
+    for line in tmpl.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        row = json.loads(line)
+        label = (row.get("label") or "").strip().lower()
+        if label not in (LABEL_FIT, LABEL_NOFIT):
+            continue
+        company = by_id.get(str(row.get("id")))
+        if not company:
+            bad += 1
+            continue
+        records.append(
+            make_company_record(
+                company,
+                label,
+                (row.get("reason") or "").strip(),
+                "manual",
+                company.get("content", ""),
+            )
+        )
+    if not records:
+        print("No labelled rows found in the template (set label to fit/nofit).", file=sys.stderr)
+        return 0
+    summary = append_records(store, records)
+    msg = (
+        f"Company golden set: +{summary['added']} added, {summary['skipped']} already present. "
+        f"Now {summary['total']} labels at version {summary['version']}."
+    )
+    if bad:
+        msg += f" ({bad} template rows skipped — company no longer scorable.)"
+    print(msg, file=sys.stderr)
     return 0
 
 
@@ -694,6 +1116,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    def _add_kind(parser):
+        parser.add_argument(
+            "--kind",
+            choices=("vacancy", "company"),
+            default="vacancy",
+            help="Which scoring surface to evaluate (default vacancy). 'company' "
+            "uses the company golden set + company-scoring prompt.",
+        )
+
     sp = sub.add_parser("seed", help="Seed labels from verdict history in the database.")
     sp.add_argument("--limit", type=int, default=50, help="Max labels to add (default 50).")
     sp.add_argument(
@@ -704,20 +1135,24 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument(
         "--dry-run", action="store_true", help="Show what would be added; write nothing."
     )
+    _add_kind(sp)
     sp.set_defaults(func=cmd_seed)
 
     tp = sub.add_parser(
         "template", help="Write a blind labelling template from your own vacancies."
     )
     tp.add_argument("--limit", type=int, default=25, help="Rows to template (default 25).")
+    _add_kind(tp)
     tp.set_defaults(func=cmd_template)
 
     ap = sub.add_parser("add-template", help="Append hand-labelled rows from the template.")
     ap.add_argument("path", nargs="?", help="Template path (default evals/label_template.jsonl).")
+    _add_kind(ap)
     ap.set_defaults(func=cmd_add_template)
 
     ep = sub.add_parser("emit", help="Print scoring payloads (stdout) for the agent to score.")
     ep.add_argument("--version", type=int, help="Freeze to golden-set version <= N.")
+    _add_kind(ep)
     ep.set_defaults(func=cmd_emit)
 
     mp = sub.add_parser("measure", help="Read [{id,score}] from stdin; print the agreement report.")
@@ -725,13 +1160,16 @@ def build_parser() -> argparse.ArgumentParser:
     mp.add_argument(
         "--threshold",
         type=int,
-        default=_threshold_default(),
-        help=f"Fit boundary: score >= this is 'fit' (default {_threshold_default()}).",
+        default=None,
+        help="Fit boundary: score >= this is 'fit'. Default: APPLYABLE_SCORE "
+        "(vacancy) / AUTO_REVIEW_APPROVE (company), both 60 unless overridden.",
     )
+    _add_kind(mp)
     mp.set_defaults(func=cmd_measure)
 
     stp = sub.add_parser("stats", help="Show set size, versions, and label balance.")
     stp.add_argument("--version", type=int, help="Freeze to golden-set version <= N.")
+    _add_kind(stp)
     stp.set_defaults(func=cmd_stats)
 
     return p
@@ -748,6 +1186,19 @@ def _threshold_default() -> int:
 
     try:
         return int(os.environ.get("APPLYABLE_SCORE", DEFAULT_THRESHOLD))
+    except (TypeError, ValueError):
+        return DEFAULT_THRESHOLD
+
+
+def _company_threshold_default() -> int:
+    """The company pipeline's own keep/reject boundary: AUTO_REVIEW_APPROVE (the
+    alignment score at/above which auto_review_candidates flips a candidate to
+    active). Same env var and default (60) the DAL reads, so the eval boundary
+    matches the pipeline's."""
+    import os
+
+    try:
+        return int(os.environ.get("AUTO_REVIEW_APPROVE", DEFAULT_THRESHOLD))
     except (TypeError, ValueError):
         return DEFAULT_THRESHOLD
 

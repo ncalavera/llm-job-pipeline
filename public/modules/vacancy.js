@@ -471,18 +471,23 @@ export function vacancyPageHtml(g, company, status, opts) {
   }
   // The full description only when it adds meaningfully beyond the summary
   // (same gate the catalog card used before it was retired), rendered as
-  // readable prose through mdToHtml (which escapes before formatting).
+  // readable prose through mdToHtml (which escapes before formatting). The
+  // LLM summary already leads the reading column in the profile's product
+  // language (DHA-411); the original source text — often English regardless
+  // of that language — sits behind a collapsed <details>, same pattern as
+  // the company page's evidence/deep-analysis blocks.
   if (
     g.full_description &&
     g.full_description.length > summaryText.length + 50
   ) {
     readParts.push(
-      '<div class="vac-desc-block">' +
-        label(t("vac_description", "About the role")) +
+      '<details class="vac-desc-block"><summary class="vac-section-label">' +
+        escHtml(t("vac_description", "About the role")) +
+        "</summary>" +
         '<div class="vac-desc">' +
         mdToHtml(g.full_description) +
         "</div>" +
-        "</div>",
+        "</details>",
     );
   }
   if (readParts.length === 0) {

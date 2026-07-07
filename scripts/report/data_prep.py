@@ -785,7 +785,6 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
                 "fit_approach": mission.get("approach", ""),
                 "experience_reasoning": mission.get("experience_match_reasoning", ""),
                 "mission_verdict": mission.get("mission_verdict", ""),
-                "mpa_prestige": _custom_boost(mission),
                 "glassdoor_rating": social.get("glassdoor_rating"),
                 "linkedin_employees": social.get("linkedin_employees", ""),
                 "recent_news": social.get("recent_news", []),
@@ -793,8 +792,10 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
                 # Everything the user has done toward this company: applications
                 # (status + artifact KEYS only — values and notes stay private)
                 # and the research rows collected in company_evidence. Shown as a
-                # small block in the profile; the full standalone Applications
-                # section is a later ticket.
+                # small block in the company profile only — the standalone
+                # Applications dashboard section this projection once also fed
+                # was deleted (0 real usage; the Triage "applied" column is
+                # the tracker).
                 "applications": [_project_application(a) for a in company_applications],
                 "application_count": len(company_applications),
                 "research": company_research,
@@ -802,9 +803,13 @@ def prepare_company_data(db: dict = None, org_colors: dict = None) -> list[dict]
             }
         )
 
-        # Calculate composite tier from enrichment scores
+        # Calculate composite tier from enrichment scores. custom_boost is an
+        # optional user-defined signal (career_narrative_boost / legacy
+        # mpa_narrative_boost in mission_fit) — unrelated to the removed MPA
+        # Prestige display column, it only nudges the composite/tier.
         c = companies[-1]
-        tier_letter, composite = calculate_company_tier(c["alignment_score"], c["mpa_prestige"])
+        custom_boost = _custom_boost(mission)
+        tier_letter, composite = calculate_company_tier(c["alignment_score"], custom_boost)
         c["calculated_tier"] = tier_letter
         c["composite_score"] = composite
 

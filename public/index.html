@@ -21,8 +21,8 @@
            Desktop (>=900px): full sidebar, sub-items expanded inline.
            Narrow (<900px): collapses to an icon rail via CSS; the active
            section's sub-items appear instead as the pill row below
-           (vacancySubNav — Applications' own sub-nav was removed, post-ship
-           fast fix), same as before U3. -->
+           (vacancySubNav — every other section, Triage included, is a single
+           leaf with no sub-nav), same as before U3. -->
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand">
           <div class="sidebar-brand-mark">JP</div>
@@ -214,9 +214,9 @@
           <button
             type="button"
             class="nav-item"
-            id="navApplications"
-            data-section="applications"
-            onclick="switchApplications()"
+            id="navTriage"
+            data-section="triage"
+            onclick="switchMode('pipeline')"
           >
             <span class="nav-icon" aria-hidden="true"
               ><svg width="15" height="15" viewBox="0 0 14 14">
@@ -232,13 +232,8 @@
                   stroke-width="1.2"
                 ></path></svg
             ></span>
-            <span class="nav-label" data-i18n="tab_applications"
-              >Applications</span
-            >
+            <span class="nav-label" data-i18n="tab_triage">Triage</span>
           </button>
-          <!-- No sub-items (post-ship fast fix): clicking Applications opens
-               Triage directly. Applied stays reachable programmatically
-               (palette, nav parent mapping) — see nav.js. -->
 
           <button
             type="button"
@@ -379,9 +374,6 @@
               <span data-i18n="tab_archive">Archive</span>
             </button>
           </div>
-
-          <!-- Applications no longer has a sub-nav (post-ship fast fix):
-               the sidebar item opens Triage directly, at every width. -->
 
           <!-- === TODAY MODE === -->
           <div class="today-section" id="todaySection"></div>
@@ -585,38 +577,6 @@
                   — Unscored
                 </option>
               </select>
-              <div class="company-sort-chips">
-                <button
-                  class="chip chip-sort active"
-                  data-csort="applyable"
-                  onclick="toggleCompanySort(this)"
-                >
-                  <span data-i18n="csort_applyable">Applyable</span> &#8595;
-                </button>
-                <button
-                  class="chip chip-sort"
-                  data-csort="liked"
-                  onclick="toggleCompanySort(this)"
-                >
-                  <span data-i18n="csort_liked">Liked</span>
-                </button>
-                <button
-                  class="chip chip-sort"
-                  data-csort="score"
-                  onclick="toggleCompanySort(this)"
-                  data-i18n="csort_score"
-                >
-                  Score
-                </button>
-                <button
-                  class="chip chip-sort"
-                  data-csort="interest"
-                  onclick="toggleCompanySort(this)"
-                  data-i18n="csort_interest"
-                >
-                  Interest
-                </button>
-              </div>
             </div>
             <div
               class="company-enrichment-stats"
@@ -684,16 +644,11 @@
           </div>
           <!-- /boards-section -->
 
-          <!-- === APPLICATIONS MODE ===
-           Roles you've applied to, grouped by company. Rendered from the baked
-           payload (groups[].application) — status + channel + date + artifact
-           KEYS only, never private values. -->
-          <div class="applications-section" id="applicationsSection"></div>
-          <!-- /applications-section -->
-
-          <!-- === PIPELINE MODE (Triage sub-tab under Applications) ===
-           Used to be a sub-tab under Vacancies; moved here because triaging
-           is the step that turns a liked vacancy into an application. -->
+          <!-- === TRIAGE MODE (pipeline) ===
+           The stage board for liked vacancies (unreviewed → applied →
+           interview/offer/rejected/expired). The "applied" column is the
+           tracker for what you've sent (DHA-413 — the old Applications
+           section duplicated this with 0 real data and was deleted). -->
           <div class="pipeline-section" id="pipelineSection">
             <div class="triage-funnel" id="triageFunnel"></div>
             <div class="triage-board-controls" id="triageBoardControls"></div>

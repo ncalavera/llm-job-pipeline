@@ -37,11 +37,6 @@ language = "en"
 # (gitignored) for personal art. Env DASHBOARD_PACK overrides this.
 illustration_pack = "default"
 
-# Show the "MPA Prestige" column on the Companies table (and the matching profile
-# metric). It is a personal MPA/MPP application-strategy score, so it ships OFF.
-# Env DASHBOARD_MPA=1 overrides this. Set true to opt in.
-show_mpa_column = false
-
 # ===========================================================================
 # Scoring cost/quality — the one dial trading input tokens against evidence.
 # ===========================================================================

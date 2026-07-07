@@ -350,11 +350,17 @@ test("Geo drops a liked role from 'liked' once its deadline passes", () => {
 // Today cockpit
 // ---------------------------------------------------------------------------
 
-function todayOpts(
-  statuses,
-  { today = TODAY, prevVisit = "2026-07-01T00:00:00Z" } = {},
-) {
+// The Today rework (DHA-410): six ordered, hide-when-empty populations. opts
+// inject isApproved / getStatus / isLiveRole / daysUntil / soonDays — no
+// basketMap, no prevVisit (the old "new since last visit" list is gone).
+function todayOpts(statuses, { today = TODAY } = {}) {
   const getStatus = (g) => statuses[g.id] || "unseen";
+  const daysUntil = (dateStr) => {
+    if (!dateStr) return null;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return null;
+    return Math.floor((d.getTime() - new Date(today).getTime()) / 86400000);
+  };
   const isExpired = (g) => {
     if (!g.deadline) return false;
     const dl = new Date(g.deadline);
@@ -366,118 +372,207 @@ function todayOpts(
     if (s === "expiring") return true;
     return !isExpired(g);
   };
-  const daysUntil = (dateStr) => {
-    if (!dateStr) return null;
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return null;
-    return Math.floor((d.getTime() - new Date(today).getTime()) / 86400000);
-  };
   return {
     isApproved: (g) => g.approved !== false,
     getStatus,
-    basketMap: STATUS_BASKET,
     isLiveRole,
     daysUntil,
     soonDays: 7,
-    newHighFit: 70,
-    prevVisit,
   };
 }
 
+// A wide sample touching every block. TODAY = 2026-07-03.
 function todaySample() {
   return [
-    { id: "t1", approved: true, llm_score: 50 }, // status expiring → protected
-    { id: "t2", approved: true, llm_score: 65 }, // status to_apply → ready
-    { id: "t3", approved: true, llm_score: 55, deadline: "2026-07-06" }, // liked, deadline in 3d
-    { id: "t4", approved: true, llm_score: 75, first_seen: "2026-07-03" }, // unseen new 70+
-    { id: "t5", approved: true, llm_score: 65, first_seen: "2026-07-03" }, // unseen but <70
-    { id: "t6", approved: true, llm_score: 90 }, // status passed → nothing
-    { id: "t7", approved: false, llm_score: 95 }, // to_apply but not approved
+    { id: "cm", approved: true, llm_score: 65, deadline: "2026-07-20" }, // to_apply
+    { id: "ov", approved: true, llm_score: 70, deadline: "2026-06-20" }, // to_apply, past deadline → overdue
+    { id: "ap", approved: true, llm_score: 80 }, // applied → awaiting
+    { id: "lk", approved: true, llm_score: 55, deadline: "2026-07-10" }, // liked, live
+    { id: "lx", approved: true, llm_score: 55, deadline: "2026-06-20" }, // liked, deadline passed → drops
+    { id: "cs", approved: true, llm_score: 75, deadline: "2026-07-08" }, // unseen 75, 5d → closing soon
+    { id: "hi", approved: true, llm_score: 30, deadline: "2026-07-07" }, // unseen weak, 4d → hidden count
+    { id: "un", approved: true, llm_score: null, deadline: "2026-07-05" }, // unseen unscored, 2d → hidden count
+    { id: "rt", approved: true, llm_score: 80, first_seen: "2026-06-23" }, // unseen 80, aged 10d, no deadline → rot
+    {
+      id: "both",
+      approved: true,
+      llm_score: 90,
+      deadline: "2026-07-08",
+      first_seen: "2026-06-13",
+    }, // unseen 90, near deadline + aged 20d → closing soon only (AE1)
+    { id: "rs", approved: true, llm_score: 62 }, // to_research → working
+    { id: "nw", approved: true, llm_score: 62 }, // to_network → working
+    { id: "no", approved: false, llm_score: 95, deadline: "2026-07-08" }, // unapproved → nowhere
   ];
 }
 
-test("Today selects protected + soon-deadline into expiring, sorted by urgency", () => {
-  const statuses = {
-    t1: "expiring",
-    t2: "to_apply",
-    t3: "liked",
-    t6: "passed",
-    t7: "to_apply",
-  };
-  const { expiring } = selectTodayRoles(todaySample(), todayOpts(statuses));
-  assert.deepEqual(
-    expiring.map((r) => r.g.id),
-    ["t1", "t3"], // protected (-1) before deadline (3)
+const todayStatuses = {
+  cm: "to_apply",
+  ov: "to_apply",
+  ap: "applied",
+  lk: "liked",
+  lx: "liked",
+  rs: "to_research",
+  nw: "to_network",
+  // cs/hi/un/rt/both/no default to unseen
+};
+
+test("Today: committed = to_apply, past-deadline kept and flagged overdue", () => {
+  const { committed } = selectTodayRoles(
+    todaySample(),
+    todayOpts(todayStatuses),
   );
-  assert.equal(expiring[0].kind, "protected");
-  assert.equal(expiring[1].kind, "deadline");
-  assert.equal(expiring[1].daysLeft, 3);
+  assert.deepEqual(
+    committed.map((r) => r.g.id),
+    ["ov", "cm"], // overdue (-13) sorts before the future deadline
+  );
+  assert.equal(committed[0].overdue, true);
+  assert.equal(committed[1].overdue, false);
 });
 
-test("Today ready = to_apply; new = unseen roles at/above the 70 threshold since last visit", () => {
-  const statuses = {
-    t1: "expiring",
-    t2: "to_apply",
-    t3: "liked",
-    t6: "passed",
-    t7: "to_apply",
-  };
-  const { ready, newHighFit } = selectTodayRoles(
+test("Today: awaiting = applied roles (read directly from status)", () => {
+  const { awaiting } = selectTodayRoles(
     todaySample(),
-    todayOpts(statuses),
+    todayOpts(todayStatuses),
   );
   assert.deepEqual(
-    ready.map((g) => g.id),
-    ["t2"],
-  ); // t7 excluded (unapproved)
+    awaiting.map((g) => g.id),
+    ["ap"],
+  );
+});
+
+test("Today: liked keeps live roles; a liked role whose deadline passed drops (R5, AE3)", () => {
+  const { liked } = selectTodayRoles(todaySample(), todayOpts(todayStatuses));
   assert.deepEqual(
-    newHighFit.map((g) => g.id),
-    ["t4"],
-  ); // t5 is 65 (<70)
+    liked.map((g) => g.id),
+    ["lk"], // lx dropped — deadline lapsed
+  );
+});
+
+test("Today: closing soon = unseen, score ≥60, deadline ≤7d — and wins the overlap with don't-rot (AE1)", () => {
+  const { closingSoon, dontRot } = selectTodayRoles(
+    todaySample(),
+    todayOpts(todayStatuses),
+  );
+  assert.deepEqual(
+    closingSoon.map((r) => r.g.id),
+    ["cs", "both"], // both are 5d out; equal deadline → stable order
+  );
+  assert.ok(closingSoon.every((r) => r.expiring === false));
+  // `both` qualifies for both closing-soon and don't-rot, but shows only in
+  // closing soon (dedupe upward); `rt` is the only pure don't-rot role.
+  assert.deepEqual(
+    dontRot.map((g) => g.id),
+    ["rt"],
+  );
+});
+
+test("Today: closingSoonHidden counts the weak/unscored near-deadline roles the gate hides (R4)", () => {
+  const { closingSoon, closingSoonHidden } = selectTodayRoles(
+    todaySample(),
+    todayOpts(todayStatuses),
+  );
+  assert.equal(closingSoonHidden, 2); // hi (score 30) + un (unscored)
+  // The hidden ones are NOT in the visible closing-soon list.
+  assert.ok(!closingSoon.some((r) => r.g.id === "hi" || r.g.id === "un"));
+});
+
+test("Today: protected 'expiring' roles lead the Closing-soon block, flagged (never lost)", () => {
+  const groups = todaySample();
+  groups.push({ id: "px", approved: true, llm_score: 72 }); // status expiring
+  const { closingSoon } = selectTodayRoles(
+    groups,
+    todayOpts({ ...todayStatuses, px: "expiring" }),
+  );
+  // px leads despite having no deadline; the unseen deadline rows follow.
+  assert.deepEqual(
+    closingSoon.map((r) => r.g.id),
+    ["px", "cs", "both"],
+  );
+  assert.equal(closingSoon[0].expiring, true);
+});
+
+test("Today: an 'expiring' role is never score-gated — a weak protected role still surfaces", () => {
+  const groups = [{ id: "weak", approved: true, llm_score: 12 }];
+  const { closingSoon } = selectTodayRoles(
+    groups,
+    todayOpts({ weak: "expiring" }),
+  );
+  assert.deepEqual(
+    closingSoon.map((r) => r.g.id),
+    ["weak"],
+  );
+});
+
+test("Today: working = to_research / to_network, live only", () => {
+  const { working } = selectTodayRoles(todaySample(), todayOpts(todayStatuses));
+  assert.deepEqual(working.map((g) => g.id).sort(), ["nw", "rs"]);
+});
+
+test("Today: an unapproved role never appears in any block", () => {
+  const all = selectTodayRoles(todaySample(), todayOpts(todayStatuses));
+  const ids = [
+    ...all.committed.map((r) => r.g.id),
+    ...all.awaiting.map((g) => g.id),
+    ...all.liked.map((g) => g.id),
+    ...all.closingSoon.map((r) => r.g.id),
+    ...all.dontRot.map((g) => g.id),
+    ...all.working.map((g) => g.id),
+  ];
+  assert.ok(!ids.includes("no"));
+});
+
+test("Today: every population is an array — empty inputs hide-when-empty (R1)", () => {
+  const empty = selectTodayRoles([], todayOpts({}));
+  assert.deepEqual(empty.committed, []);
+  assert.deepEqual(empty.awaiting, []);
+  assert.deepEqual(empty.liked, []);
+  assert.deepEqual(empty.closingSoon, []);
+  assert.deepEqual(empty.dontRot, []);
+  assert.deepEqual(empty.working, []);
+  assert.equal(empty.closingSoonHidden, 0);
 });
 
 test("Today is not score-floored: a liked low-score role still surfaces", () => {
-  // t3 scores 55 (above the 40 floor here, but Today never applies the floor) —
-  // prove the mechanism by dropping it well below and confirming it stays.
   const groups = todaySample();
-  groups.find((g) => g.id === "t3").llm_score = 12;
-  const { expiring } = selectTodayRoles(groups, todayOpts({ t3: "liked" }));
-  assert.ok(expiring.some((r) => r.g.id === "t3"));
+  groups.find((g) => g.id === "lk").llm_score = 12;
+  const { liked } = selectTodayRoles(groups, todayOpts({ lk: "liked" }));
+  assert.ok(liked.some((g) => g.id === "lk"));
 });
 
 test("Today membership reacts to a pass with no reload", () => {
   const base = todaySample();
-  const withReady = selectTodayRoles(base, todayOpts({ t2: "to_apply" }));
-  const afterPass = selectTodayRoles(base, todayOpts({ t2: "passed" }));
+  const withCommitted = selectTodayRoles(base, todayOpts({ cm: "to_apply" }));
+  const afterPass = selectTodayRoles(base, todayOpts({ cm: "passed" }));
   assert.deepEqual(
-    withReady.ready.map((g) => g.id),
-    ["t2"],
+    withCommitted.committed.map((r) => r.g.id),
+    ["cm"],
   );
   assert.deepEqual(
-    afterPass.ready.map((g) => g.id),
+    afterPass.committed.map((r) => r.g.id),
     [],
   );
 });
 
-test("Today drops a liked role from expiring once its deadline passes", () => {
-  const statuses = { t3: "liked" };
+test("Today: closing-soon reacts to a deadline lapsing with no run", () => {
+  const groups = todaySample();
+  // `cs` is unseen with a 07-08 deadline: closing-soon on the 3rd, gone by the 9th.
   const before = selectTodayRoles(
-    todaySample(),
-    todayOpts(statuses, { today: "2026-07-03" }),
+    groups,
+    todayOpts({}, { today: "2026-07-03" }),
   );
   const after = selectTodayRoles(
-    todaySample(),
-    todayOpts(statuses, { today: "2026-07-07" }),
+    groups,
+    todayOpts({}, { today: "2026-07-09" }),
   );
-  assert.ok(before.expiring.some((r) => r.g.id === "t3"));
-  assert.ok(!after.expiring.some((r) => r.g.id === "t3")); // deadline lapsed → not live
+  assert.ok(before.closingSoon.some((r) => r.g.id === "cs"));
+  assert.ok(!after.closingSoon.some((r) => r.g.id === "cs")); // deadline passed
 });
 
 // A stale-source-aware isLiveRole, mirroring today.js `_isLiveRole`: a role whose
-// source stopped confirming it STALE_SOURCE_DAYS+ days ago is no longer live
-// (except a protected `expiring` role, which stays until decided). This exercises
-// the STALE_SOURCE_DAYS branch selectTodayRoles delegates to via opts.isLiveRole —
-// the default todayOpts mock only ever checked the deadline, never staleness.
+// source stopped confirming it STALE_SOURCE_DAYS+ days ago is no longer live.
+// Exercises the branch selectTodayRoles delegates to via opts.isLiveRole for the
+// liked/working blocks (the default todayOpts mock only checks the deadline).
 const STALE_SOURCE_DAYS = 14; // mirrors helpers.STALE_SOURCE_DAYS
 function staleAwareTodayOpts(statuses, cfg = {}) {
   const base = todayOpts(statuses, cfg);
@@ -491,7 +586,7 @@ function staleAwareTodayOpts(statuses, cfg = {}) {
   const isLiveRole = (g) => {
     const s = base.getStatus(g);
     if (s === "archived" || s === "passed" || s === "skipped") return false;
-    if (s === "expiring") return true; // protected — exempt from staleness
+    if (s === "expiring") return true;
     if (base.daysUntil(g.deadline) != null && base.daysUntil(g.deadline) < 0) {
       return false;
     }
@@ -502,61 +597,42 @@ function staleAwareTodayOpts(statuses, cfg = {}) {
   return { ...base, isLiveRole };
 }
 
-test("Today drops a stale-source role and keeps a fresh one (STALE_SOURCE_DAYS)", () => {
-  // Two to_apply roles: one confirmed by its source today, one gone stale
-  // 20 days ago (past the 14-day staleness line). Same for a new-high-fit unseen.
+test("Today: a stale-source liked role drops, a fresh one stays (STALE_SOURCE_DAYS)", () => {
   const groups = [
-    {
-      id: "fresh_apply",
-      approved: true,
-      llm_score: 80,
-      last_seen: "2026-07-03",
-    },
-    {
-      id: "stale_apply",
-      approved: true,
-      llm_score: 80,
-      last_seen: "2026-06-13",
-    },
-    {
-      id: "fresh_new",
-      approved: true,
-      llm_score: 75,
-      first_seen: "2026-07-03",
-      last_seen: "2026-07-03",
-    },
-    {
-      id: "stale_new",
-      approved: true,
-      llm_score: 75,
-      first_seen: "2026-07-03",
-      last_seen: "2026-06-13",
-    },
+    { id: "fresh", approved: true, llm_score: 80, last_seen: "2026-07-03" },
+    { id: "stale", approved: true, llm_score: 80, last_seen: "2026-06-13" },
   ];
-  const opts = staleAwareTodayOpts({
-    fresh_apply: "to_apply",
-    stale_apply: "to_apply",
-  });
-  const { ready, newHighFit } = selectTodayRoles(groups, opts);
+  const opts = staleAwareTodayOpts({ fresh: "liked", stale: "liked" });
+  const { liked } = selectTodayRoles(groups, opts);
   assert.deepEqual(
-    ready.map((g) => g.id),
-    ["fresh_apply"], // stale_apply dropped by the staleness branch
-  );
-  assert.deepEqual(
-    newHighFit.map((g) => g.id),
-    ["fresh_new"], // stale_new dropped by the staleness branch
+    liked.map((g) => g.id),
+    ["fresh"], // stale dropped by the staleness branch
   );
 });
 
 test("Today keeps a protected 'expiring' role even when its source is stale", () => {
-  // A protected role gone stale 30 days ago must still surface — it needs a
-  // decision, so the staleness branch is bypassed for status 'expiring'.
+  // A protected role gone stale 30 days ago must still surface — it exists to
+  // demand a decision, so the staleness branch is bypassed for status
+  // 'expiring' and it leads the Closing-soon block.
   const groups = [
     { id: "prot", approved: true, llm_score: 50, last_seen: "2026-06-03" },
   ];
   const opts = staleAwareTodayOpts({ prot: "expiring" });
-  const { expiring } = selectTodayRoles(groups, opts);
-  assert.ok(expiring.some((r) => r.g.id === "prot" && r.kind === "protected"));
+  const { closingSoon } = selectTodayRoles(groups, opts);
+  assert.ok(closingSoon.some((r) => r.g.id === "prot" && r.expiring === true));
+});
+
+test("Today: a stale-source committed role stays, flagged overdue (never silently dropped)", () => {
+  const groups = [
+    { id: "fresh", approved: true, llm_score: 80, last_seen: "2026-07-03" },
+    { id: "stale", approved: true, llm_score: 80, last_seen: "2026-06-13" },
+  ];
+  const opts = staleAwareTodayOpts({ fresh: "to_apply", stale: "to_apply" });
+  const { committed } = selectTodayRoles(groups, opts);
+  const byId = Object.fromEntries(committed.map((r) => [r.g.id, r]));
+  assert.equal(committed.length, 2); // both kept — the user committed to them
+  assert.equal(byId.fresh.overdue, false);
+  assert.equal(byId.stale.overdue, true); // stale source → flagged, not hidden
 });
 
 // ---------------------------------------------------------------------------

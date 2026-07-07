@@ -14,12 +14,11 @@ personal), not in ``config/defaults.toml``:
     is clamped so it can never cost more than the strong model — a screen as
     expensive as the final pass would defeat the saving.
   - ``escalate_threshold`` — the screen-score floor at/above which a role is
-    escalated to the strong model. Calibrated against the golden set so the cheap
-    screen drops zero of the strong model's true positives: the lowest
-    golden role the strong model rated a fit screened at 70 on the cheap model, so
-    any floor <= 70 preserves every role the strong pass would surface. The
-    default (50) leaves a 20-point safety margin under that boundary while still
-    diverting the weak majority; raising it saves more but narrows the margin.
+    escalated to the strong model. Re-calibrated on a 102-role three-tier
+    backtest (2026-07-06): the lowest role the strong model rated >=60 screened
+    at 56 on the cheap model, so the default (40) keeps every strong-model true
+    positive with a ~16-point margin; raising it saves more but narrows the
+    margin (50 leaves only 6 points on the measured data).
   - ``max_per_run`` — a spike-day SAFETY NET, not the primary lever. A quiet day
     scores 20-30 vacancies; a burst day (hundreds of new roles at once) must not
     silently burn the plan. When a run has no explicit ``--limit``, scoring stops
@@ -75,14 +74,16 @@ def _default_max_per_run() -> int:
 
 # The cheap two-pass screen model and the escalation floor. haiku is
 # the cheapest tier — it maximises the two-pass saving (Haiku 4.5 costs ~1/5 of
-# Opus 4.8 and ~1/3 of Sonnet 5 per token). The 50 floor was calibrated against
-# the golden set: the cheap model scores ~12 points hotter than the strong model,
-# and the lowest golden role the strong model rated a fit screened at 70 on the
-# cheap model. A floor of 50 therefore clears every strong-model true positive by
-# a 20-point margin while diverting the weak majority (a 40 floor would escalate
-# ~55% of a realistic day — the majority — and erase most of the saving).
+# Opus 4.8 and ~1/3 of Sonnet 5 per token). The 40 floor was re-calibrated on a
+# 102-role backtest (2026-07-06, all three tiers on the same prompt): the cheap
+# model scores ~13.5 points hotter than the strong model on average, and the
+# LOWEST role the strong model rated >=60 screened at 56 on the cheap model — so
+# the old 50 floor left only a 6-point margin, not the 20 the original golden-set
+# calibration suggested. A 40 floor keeps zero strong-model true positives below
+# the cut with a ~16-point margin, at the cost of escalating ~66% of a realistic
+# day (vs ~50% at the old floor).
 DEFAULT_SCREEN_MODEL = "haiku"
-DEFAULT_ESCALATION_THRESHOLD = 50
+DEFAULT_ESCALATION_THRESHOLD = 40
 
 # The cheap company pre-filter model — a low-cost relevance screen that drops
 # clearly-irrelevant board-discovered companies BEFORE any paid enrichment
@@ -191,9 +192,9 @@ def escalation_threshold() -> int:
     """Return the screen-score floor at/above which a role is escalated to the
     strong model.
 
-    Calibrated against the golden set so the cheap screen drops zero of the strong
-    model's true positives (the default, 50, sits 20 points under the lowest such
-    golden role's screen score of 70). A garbage / empty value falls back to the
+    Calibrated on the 2026-07-06 three-tier backtest so the cheap screen drops
+    zero of the strong model's true positives (the default, 40, sits ~16 points
+    under the lowest such role's screen score of 56). A garbage / empty value falls back to the
     default; the result is clamped to 0..100 so the bound itself is never
     impossible — but the clamp does NOT guarantee escalation stays live: 100 (or
     anything close to it) is a valid, silently-accepted value that in practice

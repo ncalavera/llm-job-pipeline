@@ -139,14 +139,6 @@ export const TRIAGE_COLUMNS = [
   { key: "skipped", label: "Skipped", color: "var(--muted)" },
 ];
 
-export const CHIP_TO_COL = {
-  applyable: "applyable",
-  liked: "liked",
-  score: "score",
-  interest: "fit",
-  az: "name",
-};
-
 // ---------------------------------------------------------------------------
 // Mutable state — single object for all UI state
 // ---------------------------------------------------------------------------
@@ -161,9 +153,14 @@ export const state = {
   // lifted so sub-threshold roles show. Shared state (not a catalog-local flag)
   // so the Geo table honours the SAME show-all as the Catalog — the two browse
   // surfaces read one visible set and can't disagree (DHA-376 Nit B).
-  catalogShowAll: false,
+  // Default ON: every scored role is visible in Browse; toggle to "Top only"
+  // re-applies the floor. The floor was hiding sub-40 roles the user paid to
+  // score and wants to review (recall-first).
+  catalogShowAll: true,
   catalogSortDesc: true,
-  companySortCol: "applyable",
+  // Default sort: WANT score descending (DHA-409) — the table's header-click
+  // sort now covers every column the old green sort chips duplicated.
+  companySortCol: "fit",
   companySortAsc: false,
   statsSortCol: "count",
   statsSortAsc: false,
@@ -173,11 +170,6 @@ export const state = {
   // Remembered Vacancies sub-view (Browse/Geo/Archive) so re-opening the
   // Vacancies section returns to where the user was.
   vacancyView: "catalog",
-  // Remembered Applications sub-view (Applications/Triage) so re-opening the
-  // Applications section returns to where the user was.
-  applicationsView: "applications",
-  // Applications section status filter ("all" | applied | interview | …).
-  appStatusFilter: "all",
   companyStatuses: {},
   companyStatusesLoaded: false,
   companySubTab: "approved",
@@ -329,9 +321,9 @@ function replaceObjectContents(obj, next) {
  * separate `state` object and in DOM elements untouched by this function, so
  * it survives automatically; callers just call scheduleRender() after.
  *
- * Known gap: presentation config baked once at module load (SHOW_MPA in
- * companies.js, the i18n string table / pack images in i18n.js) does not
- * hot-reload — those still need a manual refresh. In practice they only
+ * Known gap: presentation config baked once at module load (the i18n string
+ * table / pack images in i18n.js) does not hot-reload — those still need a
+ * manual refresh. In practice they only
  * change if the user edits dashboard settings and reruns the pipeline while
  * the tab is open, which is rare enough to leave as a documented limitation.
  * Same class of gap: `state.liveCompanies` (loaded on demand from
