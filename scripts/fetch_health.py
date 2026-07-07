@@ -82,6 +82,10 @@ def _age_days(ts) -> float | None:
 
 
 def classify_company(row: dict, stale_days: int) -> str:
+    # board_only / manual companies are covered by the job boards, not a direct
+    # fetch — a missing/failing ATS is expected, not a problem. Takes precedence.
+    if (row.get("coverage") or "").strip() in ("board_only", "manual"):
+        return "BOARD_ONLY"
     if not (row.get("fetch_strategy") or "").strip():
         return "NEVER"
     if is_fetch_error(row.get("fetch_status")) or (row.get("consecutive_failures") or 0) >= 3:
@@ -114,7 +118,7 @@ def classify_board(row: dict, stale_days: int) -> str:
     return "OK"
 
 
-ORDER = ["BROKEN", "NEVER", "STALE", "EMPTY", "UNKNOWN", "OK"]
+ORDER = ["BROKEN", "NEVER", "STALE", "EMPTY", "UNKNOWN", "OK", "BOARD_ONLY"]
 
 
 def collect(stale_days: int) -> dict:
@@ -125,16 +129,26 @@ def collect(stale_days: int) -> dict:
     have = lambda c: c if c in ccols else "NULL"  # noqa: E731
     cur.execute(
         f"""SELECT canonical_name, COALESCE(fetch_strategy,''), fetch_status,
-                   COALESCE(vacancy_count,0), last_fetched, {have('last_success')},
-                   COALESCE({have('consecutive_failures')},0), {have('fetch_error')}
+                   COALESCE(vacancy_count,0), last_fetched, {have("last_success")},
+                   COALESCE({have("consecutive_failures")},0), {have("fetch_error")},
+                   {have("coverage")}
             FROM company WHERE status='active' ORDER BY canonical_name"""
     )
     companies = []
     for r in cur.fetchall():
         row = dict(
             zip(
-                ["name", "fetch_strategy", "fetch_status", "vacancy_count",
-                 "last_fetched", "last_success", "consecutive_failures", "fetch_error"],
+                [
+                    "name",
+                    "fetch_strategy",
+                    "fetch_status",
+                    "vacancy_count",
+                    "last_fetched",
+                    "last_success",
+                    "consecutive_failures",
+                    "fetch_error",
+                    "coverage",
+                ],
                 r,
             )
         )
@@ -144,17 +158,24 @@ def collect(stale_days: int) -> dict:
     bcols = _table_columns(cur, "board")
     bhave = lambda c: c if c in bcols else "NULL"  # noqa: E731
     cur.execute(
-        f"""SELECT id, COALESCE(enabled,{'false' if 'enabled' in bcols else '0'}),
-                   strategy, last_fetched, {bhave('vacancy_count')},
-                   {bhave('fetch_status')}, {bhave('last_error')}
+        f"""SELECT id, COALESCE(enabled,{"false" if "enabled" in bcols else "0"}),
+                   strategy, last_fetched, {bhave("vacancy_count")},
+                   {bhave("fetch_status")}, {bhave("last_error")}
             FROM board ORDER BY id"""
     )
     boards = []
     for r in cur.fetchall():
         row = dict(
             zip(
-                ["id", "enabled", "strategy", "last_fetched", "vacancy_count",
-                 "fetch_status", "last_error"],
+                [
+                    "id",
+                    "enabled",
+                    "strategy",
+                    "last_fetched",
+                    "vacancy_count",
+                    "fetch_status",
+                    "last_error",
+                ],
                 r,
             )
         )
@@ -177,7 +198,7 @@ def print_report(data: dict, only_broken: bool, stale_days: int) -> None:
     print("=" * 68)
     print(f"  FETCH HEALTH — {len(companies)} active companies, {len(boards)} boards")
     print("=" * 68)
-    print("\nCOMPANIES:  " + "   ".join(f"{b}={ccount.get(b,0)}" for b in ORDER if ccount.get(b)))
+    print("\nCOMPANIES:  " + "   ".join(f"{b}={ccount.get(b, 0)}" for b in ORDER if ccount.get(b)))
 
     show = ["BROKEN", "NEVER"] if only_broken else ORDER
     for bucket in show:
@@ -193,7 +214,7 @@ def print_report(data: dict, only_broken: bool, stale_days: int) -> None:
 
     bcount = _counts(boards)
     print("\n" + "=" * 68)
-    print("BOARDS:  " + "   ".join(f"{b}={bcount.get(b,0)}" for b in list(bcount)))
+    print("BOARDS:  " + "   ".join(f"{b}={bcount.get(b, 0)}" for b in list(bcount)))
     for b in boards:
         if only_broken and b["bucket"] not in ("BROKEN", "EMPTY"):
             continue
@@ -209,9 +230,9 @@ def main() -> int:
         print(json.dumps(data, indent=2, default=str))
     else:
         print_report(data, args.broken, args.stale_days)
-    broken = sum(
-        1 for c in data["companies"] if c["bucket"] in ("BROKEN",)
-    ) + sum(1 for b in data["boards"] if b["bucket"] == "BROKEN")
+    broken = sum(1 for c in data["companies"] if c["bucket"] in ("BROKEN",)) + sum(
+        1 for b in data["boards"] if b["bucket"] == "BROKEN"
+    )
     return 1 if broken else 0
 
 

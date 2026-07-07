@@ -100,6 +100,7 @@ def bootstrap_sqlite(monkeypatch, tmp_path):
         "0013_add_source_board",
         "0014_add_vacancy_status_reason",
         "0015_fetch_health",
+        "0016_company_coverage",
     ):
         sql = (REPO_ROOT / "sql" / "migrations" / f"{post_baseline}.sqlite.sql").read_text(
             encoding="utf-8"

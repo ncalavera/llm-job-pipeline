@@ -25,6 +25,22 @@ def test_no_strategy_is_never():
     assert fh.classify_company({"fetch_strategy": "", "fetch_status": "ok"}, 10) == "NEVER"
 
 
+def test_board_only_coverage_is_not_never_or_broken():
+    # A board-covered org with no ATS (or a failing one) is expected, not broken.
+    assert fh.classify_company({"coverage": "board_only", "fetch_strategy": ""}, 10) == "BOARD_ONLY"
+    assert (
+        fh.classify_company(
+            {
+                "coverage": "board_only",
+                "fetch_strategy": "firecrawl_scrape",
+                "fetch_status": "js_required",
+            },
+            10,
+        )
+        == "BOARD_ONLY"
+    )
+
+
 def test_error_status_is_broken():
     row = {"fetch_strategy": "greenhouse", "fetch_status": "js_required", "vacancy_count": 0}
     assert fh.classify_company(row, 10) == "BROKEN"
