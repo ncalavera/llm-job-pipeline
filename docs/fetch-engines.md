@@ -233,7 +233,7 @@ recipes read the network but write nothing to any real DB.
 
 ---
 
-## Board engines (`BOARD_FETCHERS`, 13)
+## Board engines (`BOARD_FETCHERS`, 14)
 
 Every board applies `GLOBAL_BLACKLIST` and drops generic pipeline titles; all
 but `firecrawl_board` also apply their own (empty-by-default) `board_blacklist`.
@@ -325,6 +325,14 @@ here.
   - No queries configured → prints how to fix it, `[]`.
 - **Debug:** `from fetchers.boards.linkedin import fetch_linkedin_board; print(len(fetch_linkedin_board({"name":"LinkedIn","url":"https://www.linkedin.com/jobs","queries":[{"keywords":"data analyst","location":"Remote"}],"pages":1,"fetch_detail":False})))`
 
+### `probablygood_algolia` — Probably Good via embedded Algolia key
+<!-- ENGINE: probablygood_algolia -->
+- **Surface / auth:** `POST https://OJJMNNBR0H-dsn.algolia.net/1/indexes/jobs_prod/query` with a search-scoped secured key baked into jobs.probablygood.org's own GraphQL backend (constants in the module). No login.
+- **Config keys:** `board_blacklist`.
+- **Pagination & caps:** `hitsPerPage=200` until Algolia's `nbPages`; the index itself caps pagination at 1000 reachable hits (`paginationLimitedTo`) even when `nbHits` is larger — logged, not silently dropped.
+- **Failure signatures:** if the embedded key 403s, refetch it (module comment documents the GraphQL query to re-run against `backend.jobs.probablygood.org/api/graphql`). A page error breaks; nothing fetched + error → re-raised.
+- **Debug:** `from fetchers.boards.probablygood import fetch_probablygood_board; print(len(fetch_probablygood_board({"name":"Probably Good","url":"https://jobs.probablygood.org","board_blacklist":[]})))`
+
 ### `reliefweb_api` — ReliefWeb humanitarian RSS
 <!-- ENGINE: reliefweb_api -->
 - **Surface / auth:** `GET https://reliefweb.int/jobs/rss.xml?limit=20&offset={0,20}`. Public RSS, no registration. (The JSON API needs a pre-approved appname since Nov 2025, so RSS is used.)
@@ -372,6 +380,7 @@ works). Several IDs can share one engine, and one configured strategy
 | `fast_forward` | `fastforward_board` |
 | `linkedin` | `linkedin_guest` |
 | `consultants_for_impact` | `cfi_board_json` |
+| `probablygood` | `probablygood_algolia` |
 | `a16z`, `sequoia` | `consider_board` — **not registered** (fetcher not wired in this repo; enabling them fetches nothing, per the catalogue note) |
 
 `firecrawl_board` and `algolia_api` are **generic** engines: `algolia_api` backs

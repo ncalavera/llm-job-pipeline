@@ -845,3 +845,15 @@ board_blacklist = []
 ttl_days = 3
 tier = "B"
 free = true
+
+[boards.probablygood]
+strategy = "probablygood_algolia"
+name = "Probably Good"
+audience = "High-impact roles across global health, biosecurity, AI safety, and nonprofit operations."
+audience_ru = "Высокоэффективные вакансии: глобальное здравоохранение, биобезопасность, безопасность ИИ, операции в НКО."
+audience_tags = ["effective altruism", "global health", "biosecurity", "ai safety", "policy", "nonprofit", "operations"]
+url = "https://jobs.probablygood.org"
+board_blacklist = []
+ttl_days = 3
+tier = "B"
+free = true

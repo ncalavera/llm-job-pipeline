@@ -579,6 +579,77 @@ def test_fetch_idealist_board(monkeypatch):
     assert "USD" in job["compensation"]
 
 
+def test_fetch_probablygood_board(monkeypatch):
+    hit = {
+        "id": "109663",
+        "objectID": "programme-coordinator-unidir",
+        "slug": "programme-coordinator-unidir",
+        "title": "Programme Coordinator",
+        "description": "Coordinate day-to-day operations for a UN disarmament programme.\n"
+        "- Manage donor relations and reporting.",
+        "org": {
+            "name": "United Nations Institute for Disarmament Research (UNIDIR)",
+            "website": "https://unidir.org/",
+        },
+        "url_external": "https://unjobs.org/vacancies/1783018390634",
+        "locations": [
+            {"name": "Switzerland"},
+            {"name": "Geneva, Switzerland"},
+        ],
+        "tags_area": [{"name": "Nuclear Security & Conflict"}],
+        "tags_skill": [{"name": "Operations"}, {"name": "Research"}],
+        "tags_experience": [{"name": "Mid (5-9y)"}],
+        "tags_workload": [{"name": "Full-Time"}],
+        "has_salary": False,
+        "salary_text": "",
+        "closes_at": "",
+    }
+
+    def router(verb, url, json=None, params=None):
+        assert verb == "POST" and "algolia.net" in url
+        return _Resp(json_data={"hits": [hit], "nbHits": 1, "nbPages": 1})
+
+    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
+    out = fetchers.fetch_probablygood_board(
+        {"name": "Probably Good", "url": "https://jobs.probablygood.org", "board_blacklist": []}
+    )
+    assert len(out) == 1
+    job = out[0]
+    assert job["title"] == "Programme Coordinator"
+    assert job["org_override"] == "United Nations Institute for Disarmament Research (UNIDIR)"
+    assert job["org_url"] == "https://unidir.org/"
+    assert job["url"] == "https://unjobs.org/vacancies/1783018390634"
+    assert job["external_id"] == "programme-coordinator-unidir"
+    assert job["location"] == "Switzerland, Geneva, Switzerland"
+    assert "Nuclear Security & Conflict" in job["department"]
+    assert "Coordinate day-to-day operations" in job["full_description"]
+    assert "Skills: Operations, Research" in job["full_description"]
+    assert job["compensation"] == ""
+
+
+def test_fetch_probablygood_board_no_external_url_falls_back_to_site(monkeypatch):
+    hit = {
+        "objectID": "abc",
+        "slug": "some-role",
+        "title": "Some Role",
+        "description": "A real role description here.",
+        "org": {"name": "Some Org", "website": ""},
+        "url_external": "",
+        "locations": [],
+        "tags_area": [],
+    }
+
+    def router(verb, url, json=None, params=None):
+        return _Resp(json_data={"hits": [hit], "nbHits": 1, "nbPages": 1})
+
+    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
+    out = fetchers.fetch_probablygood_board(
+        {"name": "Probably Good", "url": "https://jobs.probablygood.org", "board_blacklist": []}
+    )
+    assert out[0]["url"] == "https://jobs.probablygood.org/jobs/some-role"
+    assert out[0]["org_url"] == "https://jobs.probablygood.org"
+
+
 def test_fetch_fastforward_board(monkeypatch):
     rec = {
         "id": 555,
