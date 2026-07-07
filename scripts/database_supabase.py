@@ -152,16 +152,17 @@ def _gate_description(job: dict) -> str | None:
     paths share one mutator instead of inlining the same three lines twice.
 
     Strips a leading cookie banner; blanks the field when the text is pure
-    boilerplate (cookie wall, error page, nav chrome). Returns the reject
-    verdict ("cookie_wall"/"error_page"/"nav_junk") when boilerplate was
-    dropped, else None. A merely short/empty description is left as-is — the
-    snippet/URL fallback in filters.has_enough_content still applies.
+    boilerplate (cookie wall, error page, nav chrome, marketing/homepage dump).
+    Returns the reject verdict ("cookie_wall"/"error_page"/"nav_junk"/
+    "marketing_page") when boilerplate was dropped, else None. A merely
+    short/empty description is left as-is — the snippet/URL fallback in
+    filters.has_enough_content still applies.
     """
     raw = job.get("full_description") or ""
     if not raw.strip():
         return None
     cleaned, verdict = clean_description(raw)
-    if verdict in ("cookie_wall", "error_page", "nav_junk"):
+    if verdict in ("cookie_wall", "error_page", "nav_junk", "marketing_page"):
         job["full_description"] = ""
         return verdict
     if cleaned is not None:

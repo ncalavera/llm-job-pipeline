@@ -515,7 +515,15 @@ def generate_report(audit: dict, desc_quality: dict | None = None) -> str:
         lines.append("")
         lines.append("| Verdict | Count | % |")
         lines.append("|---------|-------|---|")
-        for verdict in ("ok", "cookie_wall", "error_page", "nav_junk", "too_short", "empty"):
+        for verdict in (
+            "ok",
+            "cookie_wall",
+            "error_page",
+            "nav_junk",
+            "marketing_page",
+            "too_short",
+            "empty",
+        ):
             count = counters.get(verdict, 0)
             pct = round(100 * count / total, 1) if total else 0
             lines.append(f"| {verdict} | {count} | {pct}% |")
