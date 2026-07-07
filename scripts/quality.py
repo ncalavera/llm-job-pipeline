@@ -202,6 +202,63 @@ def is_navigation_junk(text: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Raw page-script detection (length-independent)
+# ---------------------------------------------------------------------------
+
+# Raw inline-JavaScript / DOM-manipulation signatures. A markdown/text scrape
+# of a real JD never carries these; a page shell whose scripts leaked into the
+# text (an ATS listing page rendered when the job detail was gone, e.g. PageUp
+# careers pages whose inline jQuery html2text couldn't strip) is full of them.
+# LENGTH-INDEPENDENT on purpose: the nav/error/cookie detectors above all cap
+# at a short length, so a LONG chrome dump (5K+ chars of jQuery + nav) falls
+# through every one — it would otherwise be saved as a description and scored
+# on the title alone.
+_SCRIPT_JUNK_RE = re.compile(
+    r"jQuery\s*\(|addEventListener\s*\(|<!\[CDATA\[|"
+    r"document\.(?:getElementById|querySelector|cookie|write)|"
+    r"window\.(?:addEventListener|location|onload)|"
+    r"\.classList\.(?:add|remove|toggle|contains)|"
+    r"\btypeof\s+\w+\s*[!=]=|function\s*\w*\s*\([^)]*\)\s*\{",
+    re.IGNORECASE,
+)
+# ≥ this many raw-JS markers → the text is a script/chrome dump, not a JD. Set
+# above 1 so a dev JD that mentions a single "function()" or "addEventListener"
+# in prose is never misread as chrome (verified: a real page has dozens of
+# hits, a frontend JD has ≤1).
+SCRIPT_JUNK_THRESHOLD = 3
+
+
+def is_script_junk(text: str) -> bool:
+    """True when the text is dominated by raw inline page scripts, not a JD.
+
+    Unlike is_navigation_junk / is_error_page (both capped to short blobs), this
+    fires at any length — the failure it guards is a LONG page shell whose
+    inline JavaScript leaked into the scrape.
+    """
+    if not text:
+        return False
+    return len(_SCRIPT_JUNK_RE.findall(text)) >= SCRIPT_JUNK_THRESHOLD
+
+
+def is_boilerplate_junk(text: str) -> bool:
+    """True when text is pure page boilerplate — a cookie wall, an ATS
+    error/'job gone' page, navigation chrome, or a shell dominated by inline
+    page scripts — rather than a real job description.
+
+    The single boolean the pre-score blind gate shares with clean_description's
+    pre-checks, so scoring rejects the same junk the save gate does (defence in
+    depth: it also catches a junk row already persisted before this gate
+    existed).
+    """
+    return (
+        is_cookie_boilerplate(text)
+        or is_error_page(text)
+        or is_navigation_junk(text)
+        or is_script_junk(text)
+    )
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -233,7 +290,7 @@ def clean_description(text: str, *, min_chars: int = MIN_DESCRIPTION_CHARS):
         return None, "cookie_wall"
     if is_error_page(text):
         return None, "error_page"
-    if is_navigation_junk(text):
+    if is_navigation_junk(text) or is_script_junk(text):
         return None, "nav_junk"
 
     # Real content with a leading and/or trailing consent banner — strip

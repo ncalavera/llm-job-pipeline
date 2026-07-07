@@ -22,8 +22,30 @@ from quality import (
     strip_cookie_boilerplate,
     is_cookie_boilerplate,
     is_navigation_junk,
+    is_script_junk,
+    is_boilerplate_junk,
     COOKIE_MIN_REMAINDER,
 )
+
+# A LONG page shell whose inline JavaScript / nav chrome leaked into the scrape
+# (the shape a PageUp careers *listing* page produces when the job detail is
+# gone and html2text can't strip the inline jQuery). >600 chars, so the
+# length-gated nav/error/cookie detectors all miss it, so without the
+# script-junk guard it would be saved and scored on the title alone.
+SCRIPT_CHROME_PAGE = (
+    "Skip to main content Global Links Visit UNICEF Global Careers Toggle navigation "
+    "Explore UNICEF About UNICEF Where we work Current vacancies Explore our current "
+    "job opportunities Filter results Search using keywords Contract type Consultant "
+    "Locations Headquarters Functional Area Programme Position level Consultancy "
+    "if (typeof SocialShareKit != 'undefined') { SocialShareKit.init({ forceInit: true }); } "
+    "function careerUpdate() { var facetdiv = jQuery('#facetdiv'); "
+    "var filters = jQuery('.search-filter-type'); "
+    "jQuery(filters[x].children[2]).on('click', function(){ jQuery(this).toggleClass('open'); }); "
+    "window.addEventListener('click', function(event) { "
+    "filters[x].classList.add('ready'); }); "
+    "document.getElementById('facet').addEventListener('click', function(){}); "
+    "window.addEventListener('DOMContentLoaded', function() { var filterdiv = jQuery('#facetdiv'); });"
+) * 3
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +266,46 @@ class TestCleanDescriptionNavJunk:
     def test_QD14_is_navigation_junk_direct(self):
         nav = "Home About us Contact us Menu Search Login Sign in Register Careers Privacy Terms"
         assert is_navigation_junk(nav) is True
+
+
+class TestCleanDescriptionScriptJunk:
+    """A LONG page shell dominated by inline page scripts / nav chrome →
+    nav_junk. The length-gated nav/error/cookie detectors all miss it (they cap
+    at a short length), so this is the guardrail that catches a 5K+ char
+    jQuery dump before it is saved and scored on the title alone."""
+
+    def test_QD25_long_script_chrome_rejected(self):
+        assert len(SCRIPT_CHROME_PAGE) > 600  # too long for the nav-token detector
+        text, verdict = clean_description(SCRIPT_CHROME_PAGE)
+        assert verdict == "nav_junk"
+        assert text is None
+
+    def test_QD26_is_script_junk_direct(self):
+        assert is_script_junk(SCRIPT_CHROME_PAGE) is True
+
+    def test_QD27_real_jd_not_script_junk(self):
+        # A clean JD has zero raw-JS markers.
+        assert is_script_junk(FULL_JD) is False
+
+    def test_QD28_frontend_jd_single_js_mention_not_junk(self):
+        # A dev JD may mention one code-ish token in prose — must stay under the
+        # threshold so a real engineering role is never dropped as chrome.
+        fe_jd = (
+            "Senior Frontend Engineer\n\n"
+            "Build our React web app. You will write a function() to handle user "
+            "events and occasionally use addEventListener in the browser.\n"
+            "Requirements: 5+ years JavaScript. Competitive salary and equity.\n"
+            "Join a mission-driven team shipping to millions of users worldwide.\n"
+        )
+        assert is_script_junk(fe_jd) is False
+        text, verdict = clean_description(fe_jd)
+        assert verdict == "ok"
+
+    def test_QD29_is_boilerplate_junk_aggregates(self):
+        # The shared boolean the pre-score blind gate uses: True for every
+        # boilerplate flavour, False for a real JD.
+        assert is_boilerplate_junk(SCRIPT_CHROME_PAGE) is True
+        assert is_boilerplate_junk(FULL_JD) is False
 
 
 class TestCleanDescriptionTooShort:

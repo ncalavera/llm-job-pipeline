@@ -92,6 +92,7 @@ if "--local" in sys.argv or "--save" not in sys.argv:
     sys.stdout = sys.stderr
 
 import filters  # noqa: E402
+import quality  # noqa: E402
 from prompts import VACANCY_SCORING_PROMPT as SYSTEM_PROMPT  # noqa: E402
 from prompts import VACANCY_SCORING_USER_TEMPLATE as USER_TEMPLATE  # noqa: E402
 from config import GEO_ONSITE_PENALTY, GEO_ONSITE_OK_SET  # noqa: E402
@@ -240,11 +241,19 @@ def _load_and_dedup(
         ):
             stats["blacklisted"] += 1
             continue
-        # Blind vacancy gate — skip if no description AND no snippet
-        if not desc.strip():
+        # Blind / junk gate — skip a role with no real job content behind it.
+        # Either the desc is empty, OR it is pure page boilerplate (nav chrome,
+        # inline page scripts, a cookie wall, an ATS 'job gone' page). Either
+        # way the LLM would score on the title alone, so keep it out of scoring
+        # until a real enrich succeeds — never scored on chrome. This backstops
+        # the save-time quality gate (quality.clean_description): it also drops a
+        # junk row already persisted before that gate could catch it (a 5.7K-char
+        # UNICEF listing page full of jQuery once scored 55 on the title alone).
+        if not desc.strip() or quality.is_boilerplate_junk(desc):
             stats["blind"] += 1
+            reason = "no description" if not desc.strip() else "boilerplate/no real content"
             print(
-                f"  [BLIND SKIP] {rep['org']:25s} {rep['title'][:50]} (no description)",
+                f"  [BLIND SKIP] {rep['org']:25s} {rep['title'][:50]} ({reason})",
                 file=sys.stderr,
                 flush=True,
             )
