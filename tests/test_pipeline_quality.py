@@ -374,6 +374,17 @@ class TestCleanDescriptionMarketingPage:
     def test_QD34_is_boilerplate_junk_includes_marketing(self):
         assert is_boilerplate_junk(MARKETING_PAGE) is True
 
+    def test_QD36_two_watch_story_phrases_are_one_marker(self):
+        # The variable "watch … story" pattern can match two different phrases;
+        # they are the SAME marker type and must count once, so a video-producer
+        # JD talking about stories is not rejected on that pattern alone.
+        two_phrases = (
+            "Video Producer\n\nWatch our founder story and then watch a grantee "
+            "success story to see the impact of this role on our storytelling "
+            "team throughout the year across our field offices.\n"
+        )
+        assert is_marketing_page(two_phrases) is False
+
     def test_QD35_single_marker_not_enough(self):
         # One stray homepage marker in an otherwise-thin blob must NOT trip the
         # detector — it requires several distinct markers.

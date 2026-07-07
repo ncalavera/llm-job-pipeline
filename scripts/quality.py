@@ -252,11 +252,21 @@ def is_script_junk(text: str) -> bool:
 # well-formed PROSE, so it reads as "ok" to every gate above and gets saved and
 # scored as if it were a JD (the Co-Develop "Head of External Engagement"
 # incident: an 5.3K-char scrape of codevelop.fund's insights/news feed).
-_MARKETING_MARKER_RE = re.compile(
-    r"featured insights|from the news desk|latest news|tap to unmute|"
-    r"\bsubscribers\b|full story|watch .{0,40}\bstory\b|funding partners|"
-    r"our impact stories|newsletter sign",
-    re.IGNORECASE,
+# One entry per DISTINCT homepage signal. is_marketing_page counts how many of
+# these patterns match at least once — NOT how many substrings match — so a
+# variable-content pattern (the "watch … story" one) or a phrase repeated across
+# a news index cannot inflate a single signal type into several and trip the
+# >=2 gate on its own.
+_MARKETING_MARKERS = (
+    re.compile(r"featured insights", re.IGNORECASE),
+    re.compile(r"from the news desk", re.IGNORECASE),
+    re.compile(r"latest news", re.IGNORECASE),
+    re.compile(r"tap to unmute", re.IGNORECASE),
+    re.compile(r"\bsubscribers\b", re.IGNORECASE),
+    re.compile(r"full story|watch .{0,40}\bstory\b", re.IGNORECASE),
+    re.compile(r"funding partners", re.IGNORECASE),
+    re.compile(r"our impact stories", re.IGNORECASE),
+    re.compile(r"newsletter sign", re.IGNORECASE),
 )
 # Structural signals a genuine JD carries. Presence of MORE than one means the
 # page is a real posting even if it also happens to mention news/marketing copy,
@@ -284,8 +294,8 @@ def is_marketing_page(text: str) -> bool:
     """
     if not text:
         return False
-    markers = {m.group(0).lower() for m in _MARKETING_MARKER_RE.finditer(text)}
-    if len(markers) < MARKETING_MIN_MARKERS:
+    matched = sum(1 for pat in _MARKETING_MARKERS if pat.search(text))
+    if matched < MARKETING_MIN_MARKERS:
         return False
     return len(_JD_STRUCTURE_RE.findall(text)) <= MARKETING_MAX_JD_SIGNALS
 

@@ -271,7 +271,7 @@ def main():
             print("  -> cookie/consent page, NOT saved (js_required)", flush=True)
             cookie_pages += 1
             errors += 1
-        elif verdict in ("error_page", "nav_junk"):
+        elif verdict in ("error_page", "nav_junk", "marketing_page"):
             print(f"  -> {verdict.replace('_', ' ')}, NOT saved", flush=True)
             errors += 1
         elif verdict == "too_short":
