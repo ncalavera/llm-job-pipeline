@@ -240,10 +240,61 @@ def is_script_junk(text: str) -> bool:
     return len(_SCRIPT_JUNK_RE.findall(text)) >= SCRIPT_JUNK_THRESHOLD
 
 
+# ---------------------------------------------------------------------------
+# Marketing / homepage-dump detection (length-independent)
+# ---------------------------------------------------------------------------
+
+# Markers that only a company HOMEPAGE / news / marketing page carries — a
+# real job description never renders a news feed, a video embed, a subscriber
+# count, or a "funding partners" strip. This is the failure the length-gated
+# nav/cookie/script detectors all miss: a Firecrawl scrape that landed on the
+# org's homepage (or a broken careers link that redirected there) returns long,
+# well-formed PROSE, so it reads as "ok" to every gate above and gets saved and
+# scored as if it were a JD (the Co-Develop "Head of External Engagement"
+# incident: an 5.3K-char scrape of codevelop.fund's insights/news feed).
+_MARKETING_MARKER_RE = re.compile(
+    r"featured insights|from the news desk|latest news|tap to unmute|"
+    r"\bsubscribers\b|full story|watch .{0,40}\bstory\b|funding partners|"
+    r"our impact stories|newsletter sign",
+    re.IGNORECASE,
+)
+# Structural signals a genuine JD carries. Presence of MORE than one means the
+# page is a real posting even if it also happens to mention news/marketing copy,
+# so a media/comms JD (which may legitimately say "newsletter" or "subscribers")
+# is never misread as a homepage dump.
+_JD_STRUCTURE_RE = re.compile(
+    r"responsibilit|qualificat|requirement|you will|we(?:'re| are) looking|"
+    r"what you(?:'ll| will)|the role|reports? to|how to apply|"
+    r"application deadline|apply (?:now|here|for this|by|via|online)|"
+    r"minimum .{0,20}years|job description|key duties|role purpose",
+    re.IGNORECASE,
+)
+MARKETING_MIN_MARKERS = 2  # this many DISTINCT homepage markers → a marketing page
+MARKETING_MAX_JD_SIGNALS = 1  # more JD structure than this → it's a real posting
+
+
+def is_marketing_page(text: str) -> bool:
+    """True when the text is a company homepage / news / marketing page, not a JD.
+
+    Requires several DISTINCT homepage-only markers (news feed, video embed,
+    subscriber count, funding-partner strip) AND almost no JD structure — the
+    conjunction keeps a genuine media/comms posting that merely mentions a
+    newsletter from being rejected. Length-independent: the pages it guards are
+    long, well-formed prose that every length-capped detector above lets through.
+    """
+    if not text:
+        return False
+    markers = {m.group(0).lower() for m in _MARKETING_MARKER_RE.finditer(text)}
+    if len(markers) < MARKETING_MIN_MARKERS:
+        return False
+    return len(_JD_STRUCTURE_RE.findall(text)) <= MARKETING_MAX_JD_SIGNALS
+
+
 def is_boilerplate_junk(text: str) -> bool:
     """True when text is pure page boilerplate — a cookie wall, an ATS
-    error/'job gone' page, navigation chrome, or a shell dominated by inline
-    page scripts — rather than a real job description.
+    error/'job gone' page, navigation chrome, a shell dominated by inline
+    page scripts, or a company homepage/news/marketing dump — rather than a
+    real job description.
 
     The single boolean the pre-score blind gate shares with clean_description's
     pre-checks, so scoring rejects the same junk the save gate does (defence in
@@ -255,6 +306,7 @@ def is_boilerplate_junk(text: str) -> bool:
         or is_error_page(text)
         or is_navigation_junk(text)
         or is_script_junk(text)
+        or is_marketing_page(text)
     )
 
 
@@ -268,6 +320,7 @@ def is_boilerplate_junk(text: str) -> bool:
 #   "cookie_wall" — a cookie/consent page with no real content behind it
 #   "error_page"  — an HTTP-error / 'job gone' page
 #   "nav_junk"    — navigation chrome / empty page shell
+#   "marketing_page" — a company homepage / news / marketing dump, not a JD
 #   "too_short"   — real-looking but below the minimum usable length
 
 MIN_DESCRIPTION_CHARS = 100  # below this a description is not worth saving
@@ -292,6 +345,8 @@ def clean_description(text: str, *, min_chars: int = MIN_DESCRIPTION_CHARS):
         return None, "error_page"
     if is_navigation_junk(text) or is_script_junk(text):
         return None, "nav_junk"
+    if is_marketing_page(text):
+        return None, "marketing_page"
 
     # Real content with a leading and/or trailing consent banner — strip
     # both, keep the JD.

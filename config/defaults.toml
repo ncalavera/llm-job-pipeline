@@ -159,7 +159,8 @@ words = [
     "future opportunities", "open application", "talent network",
     "join our talent", "talent connection", "general interest",
     "request for proposals", "request for proposal", "career advising",
-    "now closed",
+    "now closed", "register your interest", "register interest",
+    "banco de talentos",
 ]
 
 # Substring (stem) matches — no word boundaries. Ships EMPTY on purpose.

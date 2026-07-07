@@ -23,6 +23,7 @@ from quality import (
     is_cookie_boilerplate,
     is_navigation_junk,
     is_script_junk,
+    is_marketing_page,
     is_boilerplate_junk,
     COOKIE_MIN_REMAINDER,
 )
@@ -46,6 +47,31 @@ SCRIPT_CHROME_PAGE = (
     "document.getElementById('facet').addEventListener('click', function(){}); "
     "window.addEventListener('DOMContentLoaded', function() { var filterdiv = jQuery('#facetdiv'); });"
 ) * 3
+
+
+# A company HOMEPAGE / news feed scraped and mistaken for a JD — the shape a
+# Firecrawl scrape returns when it lands on the org's homepage (or a broken
+# careers link that redirected there). Long, well-formed prose, so every
+# length-capped nav/cookie/script detector reads it as "ok"; only the
+# marketing-page detector (news feed + video embed + subscriber count, no JD
+# structure) catches it. Modelled on the live Co-Develop incident.
+MARKETING_PAGE = (
+    "About Co-Develop\n\n"
+    "Co-Develop is a global non-profit fund helping countries accelerate their "
+    "digital transformation journeys.\n\n"
+    "Featured Insights\n\n"
+    "Empowering Civil Society to Shape DPI Governance in Latin America.\n\n"
+    "From the News Desk\n\n"
+    "November 17, 2025 — The case for expanding digital public infrastructure.\n"
+    "July 24, 2025 — How Fayda Digital ID Powers Ethiopia's service platform.\n\n"
+    "Global DPI Summit 2025 - From Policy to Practice - YouTube\n"
+    "Tap to unmute\n"
+    "Co-Develop170 subscribers\n\n"
+    "Watch Ayisha's full story about becoming a self-reliant coffee farmer.\n\n"
+    "Funding Partners\n\n"
+    "We operate on the ethos that, together with like-minded partners, we must "
+    "co-develop the foundations for a fairer future.\n"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +334,57 @@ class TestCleanDescriptionScriptJunk:
         assert is_boilerplate_junk(FULL_JD) is False
 
 
+class TestCleanDescriptionMarketingPage:
+    """A company homepage / news / marketing dump scraped as a JD →
+    marketing_page. Long, well-formed prose, so every length-capped detector
+    lets it through; only the marketing-page detector catches it (the live
+    Co-Develop 'Head of External Engagement' incident)."""
+
+    def test_QD30_homepage_dump_rejected(self):
+        assert len(MARKETING_PAGE) > 600  # too long for the length-capped detectors
+        text, verdict = clean_description(MARKETING_PAGE)
+        assert verdict == "marketing_page"
+        assert text is None
+
+    def test_QD31_is_marketing_page_direct(self):
+        assert is_marketing_page(MARKETING_PAGE) is True
+
+    def test_QD32_real_jd_not_marketing_page(self):
+        assert is_marketing_page(FULL_JD) is False
+
+    def test_QD33_comms_jd_mentioning_newsletter_not_flagged(self):
+        # A comms/media JD may say "newsletter" or "subscribers" in prose — the
+        # JD-structure conjunction must keep it from being read as a homepage.
+        comms_jd = (
+            "Communications Manager\n\n"
+            "We are looking for a Communications Manager to grow our newsletter "
+            "and reach new subscribers.\n\n"
+            "Responsibilities:\n"
+            "- Own the editorial calendar and grow our subscriber base\n"
+            "- Manage social channels and the monthly newsletter\n\n"
+            "Requirements:\n"
+            "- 5+ years in communications\n"
+            "- Strong writing skills\n\n"
+            "Apply now with a cover letter. Competitive salary offered.\n"
+        )
+        assert is_marketing_page(comms_jd) is False
+        _, verdict = clean_description(comms_jd)
+        assert verdict == "ok"
+
+    def test_QD34_is_boilerplate_junk_includes_marketing(self):
+        assert is_boilerplate_junk(MARKETING_PAGE) is True
+
+    def test_QD35_single_marker_not_enough(self):
+        # One stray homepage marker in an otherwise-thin blob must NOT trip the
+        # detector — it requires several distinct markers.
+        one_marker = (
+            "Programme Officer\n\nLatest news from our field offices this quarter. "
+            "The team supports grantees across three regions with reporting and "
+            "monitoring throughout the year.\n"
+        )
+        assert is_marketing_page(one_marker) is False
+
+
 class TestCleanDescriptionTooShort:
     """Content < min_chars → too_short."""
 
@@ -397,6 +474,12 @@ class TestBlacklistJunkMatched:
 
     def test_speculative_application(self):
         assert self._is_blacklisted("Speculative Application") is True
+
+    def test_register_your_interest(self):
+        assert self._is_blacklisted("Register Your Interest") is True
+
+    def test_banco_de_talentos(self):
+        assert self._is_blacklisted("[Banco de Talentos] Pessoas com deficiência") is True
 
 
 class TestBlacklistFormatWordsNotJunk:
