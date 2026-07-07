@@ -727,7 +727,9 @@ def _fetch_one_board(board_id, board_cfg, strategy) -> int:
     if new_count > 0:
         print(f"  [{board_name}] {new_count} NEW vacancies added")
 
-    mark_board_fetched(board_id)
+    # Record health telemetry: RAW rows returned (len(jobs)), not new_count —
+    # a board returning 200 rows of which 0 are new is healthy; 0 rows is not.
+    mark_board_fetched(board_id, jobs_returned=len(jobs), fetch_status=board_fetch_status)
     return new_count
 
 

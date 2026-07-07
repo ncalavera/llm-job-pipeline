@@ -1,0 +1,16 @@
+-- 0016_company_coverage — mark how a company is monitored so the health report
+-- stops flagging legitimately-uncrawlable orgs as broken.
+--
+-- ~44 active companies (World Bank, UNDP, UNICEF, IDB, Gavi, GIZ, the big
+-- foundations …) use enterprise ATS with no free JSON feed. They are covered by
+-- the job BOARDS (impactpool, reliefweb, idealist, devex), not a direct fetch —
+-- so "active, no direct strategy" is a VALID state, not a failure. Without a way
+-- to say so, they sit forever in the NEVER bucket and drown the real signal.
+--
+--   coverage = 'direct'      — we fetch this company's own ATS (default)
+--            = 'board_only'   — no free feed; the boards surface its roles
+--            = 'manual'       — track by hand
+--
+-- Additive; NULL means 'direct' (the historical default) so nothing changes for
+-- companies that already fetch fine.
+ALTER TABLE company ADD COLUMN IF NOT EXISTS coverage TEXT;

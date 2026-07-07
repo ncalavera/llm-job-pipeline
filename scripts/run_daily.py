@@ -1830,6 +1830,29 @@ def drive(state: dict, opts: Opts, observe: bool = False) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _print_fetch_health_summary() -> None:
+    """One-line fetch-health readout at the end of every run: how many active
+    companies + boards are broken / empty / ok. Turns silent parser rot into a
+    daily signal. Best-effort — never breaks the run summary. Full detail:
+    `python3 scripts/fetch_health.py`."""
+    try:
+        import fetch_health
+
+        data = fetch_health.collect(stale_days=10)
+        cc = fetch_health._counts(data["companies"])
+        bc = fetch_health._counts(data["boards"])
+        broken = cc.get("BROKEN", 0) + bc.get("BROKEN", 0)
+        mark = "⚠ " if broken else "✓ "
+        c = "  ".join(f"{b}={cc[b]}" for b in fetch_health.ORDER if cc.get(b))
+        b = "  ".join(f"{k}={v}" for k, v in bc.items())
+        print(f"  {mark}fetch health — companies: {c}")
+        print(f"  {mark}fetch health — boards: {b}")
+        if broken:
+            print("     ↳ see broken items: python3 scripts/fetch_health.py --broken")
+    except Exception as exc:  # never let the readout break the run summary
+        print(f"  · fetch-health summary unavailable ({exc})")
+
+
 def _health_lines(state: dict, opts: Opts) -> list[str]:
     """The end-of-run expected-range check: an HONEST health signal that
     catches a silent parser breakage instead of shrugging at a suspicious count.
@@ -1913,6 +1936,7 @@ def _print_summary(state: dict, opts: Opts) -> None:
     for line in _health_lines(state, opts):
         mark = "⚠ " if "OUT OF RANGE" in line else "✓ "
         print(f"  {mark}run health — {line}")
+    _print_fetch_health_summary()
     print(bar, flush=True)
 
 
