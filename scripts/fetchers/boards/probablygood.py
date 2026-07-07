@@ -126,9 +126,7 @@ def fetch_probablygood_board(board_cfg: dict) -> list[dict]:
         compensation = hit.get("salary_text") or "" if hit.get("has_salary") else ""
         deadline = hit.get("closes_at") or ""
 
-        external_id = hit.get("objectID") or hashlib.md5(f"{org}:{title}".encode()).hexdigest()[
-            :12
-        ]
+        external_id = hit.get("objectID") or hashlib.md5(f"{org}:{title}".encode()).hexdigest()[:12]
 
         jobs.append(
             {
