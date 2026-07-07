@@ -125,6 +125,39 @@ def test_load_vacancies_status_exclude_omitted_no_clause(monkeypatch):
     assert "v.status != 'archived'" in sql
 
 
+def test_load_vacancies_score_floor_ors_into_company_gate(monkeypatch):
+    """score_floor_any_company=N must OR a `v.llm_score > N` clause onto the
+    company-status gate, so a strong role is shown whatever its company status."""
+    import database_supabase as db
+
+    conn, cur = _mock_conn()
+    monkeypatch.setattr(db, "get_conn", lambda: conn)
+
+    db.load_vacancies(include_candidate_companies=True, score_floor_any_company=40)
+
+    sql = _captured_sql(cur).lower()
+    assert "or v.llm_score >" in sql, (
+        f"score floor must OR a score clause onto the company gate; got:\n{sql}"
+    )
+    args = cur.execute.call_args_list[0].args
+    params = args[1] if len(args) > 1 else []
+    assert 40 in params, f"floor value 40 missing from SQL params: {params}"
+
+
+def test_load_vacancies_score_floor_omitted_no_clause(monkeypatch):
+    """Without the floor, the company gate stays a plain status check — no score
+    OR leaks in (the default keeps today's behaviour)."""
+    import database_supabase as db
+
+    conn, cur = _mock_conn()
+    monkeypatch.setattr(db, "get_conn", lambda: conn)
+
+    db.load_vacancies(include_candidate_companies=True)
+
+    sql = _captured_sql(cur).lower()
+    assert "or v.llm_score >" not in sql
+
+
 def test_load_vacancies_light_default_is_false():
     """Backward-compat guardrail: default value of light must be False.
 

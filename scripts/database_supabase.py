@@ -887,6 +887,7 @@ def load_vacancies(
     limit=None,
     include_inactive_companies=False,
     include_candidate_companies=False,
+    score_floor_any_company=None,
     light: bool = False,
 ) -> dict[str, dict]:
     """Load vacancies from Supabase. Returns {uuid_str: vacancy_dict}.
@@ -894,6 +895,10 @@ def load_vacancies(
     By default shows only vacancies from active (approved) companies.
     include_inactive_companies=True → no company status filter (all statuses).
     include_candidate_companies=True → also include candidate companies.
+    score_floor_any_company=N → a role scoring > N is shown no matter its
+    company's status (active/candidate/inactive), so a strong match never hides
+    just because its company isn't approved yet. Only widens the set; it never
+    hides a role the company-status filter would have shown.
     status_exclude=[...] → filter out vacancies whose status is in the list
     (e.g. ['passed', 'skipped'] for /score to skip already-decided rows).
     light=True → drop full_description from the SELECT (saves ~8 KB/row).
@@ -906,9 +911,14 @@ def load_vacancies(
 
     if not include_inactive_companies:
         if include_candidate_companies:
-            conditions.append("c.status != 'inactive'")
+            company_cond = "c.status != 'inactive'"
         else:
-            conditions.append("c.status = 'active'")
+            company_cond = "c.status = 'active'"
+        if score_floor_any_company is not None:
+            conditions.append(f"({company_cond} OR v.llm_score > %s)")
+            params.append(score_floor_any_company)
+        else:
+            conditions.append(company_cond)
 
     if company_name:
         canonical = resolve_canonical_name(company_name)

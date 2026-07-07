@@ -449,7 +449,15 @@ def prepare_report_data(db: dict = None) -> dict:
     from scoring_settings import scoring_model
     import applications
 
-    all_vacs = load_vacancies(include_candidate_companies=True, status_exclude=["archived"])
+    # Roles scoring > 40 surface on the dashboard regardless of their company's
+    # status — a strong match is worth reviewing even before its company is
+    # approved (score_floor_any_company). Company-status gating still hides the
+    # long tail of low/unscored roles from not-yet-approved companies.
+    all_vacs = load_vacancies(
+        include_candidate_companies=True,
+        status_exclude=["archived"],
+        score_floor_any_company=40,
+    )
     # Exclude unscored vacancies from dashboard — they appear after /score
     vacancies = [
         v
