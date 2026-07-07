@@ -2294,3 +2294,54 @@ function buildCompanyProfilePage(c) {
     counts: counts,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Keyboard like/pass on the open company profile — same discipline as
+// vacancy.js/catalog.js: returns early unless the profile is the active, in-
+// focus surface with no palette open. l = approve (like), x = reject (pass),
+// each gated to the review banner's OWN buttons so a settled status (approved
+// shows no banner button) makes the key a no-op, exactly like the UI.
+// ---------------------------------------------------------------------------
+function companyProfileKeydown(e) {
+  if (e.isComposing) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  var active = document.activeElement;
+  if (active) {
+    var tag = active.tagName;
+    if (
+      tag === "INPUT" ||
+      tag === "TEXTAREA" ||
+      tag === "SELECT" ||
+      active.isContentEditable
+    )
+      return;
+  }
+
+  var palette = document.getElementById("commandPalette");
+  if (palette && palette.classList.contains("active")) return;
+
+  var el = document.getElementById("companyProfile");
+  if (!el || !el.classList.contains("active")) return;
+
+  var key = e.key;
+  if (key !== "l" && key !== "x") return;
+
+  var c = getCompanyBySlug(state.currentProfileSlug);
+  if (!c || !c.company_id) return;
+
+  var status = _getReviewStatus(c);
+  // approve is available while pending or rejected (restore); reject only while
+  // pending — mirrors the banner button rendering in companyProfileHtml.
+  if (key === "l" && (status === "pending" || status === "rejected")) {
+    e.preventDefault();
+    reviewCompany(c.company_id, "approve");
+  } else if (key === "x" && status === "pending") {
+    e.preventDefault();
+    reviewCompany(c.company_id, "reject");
+  }
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("keydown", companyProfileKeydown);
+}

@@ -257,6 +257,14 @@ function vacancyKeyhintHtml(t) {
     '<span class="vac-keyhint-label">' +
     escHtml(t("vac_keyhint_browse", "browse")) +
     "</span>" +
+    '<span class="vac-key">l</span>' +
+    '<span class="vac-keyhint-label">' +
+    escHtml(t("vac_keyhint_like", "like")) +
+    "</span>" +
+    '<span class="vac-key">x</span>' +
+    '<span class="vac-keyhint-label">' +
+    escHtml(t("vac_keyhint_pass", "pass")) +
+    "</span>" +
     '<span class="vac-key">Esc</span>' +
     '<span class="vac-keyhint-label">' +
     escHtml(t("vac_keyhint_back", "back")) +
@@ -777,6 +785,25 @@ function vacancyKeydown(e) {
   if (key === "Escape") {
     e.preventDefault();
     if (typeof window.closeDetail === "function") window.closeDetail();
+    return;
+  }
+
+  // l / x mirror Browse's like/pass on the open vacancy — gated by the SAME
+  // vacancyActions the Like/Pass buttons render from, so a status that shows no
+  // button (to_apply, applied, archived, …) makes the key a no-op too.
+  if (key === "l" || key === "x") {
+    const vid = state.currentVacancyId;
+    if (!vid) return;
+    const g = groupsById.get(vid);
+    if (!g) return;
+    const acts = vacancyActions(getGroupStatus(g));
+    if (key === "l" && acts.canLike) {
+      e.preventDefault();
+      vacancyLike(vid);
+    } else if (key === "x" && acts.canPass) {
+      e.preventDefault();
+      vacancyPass(vid);
+    }
     return;
   }
 
