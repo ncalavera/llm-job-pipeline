@@ -279,6 +279,73 @@ function _card(title, inner) {
 }
 
 // ---------------------------------------------------------------------------
+// Verdict line (HEALTH-001) — one status header above the cards that answers
+// "is everything OK?" at a glance. Pure over the payload so it unit-tests
+// directly: all-clear → calm green one-liner; anything wrong → a warning that
+// names the problems. Kept exported for that test.
+// ---------------------------------------------------------------------------
+
+function _plural(n, one, many) {
+  return n === 1 ? one : many;
+}
+
+export function healthVerdict(d) {
+  const boards = (d && d.boards) || [];
+  const brokenBoards = boards.filter((b) => b.presumed_broken).length;
+  const fetchingBoards = boards.length - brokenBoards;
+  const failing = (d && d.companies && d.companies.failing) || [];
+  const failingCount = failing.length;
+
+  const problems = [];
+  if (brokenBoards) {
+    problems.push(
+      brokenBoards +
+        " " +
+        _plural(brokenBoards, "board", "boards") +
+        " presumed broken",
+    );
+  }
+  if (failingCount) {
+    problems.push(
+      failingCount +
+        " " +
+        _plural(failingCount, "company", "companies") +
+        " failing",
+    );
+  }
+
+  if (!problems.length) {
+    return {
+      ok: true,
+      text:
+        "All systems healthy — " +
+        fetchingBoards +
+        " " +
+        _plural(fetchingBoards, "board", "boards") +
+        " fetching, no failing companies",
+    };
+  }
+  return { ok: false, text: problems.join(" · ") };
+}
+
+function _renderVerdict(d) {
+  const el = document.getElementById("healthVerdict");
+  if (!el) return;
+  const v = healthVerdict(d);
+  el.className = "health-verdict health-verdict--" + (v.ok ? "ok" : "warn");
+  el.innerHTML =
+    '<span class="health-verdict-dot" aria-hidden="true"></span>' +
+    escHtml(v.text);
+}
+
+function _clearVerdict() {
+  const el = document.getElementById("healthVerdict");
+  if (!el) return;
+  el.className = "";
+  el.innerHTML = "";
+}
+
+// ---------------------------------------------------------------------------
 // Top-level render
 // ---------------------------------------------------------------------------
 
@@ -287,6 +354,7 @@ export function renderHealth() {
   if (!grid) return;
 
   if (healthState === "error") {
+    _clearVerdict();
     grid.innerHTML =
       '<p class="health-offline">' +
       escHtml(
@@ -299,6 +367,7 @@ export function renderHealth() {
     return;
   }
   if (healthState !== "ok" || !healthData) {
+    _clearVerdict();
     grid.innerHTML =
       '<p class="health-dim">' +
       escHtml(T("health_loading", "Loading…")) +
@@ -307,6 +376,7 @@ export function renderHealth() {
   }
 
   const d = healthData;
+  _renderVerdict(d);
   grid.innerHTML =
     _card(T("health_boards_title", "Boards"), _boardsBlock(d.boards)) +
     _card(
@@ -407,6 +477,11 @@ function _injectStylesOnce() {
   const style = document.createElement("style");
   style.id = "healthStyles";
   style.textContent = `
+    .health-verdict{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:600;padding:10px 14px;border-radius:8px;margin-bottom:14px}
+    .health-verdict:empty{display:none}
+    .health-verdict--ok{color:var(--q-good);background:var(--q-good-bg)}
+    .health-verdict--warn{color:var(--q-weak);background:var(--q-weak-bg)}
+    .health-verdict-dot{width:9px;height:9px;border-radius:50%;background:currentColor;flex:none}
     .health-grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin-bottom:20px}
     .health-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:14px 16px}
     .health-card-title{margin:0 0 10px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;opacity:.7}
