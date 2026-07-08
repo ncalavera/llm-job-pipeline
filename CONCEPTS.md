@@ -67,6 +67,12 @@ Terminal application stage meaning the employer went silent and the user gave up
 
 ## Company scoring
 
+### Earned candidate
+A board-discovered candidate company that has justified paid research: at least one of its vacancies scored at/above the `company_paid_min_vacancy_score` floor (60) or was liked. Only earned candidates enter the paid enrichment chain (URL search, about-page scrape, evidence collection) and the cheap relevance screen; unearned candidates are free name-only rows that simply wait. Replaced the company-first queue that once sent 97 strangers into paid research at once (2026-07-08).
+
+### Money valve
+The failure rule for the cheap relevance screen (2026-07-08): if the screen crashed — as opposed to running and keeping everything — ALL paid enrichment is withheld that cycle, the run records a blocking warning, and the publish gate keeps the previous dashboard snapshot. Inverts the old fail-open behavior where a crashed screen meant "research everyone". Candidates are never dropped by the valve; they wait for the next healthy run.
+
 ### Banded verdict (WANT total)
 The WANT total is a holistic banded judgment (90–100 exceptional, 80–89 strong, …) made across all seven dimensions at once — deliberately NOT the arithmetic mean of the dimension scores. The bands plus the spread mandate exist to prevent score compression in a curated pool; drift between the total and the dimension average is expected behavior, and the UI says so.
 *Avoid:* "fixing" the total to equal the dimension mean.
