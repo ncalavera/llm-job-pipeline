@@ -635,27 +635,6 @@ export function vacancyNotFoundHtml(opts) {
   );
 }
 
-// Terminal banner when the Browse-unreviewed queue drains (F3).
-export function vacancyQueueDoneHtml(opts) {
-  const t = (opts && opts.t) || ((k, fb) => fb);
-  return (
-    '<div class="vac-page"><div class="catalog-empty">' +
-    '<div class="catalog-empty-icon">✅</div>' +
-    "<strong>" +
-    escHtml(t("vac_queue_done", "All caught up")) +
-    "</strong>" +
-    '<div class="catalog-empty-hint">' +
-    escHtml(
-      t("vac_queue_done_hint", "No more unreviewed roles in this list."),
-    ) +
-    "</div>" +
-    '<div class="vac-empty-actions"><button class="vac-btn vac-btn--apply" onclick="switchVacancies()">' +
-    escHtml(t("vac_back_to_browse", "Back to Browse")) +
-    "</button></div>" +
-    "</div></div>"
-  );
-}
-
 // ---------------------------------------------------------------------------
 // DOM shell — thin: look up the group, pick the HTML, set innerHTML. Actions
 // use the inline-onclick pattern (KTD4) and the existing status path.
@@ -721,12 +700,16 @@ function advanceBrowseQueue(id) {
     });
     return true;
   }
-  // Queue drained — terminal done banner. Clear the id so the scheduled
-  // "render" won't repaint the page over the banner.
+  // Queue drained (that was the last unreviewed role) — drop back to the Browse
+  // list, which now shows its own empty state, instead of a separate "done"
+  // screen. Clear the id first so the scheduled render (fired by the verdict's
+  // statusChanged) won't repaint the detail over the list. closeDetail pops the
+  // history entry the queue chain sat on (all hops used replace), landing on the
+  // originating list URL.
   state.currentVacancyId = null;
   state.vacancyEntry = null;
-  const host = document.getElementById("vacancyDetail");
-  if (host) host.innerHTML = vacancyQueueDoneHtml(pageOpts());
+  if (typeof window !== "undefined" && typeof window.closeDetail === "function")
+    window.closeDetail();
   return true;
 }
 
