@@ -268,9 +268,20 @@ function _emptyBlock(msg) {
   return '<p class="health-dim">' + escHtml(msg) + "</p>";
 }
 
-function _card(title, inner) {
+// Cards carry weight, not just content (HEALTH-002): "Waiting on you" is
+// actionable, so it gets a cobalt accent edge and a full-strength title;
+// "Learning loop" is informational, so it recedes. Variant is "priority" |
+// "muted" | undefined — the grid layout itself is untouched.
+function _card(title, inner, variant) {
+  const cardCls = "health-card" + (variant ? " health-card--" + variant : "");
+  const titleCls =
+    "health-card-title" + (variant ? " health-card-title--" + variant : "");
   return (
-    '<section class="health-card"><h3 class="health-card-title">' +
+    '<section class="' +
+    cardCls +
+    '"><h3 class="' +
+    titleCls +
+    '">' +
     escHtml(title) +
     "</h3>" +
     inner +
@@ -386,10 +397,12 @@ export function renderHealth() {
     _card(
       T("health_waiting_title", "Waiting on you"),
       _waitingBlock(d.waiting),
+      "priority",
     ) +
     _card(
       T("health_learning_title", "Learning loop"),
       _learningBlock(d.learning),
+      "muted",
     );
 }
 
@@ -485,6 +498,10 @@ function _injectStylesOnce() {
     .health-grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin-bottom:20px}
     .health-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:14px 16px}
     .health-card-title{margin:0 0 10px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;opacity:.7}
+    .health-card--priority{border-left:3px solid var(--cobalt);padding-left:14px}
+    .health-card-title--priority{opacity:1;color:var(--cobalt)}
+    .health-card--muted{opacity:.82}
+    .health-card-title--muted{opacity:.55}
     .health-table{width:100%;border-collapse:collapse;font-size:13px}
     .health-th{text-align:left;padding:4px 6px;opacity:.6;font-weight:600;border-bottom:1px solid rgba(255,255,255,.08)}
     .health-th.num,.health-td.num{text-align:right}
