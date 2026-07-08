@@ -502,24 +502,24 @@ function _injectStylesOnce() {
     .health-card-title--priority{opacity:1;color:var(--cobalt)}
     .health-card--muted{opacity:.82}
     .health-card-title--muted{opacity:.55}
-    .health-table{width:100%;border-collapse:collapse;font-size:13px}
-    .health-th{text-align:left;padding:4px 6px;opacity:.6;font-weight:600;border-bottom:1px solid rgba(255,255,255,.08)}
+    .health-table{width:100%;border-collapse:collapse;font-size:14px}
+    .health-th{text-align:left;padding:4px 6px;font-size:13px;color:var(--sky-text-secondary);font-weight:600;border-bottom:1px solid rgba(255,255,255,.08)}
     .health-th.num,.health-td.num{text-align:right}
     .health-td{padding:5px 6px;border-bottom:1px solid rgba(255,255,255,.05)}
     .health-tr--broken{background:rgba(127,29,29,.18)}
-    .health-badge{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;margin-left:6px;vertical-align:middle}
+    .health-badge{font-size:12px;font-weight:700;padding:1px 6px;border-radius:5px;margin-left:6px;vertical-align:middle}
     .health-badge--broken{background:#7F1D1D;color:#fff}
-    .health-subhead{margin:0 0 8px;font-size:13px}
-    .health-count{background:rgba(255,255,255,.1);border-radius:5px;padding:0 7px;font-size:12px}
-    .health-list,.health-stat-list{margin:0;padding-left:18px;font-size:13px;line-height:1.7}
+    .health-subhead{margin:0 0 8px;font-size:14px}
+    .health-count{background:rgba(255,255,255,.1);border-radius:5px;padding:0 7px;font-size:13px}
+    .health-list,.health-stat-list{margin:0;padding-left:18px;font-size:14px;line-height:1.7}
     .health-stat-list{list-style:none;padding-left:0}
-    .health-dim{opacity:.6;font-size:12px}
+    .health-dim{color:var(--sky-text-secondary);font-size:13px}
     .health-manual{margin-top:10px}
     .health-manual summary{cursor:pointer;list-style-position:inside}
     .health-manual summary:hover{opacity:.85}
     .health-manual-list{margin:6px 0 0;line-height:1.6}
-    .health-ok-line{font-size:13px;opacity:.8;margin:0}
-    .health-offline{opacity:.7;font-size:14px;padding:20px;text-align:center}
+    .health-ok-line{font-size:14px;margin:0}
+    .health-offline{color:var(--sky-text-secondary);font-size:14px;padding:20px;text-align:center}
     .health-diagram-card{margin-top:4px;overflow-x:auto}
     #healthDiagram svg{max-width:100%;height:auto}
     .health-arch-details{margin-top:10px;border-top:1px solid rgba(255,255,255,.08);padding-top:8px}
