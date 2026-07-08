@@ -2247,6 +2247,25 @@ body::after {
   font-weight: 500;
   letter-spacing: 0.02em;
 }
+.loading-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid var(--sky-hairline, rgba(0, 0, 0, 0.08));
+  border-top-color: var(--muted);
+  animation: loadingSpin 0.8s linear infinite;
+}
+@keyframes loadingSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .loading-spinner {
+    animation: none;
+    border-top-color: var(--sky-hairline, rgba(0, 0, 0, 0.08));
+  }
+}
 @keyframes loadingFadeIn {
   from {
     opacity: 0;
