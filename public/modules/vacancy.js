@@ -693,36 +693,16 @@ export function renderVacancyDetail(id) {
   host.innerHTML = vacancyPageHtml(g, company, status, pageOpts());
 }
 
-export function vacancyLike(id) {
-  const g = groupsById.get(id);
-  if (g) updateStatus(id, g.member_ids || [], "liked");
-}
-
-export function vacancyPass(id) {
-  const g = groupsById.get(id);
-  if (g) updateStatus(id, g.member_ids || [], "passed");
-}
-
-export function vacancyResearch(id) {
-  const g = groupsById.get(id);
-  if (g) updateStatus(id, g.member_ids || [], "to_research");
-}
-
-export function vacancyNetwork(id) {
-  const g = groupsById.get(id);
-  if (g) updateStatus(id, g.member_ids || [], "to_network");
-}
-
-export function vacancyMoveToApply(id) {
-  const g = groupsById.get(id);
-  if (!g) return;
-  updateStatus(id, g.member_ids || [], "to_apply");
-
-  // Auto-advance ONLY from a Browse-unreviewed entry (F3). Other entry points
-  // (Today, company roles, cold deep link) confirm in place — the statusChanged
-  // re-render already updates the actions + status chip, and the toast fires.
+// After a verdict from a Browse-unreviewed entry, hop to the next STILL-
+// unreviewed role in the same queue (F3) — the same advance "Move to apply"
+// uses, now shared by like/pass so any verdict walks you forward. Other entry
+// points (Today, company roles, cold deep link) confirm in place: the
+// statusChanged re-render updates the actions + status chip and the toast
+// fires. Returns true when it took over the page (advanced or showed the
+// queue-done banner), false when it left the page for the caller's re-render.
+function advanceBrowseQueue(id) {
   const entry = state.vacancyEntry;
-  if (!entry || entry.context !== "browse") return;
+  if (!entry || entry.context !== "browse") return false;
 
   const isUnseen = (vid) => {
     const vg = groupsById.get(vid);
@@ -739,7 +719,7 @@ export function vacancyMoveToApply(id) {
       queue: entry.queue,
       replace: true,
     });
-    return;
+    return true;
   }
   // Queue drained — terminal done banner. Clear the id so the scheduled
   // "render" won't repaint the page over the banner.
@@ -747,6 +727,38 @@ export function vacancyMoveToApply(id) {
   state.vacancyEntry = null;
   const host = document.getElementById("vacancyDetail");
   if (host) host.innerHTML = vacancyQueueDoneHtml(pageOpts());
+  return true;
+}
+
+export function vacancyLike(id) {
+  const g = groupsById.get(id);
+  if (!g) return;
+  updateStatus(id, g.member_ids || [], "liked");
+  advanceBrowseQueue(id);
+}
+
+export function vacancyPass(id) {
+  const g = groupsById.get(id);
+  if (!g) return;
+  updateStatus(id, g.member_ids || [], "passed");
+  advanceBrowseQueue(id);
+}
+
+export function vacancyResearch(id) {
+  const g = groupsById.get(id);
+  if (g) updateStatus(id, g.member_ids || [], "to_research");
+}
+
+export function vacancyNetwork(id) {
+  const g = groupsById.get(id);
+  if (g) updateStatus(id, g.member_ids || [], "to_network");
+}
+
+export function vacancyMoveToApply(id) {
+  const g = groupsById.get(id);
+  if (!g) return;
+  updateStatus(id, g.member_ids || [], "to_apply");
+  advanceBrowseQueue(id);
 }
 
 // ---------------------------------------------------------------------------
