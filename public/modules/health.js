@@ -60,6 +60,31 @@ function loadHealth() {
 // Block renderers
 // ---------------------------------------------------------------------------
 
+// A board that has never been fetched has no display name in the DB yet — show
+// a humanised id ("consultants_for_impact" → "Consultants For Impact"), never
+// the raw snake_case (design FINDING-004).
+function _boardName(b) {
+  if (b.name) return b.name;
+  return String(b.id || "")
+    .split("_")
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
+
+// Fetch-status codes are pipeline vocabulary; the user reads plain words
+// (design FINDING-005). The raw code stays in the tooltip.
+const FETCH_STATUS_LABELS = {
+  render_ok_zero: "fetches fine, finds 0 roles",
+  js_required: "site needs a browser to render",
+  no_data: "source returns nothing",
+  error: "fetch error",
+  ok: "ok",
+};
+
+function _statusLabel(code) {
+  return FETCH_STATUS_LABELS[code] || code || "—";
+}
+
 function _brokenBadge() {
   return (
     '<span class="health-badge health-badge--broken">' +
@@ -75,8 +100,11 @@ function _boardsBlock(boards) {
   const rows = boards
     .map((b) => {
       const badge = b.presumed_broken ? " " + _brokenBadge() : "";
+      // relativeTime WITHOUT the T dictionary: the tab's copy is English, and
+      // the shared dictionary localises only time strings — mixing "2 дн назад"
+      // into English labels read as a bug (design FINDING-003).
       const fetched = b.last_fetched
-        ? escHtml(relativeTime(b.last_fetched, T))
+        ? escHtml(relativeTime(b.last_fetched))
         : escHtml(T("health_never", "never"));
       const cf =
         b.consecutive_failures == null ? "—" : String(b.consecutive_failures);
@@ -85,7 +113,7 @@ function _boardsBlock(boards) {
         (b.presumed_broken ? " health-tr--broken" : "") +
         '">' +
         '<td class="health-td"><b>' +
-        escHtml(b.name || b.id) +
+        escHtml(_boardName(b)) +
         "</b>" +
         badge +
         "</td>" +
@@ -125,8 +153,10 @@ function _companiesBlock(companies) {
           (c) =>
             "<li>" +
             escHtml(c.name) +
-            ' <span class="health-dim">(' +
-            escHtml(c.fetch_status || "—") +
+            ' <span class="health-dim" title="' +
+            escHtml(c.fetch_status || "") +
+            '">(' +
+            escHtml(_statusLabel(c.fetch_status)) +
             (c.consecutive_failures
               ? ", " + c.consecutive_failures + " fails"
               : "") +
@@ -137,17 +167,19 @@ function _companiesBlock(companies) {
     : '<p class="health-ok-line">' +
       escHtml(T("health_no_failing", "No company's direct fetch is failing.")) +
       "</p>";
+  // The covered-elsewhere list is reassurance, not action — collapsed to one
+  // line with a count, full list on click (design FINDING-006).
   const manualHtml = manual.length
-    ? '<p class="health-dim health-manual">' +
+    ? '<details class="health-manual"><summary class="health-dim">' +
       escHtml(
         T(
-          "health_manual_intro",
-          "Covered by boards or tracked by hand (not broken):",
-        ),
+          "health_manual_summary",
+          "{n} companies have no direct fetch but are covered by boards or tracked by hand — not broken",
+        ).replace("{n}", manual.length),
       ) +
-      " " +
+      '</summary><p class="health-dim health-manual-list">' +
       escHtml(manual.map((m) => m.name).join(", ")) +
-      "</p>"
+      "</p></details>"
     : "";
   return (
     '<h4 class="health-subhead">' +
@@ -196,7 +228,7 @@ function _learningBlock(l) {
     );
   }
   const last = l.last_review
-    ? escHtml(relativeTime(l.last_review, T))
+    ? escHtml(relativeTime(l.last_review))
     : escHtml(T("health_never_reviewed", "never reviewed"));
   return (
     '<ul class="health-stat-list">' +
@@ -343,6 +375,9 @@ function _injectStylesOnce() {
     .health-stat-list{list-style:none;padding-left:0}
     .health-dim{opacity:.6;font-size:12px}
     .health-manual{margin-top:10px}
+    .health-manual summary{cursor:pointer;list-style-position:inside}
+    .health-manual summary:hover{opacity:.85}
+    .health-manual-list{margin:6px 0 0;line-height:1.6}
     .health-ok-line{font-size:13px;opacity:.8;margin:0}
     .health-offline{opacity:.7;font-size:14px;padding:20px;text-align:center}
     .health-diagram-card{margin-top:4px;overflow-x:auto}
