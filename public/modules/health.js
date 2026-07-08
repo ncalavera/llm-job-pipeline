@@ -103,6 +103,12 @@ function _boardsBlock(boards) {
   const rows = boards
     .map((b) => {
       const badge = b.presumed_broken ? " " + _brokenBadge() : "";
+      // A healthy row carries one quiet confirmed-good cue — a small green dot
+      // in the board's own green (HEALTH-004); a broken row gets the badge
+      // instead, never both.
+      const dot = b.presumed_broken
+        ? ""
+        : '<span class="health-dot" aria-hidden="true" title="fetching"></span>';
       // relativeTime WITHOUT the T dictionary: the tab's copy is English, and
       // the shared dictionary localises only time strings — mixing "2 дн назад"
       // into English labels read as a bug (design FINDING-003).
@@ -115,7 +121,9 @@ function _boardsBlock(boards) {
         '<tr class="health-tr' +
         (b.presumed_broken ? " health-tr--broken" : "") +
         '">' +
-        '<td class="health-td"><b>' +
+        '<td class="health-td">' +
+        dot +
+        "<b>" +
         escHtml(_boardName(b)) +
         "</b>" +
         badge +
@@ -167,7 +175,7 @@ function _companiesBlock(companies) {
         )
         .join("") +
       "</ul>"
-    : '<p class="health-ok-line">' +
+    : '<p class="health-ok-line"><span class="health-dot" aria-hidden="true"></span>' +
       escHtml(T("health_no_failing", "No company's direct fetch is failing.")) +
       "</p>";
   // The covered-elsewhere list is reassurance, not action — collapsed to one
@@ -519,6 +527,7 @@ function _injectStylesOnce() {
     .health-manual summary:hover{opacity:.85}
     .health-manual-list{margin:6px 0 0;line-height:1.6}
     .health-ok-line{font-size:14px;margin:0}
+    .health-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--q-good);margin-right:7px;vertical-align:middle}
     .health-offline{color:var(--sky-text-secondary);font-size:14px;padding:20px;text-align:center}
     .health-diagram-card{margin-top:4px;overflow-x:auto}
     #healthDiagram svg{max-width:100%;height:auto}
