@@ -103,9 +103,16 @@ function _boardsBlock(boards) {
   const rows = boards
     .map((b) => {
       const badge = b.presumed_broken ? " " + _brokenBadge() : "";
-      // relativeTime WITHOUT the T dictionary: the tab's copy is English, and
-      // the shared dictionary localises only time strings — mixing "2 дн назад"
-      // into English labels read as a bug (design FINDING-003).
+      // A healthy row carries one quiet confirmed-good cue — a small green dot
+      // in the board's own green (HEALTH-004); a broken row gets the badge
+      // instead, never both.
+      const dot = b.presumed_broken
+        ? ""
+        : '<span class="health-dot" aria-hidden="true" title="fetching"></span>';
+      // relativeTime is called WITHOUT the T dictionary on purpose: the tab's
+      // copy is English, and the shared dictionary would localise the time
+      // string, so a Russian relative time could leak into an English label
+      // and read as a bug (design FINDING-003).
       const fetched = b.last_fetched
         ? escHtml(relativeTime(b.last_fetched))
         : escHtml(T("health_never", "never"));
@@ -115,7 +122,9 @@ function _boardsBlock(boards) {
         '<tr class="health-tr' +
         (b.presumed_broken ? " health-tr--broken" : "") +
         '">' +
-        '<td class="health-td"><b>' +
+        '<td class="health-td">' +
+        dot +
+        "<b>" +
         escHtml(_boardName(b)) +
         "</b>" +
         badge +
@@ -167,7 +176,7 @@ function _companiesBlock(companies) {
         )
         .join("") +
       "</ul>"
-    : '<p class="health-ok-line">' +
+    : '<p class="health-ok-line"><span class="health-dot" aria-hidden="true"></span>' +
       escHtml(T("health_no_failing", "No company's direct fetch is failing.")) +
       "</p>";
   // The covered-elsewhere list is reassurance, not action — collapsed to one
@@ -268,14 +277,92 @@ function _emptyBlock(msg) {
   return '<p class="health-dim">' + escHtml(msg) + "</p>";
 }
 
-function _card(title, inner) {
+// Cards carry weight, not just content (HEALTH-002): "Waiting on you" is
+// actionable, so it gets a cobalt accent edge and a full-strength title;
+// "Learning loop" is informational, so it recedes. Variant is "priority" |
+// "muted" | undefined — the grid layout itself is untouched.
+function _card(title, inner, variant) {
+  const cardCls = "health-card" + (variant ? " health-card--" + variant : "");
+  const titleCls =
+    "health-card-title" + (variant ? " health-card-title--" + variant : "");
   return (
-    '<section class="health-card"><h3 class="health-card-title">' +
+    '<section class="' +
+    cardCls +
+    '"><h3 class="' +
+    titleCls +
+    '">' +
     escHtml(title) +
     "</h3>" +
     inner +
     "</section>"
   );
+}
+
+// ---------------------------------------------------------------------------
+// Verdict line (HEALTH-001) — one status header above the cards that answers
+// "is everything OK?" at a glance. Pure over the payload so it unit-tests
+// directly: all-clear → calm green one-liner; anything wrong → a warning that
+// names the problems. Kept exported for that test.
+// ---------------------------------------------------------------------------
+
+function _plural(n, one, many) {
+  return n === 1 ? one : many;
+}
+
+export function healthVerdict(d) {
+  const boards = (d && d.boards) || [];
+  const brokenBoards = boards.filter((b) => b.presumed_broken).length;
+  const fetchingBoards = boards.length - brokenBoards;
+  const failing = (d && d.companies && d.companies.failing) || [];
+  const failingCount = failing.length;
+
+  const problems = [];
+  if (brokenBoards) {
+    problems.push(
+      brokenBoards +
+        " " +
+        _plural(brokenBoards, "board", "boards") +
+        " presumed broken",
+    );
+  }
+  if (failingCount) {
+    problems.push(
+      failingCount +
+        " " +
+        _plural(failingCount, "company", "companies") +
+        " failing",
+    );
+  }
+
+  if (!problems.length) {
+    return {
+      ok: true,
+      text:
+        "All systems healthy — " +
+        fetchingBoards +
+        " " +
+        _plural(fetchingBoards, "board", "boards") +
+        " fetching, no failing companies",
+    };
+  }
+  return { ok: false, text: problems.join(" · ") };
+}
+
+function _renderVerdict(d) {
+  const el = document.getElementById("healthVerdict");
+  if (!el) return;
+  const v = healthVerdict(d);
+  el.className = "health-verdict health-verdict--" + (v.ok ? "ok" : "warn");
+  el.innerHTML =
+    '<span class="health-verdict-dot" aria-hidden="true"></span>' +
+    escHtml(v.text);
+}
+
+function _clearVerdict() {
+  const el = document.getElementById("healthVerdict");
+  if (!el) return;
+  el.className = "";
+  el.innerHTML = "";
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +374,7 @@ export function renderHealth() {
   if (!grid) return;
 
   if (healthState === "error") {
+    _clearVerdict();
     grid.innerHTML =
       '<p class="health-offline">' +
       escHtml(
@@ -299,6 +387,7 @@ export function renderHealth() {
     return;
   }
   if (healthState !== "ok" || !healthData) {
+    _clearVerdict();
     grid.innerHTML =
       '<p class="health-dim">' +
       escHtml(T("health_loading", "Loading…")) +
@@ -307,6 +396,7 @@ export function renderHealth() {
   }
 
   const d = healthData;
+  _renderVerdict(d);
   grid.innerHTML =
     _card(T("health_boards_title", "Boards"), _boardsBlock(d.boards)) +
     _card(
@@ -316,10 +406,12 @@ export function renderHealth() {
     _card(
       T("health_waiting_title", "Waiting on you"),
       _waitingBlock(d.waiting),
+      "priority",
     ) +
     _card(
       T("health_learning_title", "Learning loop"),
       _learningBlock(d.learning),
+      "muted",
     );
 }
 
@@ -407,27 +499,37 @@ function _injectStylesOnce() {
   const style = document.createElement("style");
   style.id = "healthStyles";
   style.textContent = `
+    .health-verdict{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:600;padding:10px 14px;border-radius:8px;margin-bottom:14px}
+    .health-verdict:empty{display:none}
+    .health-verdict--ok{color:var(--q-good);background:var(--q-good-bg)}
+    .health-verdict--warn{color:var(--q-weak);background:var(--q-weak-bg)}
+    .health-verdict-dot{width:9px;height:9px;border-radius:50%;background:currentColor;flex:none}
     .health-grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin-bottom:20px}
     .health-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:14px 16px}
     .health-card-title{margin:0 0 10px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;opacity:.7}
-    .health-table{width:100%;border-collapse:collapse;font-size:13px}
-    .health-th{text-align:left;padding:4px 6px;opacity:.6;font-weight:600;border-bottom:1px solid rgba(255,255,255,.08)}
+    .health-card--priority{border-left:3px solid var(--cobalt);padding-left:14px}
+    .health-card-title--priority{opacity:1;color:var(--cobalt)}
+    .health-card--muted{opacity:.82}
+    .health-card-title--muted{opacity:.55}
+    .health-table{width:100%;border-collapse:collapse;font-size:14px}
+    .health-th{text-align:left;padding:4px 6px;font-size:13px;color:var(--sky-text-secondary);font-weight:600;border-bottom:1px solid rgba(255,255,255,.08)}
     .health-th.num,.health-td.num{text-align:right}
     .health-td{padding:5px 6px;border-bottom:1px solid rgba(255,255,255,.05)}
     .health-tr--broken{background:rgba(127,29,29,.18)}
-    .health-badge{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;margin-left:6px;vertical-align:middle}
+    .health-badge{font-size:12px;font-weight:700;padding:1px 6px;border-radius:5px;margin-left:6px;vertical-align:middle}
     .health-badge--broken{background:#7F1D1D;color:#fff}
-    .health-subhead{margin:0 0 8px;font-size:13px}
-    .health-count{background:rgba(255,255,255,.1);border-radius:5px;padding:0 7px;font-size:12px}
-    .health-list,.health-stat-list{margin:0;padding-left:18px;font-size:13px;line-height:1.7}
+    .health-subhead{margin:0 0 8px;font-size:14px}
+    .health-count{background:rgba(255,255,255,.1);border-radius:5px;padding:0 7px;font-size:13px}
+    .health-list,.health-stat-list{margin:0;padding-left:18px;font-size:14px;line-height:1.7}
     .health-stat-list{list-style:none;padding-left:0}
-    .health-dim{opacity:.6;font-size:12px}
+    .health-dim{color:var(--sky-text-secondary);font-size:13px}
     .health-manual{margin-top:10px}
     .health-manual summary{cursor:pointer;list-style-position:inside}
     .health-manual summary:hover{opacity:.85}
     .health-manual-list{margin:6px 0 0;line-height:1.6}
-    .health-ok-line{font-size:13px;opacity:.8;margin:0}
-    .health-offline{opacity:.7;font-size:14px;padding:20px;text-align:center}
+    .health-ok-line{font-size:14px;margin:0}
+    .health-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--q-good);margin-right:7px;vertical-align:middle}
+    .health-offline{color:var(--sky-text-secondary);font-size:14px;padding:20px;text-align:center}
     .health-diagram-card{margin-top:4px;overflow-x:auto}
     #healthDiagram svg{max-width:100%;height:auto}
     .health-arch-details{margin-top:10px;border-top:1px solid rgba(255,255,255,.08);padding-top:8px}
