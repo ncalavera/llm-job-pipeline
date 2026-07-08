@@ -115,3 +115,74 @@ class TestSearchWebsite:
         # A LinkedIn hit is skipped; nothing else matches → unresolved.
         client = _FakeClient([_Item("https://linkedin.com/company/alone")])
         assert f._search_website(client, "ALONE") is None
+
+
+# ---------------------------------------------------------------------------
+# Vacancy-first gate (R3): the ghost branch only searches for a URL once a
+# vacancy has EARNED the stranger — otherwise the paid Firecrawl search never
+# fires. DB-backed on an isolated temp SQLite DB.
+# ---------------------------------------------------------------------------
+
+import importlib  # noqa: E402
+import sys  # noqa: E402
+import uuid  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import pytest  # noqa: E402
+
+_SCRIPTS = str(Path(__file__).resolve().parent.parent / "scripts")
+if _SCRIPTS not in sys.path:
+    sys.path.insert(0, _SCRIPTS)
+
+
+@pytest.fixture()
+def sqlite_db(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
+    monkeypatch.setenv("JOBSEARCH_DB_PATH", str(tmp_path / "jobsearch.db"))
+    for mod in ("database_supabase", "config", "company_registry", "db_conn", "db_backend"):
+        sys.modules.pop(mod, None)
+    import db_backend
+
+    importlib.reload(db_backend)
+    assert db_backend.IS_SQLITE
+    import database_supabase  # noqa: F401  (initializes the schema)
+
+    yield db_backend
+    db_backend.close_conn()
+
+
+def _ghost(conn, name):
+    cid = str(uuid.uuid4())
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO company (id, canonical_name, status, website) VALUES (%s, %s, 'candidate', '')",
+        (cid, name),
+    )
+    conn.commit()
+    cur.close()
+    return cid
+
+
+def _earn(conn, company_id, llm_score=90):
+    vid = str(uuid.uuid4())
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO vacancy (id, dedup_hash, company_id, title, first_seen, last_seen, "
+        "status, llm_score) VALUES (%s, %s, %s, 'Role', '2026-01-01', '2026-01-01', 'unseen', %s)",
+        (vid, vid, company_id, llm_score),
+    )
+    conn.commit()
+    cur.close()
+
+
+def test_load_companies_to_find_gates_ghosts_on_earning_vacancy(sqlite_db, capsys):
+    conn = sqlite_db.get_conn()
+    earned = _ghost(conn, "Harborlight Trust")
+    _ghost(conn, "Driftwood Society")  # no earning vacancy → stays unearned
+    _earn(conn, earned, llm_score=90)
+
+    names = f._load_companies_to_find()
+    assert "Harborlight Trust" in names
+    assert "Driftwood Society" not in names  # unearned ghost is not searched
+    assert "1 ghost candidate(s) waiting unearned" in capsys.readouterr().out

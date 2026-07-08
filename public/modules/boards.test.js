@@ -286,6 +286,21 @@ test("a board with no matching roles shows an honest 'no data yet', not 0/0/0", 
   assert.ok(!html.includes("brd-yield-funnel"), "and not a 0/0/0 funnel");
 });
 
+test("a hidden board is filtered out of the render (baked hidden flag)", () => {
+  setCatalog([
+    boardRow({ id: "shown", name: "ShownBoard" }),
+    boardRow({ id: "gone", name: "HiddenBoard", hidden: true }),
+  ]);
+  setGroups([]);
+  renderBoards();
+  const html = grid.innerHTML;
+  assert.ok(html.includes("ShownBoard"), "a visible board still renders");
+  assert.ok(
+    !html.includes("HiddenBoard"),
+    "a board with hidden=true is dropped from the table",
+  );
+});
+
 test("the Boards section links to the suggest-a-board issue form", () => {
   setCatalog([boardRow({})]);
   setGroups([]);

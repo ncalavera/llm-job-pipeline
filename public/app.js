@@ -65,6 +65,7 @@ import { renderToday, todayAction, openTodayRow } from "./modules/today.js";
 import { initStats, renderStats } from "./modules/stats.js";
 import { initArchive, renderArchive } from "./modules/archive.js";
 import { initBoards, renderBoards, toggleBoard } from "./modules/boards.js";
+import { initHealth, renderHealth } from "./modules/health.js";
 import { initSettings, renderSettings } from "./modules/settings.js";
 import {
   sectionForMode,
@@ -300,6 +301,7 @@ on("render", () => {
   if (state.currentMode === "stats") renderStats();
   if (state.currentMode === "settings") renderSettings();
   if (state.currentMode === "boards") renderBoards();
+  if (state.currentMode === "health") renderHealth();
   if (state.currentProfileSlug) renderProfileForSlug(state.currentProfileSlug);
   if (state.currentVacancyId) renderVacancyDetail(state.currentVacancyId);
 });
@@ -355,6 +357,7 @@ var LEAF_SECTION_ID = {
   stats: "statsSection",
   archive: "archiveSection",
   boards: "boardsSection",
+  health: "healthSection",
   settings: "settingsSection",
 };
 
@@ -366,6 +369,7 @@ var NAV_BTNS = {
   companies: "navCompanies",
   triage: "navTriage",
   boards: "navBoards",
+  health: "navHealth",
   settings: "navSettings",
 };
 
@@ -639,6 +643,8 @@ function switchMode(mode) {
     initArchive();
   } else if (mode === "boards") {
     initBoards();
+  } else if (mode === "health") {
+    initHealth();
   } else if (mode === "settings") {
     initSettings();
   }

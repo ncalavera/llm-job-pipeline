@@ -10,10 +10,22 @@ export default withHandler(
     try {
       const supabase = getSupabase();
 
-      const { data: catalog, error: catalogErr } = await supabase
+      // `enabled` (migration 0011) and `hidden` (later) may be absent on a
+      // partially-migrated DB. Try the full select; on an unknown-column error
+      // fall back to the base columns and treat the flags as their defaults
+      // (enabled true / hidden false) so the boards tab still renders.
+      const BASE_COLS = "id, name, strategy, tier, ttl_days, url, last_fetched";
+      let catalog;
+      const full = await supabase
         .from("board")
-        .select("id, name, strategy, tier, ttl_days, url, last_fetched");
-      if (catalogErr) throw catalogErr;
+        .select(`${BASE_COLS}, enabled, hidden`);
+      if (full.error) {
+        const base = await supabase.from("board").select(BASE_COLS);
+        if (base.error) throw base.error;
+        catalog = base.data;
+      } else {
+        catalog = full.data;
+      }
 
       const recentCutoff = new Date(
         Date.now() - 14 * 24 * 60 * 60 * 1000,
@@ -43,6 +55,10 @@ export default withHandler(
 
           return {
             ...b,
+            // Normalise the two flags so the client never sees undefined:
+            // a missing column (older schema) reads as enabled / not hidden.
+            enabled: b.enabled == null ? true : !!b.enabled,
+            hidden: !!b.hidden,
             vac_total: totalRes.count || 0,
             vac_recent: recentRes.count || 0,
             overdue,

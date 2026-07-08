@@ -12,6 +12,8 @@ applied ON TOP of this persisted set for a single run.
     python3 scripts/sources.py recommend          # boards that fit YOUR profile
     python3 scripts/sources.py enable-board <id>   # make a board stick across runs
     python3 scripts/sources.py disable-board <id>  # stop a board fetching by default
+    python3 scripts/sources.py hide-board <id>     # drop a board from the dashboard view
+    python3 scripts/sources.py unhide-board <id>   # bring a hidden board back into view
 
 Disabling a board also archives its still-unseen vacancies (status_reason
 'board_disabled') so they stop lingering forever -- nothing else ever
@@ -45,6 +47,7 @@ from database_supabase import (  # noqa: E402
     get_company_fitness_map,
     get_enabled_boards,
     set_board_enabled,
+    set_board_hidden,
 )
 from db_conn import close_conn  # noqa: E402
 
@@ -145,6 +148,29 @@ def cmd_disable(board_id: str) -> int:
     return 0
 
 
+def cmd_hide(board_id: str) -> int:
+    # Hiding is display-only (the board keeps whatever enabled state it has), so
+    # a known-id guard mirrors enable-board: you hide a board config still ships.
+    if board_id not in _ALL_JOB_BOARDS:
+        known = ", ".join(sorted(_ALL_JOB_BOARDS)) or "(none)"
+        print(f"Unknown board '{board_id}'. Known boards: {known}")
+        return 2
+    set_board_hidden(board_id, True)
+    print(
+        f"Hid board '{board_id}' ({_board_name(board_id)}) from the dashboard Boards tab. "
+        "It still fetches if enabled; unhide-board brings it back into the view."
+    )
+    return 0
+
+
+def cmd_unhide(board_id: str) -> int:
+    # Tolerant of an unknown id (the clean-up path), like disable-board: a board
+    # config no longer ships may still carry a stale hidden flag in the DB.
+    set_board_hidden(board_id, False)
+    print(f"Unhid board '{board_id}': it shows on the dashboard Boards tab again.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         description="Show and manage pipeline sources (enabled boards + active companies)."
@@ -162,6 +188,15 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     di.add_argument("board_id")
+    hi = sub.add_parser(
+        "hide-board",
+        help="Hide a board from the dashboard Boards tab (does not change fetching).",
+    )
+    hi.add_argument("board_id")
+    uh = sub.add_parser(
+        "unhide-board", help="Show a previously hidden board on the dashboard again."
+    )
+    uh.add_argument("board_id")
     args = p.parse_args(argv)
 
     try:
@@ -171,6 +206,10 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_enable(args.board_id)
         if args.cmd == "disable-board":
             return cmd_disable(args.board_id)
+        if args.cmd == "hide-board":
+            return cmd_hide(args.board_id)
+        if args.cmd == "unhide-board":
+            return cmd_unhide(args.board_id)
         return cmd_list()
     except BoardPersistenceUnavailable as exc:
         print(exc)

@@ -83,10 +83,15 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
         cities = hit.get("tags_city") or []
         location = ", ".join(cities) if cities else ", ".join(hit.get("tags_country") or [])
         job_url = hit.get("url_external") or ""
-        # Strip HTML from description_short
-        snippet = hit.get("description_short") or ""
-        snippet = re.sub(r"<[^>]+>", " ", snippet)
-        snippet = re.sub(r"\s+", " ", snippet).strip()
+        # `description_short` is the ONLY role text this index carries — the
+        # `description` field is always empty (verified across the live index),
+        # and the full posting lives off-site at url_external. So the full
+        # cleaned text feeds full_description uncapped; `snippet` is only a
+        # capped preview for the digest/card.
+        desc_text = hit.get("description_short") or ""
+        desc_text = re.sub(r"<[^>]+>", " ", desc_text)
+        desc_text = re.sub(r"\s+", " ", desc_text).strip()
+        snippet = desc_text
         if len(snippet) > 400:
             snippet = snippet[:400].rsplit(" ", 1)[0] + "…"
 
@@ -100,7 +105,7 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
         areas = ", ".join(hit.get("tags_area") or [])
         salary = hit.get("salary") or ""
 
-        desc_parts = [snippet]
+        desc_parts = [desc_text]
         if comp_desc:
             desc_parts.append(f"About {org}: {comp_desc}")
         meta = []

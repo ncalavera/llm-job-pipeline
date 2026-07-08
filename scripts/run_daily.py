@@ -192,7 +192,27 @@ def _new_state(opts: Opts) -> dict:
             "no_publish": opts.no_publish,
         },
         "stages": [{"name": n, "status": "pending"} for n in STAGE_ORDER],
+        # Structured non-fatal failures appended by best-effort helpers (R7): a
+        # subprocess that exited non-zero but did not fail its whole stage. They
+        # render OK-BUT on the report card; a blocking one also dirties publish.
+        "warnings": [],
     }
+
+
+def _add_warning(state: "dict | None", stage: str, message: str, blocking: bool = False) -> None:
+    """Record a non-fatal failure on run state so it reaches the report card (R7).
+
+    A best-effort helper (junk prefilter, screen, website backfill, evidence) that
+    saw a non-zero subprocess exit calls this instead of only printing a line.
+    ``blocking`` marks a failure that must also dirty the publish gate (the screen
+    crash — its valve withholds paid enrichment, so the run is not trustworthy);
+    other warnings render OK-BUT and let publish proceed (A2). Tolerates a missing
+    state (helpers called outside a driven run in unit tests) as a no-op."""
+    if state is None:
+        return
+    state.setdefault("warnings", []).append(
+        {"stage": stage, "message": message, "blocking": bool(blocking), "at": _now()}
+    )
 
 
 def _save_state(state: dict) -> None:
@@ -643,13 +663,15 @@ def _py(script: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _prefilter_junk_companies(opts: Opts) -> None:
+def _prefilter_junk_companies(opts: Opts, state: "dict | None" = None) -> None:
     """Drop structural junk candidates (gov / university / aggregator) before we
     spend Firecrawl credits enriching them. Best-effort: a failure here must not
-    block scoring, so its exit code is advisory only."""
+    block scoring, so its exit code is advisory only — but it is recorded as a
+    warning (R7) so it reaches the report card instead of only a log line."""
     rc = _run(_py("filter_companies.py") + ["--apply"], opts)
     if rc != 0:
         print("  ⚠  company junk pre-filter exited non-zero — continuing", flush=True)
+        _add_warning(state, "company_scoring", "company junk pre-filter exited non-zero")
 
 
 def _screen_candidates(opts: Opts) -> "dict | None":
@@ -668,8 +690,9 @@ def _screen_candidates(opts: Opts) -> "dict | None":
     LLM cut was deferred (no direct API key) and payloads are pending, the
     caller gates so cheap subagents make the keep/drop calls instead.
 
-    Best-effort: a screen failure keeps every candidate — the safe direction —
-    so it can never block scoring."""
+    A None return closes the driver's MONEY VALVE (R2): the caller withholds all
+    paid enrichment this cycle rather than research unscreened strangers, records a
+    blocking warning, and lets the candidates wait for the next run."""
     SCREEN_SUMMARY_PATH.unlink(missing_ok=True)  # never act on a stale marker
     rc = _run(_py("screen_candidates.py") + ["--apply"], opts)
     if rc != 0:
@@ -681,7 +704,7 @@ def _screen_candidates(opts: Opts) -> "dict | None":
     return record if isinstance(record, dict) else None
 
 
-def _backfill_candidate_websites(opts: Opts) -> None:
+def _backfill_candidate_websites(opts: Opts, state: "dict | None" = None) -> None:
     """Find official websites for ghost candidates (board-discovered, no URL) so
     they enter scoring instead of hanging unscored. Capped at the same per-run
     safety net already used for the scoring set (``scoring_settings.max_per_run``
@@ -709,9 +732,10 @@ def _backfill_candidate_websites(opts: Opts) -> None:
     rc = _run(_py("find_company_urls.py") + ["--limit", str(capped)], opts)
     if rc != 0:
         print("  ⚠  website backfill exited non-zero — continuing", flush=True)
+        _add_warning(state, "company_scoring", "candidate website backfill exited non-zero")
 
 
-def _collect_company_evidence(names: list[str], opts: Opts) -> None:
+def _collect_company_evidence(names: list[str], opts: Opts, state: "dict | None" = None) -> None:
     """Collect primary-source evidence (company_evidence rows) for the companies
     about to be scored. Runs BEFORE score_companies so the scorer reads real
     primary text, not the legacy scrape cache. The caller has already capped
@@ -730,6 +754,11 @@ def _collect_company_evidence(names: list[str], opts: Opts) -> None:
             "  ⚠  evidence collection exited non-zero — WANT scores may fall back to "
             "the scrape cache (degraded). Check the output above.",
             flush=True,
+        )
+        _add_warning(
+            state,
+            "company_scoring",
+            "evidence collection exited non-zero — WANT scores degraded to scrape cache",
         )
 
 
@@ -808,6 +837,13 @@ def check_publish_gate(state: dict, fetch_stats: dict | None = None) -> tuple[bo
     errored = [s["name"] for s in state.get("stages", []) if s.get("status") == "error"]
     if errored:
         reasons.append("stage error(s): " + ", ".join(errored))
+
+    # A blocking warning (the screen crash — its valve withheld paid enrichment)
+    # dirties the run even though the stage itself did not error (A2, R7). Other
+    # warnings render OK-BUT on the card but do NOT block publish.
+    for w in state.get("warnings", []) or []:
+        if w.get("blocking"):
+            reasons.append(f"{w.get('stage', '?')}: {w.get('message', 'blocking warning')}")
 
     stats = fetch_stats if fetch_stats is not None else _read_fetch_stats()
     for org, d in (stats.get("orgs", {}) or {}).items():
@@ -1216,10 +1252,30 @@ def _h_fetch(state, entry, opts):
     stats = _read_fetch_stats()
     new = stats.get("total_new", "?")
     errs = len(stats.get("errors", {}) or {})
-    note = f"{new} new vacancies"
+    note = f"{new} new vacancies · " + _fetch_source_counters(stats)
     if errs:
         note += f"; {errs} source(s) had a fetch error (does not block the other sources)"
     return "advance", note
+
+
+def _fetch_source_counters(stats: dict) -> str:
+    """Two labeled counters for the fetch stage note: company CAREER SITES vs job
+    BOARDS (R7 terminology). Each shows sources-that-yielded / sources-attempted;
+    boards that all TTL-skipped read "boards 0/7 (TTL)" — honest about a boards
+    run that never actually fired, instead of implying it ran."""
+    cs = stats.get("career_sites", {}) or {}
+    bd = stats.get("boards", {}) or {}
+    parts: list[str] = []
+    cs_total = int(cs.get("total", 0) or 0)
+    if cs_total:
+        parts.append(f"career sites {int(cs.get('yielded', 0) or 0)}/{cs_total}")
+    bd_total = int(bd.get("total", 0) or 0)
+    if bd_total:
+        seg = f"boards {int(bd.get('yielded', 0) or 0)}/{bd_total}"
+        if int(bd.get("fetched", 0) or 0) == 0 and int(bd.get("ttl_skipped", 0) or 0):
+            seg += " (TTL)"
+        parts.append(seg)
+    return " · ".join(parts) if parts else "no sources fetched"
 
 
 def _h_enrich(state, entry, opts):
@@ -1300,37 +1356,46 @@ def _h_company_scoring(state, entry, opts):
     #   4. count what is now scorable,
     #   5. scrape about-pages + collect primary-source evidence for that set,
     #   6. build the WANT-scoring payloads for the gate.
-    _prefilter_junk_companies(opts)
+    _prefilter_junk_companies(opts, state)
     if entry.get("phase") != "screened":
         screen = _screen_candidates(opts)
-        if screen is not None:
-            # Run marker: distinguishes "ran, kept all" from "errored/deferred,
-            # kept all by fail-safe" after the fact.
-            entry["screen"] = screen
-            print(
-                f"  screen: screened {screen.get('screened', 0)} of "
-                f"{screen.get('total', 0)}, llm_ran "
-                f"{'yes' if screen.get('llm_ran') else 'no'}, "
-                f"drops {screen.get('drops', 0)} "
-                f"(dup {screen.get('dup_drops', 0)} + screen {screen.get('llm_drops', 0)})",
-                flush=True,
-            )
-            if not screen.get("llm_ran") and screen.get("pending_count", 0) > 0:
-                # No direct API key — the screen wrote per-company payloads
-                # instead of calling a model. Gate so cheap subagents make the
-                # keep/drop calls, then --resume continues past the screen.
-                from scoring_settings import company_screen_model
+        if screen is None:
+            # MONEY VALVE (R2, KTD2): the cheap screen crashed before writing its
+            # run marker, so mismatch is indistinguishable from fit. Withhold ALL
+            # paid enrichment this cycle (website search, about-page scrape, Exa
+            # evidence) rather than pay to research unscreened strangers. The
+            # warning is BLOCKING — a run whose screen never ran is not
+            # trustworthy, so publish keeps the prior good snapshot (R7). The
+            # candidates stay and are picked up once the screen runs again.
+            withheld = _candidates_to_score() + _ghost_candidate_count()
+            note = f"screen failed — paid enrichment withheld for {withheld} candidate(s)"
+            _add_warning(state, "company_scoring", note, blocking=True)
+            return "skip", note
+        # Run marker: distinguishes "ran, kept all" from "errored/deferred,
+        # kept all by fail-safe" after the fact.
+        entry["screen"] = screen
+        print(
+            f"  screen: screened {screen.get('screened', 0)} of "
+            f"{screen.get('total', 0)}, llm_ran "
+            f"{'yes' if screen.get('llm_ran') else 'no'}, "
+            f"drops {screen.get('drops', 0)} "
+            f"(dup {screen.get('dup_drops', 0)} + screen {screen.get('llm_drops', 0)})",
+            flush=True,
+        )
+        if not screen.get("llm_ran") and screen.get("pending_count", 0) > 0:
+            # No direct API key — the screen wrote per-company payloads
+            # instead of calling a model. Gate so cheap subagents make the
+            # keep/drop calls, then --resume continues past the screen.
+            from scoring_settings import company_screen_model
 
-                entry["phase"] = "screen"
-                return "gate", {
-                    "action": "screen_companies",
-                    "count": screen["pending_count"],
-                    "payload_path": screen.get("payload_path") or str(SCREEN_CO_PAYLOAD_PATH),
-                    "instructions": _screen_gate_text(
-                        screen["pending_count"], company_screen_model()
-                    ),
-                }
-    _backfill_candidate_websites(opts)
+            entry["phase"] = "screen"
+            return "gate", {
+                "action": "screen_companies",
+                "count": screen["pending_count"],
+                "payload_path": screen.get("payload_path") or str(SCREEN_CO_PAYLOAD_PATH),
+                "instructions": _screen_gate_text(screen["pending_count"], company_screen_model()),
+            }
+    _backfill_candidate_websites(opts, state)
 
     n = _candidates_to_score()
     if n == 0:
@@ -1361,7 +1426,7 @@ def _h_company_scoring(state, entry, opts):
     rc = _run(_py("fetch_companies.py") + ["--limit", str(capped)], opts)
     if rc != 0:
         return "error", f"company scrape exited with code {rc}"
-    _collect_company_evidence(names, opts)
+    _collect_company_evidence(names, opts, state)
 
     res = _run_capture(_py("score_companies.py") + ["--local", "--limit", str(capped)], opts)
     if res.returncode != 0:
@@ -1933,6 +1998,18 @@ def _print_summary(state: dict, opts: Opts) -> None:
     print("  • " + t("summary_verdicts", scored_unseen=scored_unseen, liked=liked))
     print("  • " + t("summary_publish", note=publish_note))
     print("  • " + t("summary_review_hint"))
+    # Report card (R5): every run ends with the per-stage verdict table, so "did
+    # it work?" is answerable without reading logs. Warnings (R7) list underneath.
+    print("  " + "-" * 66)
+    print("  Report card:")
+    _print_stage_board(state, verdict=True)
+    warnings = state.get("warnings", []) or []
+    if warnings:
+        print("  warnings:")
+        for w in warnings:
+            tag = "BLOCKING" if w.get("blocking") else "degraded"
+            print(f"    ⚠  [{tag}] {w.get('stage', '?')}: {w.get('message', '')}")
+    print("  " + "-" * 66)
     for line in _health_lines(state, opts):
         mark = "⚠ " if "OUT OF RANGE" in line else "✓ "
         print(f"  {mark}run health — {line}")
@@ -2010,23 +2087,63 @@ def _print_run_banner(opts: Opts) -> None:
         pass
 
 
+_STATUS_MARK = {
+    "done": "✓",
+    "skipped": "–",
+    "blocked_gate": "⏸",
+    "error": "✗",
+    "aborted": "✗",
+    "running": "…",
+    "pending": " ",
+}
+
+
+def _stage_verdict(stage: dict, warnings: "list[dict]") -> str:
+    """One-word report-card verdict for a stage (R5).
+
+    OK       — finished cleanly.
+    OK-BUT   — finished, but a best-effort sub-step of this stage warned (degraded,
+               e.g. evidence collection failed → WANT scores fell back to cache).
+    FAILED   — the stage errored/aborted, OR it carries a BLOCKING warning (the
+               screen crash: the stage "skipped" its paid work on purpose, but the
+               failure is real and blocks publish — it reads FAILED, not SKIPPED).
+    SKIPPED  — the stage was skipped for a benign reason; it travels in the note.
+    A stage still mid-run (gate / running / pending) reports its raw status so the
+    live --status view stays honest on an unfinished run."""
+    status = stage.get("status", "pending")
+    stage_warnings = [w for w in warnings if w.get("stage") == stage.get("name")]
+    if any(w.get("blocking") for w in stage_warnings):
+        return "FAILED"
+    if status in ("error", "aborted"):
+        return "FAILED"
+    if status == "done":
+        return "OK-BUT" if stage_warnings else "OK"
+    if status == "skipped":
+        return "SKIPPED"
+    return status.upper()
+
+
+def _print_stage_board(state: dict, *, verdict: bool = False) -> None:
+    """Render the per-stage board from run state — shared by ``--status`` and the
+    end-of-run report card. ``verdict=True`` adds the OK / OK-BUT / FAILED /
+    SKIPPED column (the report card); the plain form is the live status view."""
+    warnings = state.get("warnings", []) or []
+    for s in state["stages"]:
+        mark = _STATUS_MARK.get(s.get("status", "pending"), "?")
+        note = s.get("note", "")
+        if verdict:
+            print(f"  [{mark}] {s['name']:<18} {_stage_verdict(s, warnings):<8} {note}")
+        else:
+            print(f"  [{mark}] {s['name']:<18} {note}")
+
+
 def _print_status() -> None:
     state = _load_state()
     if not state:
         print("No run on disk. Start one: python3 scripts/run_daily.py")
         return
     print(f"run {state.get('run_id')} — {'finished' if state.get('finished') else 'in progress'}")
-    for s in state["stages"]:
-        mark = {
-            "done": "✓",
-            "skipped": "–",
-            "blocked_gate": "⏸",
-            "error": "✗",
-            "running": "…",
-            "pending": " ",
-        }.get(s.get("status", "pending"), "?")
-        note = s.get("note", "")
-        print(f"  [{mark}] {s['name']:<18} {note}")
+    _print_stage_board(state)
 
 
 # ---------------------------------------------------------------------------

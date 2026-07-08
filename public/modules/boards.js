@@ -283,12 +283,19 @@ export function renderBoards() {
   }
 
   // Merge the live row (by id, then name) onto each baked catalogue entry —
-  // its last_fetched (if present) is fresher than the baked snapshot.
-  const rows = catalog.map((b) => {
-    const live = (liveByKey && (liveByKey[b.id] || liveByKey[b.name])) || null;
-    const last_fetched = (live && live.last_fetched) || b.last_fetched || "";
-    return { ...b, _live: live, last_fetched };
-  });
+  // its last_fetched (if present) is fresher than the baked snapshot. A board
+  // curated out of view (board.hidden, set via sources.py hide-board) is
+  // dropped here: the live flag wins, falling back to a baked hidden flag, and
+  // absent on both means visible (the historical default).
+  const rows = catalog
+    .map((b) => {
+      const live =
+        (liveByKey && (liveByKey[b.id] || liveByKey[b.name])) || null;
+      const last_fetched = (live && live.last_fetched) || b.last_fetched || "";
+      const hidden = live && live.hidden != null ? live.hidden : b.hidden;
+      return { ...b, _live: live, last_fetched, hidden };
+    })
+    .filter((b) => !b.hidden);
 
   // Enabled first, then by recent volume (live) / name.
   rows.sort((a, b) => {

@@ -534,7 +534,7 @@ class _FakeHTTP:
         self.calls = []
 
     def post(self, url, data=None, json=None, headers=None, timeout=None):
-        self.calls.append({"verb": "POST", "url": url, "json": json})
+        self.calls.append({"verb": "POST", "url": url, "json": json, "data": data})
         return self.router("POST", url, json=json, params=None)
 
     def get(self, url, params=None, headers=None, timeout=None):
@@ -577,6 +577,66 @@ def test_fetch_idealist_board(monkeypatch):
     assert job["url"].endswith("/en/nonprofit-job/abc123-head-of-operations")
     assert job["location"] == "Remote (worldwide)"
     assert "USD" in job["compensation"]
+
+
+def _idealist_params(fake) -> str:
+    """Decode the Algolia ``params`` query string sent by the fetcher."""
+    import json as _json
+
+    body = _json.loads(fake.calls[0]["data"])
+    return body["params"]
+
+
+def test_fetch_idealist_params_are_url_encoded(monkeypatch):
+    """facetFilters must be percent-encoded — no raw brackets/quotes in params."""
+
+    def router(verb, url, json=None, params=None):
+        return _Resp(json_data={"hits": [], "nbPages": 1})
+
+    fake = _FakeHTTP(router)
+    monkeypatch.setattr(fetchers, "requests", fake)
+    fetchers.fetch_idealist_board({"name": "Idealist", "url": "https://www.idealist.org/en/jobs"})
+
+    params = _idealist_params(fake)
+    assert "[" not in params and "]" not in params
+    assert '"' not in params
+    # remoteZone:WORLD dropped by default (A4) — encoded colon is %3A
+    assert "remoteZone" not in params
+    assert "locationType%3AREMOTE" in params
+    assert "type%3AJOB" in params
+
+
+def test_fetch_idealist_include_onsite_drops_remote_facet(monkeypatch):
+    """include_onsite=True widens to all locations — locationType facet gone."""
+
+    def router(verb, url, json=None, params=None):
+        return _Resp(json_data={"hits": [], "nbPages": 1})
+
+    fake = _FakeHTTP(router)
+    monkeypatch.setattr(fetchers, "requests", fake)
+    fetchers.fetch_idealist_board(
+        {"name": "Idealist", "url": "https://www.idealist.org/en/jobs", "include_onsite": True}
+    )
+
+    params = _idealist_params(fake)
+    assert "locationType" not in params
+    assert "type%3AJOB" in params
+
+
+def test_fetch_idealist_remote_zone_knob_still_honored(monkeypatch):
+    """Explicit remote_zone re-adds the restriction (encoded)."""
+
+    def router(verb, url, json=None, params=None):
+        return _Resp(json_data={"hits": [], "nbPages": 1})
+
+    fake = _FakeHTTP(router)
+    monkeypatch.setattr(fetchers, "requests", fake)
+    fetchers.fetch_idealist_board(
+        {"name": "Idealist", "url": "https://www.idealist.org/en/jobs", "remote_zone": "WORLD"}
+    )
+
+    params = _idealist_params(fake)
+    assert "remoteZone%3AWORLD" in params
 
 
 def test_fetch_probablygood_board(monkeypatch):
@@ -814,6 +874,48 @@ def test_fetch_cfi_board_max_jobs_caps_output(monkeypatch):
         }
     )
     assert out == []
+
+
+def test_fetch_algolia_board_keeps_full_description(monkeypatch):
+    # description_short is the only role text the 80k index carries and it runs
+    # past 400 chars for most postings — full_description must keep ALL of it
+    # (snippet stays a capped preview).
+    long_text = " ".join(f"Sentence {i} about the actual day-to-day of the role." for i in range(40))
+    assert len(long_text) > 400
+    hit = {
+        "objectID": "20142",
+        "title": "Policy Director",
+        "company_name": "Secure AI Project",
+        "url_external": "https://example.org/apply",
+        "description_short": f"<ul><li>{long_text}</li></ul>",
+        "description": "",  # always empty in the live index
+        "tags_skill": ["Policy"],
+        "tags_area": ["AI safety"],
+        "salary": "$115,000 - $235,000",
+    }
+
+    def router(verb, url, json=None, params=None):
+        assert verb == "POST" and "algolia.net" in url
+        return _Resp(json_data={"hits": [hit], "nbHits": 1, "nbPages": 1})
+
+    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
+    out = fetchers.fetch_algolia_board(
+        {
+            "name": "80,000 Hours",
+            "url": "https://80000hours.org/jobs",
+            "algolia_app_id": "APP",
+            "algolia_api_key": "KEY",
+            "algolia_index": "jobs",
+            "board_blacklist": [],
+        }
+    )
+    assert len(out) == 1
+    job = out[0]
+    # full_description carries the ENTIRE cleaned text, uncapped and no ellipsis.
+    assert long_text in job["full_description"]
+    assert "…" not in job["full_description"]
+    # snippet is still a capped preview.
+    assert len(job["snippet"]) <= 401 and job["snippet"].endswith("…")
 
 
 # ---------------------------------------------------------------------------

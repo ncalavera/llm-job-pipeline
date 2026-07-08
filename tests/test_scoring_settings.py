@@ -219,6 +219,74 @@ def test_missing_profile_file_falls_back_to_defaults(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# company_paid_min_vacancy_score — the vacancy-first gate floor ([volume] knob).
+# Unlike the profile knobs above it lives in defaults.toml, so it is pinned via
+# DEFAULTS_TOML_PATH, not USER_PROFILE_PATH.
+# ---------------------------------------------------------------------------
+
+
+def _point_defaults(monkeypatch, tmp_path, volume_block: str) -> None:
+    import settings
+
+    p = tmp_path / "defaults.toml"
+    p.write_text(f"[volume]\n{volume_block}\n", encoding="utf-8")
+    monkeypatch.setenv("DEFAULTS_TOML_PATH", str(p))
+    settings.clear_cache()
+
+
+def test_company_paid_min_vacancy_score_default(monkeypatch, tmp_path):
+    import settings
+
+    _point_defaults(monkeypatch, tmp_path, "digest_size = 5")
+    try:
+        assert ss.company_paid_min_vacancy_score() == ss.DEFAULT_COMPANY_PAID_MIN_VACANCY_SCORE == 60
+    finally:
+        settings.clear_cache()
+
+
+def test_company_paid_min_vacancy_score_read_from_toml(monkeypatch, tmp_path):
+    import settings
+
+    _point_defaults(monkeypatch, tmp_path, "company_paid_min_vacancy_score = 75")
+    try:
+        assert ss.company_paid_min_vacancy_score() == 75
+    finally:
+        settings.clear_cache()
+
+
+def test_company_paid_min_vacancy_score_zero_is_allowed(monkeypatch, tmp_path):
+    # Unlike the volume dials, a 0 floor is a legitimate "any scored vacancy earns
+    # it" setting and must NOT be coerced up to the default.
+    import settings
+
+    _point_defaults(monkeypatch, tmp_path, "company_paid_min_vacancy_score = 0")
+    try:
+        assert ss.company_paid_min_vacancy_score() == 0
+    finally:
+        settings.clear_cache()
+
+
+def test_company_paid_min_vacancy_score_garbage_is_default(monkeypatch, tmp_path):
+    import settings
+
+    _point_defaults(monkeypatch, tmp_path, 'company_paid_min_vacancy_score = "lots"')
+    try:
+        assert ss.company_paid_min_vacancy_score() == 60
+    finally:
+        settings.clear_cache()
+
+
+def test_company_paid_min_vacancy_score_clamped_to_100(monkeypatch, tmp_path):
+    import settings
+
+    _point_defaults(monkeypatch, tmp_path, "company_paid_min_vacancy_score = 250")
+    try:
+        assert ss.company_paid_min_vacancy_score() == 100
+    finally:
+        settings.clear_cache()
+
+
+# ---------------------------------------------------------------------------
 # Per-run cap: cuts the list + honest "Scoring X of Y" message
 # ---------------------------------------------------------------------------
 

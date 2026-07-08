@@ -273,6 +273,27 @@
             ></span>
             <span class="nav-label" data-i18n="tab_boards">Boards</span>
           </button>
+
+          <button
+            type="button"
+            class="nav-item"
+            id="navHealth"
+            data-section="health"
+            onclick="switchMode('health')"
+          >
+            <span class="nav-icon" aria-hidden="true"
+              ><svg width="15" height="15" viewBox="0 0 14 14">
+                <path
+                  d="M1.5 7.5h2.2l1.4-3.5 1.8 6 1.5-3.2 1 1.7h2.6"
+                  fill="none"
+                  stroke="#0F766E"
+                  stroke-width="1.3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                ></path></svg
+            ></span>
+            <span class="nav-label" data-i18n="tab_health">Health</span>
+          </button>
         </nav>
 
         <div class="sidebar-footer">
@@ -643,6 +664,32 @@
             <div class="boards-grid" id="boardsGrid"></div>
           </div>
           <!-- /boards-section -->
+
+          <!-- === HEALTH MODE ===
+           Read-only observability: per-board health (with a PRESUMED BROKEN
+           flag), failing-parser companies, what's waiting on you, learning-loop
+           state, plus the architecture diagram. Live-only (never baked) — the
+           four blocks render from /api/health-detail; the diagram is Mermaid
+           lazy-loaded from a CDN on first open (public/modules/health.js). -->
+          <div class="health-section" id="healthSection">
+            <div class="boards-header">
+              <span class="boards-header-title" data-i18n="health_title"
+                >Health</span
+              >
+              <span class="boards-header-sub" data-i18n="health_sub"
+                >What works, what's broken, what waits on you, and whether your
+                verdicts changed anything.</span
+              >
+            </div>
+            <div class="health-grid" id="healthGrid"></div>
+            <section class="health-card health-diagram-card">
+              <h3 class="health-card-title" data-i18n="health_arch_title">
+                Architecture
+              </h3>
+              <div id="healthDiagram"></div>
+            </section>
+          </div>
+          <!-- /health-section -->
 
           <!-- === TRIAGE MODE (pipeline) ===
            The stage board for liked vacancies (unreviewed → applied →

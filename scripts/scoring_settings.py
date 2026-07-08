@@ -59,6 +59,13 @@ from prompts import _load_user_profile
 DEFAULT_SCORING_MODEL = "sonnet"
 DEFAULT_MAX_PER_RUN = 150
 
+# The score floor a candidate company's vacancy must reach to EARN paid enrichment
+# (website search + about-page scrape + Exa evidence). A stranger company enters
+# the paid chain only once one of its vacancies scores at/above this (or the user
+# likes any of its roles); until then it waits, costing nothing. Mirrors
+# config/defaults.toml [volume] company_paid_min_vacancy_score.
+DEFAULT_COMPANY_PAID_MIN_VACANCY_SCORE = 60
+
 
 def _default_max_per_run() -> int:
     """The neutral scoring-limit default: [volume] daily_scoring_limit.
@@ -224,6 +231,27 @@ def escalation_threshold_warning(threshold: int) -> str | None:
             "cheap screen score. If that's not intended, lower '[## VOLUME] escalate_threshold'."
         )
     return None
+
+
+def company_paid_min_vacancy_score() -> int:
+    """Return the vacancy-score floor that earns a candidate company paid enrichment.
+
+    A stranger company (auto-discovered, status='candidate') costs nothing until
+    one of its own vacancies scores at/above this floor (or the user likes any of
+    its roles); only then does it enter the paid chain (website search, about-page
+    scrape, Exa evidence). Sourced from ``[volume] company_paid_min_vacancy_score``
+    (defaults.toml). A garbage / missing value falls back to the neutral default;
+    the result is clamped to 0..100. 0 is a valid, silently-accepted value meaning
+    "any scored vacancy earns it" — unlike the volume dials, this gate legitimately
+    allows a zero floor, so it does not coerce 0 up to the default.
+    """
+    sec = settings._section("volume")
+    raw = sec.get("company_paid_min_vacancy_score", DEFAULT_COMPANY_PAID_MIN_VACANCY_SCORE)
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_COMPANY_PAID_MIN_VACANCY_SCORE
+    return min(100, max(0, n))
 
 
 def max_per_run() -> int:

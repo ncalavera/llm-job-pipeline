@@ -272,13 +272,32 @@ def _insert_company(conn, name, *, status="candidate", alignment_score=None, des
     return cid
 
 
+def _insert_earning_vacancy(conn, company_id, *, llm_score=90, status="unseen"):
+    """Give a candidate company an EARNING vacancy so it passes the vacancy-first
+    gate (R3): load_fresh_candidates selects only candidates with a vacancy scored
+    at/above the paid floor or one the user liked. Without this a fresh candidate
+    is a free name-only row that never reaches the screen."""
+    vid = str(uuid.uuid4())
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO vacancy (id, dedup_hash, company_id, title, first_seen, last_seen, "
+        "status, llm_score) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+        (vid, vid, company_id, "Some Role", "2026-01-01", "2026-01-01", status, llm_score),
+    )
+    conn.commit()
+    cur.close()
+    return vid
+
+
 def test_apply_drops_sets_inactive_and_removes_from_enrichment(dal):
     conn = dal.get_conn()
     # A tracked (already active) company + two fresh candidates: one a clear
     # mismatch, one a plausible fit.
     _insert_company(conn, "Clean Water Fund", status="active", alignment_score=80)
-    _insert_company(conn, "Acme Staffing Agency", description="temp placement")
-    _insert_company(conn, "Ocean Cleanup Initiative")
+    acme = _insert_company(conn, "Acme Staffing Agency", description="temp placement")
+    ocean = _insert_company(conn, "Ocean Cleanup Initiative")
+    _insert_earning_vacancy(conn, acme)  # both candidates have earned enrichment
+    _insert_earning_vacancy(conn, ocean)
 
     llm = _FakeLLM(drop_substrings=["Staffing"])
     summary = sc.run_screen(conn, llm, limit=0)
@@ -312,12 +331,59 @@ def test_load_tracked_names_excludes_fresh_candidates(dal):
     assert "Fresh Candidate" not in tracked
 
 
+def test_load_fresh_candidates_gates_on_earning_vacancy(dal):
+    """Vacancy-first gate (R3): a candidate is selected for the paid chain ONLY
+    when a vacancy has earned it — scored at/above the floor, or liked."""
+    conn = dal.get_conn()
+    none_id = _insert_company(conn, "No Vacancy Org")
+    low_id = _insert_company(conn, "Low Score Org")
+    edge_id = _insert_company(conn, "Edge Score Org")
+    liked_id = _insert_company(conn, "Liked Low Org")
+    _insert_earning_vacancy(conn, low_id, llm_score=59)  # below floor
+    _insert_earning_vacancy(conn, edge_id, llm_score=60)  # exactly the floor
+    _insert_earning_vacancy(conn, liked_id, llm_score=10, status="liked")  # liked wins
+
+    selected = {r["canonical_name"] for r in sc.load_fresh_candidates(conn, min_vacancy_score=60)}
+    assert selected == {"Edge Score Org", "Liked Low Org"}
+    assert "No Vacancy Org" not in selected  # a stranger with no earning role waits
+    assert "Low Score Org" not in selected
+
+
+def test_count_unearned_candidates(dal):
+    conn = dal.get_conn()
+    earned = _insert_company(conn, "Earned Org")
+    _insert_company(conn, "Waiting Org A")
+    _insert_company(conn, "Waiting Org B")
+    _insert_earning_vacancy(conn, earned, llm_score=80)
+
+    assert sc.count_unearned_candidates(conn, min_vacancy_score=60) == 2
+
+
+def test_load_fresh_candidates_degrades_when_description_missing(dal, capsys):
+    """Schema drift: a live DB missing company.description must degrade to
+    name-only selection with a warning, never crash the whole valve (KTD3)."""
+    conn = dal.get_conn()
+    cid = _insert_company(conn, "Drifted Org", description="")
+    _insert_earning_vacancy(conn, cid, llm_score=90)
+    cur = conn.cursor()
+    cur.execute("ALTER TABLE company DROP COLUMN description")
+    conn.commit()
+    cur.close()
+
+    rows = sc.load_fresh_candidates(conn, min_vacancy_score=60)
+    assert {r["canonical_name"] for r in rows} == {"Drifted Org"}
+    assert rows[0]["description"] == ""  # blank snippet, name-only screening
+    assert "description unavailable" in capsys.readouterr().out
+
+
 def test_dup_and_llm_drops_get_distinct_prefixes(dal):
     """Dedup drops are filterable apart from LLM drops: 'screen-dup:' vs 'screen:'."""
     conn = dal.get_conn()
     _insert_company(conn, "Save the Children", status="active", alignment_score=75)
-    _insert_company(conn, "Save the Children International")  # dup of tracked
-    _insert_company(conn, "Acme Staffing Agency")  # LLM clear mismatch
+    dup = _insert_company(conn, "Save the Children International")  # dup of tracked
+    acme = _insert_company(conn, "Acme Staffing Agency")  # LLM clear mismatch
+    _insert_earning_vacancy(conn, dup)
+    _insert_earning_vacancy(conn, acme)
 
     llm = _FakeLLM(drop_substrings=["Staffing"])
     summary = sc.run_screen(conn, llm, limit=0)
@@ -358,6 +424,8 @@ def test_cmd_save_applies_drops_and_skips_unknown(dal, tmp_path, monkeypatch):
     conn = dal.get_conn()
     drop_id = _insert_company(conn, "Acme Staffing Agency")
     keep_id = _insert_company(conn, "Ocean Cleanup Initiative")
+    _insert_earning_vacancy(conn, drop_id)  # both earned → decidable via --save
+    _insert_earning_vacancy(conn, keep_id)
     monkeypatch.setattr(sc, "get_conn", lambda: conn)
 
     f1 = tmp_path / "r1.json"
@@ -388,7 +456,9 @@ def test_cmd_save_malformed_file_keeps_its_companies(dal, tmp_path, monkeypatch)
     (fail-safe), the rest still apply."""
     conn = dal.get_conn()
     ok_id = _insert_company(conn, "Acme Staffing Agency")
-    _insert_company(conn, "Ocean Cleanup Initiative")
+    ocean_id = _insert_company(conn, "Ocean Cleanup Initiative")
+    _insert_earning_vacancy(conn, ok_id)
+    _insert_earning_vacancy(conn, ocean_id)
     monkeypatch.setattr(sc, "get_conn", lambda: conn)
 
     good = tmp_path / "good.json"

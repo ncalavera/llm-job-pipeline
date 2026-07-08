@@ -52,6 +52,10 @@ def env(tmp_path, monkeypatch):
         "0014_add_vacancy_status_reason",  # needed to record why they were archived
     ):
         cur.execute((MIGRATIONS / f"{m}.sqlite.sql").read_text(encoding="utf-8"))
+    # board.hidden (dashboard-curation flag, added by a later migration than the
+    # ones applied above). Add it inline so the fixture matches a fully-migrated
+    # install without coupling to that migration file's final number.
+    cur.execute("ALTER TABLE board ADD COLUMN hidden BOOLEAN DEFAULT 0")
     cur.close()
     conn.commit()
 
@@ -138,6 +142,62 @@ def test_disable_board_clears_the_flag(env):
 
     assert sources.main(["disable-board", board]) == 0
     assert dal.get_enabled_boards() == []
+
+
+def _board_hidden(dal, board_id):
+    cur = dal.get_conn().cursor()
+    cur.execute("SELECT hidden FROM board WHERE id = %s", (board_id,))
+    row = cur.fetchone()
+    cur.close()
+    return bool(row[0]) if row else None
+
+
+def test_hide_board_sets_the_flag_and_persists(env, capsys):
+    sources, dal = env
+    board = _a_known_board(sources)
+
+    assert sources.main(["hide-board", board]) == 0
+    out = capsys.readouterr().out
+    assert "Hid board" in out
+    dal.close_conn()  # drop the connection the write went through
+    assert _board_hidden(dal, board) is True  # a fresh connection still sees it
+
+
+def test_hide_board_does_not_change_enabled(env):
+    """Hiding is display-only: an enabled board stays enabled when hidden."""
+    sources, dal = env
+    board = _a_known_board(sources)
+    sources.main(["enable-board", board])
+    assert dal.get_enabled_boards() == [board]
+
+    assert sources.main(["hide-board", board]) == 0
+    assert dal.get_enabled_boards() == [board]  # still fetching
+    assert _board_hidden(dal, board) is True
+
+
+def test_unhide_board_clears_the_flag(env):
+    sources, dal = env
+    board = _a_known_board(sources)
+    sources.main(["hide-board", board])
+    assert _board_hidden(dal, board) is True
+
+    assert sources.main(["unhide-board", board]) == 0
+    assert _board_hidden(dal, board) is False
+
+
+def test_hide_unknown_board_is_rejected(env, capsys):
+    sources, dal = env
+    assert sources.main(["hide-board", "definitely_not_a_board"]) == 2
+    out = capsys.readouterr().out
+    assert "Unknown board" in out
+
+
+def test_unhide_unknown_board_id_does_not_crash(env, capsys):
+    """unhide-board is tolerant of an id config no longer ships (clean-up path)."""
+    sources, dal = env
+    assert sources.main(["unhide-board", "definitely_not_a_board"]) == 0
+    out = capsys.readouterr().out
+    assert "shows on the dashboard" in out
 
 
 def test_disable_board_archives_its_unseen_vacancies_and_reports_it(env, capsys):

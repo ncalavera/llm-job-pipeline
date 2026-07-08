@@ -2374,6 +2374,47 @@ def set_board_enabled(board_id: str, enabled: bool = True) -> None:
     conn.commit()
 
 
+def set_board_hidden(board_id: str, hidden: bool = True) -> None:
+    """Persist whether a board is hidden from the dashboard's Boards tab.
+
+    Hidden != disabled: disabling stops a board fetching (set_board_enabled),
+    hiding only removes a board from the dashboard render (api/board-statuses.js
+    surfaces the flag, public/modules/boards.js filters on it) so a curated view
+    isn't cluttered by boards kept off. A board can be disabled AND hidden (the
+    curation set), or hidden while still enabled. The row is never deleted.
+
+    Mirrors set_board_enabled: upserts a bare catalog row when the board has
+    never been synced, and COMMITS here (a discrete user action whose effect
+    must survive the process, not wait on a caller commit).
+
+    The `hidden` column arrives in a later migration than 0011, so it may be
+    absent on a partially-migrated DB. Guarded with _table_has_column so the
+    write raises the run-migrate hint (BoardPersistenceUnavailable) rather than
+    a raw "no such column" traceback."""
+    if not _table_has_column("board", "hidden"):
+        raise BoardPersistenceUnavailable(
+            "board.hidden column is missing (added by the board-hidden migration) — "
+            "run: python3 scripts/migrate.py"
+        )
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """INSERT INTO board (id, name, hidden)
+               VALUES (%s, %s, %s)
+               ON CONFLICT (id) DO UPDATE SET
+                   hidden = EXCLUDED.hidden, updated_at = now()""",
+            (board_id, board_id, bool(hidden)),
+        )
+    except Exception as exc:
+        conn.rollback()
+        if _board_schema_missing(exc):
+            raise BoardPersistenceUnavailable(_MIGRATE_HINT) from exc
+        raise
+    cur.close()
+    conn.commit()
+
+
 def get_enabled_boards() -> list[str]:
     """Board ids persisted as enabled -- they participate in every run until
     disabled (see set_board_enabled). Sorted for stable, diffable output.

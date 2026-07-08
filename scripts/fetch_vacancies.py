@@ -765,7 +765,17 @@ def main():
     conn = get_conn()
     total_new = 0
     # Per-run telemetry for the driver's publish gate (see FETCH_STATS_PATH).
-    fetch_stats = {"orgs": {}, "errors": {}, "total_new": 0}
+    # career_sites / boards carry the report-card counters that distinguish a
+    # company career site from a job board (R7): yielded = produced >=1 NEW role;
+    # boards also record how many actually ran vs were TTL-skipped, so "boards
+    # 0/7 (TTL)" reads honestly instead of claiming a boards run that never fired.
+    fetch_stats = {
+        "orgs": {},
+        "errors": {},
+        "total_new": 0,
+        "career_sites": {"total": 0, "yielded": 0},
+        "boards": {"total": 0, "fetched": 0, "ttl_skipped": 0, "yielded": 0},
+    }
 
     if not args.report_only:
         filtered = _filter_companies(args)
@@ -823,7 +833,11 @@ def main():
                 print(f"  [{org_name}] Skipped (--free-only mode)")
                 continue
 
-            total_new += _fetch_one_company(org_name, config, tier, strategy, fetch_stats)
+            company_new = _fetch_one_company(org_name, config, tier, strategy, fetch_stats)
+            total_new += company_new
+            fetch_stats["career_sites"]["total"] += 1
+            if company_new > 0:
+                fetch_stats["career_sites"]["yielded"] += 1
 
             # Commit per company so an interrupted run keeps finished orgs.
             get_conn().commit()
@@ -848,6 +862,8 @@ def main():
                     manual_boards.append((board_name, board_cfg["url"]))
                     continue
 
+                fetch_stats["boards"]["total"] += 1
+
                 is_free = board_cfg.get("free", False)
                 if args.free_only and not is_free:
                     print(f"  [{board_name}] Skipped (--free-only, Firecrawl board)")
@@ -856,9 +872,14 @@ def main():
                 ttl_days = board_cfg.get("ttl_days", 3)
                 if not should_fetch_board(board_id, ttl_days):
                     print(f"  [{board_name}] Skipped (recent, ttl={ttl_days}d)")
+                    fetch_stats["boards"]["ttl_skipped"] += 1
                     continue
 
-                total_new += _fetch_one_board(board_id, board_cfg, strategy)
+                board_new = _fetch_one_board(board_id, board_cfg, strategy)
+                total_new += board_new
+                fetch_stats["boards"]["fetched"] += 1
+                if board_new > 0:
+                    fetch_stats["boards"]["yielded"] += 1
                 # Commit per board so an interrupted run keeps finished boards.
                 get_conn().commit()
 

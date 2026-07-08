@@ -1,7 +1,7 @@
 // =============================================================================
 // nav.js — Six-section navigation model (pure, unit-testable).
 //
-// The dashboard has SIX top-level sections. Five are single leaf views; one
+// The dashboard has SEVEN top-level sections. Six are single leaf views; one
 // is a hub that holds leaf views behind a sub-navigation: "Vacancies" (Browse
 // / Geo / Archive). `state.currentMode` stays the LEAF the render dispatch
 // keys on (unchanged for every existing module); this module only maps a
@@ -20,6 +20,7 @@ export const SECTIONS = [
   "companies",
   "triage",
   "boards",
+  "health",
   "settings",
 ];
 
@@ -43,6 +44,7 @@ const MODE_TO_SECTION = {
   companies: "companies",
   pipeline: "triage",
   boards: "boards",
+  health: "health",
   settings: "settings",
   // Detail-overlay screens (route.js).
   vacancy: "vacancies",

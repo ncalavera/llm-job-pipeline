@@ -235,25 +235,92 @@ def build_screen_payloads(candidates: "list[dict]", system_prompt: str) -> "list
 # ---------------------------------------------------------------------------
 
 
-def load_fresh_candidates(conn, limit: int = 0) -> "list[dict]":
-    """Fresh board-discovered candidates: status='candidate', not yet scored.
+def _earned_vacancy_clause() -> str:
+    """SQL EXISTS predicate: this candidate has a vacancy that EARNS paid
+    enrichment — one scored at/above the floor, or one the user liked. Placeholder
+    ``%s`` binds the score floor (db_conn translates it per backend)."""
+    return (
+        "EXISTS (SELECT 1 FROM vacancy v WHERE v.company_id = company.id "
+        "AND (v.llm_score >= %s OR v.status = 'liked'))"
+    )
+
+
+def load_fresh_candidates(
+    conn, limit: int = 0, min_vacancy_score: "int | None" = None
+) -> "list[dict]":
+    """Fresh board-discovered candidates that have EARNED paid enrichment:
+    status='candidate', not yet scored, AND with at least one vacancy scoring at/
+    above ``min_vacancy_score`` (or a liked vacancy). A stranger company with no
+    earning vacancy is a free name-only row that simply waits — it never reaches
+    this screen or the paid chain behind it (R3). ``min_vacancy_score`` defaults to
+    the ``[volume] company_paid_min_vacancy_score`` knob.
 
     Includes ghost candidates (no website yet) on purpose — dropping a clear
     mismatch HERE also saves the paid website-search that would otherwise run on
-    it. Ordered by name so a --limit run screens a stable prefix."""
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT id, canonical_name, description, category "
+    it. Ordered by name so a --limit run screens a stable prefix.
+
+    Defensive against schema drift: if ``company.description`` is missing from a
+    live DB (it lives in the frozen baseline but drifted out once), the screen
+    degrades to NAME-ONLY selection with a printed warning instead of crashing —
+    a missing snippet only makes the screen slightly blinder, never wrong (it
+    fails safe to KEEP)."""
+    if min_vacancy_score is None:
+        from scoring_settings import company_paid_min_vacancy_score
+
+        min_vacancy_score = company_paid_min_vacancy_score()
+
+    tail = (
         "FROM company "
         "WHERE status = 'candidate' AND alignment_score IS NULL "
+        f"AND {_earned_vacancy_clause()} "
         "ORDER BY canonical_name"
     )
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id, canonical_name, description, category " + tail, (min_vacancy_score,))
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    except Exception as exc:  # noqa: BLE001 — degrade to name-only, never crash the valve
+        try:
+            conn.rollback()  # a failed SELECT aborts the Postgres txn; clear it
+        except Exception:
+            pass
+        print(
+            "  ⚠  screen: company.description unavailable — screening on name only "
+            f"(schema drift: {type(exc).__name__})",
+            flush=True,
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT id, canonical_name, category " + tail, (min_vacancy_score,))
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        for r in rows:
+            r.setdefault("description", "")
     cur.close()
     if limit and limit > 0:
         rows = rows[:limit]
     return rows
+
+
+def count_unearned_candidates(conn, min_vacancy_score: "int | None" = None) -> int:
+    """Fresh candidates that have NOT yet earned paid enrichment — no vacancy at/
+    above the score floor and none liked. These are the free name-only rows that
+    simply wait; counting them lets the run say how many are held back (R3), never
+    silently dropping them."""
+    if min_vacancy_score is None:
+        from scoring_settings import company_paid_min_vacancy_score
+
+        min_vacancy_score = company_paid_min_vacancy_score()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT count(*) FROM company "
+        "WHERE status = 'candidate' AND alignment_score IS NULL "
+        f"AND NOT {_earned_vacancy_clause()}",
+        (min_vacancy_score,),
+    )
+    n = cur.fetchone()[0]
+    cur.close()
+    return int(n or 0)
 
 
 def load_tracked_names(conn) -> "list[str]":
@@ -332,6 +399,10 @@ def run_screen(conn, call_llm, limit: int = 0) -> "dict":
     They stay candidates (kept — the safe direction) until decisions come back
     via ``--save``."""
     candidates = load_fresh_candidates(conn, limit)
+    try:
+        waiting_unearned = count_unearned_candidates(conn)
+    except Exception:  # best-effort count for the log line — never fail the screen
+        waiting_unearned = 0
     base = {
         "total": len(candidates),
         "keep": [],
@@ -340,6 +411,7 @@ def run_screen(conn, call_llm, limit: int = 0) -> "dict":
         "screened": 0,
         "fail_safe_keeps": 0,
         "llm_ran": call_llm is not None,
+        "waiting_unearned": waiting_unearned,
     }
     if not candidates:
         return base
@@ -393,6 +465,7 @@ def write_summary(summary: dict, applied: bool, path: Path = SCREEN_SUMMARY_PATH
         "llm_drops": llm_drops,
         "fail_safe_keeps": summary["fail_safe_keeps"],
         "pending_count": len(summary["pending"]),
+        "waiting_unearned": summary.get("waiting_unearned", 0),
         "payload_path": str(SCREEN_PAYLOAD_PATH) if summary["pending"] else "",
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -526,6 +599,12 @@ def _print_report(summary: dict, applied: bool) -> None:
         f"[{head}] {summary['total']} fresh candidate(s): {len(kept)} kept, "
         f"{len(dropped)} dropped, {len(pending)} pending subagent screen ({llm_note})"
     )
+    waiting = summary.get("waiting_unearned", 0)
+    if waiting:
+        print(
+            f"  {waiting} candidate(s) waiting unearned — no vacancy has earned them "
+            "paid enrichment yet (kept free until one does)"
+        )
     for row, reason, kind in dropped:
         tag = _DROP_PREFIX_DUP if kind == "dup" else _DROP_PREFIX_LLM
         print(f"  DROP [{tag}] {row['canonical_name']}: {reason}")
@@ -581,7 +660,8 @@ def main() -> int:
         f"screen summary: screened {record['screened']} of {record['total']}, "
         f"llm_ran {'yes' if record['llm_ran'] else 'no'}, drops {record['drops']} "
         f"(dup {record['dup_drops']} + screen {record['llm_drops']}), "
-        f"fail-safe keeps {record['fail_safe_keeps']}, pending {record['pending_count']}"
+        f"fail-safe keeps {record['fail_safe_keeps']}, pending {record['pending_count']}, "
+        f"waiting unearned {record['waiting_unearned']}"
     )
     return 0
 

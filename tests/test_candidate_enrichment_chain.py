@@ -53,6 +53,22 @@ def rd(monkeypatch, tmp_path):
     dal.close_conn()
 
 
+# A benign successful screen record (llm_ran, nothing pending): the stubbed _run
+# in these chain tests never writes the real screen summary file, so the driver's
+# money valve would otherwise (correctly) treat the screen as crashed. These tests
+# assert the PAID chain order, not the screen, so we stub a clean screen result.
+_OK_SCREEN = {
+    "total": 0,
+    "screened": 0,
+    "llm_ran": True,
+    "drops": 0,
+    "dup_drops": 0,
+    "llm_drops": 0,
+    "fail_safe_keeps": 0,
+    "pending_count": 0,
+}
+
+
 def _seed_candidate(dal, name, website):
     cur = dal.get_conn().cursor()
     cur.execute(
@@ -107,6 +123,7 @@ def test_company_scoring_runs_full_chain_in_order(rd, monkeypatch):
 
     monkeypatch.setattr(run_daily, "_run", fake_run)
     monkeypatch.setattr(run_daily, "_run_capture", fake_run_capture)
+    monkeypatch.setattr(run_daily, "_screen_candidates", lambda opts: _OK_SCREEN)
 
     state = run_daily._new_state(run_daily.Opts())
     entry = run_daily._stage(state, "company_scoring")
@@ -215,6 +232,7 @@ def test_company_scoring_caps_paid_chain_at_max_per_run(rd, monkeypatch, capsys)
 
     calls = []
     monkeypatch.setattr(run_daily, "_run", lambda cmd, opts: calls.append(cmd) or 0)
+    monkeypatch.setattr(run_daily, "_screen_candidates", lambda opts: _OK_SCREEN)
 
     def fake_run_capture(cmd, opts):
         calls.append(cmd)
@@ -261,11 +279,48 @@ def test_company_scoring_caps_paid_chain_at_max_per_run(rd, monkeypatch, capsys)
     assert "3 candidate(s) deferred" in payload["instructions"]
 
 
+def test_company_scoring_closes_valve_when_screen_crashes(rd, monkeypatch):
+    """Money valve (R2): a crashed cheap screen (returns None) withholds ALL paid
+    enrichment this cycle — no website search, scrape, or evidence subprocess runs
+    — records a BLOCKING warning, and returns a skip with the withheld-count note."""
+    run_daily, dal = rd
+    _seed_candidate(dal, "Nova Harbor", "https://novaharbor.org")
+    _seed_candidate(dal, "Ghost Org", "")  # a ghost too
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
+
+    calls = []
+    monkeypatch.setattr(run_daily, "_run", lambda cmd, opts: calls.append(cmd) or 0)
+    monkeypatch.setattr(
+        run_daily,
+        "_run_capture",
+        lambda cmd, opts: (calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, "[]", "")),
+    )
+    # Screen crashed: no run marker written → _screen_candidates returns None.
+    monkeypatch.setattr(run_daily, "_screen_candidates", lambda opts: None)
+
+    state = run_daily._new_state(run_daily.Opts())
+    entry = run_daily._stage(state, "company_scoring")
+    kind, note = run_daily._h_company_scoring(state, entry, run_daily.Opts())
+
+    assert kind == "skip"
+    assert "paid enrichment withheld" in note
+    # No PAID enrichment subprocess ran (only the free junk prefilter may have).
+    joined = [" ".join(str(x) for x in c) for c in calls]
+    assert not any(
+        s for s in joined if "find_company_urls" in s or "fetch_companies" in s
+        or "collect_company_evidence" in s or "score_companies" in s
+    )
+    # A blocking warning was recorded → publish gate will treat the run as dirty.
+    blocking = [w for w in state["warnings"] if w["blocking"]]
+    assert blocking and "withheld" in blocking[0]["message"]
+
+
 def test_company_scoring_advances_when_no_candidates(rd, monkeypatch):
     run_daily, dal = rd
     monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
     # No candidates seeded; the junk-filter + backfill run, then n == 0 -> advance.
     monkeypatch.setattr(run_daily, "_run", lambda cmd, opts: 0)
+    monkeypatch.setattr(run_daily, "_screen_candidates", lambda opts: _OK_SCREEN)
     monkeypatch.setattr(
         run_daily,
         "_run_capture",

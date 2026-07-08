@@ -80,10 +80,14 @@ def _load_companies_to_find() -> list[str]:
 
     Two sources:
     1. Companies with high-scoring vacancies (llm_score >= 40) but no website
-    2. Ghost candidates: status='candidate', no website, no alignment_score
+    2. Ghost candidates: status='candidate', no website, no alignment_score, AND
+       EARNED — a stranger company enters this PAID Firecrawl search only once one
+       of its vacancies scores at/above the paid-enrichment floor (or is liked).
+       Unearned ghosts stay free name-only rows and simply wait (R3).
     """
     from db_conn import get_conn
     from database_supabase import load_all_enrichment
+    from scoring_settings import company_paid_min_vacancy_score
 
     conn = get_conn()
     cur = conn.cursor()
@@ -99,16 +103,41 @@ def _load_companies_to_find() -> list[str]:
     """)
     from_vacancies = {row[0] for row in cur.fetchall()}
 
-    # Source 2: ghost candidates (no website, no alignment, pending review)
-    cur.execute("""
-        SELECT canonical_name
-        FROM company
-        WHERE status = 'candidate'
-          AND (website IS NULL OR website = '')
-          AND alignment_score IS NULL
-    """)
+    # Source 2: ghost candidates (no website, no alignment, pending review) that
+    # have EARNED paid enrichment via a scoring/liked vacancy (vacancy-first gate).
+    min_score = company_paid_min_vacancy_score()
+    cur.execute(
+        "SELECT canonical_name "
+        "FROM company "
+        "WHERE status = 'candidate' "
+        "  AND (website IS NULL OR website = '') "
+        "  AND alignment_score IS NULL "
+        "  AND EXISTS (SELECT 1 FROM vacancy v WHERE v.company_id = company.id "
+        "              AND (v.llm_score >= %s OR v.status = 'liked'))",
+        (min_score,),
+    )
     from_ghosts = {row[0] for row in cur.fetchall()}
+
+    # How many ghosts are held back because nothing has earned them yet — logged,
+    # never silently dropped.
+    cur.execute(
+        "SELECT count(*) "
+        "FROM company "
+        "WHERE status = 'candidate' "
+        "  AND (website IS NULL OR website = '') "
+        "  AND alignment_score IS NULL "
+        "  AND NOT EXISTS (SELECT 1 FROM vacancy v WHERE v.company_id = company.id "
+        "                  AND (v.llm_score >= %s OR v.status = 'liked'))",
+        (min_score,),
+    )
+    unearned = int(cur.fetchone()[0] or 0)
     cur.close()
+    if unearned:
+        print(
+            f"  {unearned} ghost candidate(s) waiting unearned (no vacancy scored "
+            f">= {min_score} or liked) — no paid URL search until one earns it",
+            flush=True,
+        )
 
     all_names = from_vacancies | from_ghosts
 

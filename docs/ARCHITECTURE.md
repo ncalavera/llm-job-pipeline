@@ -102,6 +102,37 @@ browser refresh, no redeploy); in simple mode it rewrites the local
 `public/data.js`. Both go through the same driver — no mode branching.
 (`vercel --prod` is only ever for dashboard *code* changes.)
 
+## Health & observability
+
+Two read-only surfaces answer "does the pipeline work as intended?" without
+reading logs:
+
+- **Run report card** — every `run_daily.py` run ends with a per-stage verdict
+  table (`OK / OK-BUT / FAILED / SKIPPED`) rendered from `run_state.json`.
+- **Health tab** (dashboard) — `public/modules/health.js` renders four blocks
+  from the live `api/health-detail.js` endpoint (read-only, no LLM spend):
+  - **Boards** — per enabled board: freshness, failure streak, vacancy count,
+    and a **PRESUMED BROKEN** flag (3+ consecutive failures, or fetched yet zero
+    vacancies).
+  - **Companies** — active companies whose *direct* fetch never parses (an
+    error/streak, or a `render_ok_zero`/`no_data`/`js_required` status). A
+    company covered by the boards or tracked by hand (`company.coverage`) is
+    listed separately as *not broken* — it was never meant to fetch directly.
+  - **Waiting on you** — candidate companies pending review; unseen scored roles
+    and the oldest one's age.
+  - **Learning loop** — last review, changes applied since, verdicts waiting
+    (mirrors `scripts/learning.py`'s cursor math).
+
+  The endpoint reads columns added by later migrations (board/company
+  `last_success`, `consecutive_failures`; `company.coverage`; `board.hidden`)
+  **defensively** — an unknown-column error retries without them so a
+  partially-migrated DB still answers.
+
+- **Architecture diagram** — the canonical data-flow picture lives as a Mermaid
+  source string in `public/modules/architecture-diagram.js`, rendered on the
+  Health tab (Mermaid lazy-loaded from a CDN on first open) and kept in sync
+  with this document. **Any change to the pipeline's shape updates both.**
+
 ## Two backends
 
 The pipeline runs on one of two databases, chosen purely by whether

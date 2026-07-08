@@ -98,6 +98,16 @@ daily_scoring_limit = 150
 # for a shorter daily message.
 digest_size = 5
 
+# Vacancy-first gate for PAID company enrichment. An auto-discovered stranger
+# company (status='candidate') stays free — name-only discovery keeps writing its
+# row — but it only enters the PAID chain (website search, about-page scrape, Exa
+# evidence) once one of its own vacancies EARNS it: a vacancy scored at/above this
+# floor, OR any vacancy the user liked. Real lever: the candidate selection in
+# screen_candidates.load_fresh_candidates and find_company_urls (ghost branch).
+# Unearned candidates simply wait — reported, never silently dropped. 0 means "any
+# scored vacancy earns it"; raise it to spend paid credits only on strong matches.
+company_paid_min_vacancy_score = 60
+
 # ===========================================================================
 # Numeric thresholds — scoring, tiers, auto-archive, auto-review.
 # ===========================================================================

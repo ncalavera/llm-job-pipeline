@@ -112,14 +112,20 @@ fallback for agents not driven by the daily runner.
        writes BEFORE calling it, or the snapshot commit sweeps them up by chance.
     3. `telegram_digest.py` opens its own separate `autocommit=True` connection
        (the digest poller), not the shared DAL singleton.
-    4. `set_board_enabled()` and `archive_board_vacancies()` each commit
-       internally — both back a discrete, durable user action (enabling/
-       disabling a board, and the unseen-vacancy archive that disabling now
-       triggers), so a forgotten caller commit must not silently lose it.
+    4. `set_board_enabled()`, `set_board_hidden()`, and
+       `archive_board_vacancies()` each commit internally — each backs a
+       discrete, durable user action (enabling/disabling a board, hiding it from
+       the dashboard, and the unseen-vacancy archive that disabling triggers),
+       so a forgotten caller commit must not silently lose it.
   Consequence for `--report-only`: `fetch_vacancies.py --report-only` must NOT
   stage any source-data mutation (e.g. `pass_expired_vacancies()` stays inside
   the fetch guard) — a report run only re-renders the dashboard from the data,
   it never changes it. Otherwise the dashboard snapshot commit would persist it.
+- Any change to the pipeline's shape (a new stage, a moved data flow, a new
+  observability surface) updates BOTH the architecture diagram
+  (`public/modules/architecture-diagram.js`, rendered on the dashboard Health
+  tab) and the Health & observability section of `docs/ARCHITECTURE.md`. They
+  are the one canonical picture; a diagram that lies is worse than none.
 - Run `python3 -m pytest tests/ -q` after changing pipeline code — the suite
   runs offline. (`pytest` and `pydantic` are not in the easy-mode install; add
   them with `pip install pytest pydantic` to run the full suite.)

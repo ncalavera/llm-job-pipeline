@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from urllib.parse import urlencode
 
 from config import GLOBAL_BLACKLIST, GLOBAL_BLACKLIST_SUBSTR
 from fetchers import http
@@ -24,13 +25,14 @@ def fetch_idealist_board(board_cfg: dict) -> list[dict]:
     Idealist's React SPA bakes the Algolia appId + search-only key into the page
     HTML — no login, no paid API. POSTs to the Algolia query endpoint.
 
-    board_cfg knobs: ``remote_zone`` (default "WORLD" = globally-open remote),
-    ``include_onsite`` (default False), ``max_pages`` (default 20).
+    board_cfg knobs: ``remote_zone`` (default None = any remote zone; set e.g.
+    "WORLD" to restrict to globally-open remote), ``include_onsite`` (default
+    False), ``max_pages`` (default 20).
     """
     board_name = board_cfg["name"]
     board_blacklist = board_cfg.get("board_blacklist", [])
     max_pages = int(board_cfg.get("max_pages", 20))
-    remote_zone = board_cfg.get("remote_zone", "WORLD")
+    remote_zone = board_cfg.get("remote_zone")
     include_onsite = bool(board_cfg.get("include_onsite", False))
 
     algolia_url = f"https://{_IDEALIST_APP_ID}-dsn.algolia.net/1/indexes/{_IDEALIST_INDEX}/query"
@@ -53,13 +55,13 @@ def fetch_idealist_board(board_cfg: dict) -> list[dict]:
     all_hits: list[dict] = []
     last_error = None
     for page in range(max_pages):
-        params_str = "&".join(
-            [
-                "query=",
-                "hitsPerPage=200",
-                f"page={page}",
-                f"facetFilters={json.dumps(facet)}",
-            ]
+        params_str = urlencode(
+            {
+                "query": "",
+                "hitsPerPage": 200,
+                "page": page,
+                "facetFilters": json.dumps(facet),
+            }
         )
         try:
             resp = http.post(

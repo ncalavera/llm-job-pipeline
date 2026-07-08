@@ -19,13 +19,14 @@ import {
   parseSnapshotStamp,
 } from "./nav.js";
 
-test("there are exactly six top-nav sections, in order", () => {
+test("there are exactly seven top-nav sections, in order", () => {
   assert.deepEqual(SECTIONS, [
     "today",
     "vacancies",
     "companies",
     "triage",
     "boards",
+    "health",
     "settings",
   ]);
 });
@@ -40,6 +41,7 @@ test("every leaf mode maps to its owning section", () => {
   // with was deleted) is its own top-nav section now.
   assert.equal(sectionForMode("pipeline"), "triage");
   assert.equal(sectionForMode("boards"), "boards");
+  assert.equal(sectionForMode("health"), "health");
   assert.equal(sectionForMode("settings"), "settings");
 });
 

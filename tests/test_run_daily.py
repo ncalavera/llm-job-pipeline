@@ -1250,3 +1250,101 @@ def test_tier_and_skip_boards_are_ignored_on_resume(rd):
     args = rd._parser().parse_args(["--resume", "--tier", "S", "--skip-boards", "linkedin"])
     ignored = rd._ignored_resume_flags(args)
     assert "--tier" in ignored and "--skip-boards" in ignored
+
+
+# ---------------------------------------------------------------------------
+# Loud failures + report card (R5 / R7): warnings, publish gate, stage verdicts.
+# ---------------------------------------------------------------------------
+
+
+def test_new_state_seeds_empty_warnings(rd):
+    assert rd._new_state(rd.Opts())["warnings"] == []
+
+
+def test_add_warning_records_structured_entry(rd):
+    state = rd._new_state(rd.Opts())
+    rd._add_warning(state, "company_scoring", "evidence failed")
+    rd._add_warning(state, "company_scoring", "screen crashed", blocking=True)
+    assert [w["message"] for w in state["warnings"]] == ["evidence failed", "screen crashed"]
+    assert state["warnings"][0]["blocking"] is False
+    assert state["warnings"][1]["blocking"] is True
+
+
+def test_add_warning_tolerates_missing_state(rd):
+    rd._add_warning(None, "company_scoring", "no state here")  # must not raise
+
+
+def test_prefilter_records_warning_on_nonzero_exit(rd, monkeypatch):
+    monkeypatch.setattr(rd, "_run", lambda cmd, opts: 1)
+    state = rd._new_state(rd.Opts())
+    rd._prefilter_junk_companies(rd.Opts(), state)
+    assert any("junk pre-filter" in w["message"] for w in state["warnings"])
+    assert not state["warnings"][0]["blocking"]  # degraded, not publish-blocking
+
+
+def test_publish_gate_blocks_on_blocking_warning(rd):
+    state = _clean_state(rd)
+    rd._add_warning(state, "company_scoring", "screen failed — paid enrichment withheld", blocking=True)
+    allowed, reasons = rd.check_publish_gate(state, fetch_stats={"orgs": {}})
+    assert allowed is False
+    assert any("screen failed" in r for r in reasons)
+
+
+def test_publish_gate_allows_nonblocking_warning(rd):
+    state = _clean_state(rd)
+    rd._add_warning(state, "company_scoring", "evidence collection degraded")
+    allowed, reasons = rd.check_publish_gate(state, fetch_stats={"orgs": {}})
+    assert allowed is True and reasons == []
+
+
+def test_stage_verdict_maps_each_status(rd):
+    warned = {"name": "company_scoring", "status": "done"}
+    clean = {"name": "fetch", "status": "done"}
+    warnings = [{"stage": "company_scoring", "message": "x"}]
+    assert rd._stage_verdict(clean, warnings) == "OK"
+    assert rd._stage_verdict(warned, warnings) == "OK-BUT"
+    assert rd._stage_verdict({"name": "filter", "status": "error"}, []) == "FAILED"
+    assert rd._stage_verdict({"name": "enrich", "status": "skipped"}, []) == "SKIPPED"
+
+
+def test_stage_verdict_blocking_warning_reads_failed(rd):
+    # The valve skips paid work on purpose, but a blocking warning is a real
+    # failure — it reads FAILED on the card and blocks publish, not a benign SKIP.
+    stage = {"name": "company_scoring", "status": "skipped"}
+    warnings = [{"stage": "company_scoring", "message": "screen failed", "blocking": True}]
+    assert rd._stage_verdict(stage, warnings) == "FAILED"
+
+
+def test_report_card_renders_four_distinct_verdicts(rd, capsys):
+    state = rd._new_state(rd.Opts())
+    rd._stage(state, "fetch")["status"] = "done"
+    rd._stage(state, "fetch")["note"] = "12 new vacancies"
+    rd._stage(state, "company_scoring")["status"] = "done"
+    rd._stage(state, "company_scoring")["note"] = "scored 3"
+    rd._stage(state, "enrich")["status"] = "skipped"
+    rd._stage(state, "enrich")["note"] = "FIRECRAWL_API_KEY unset"
+    rd._stage(state, "filter")["status"] = "error"
+    rd._stage(state, "filter")["note"] = "exited 1"
+    rd._add_warning(state, "company_scoring", "evidence degraded")
+
+    rd._print_stage_board(state, verdict=True)
+    out = capsys.readouterr().out
+    assert "OK" in out and "OK-BUT" in out and "FAILED" in out and "SKIPPED" in out
+    assert "FIRECRAWL_API_KEY unset" in out  # reason travels in the note column
+
+
+def test_fetch_source_counters_labels_career_sites_and_boards(rd):
+    stats = {
+        "career_sites": {"total": 8, "yielded": 4},
+        "boards": {"total": 7, "fetched": 0, "ttl_skipped": 7, "yielded": 0},
+    }
+    counters = rd._fetch_source_counters(stats)
+    assert counters == "career sites 4/8 · boards 0/7 (TTL)"
+
+
+def test_fetch_source_counters_no_ttl_tag_when_boards_ran(rd):
+    stats = {
+        "career_sites": {"total": 3, "yielded": 3},
+        "boards": {"total": 2, "fetched": 2, "ttl_skipped": 0, "yielded": 1},
+    }
+    assert rd._fetch_source_counters(stats) == "career sites 3/3 · boards 1/2"
