@@ -4104,6 +4104,18 @@ body::after {
   position: relative;
 }
 
+/* Health (trust/observability) is a leaf section like Boards: hidden until
+   switchMode() stamps .active — without this pair it stacks under whatever
+   section is on screen (bug: visible during initial load). */
+.health-section {
+  display: none;
+}
+.health-section.active {
+  display: block;
+  position: relative;
+  padding: 4px 0 0;
+}
+
 .boards-section,
 .settings-section {
   background: none;
