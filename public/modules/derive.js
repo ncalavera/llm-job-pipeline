@@ -33,18 +33,27 @@ export function hasVerdict(g, opts) {
   return status !== "unseen" && opts.basketMap[status] != null;
 }
 
-// The shared visibility filter. A role is visible when its company is approved
-// AND (the user has already acted on it OR it clears the score floor). An
-// explicit verdict overrides the floor — a liked role always shows in Liked and
-// a passed role in Passed regardless of score, the same principle the Today tab
-// uses (a role you acted on must never silently vanish under the discovery
-// floor). Only undecided ("unseen") roles are subject to the floor, which keeps
-// the Catalog/Geo browse surfaces focused on high-fit unreviewed roles. Company
-// approval still gates everything, and expiry is deliberately NOT a visibility
-// gate — an expired liked role stays "visible", it is only re-bucketed to Passed
-// (see effectiveBasket), so it is counted and surfaced rather than vanishing.
+// A role from a not-yet-approved company still surfaces when it scores at/above
+// this floor — mirrors score_floor_any_company in scripts/database_supabase.py,
+// where a strong match ORs past the company-status gate. The server only ships
+// such roles when they clear this bar, so client and server agree on the set.
+export const ANY_COMPANY_MIN_SCORE = VISIBLE_MIN_SCORE;
+
+// The shared visibility filter. A role is visible when its company is approved —
+// OR the role scores above ANY_COMPANY_MIN_SCORE, a strong match that ORs past
+// the approval gate (same rule the pipeline applies server-side) — AND (the user
+// has already acted on it OR it clears the score floor). An explicit verdict
+// overrides the floor — a liked role always shows in Liked and a passed role in
+// Passed regardless of score, the same principle the Today tab uses (a role you
+// acted on must never silently vanish under the discovery floor). Only undecided
+// ("unseen") roles are subject to the floor, which keeps the Catalog/Geo browse
+// surfaces focused on high-fit unreviewed roles. Expiry is deliberately NOT a
+// visibility gate — an expired liked role stays "visible", it is only re-bucketed
+// to Passed (see effectiveBasket), so it is counted and surfaced rather than
+// vanishing.
 export function isVisible(g, opts) {
-  if (!opts.isApproved(g)) return false;
+  if (!opts.isApproved(g) && !clearsScoreFloor(g, ANY_COMPANY_MIN_SCORE))
+    return false;
   if (hasVerdict(g, opts)) return true;
   return clearsScoreFloor(g, opts.minScore);
 }

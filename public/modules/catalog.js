@@ -26,7 +26,13 @@ import {
   tierClass,
 } from "./helpers.js";
 import { T, dateLocale } from "./i18n.js";
-import { VISIBLE_MIN_SCORE, basketCounts, groupsInBasket } from "./derive.js";
+import {
+  ANY_COMPANY_MIN_SCORE,
+  VISIBLE_MIN_SCORE,
+  basketCounts,
+  clearsScoreFloor,
+  groupsInBasket,
+} from "./derive.js";
 import { createCursor, actionsFor } from "./keys.js";
 
 // The shared visibility options the basket badge AND the basket list both read,
@@ -140,7 +146,13 @@ function _renderCatalogHiddenNote(grid) {
   if (existing) existing.remove();
   if (!grid || !grid.parentNode) return;
 
-  const hidden = groups.filter((g) => !isGroupCompanyApproved(g));
+  // Only roles still hidden after the fix: not-yet-approved AND below the
+  // any-company floor. Strong matches (≥ ANY_COMPANY_MIN_SCORE) now show
+  // inline, so they no longer belong in this "hidden" note.
+  const hidden = groups.filter(
+    (g) =>
+      !isGroupCompanyApproved(g) && !clearsScoreFloor(g, ANY_COMPANY_MIN_SCORE),
+  );
   if (hidden.length === 0) return;
 
   const orgs = new Set();

@@ -125,14 +125,20 @@ test("score floor: scored-and-above passes, below/unscored fails, null lifts it"
   assert.equal(clearsScoreFloor({ llm_score: 0 }, null), true);
 });
 
-test("visible = approved AND clears the floor; expiry is not a visibility gate", () => {
+test("visible = approved (or strong match) AND clears the floor; expiry is not a visibility gate", () => {
   const opts = visOpts({});
   assert.equal(
     isVisible({ id: "a", approved: true, llm_score: 80 }, opts),
     true,
   );
+  // Not approved but a strong match (≥ ANY_COMPANY_MIN_SCORE) ORs past the gate.
   assert.equal(
     isVisible({ id: "b", approved: false, llm_score: 80 }, opts),
+    true,
+  );
+  // Not approved and below the any-company floor → still hidden.
+  assert.equal(
+    isVisible({ id: "b2", approved: false, llm_score: 20 }, opts),
     false,
   );
   assert.equal(
@@ -149,11 +155,13 @@ test("visible = approved AND clears the floor; expiry is not a visibility gate",
   );
 });
 
-test("visibleGroups drops below-floor and unapproved roles", () => {
+test("visibleGroups drops below-floor roles; a strong unapproved match still shows", () => {
   const visible = visibleGroups(sampleGroups(), visOpts({}));
   assert.deepEqual(
     visible.map((g) => g.id).sort(),
-    ["g1", "g3", "g4", "g6", "g7"], // g2 below floor, g5 not approved
+    // g2 below floor stays hidden; g5 is unapproved but scores 95 → ORs past
+    // the company gate (mirrors score_floor_any_company).
+    ["g1", "g3", "g4", "g5", "g6", "g7"],
   );
 });
 
@@ -175,8 +183,8 @@ test("effectiveBasket re-buckets an expired liked role to passed", () => {
 test("basket counts over the visible set match the sample by hand", () => {
   const opts = visOpts({ g3: "liked", g4: "liked", g6: "passed" });
   const counts = basketCounts(sampleGroups(), opts);
-  // liked: g3 | unseen: g1,g7 | passed: g4(expired-liked)+g6
-  assert.deepEqual(counts, { liked: 1, unseen: 2, passed: 2 });
+  // liked: g3 | unseen: g1,g7,g5(unapproved 95, ORs past the gate) | passed: g4(expired-liked)+g6
+  assert.deepEqual(counts, { liked: 1, unseen: 3, passed: 2 });
 });
 
 // This is the DHA-374 invariant: a basket badge equals the number of rows its
@@ -287,9 +295,13 @@ test("Nit A: liking/passing a below-floor role puts it in that basket's count+li
   );
 });
 
-test("Nit A: an un-approved company still hides a liked role (approval gates all)", () => {
-  const g = { id: "np", approved: false, llm_score: 90, locations: [] };
-  assert.equal(isVisible(g, visOpts({ np: "liked" })), false);
+test("un-approved company: a strong match shows, a below-floor role stays hidden", () => {
+  // ≥ ANY_COMPANY_MIN_SCORE ORs past the approval gate (score_floor_any_company).
+  const strong = { id: "np", approved: false, llm_score: 90, locations: [] };
+  assert.equal(isVisible(strong, visOpts({ np: "liked" })), true);
+  // Below the floor, approval still gates it — a verdict cannot un-hide it.
+  const weak = { id: "nw", approved: false, llm_score: 20, locations: [] };
+  assert.equal(isVisible(weak, visOpts({ nw: "liked" })), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -309,10 +321,11 @@ test("Geo buckets by city over the visible set, counting a role once per locatio
       visOpts({ g3: "liked", g4: "liked", g6: "passed" }),
     ),
   );
-  // Berlin: g1 + g3 → count 2, liked 1 (g3), mean of 80,90 = 85.
-  assert.equal(rows["Germany::Berlin"].count, 2);
+  // Berlin: g1 + g3 + g5 (unapproved 95, ORs past the gate) → count 3, liked 1
+  // (g3), mean of 80,90,95 = 88.3.
+  assert.equal(rows["Germany::Berlin"].count, 3);
   assert.equal(rows["Germany::Berlin"].liked, 1);
-  assert.equal(rows["Germany::Berlin"].meanScore, 85);
+  assert.equal(rows["Germany::Berlin"].meanScore, 88.3);
   // Paris: g3 + g4 → count 2; g4 is expired-liked so NOT liked → liked 1.
   assert.equal(rows["France::Paris"].count, 2);
   assert.equal(rows["France::Paris"].liked, 1);
@@ -323,9 +336,9 @@ test("Geo buckets by city over the visible set, counting a role once per locatio
   // Remote/unknown bucket for the location-less role.
   assert.equal(rows["__remote_unknown"].count, 1);
   assert.equal(rows["__remote_unknown"].isRemote, true);
-  // Below-floor g2 and unapproved g5 never reach any bucket.
+  // Below-floor g2 never reaches any bucket; unapproved g5 does (score 95).
   const berlinTotal = rows["Germany::Berlin"].count;
-  assert.equal(berlinTotal, 2);
+  assert.equal(berlinTotal, 3);
 });
 
 test("Geo 'liked' column reacts to a like with no reload", () => {
