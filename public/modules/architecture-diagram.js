@@ -1,53 +1,77 @@
 // =============================================================================
-// architecture-diagram.js — the pipeline's data-flow picture, as a Mermaid
-// source string rendered on the Health tab.
+// architecture-diagram.js — the pipeline's data-flow picture, as Mermaid
+// source strings rendered on the Health tab.
 //
-// This is the ONE canonical diagram of how a role travels from source to
-// verdict. It seeds from the flowchart in README.md and extends it with the
-// pieces the trust/observability work added: the cheap relevance screen, the
-// money valve that closes when the screen crashes, the learning loop, and the
-// health/report-card observability surface.
+// Design FINDING-007: one 25-node diagram was unreadable. The canonical picture
+// is now layered — a 6-node OVERVIEW that answers "how does a role travel from
+// source to verdict" at a glance, plus per-component detail diagrams collapsed
+// behind <details> and rendered only when opened.
 //
 // House rule (AGENTS.md): any change to the pipeline's shape updates BOTH this
-// string and docs/ARCHITECTURE.md. Keep an explicit `color:` on every styled
+// file and docs/ARCHITECTURE.md. Keep an explicit `color:` on every styled
 // node so the labels stay legible in the dashboard's dark theme.
 // =============================================================================
 
-export const ARCHITECTURE_MERMAID = `flowchart TB
-    A[ATS & job boards] -->|fetch| B[(Database)]
-    A2[Company career sites] -->|enrich| B
-    B -->|filter + quality gate| C[Clean vacancies]
-    C -->|score, Claude| D[Scores 0-100]
+export const ARCHITECTURE_OVERVIEW = `flowchart LR
+    SRC[Job boards +<br/>company career sites] -->|fetch daily| DB[(Database)]
+    DB --> SCORE[Filter +<br/>AI scoring]
+    SCORE --> YOU[Dashboard / Telegram<br/>you triage]
+    YOU -->|likes & passes| LEARN[Learning loop]
+    LEARN -->|tunes filters| DB
+    DB --> OBS[Health tab +<br/>run report card]
 
-    subgraph screen[Company scoring — paid valve]
-        J[junk prefilter<br/>free] --> S[relevance screen<br/>Haiku, cheap]
-        S -- pass + earned vacancy --> U[URL search + about scrape<br/>PAID]
-        U --> E[evidence<br/>PAID]
-        S -. crashed .-> X[VALVE CLOSED<br/>paid steps skipped]
-    end
-    B --> J
-    E --> B
+    style DB fill:#1E40AF,color:#fff
+    style SCORE fill:#065F46,color:#fff
+    style YOU fill:#7C2D12,color:#fff
+    style LEARN fill:#4C1D95,color:#fff
+    style OBS fill:#0F766E,color:#fff
+`;
 
-    D -->|archive low, optional| AR[Archive]
-    D --> F[Dashboard / vac CLI / Telegram]
-    F -->|triage| G{liked / passed /<br/>to_apply / applied}
-    G -->|status| B
-    G --> L[learning loop<br/>verdicts to filter/score]
-    L -->|applied changes| B
+export const ARCHITECTURE_DETAILS = [
+  {
+    id: "archDailyRun",
+    title: "Daily run — stage by stage",
+    src: `flowchart LR
+    V[validate profile] --> P[preflight DB check] --> LR2[learning review]
+    LR2 --> F[fetch: career sites + boards] --> EN[enrich blind roles]
+    EN --> FI[filter junk] --> CS[company scoring] --> VS[vacancy scoring<br/>cheap screen, then strong model]
+    VS --> VD[your verdicts] --> PU[publish snapshot]
 
-    B --> H[api/health-detail.js]
-    RS[run_state.json<br/>status + warnings] --> RC[run report card]
-    RS --> PG[publish gate<br/>dirty = stage error or screen crash]
-    H --> T[Health tab<br/>+ this diagram]
+    style F fill:#1E40AF,color:#fff
+    style VS fill:#065F46,color:#fff
+    style VD fill:#7C2D12,color:#fff
+`,
+  },
+  {
+    id: "archMoneyValve",
+    title: "Company scoring — where money is spent, and the valve",
+    src: `flowchart TB
+    J[junk prefilter<br/>free] --> S[relevance screen<br/>cheap AI]
+    S -->|pass + a vacancy scored 60+ or liked| U[website search + about scrape<br/>PAID Firecrawl]
+    U --> E[evidence collection<br/>PAID Firecrawl + Exa]
+    E --> W[WANT scoring]
+    S -. screen crashed .-> X[VALVE CLOSED<br/>no paid steps this run]
 
-    style B fill:#1E40AF,color:#fff
-    style D fill:#065F46,color:#fff
-    style F fill:#7C2D12,color:#fff
     style S fill:#3730A3,color:#fff
+    style U fill:#854D0E,color:#fff
+    style E fill:#854D0E,color:#fff
     style X fill:#7F1D1D,color:#fff
-    style L fill:#4C1D95,color:#fff
-    style H fill:#0F766E,color:#fff
-    style T fill:#0F766E,color:#fff
+`,
+  },
+  {
+    id: "archObservability",
+    title: "Trust & observability — how failures surface",
+    src: `flowchart LR
+    RS[run_state.json<br/>per-stage status + warnings] --> RC[report card<br/>after every run]
+    RS --> PG{publish gate}
+    PG -->|clean| PUB[dashboard updated]
+    PG -->|dirty: stage error or screen crash| KEEP[previous snapshot kept]
+    DB[(Database)] --> HD[api/health-detail.js] --> HT[Health tab<br/>this page]
+
     style RC fill:#854D0E,color:#fff
     style PG fill:#854D0E,color:#fff
-`;
+    style DB fill:#1E40AF,color:#fff
+    style HT fill:#0F766E,color:#fff
+`,
+  },
+];

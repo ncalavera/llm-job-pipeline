@@ -18,7 +18,10 @@
 import { API_BASE } from "./state.js";
 import { escHtml, relativeTime } from "./helpers.js";
 import { T } from "./i18n.js";
-import { ARCHITECTURE_MERMAID } from "./architecture-diagram.js";
+import {
+  ARCHITECTURE_OVERVIEW,
+  ARCHITECTURE_DETAILS,
+} from "./architecture-diagram.js";
 
 let healthData = null; // last successful /api/health-detail payload
 let healthState = "idle"; // idle | loading | ok | error
@@ -324,23 +327,29 @@ export function renderHealth() {
 // Architecture diagram — Mermaid, lazy-loaded from CDN on first tab open.
 // ---------------------------------------------------------------------------
 
-function renderDiagram() {
-  const host = document.getElementById("healthDiagram");
-  if (!host || diagramRendered) return;
-  diagramRendered = true; // one attempt; a failure shows a graceful fallback
-  import(MERMAID_CDN)
-    .then((mod) => {
+let mermaidPromise = null;
+
+function _mermaid() {
+  if (!mermaidPromise) {
+    mermaidPromise = import(MERMAID_CDN).then((mod) => {
       const mermaid = mod.default;
       mermaid.initialize({ startOnLoad: false, theme: "dark" });
-      return mermaid.render("healthArchSvg", ARCHITECTURE_MERMAID);
-    })
+      return mermaid;
+    });
+  }
+  return mermaidPromise;
+}
+
+function _renderInto(el, svgId, src, retryFlagSetter) {
+  return _mermaid()
+    .then((mermaid) => mermaid.render(svgId, src))
     .then(({ svg }) => {
-      host.innerHTML = svg;
+      el.innerHTML = svg;
     })
     .catch((e) => {
       console.warn("Architecture diagram render failed:", e);
-      diagramRendered = false; // let a later re-open retry
-      host.innerHTML =
+      if (retryFlagSetter) retryFlagSetter();
+      el.innerHTML =
         '<p class="health-dim">' +
         escHtml(
           T(
@@ -350,6 +359,45 @@ function renderDiagram() {
         ) +
         "</p>";
     });
+}
+
+// Layered rendering (FINDING-007): the small overview renders on tab open;
+// each detail diagram sits behind a <details> and renders on first expand.
+function renderDiagram() {
+  const host = document.getElementById("healthDiagram");
+  if (!host || diagramRendered) return;
+  diagramRendered = true; // one attempt; a failure re-arms itself
+
+  host.innerHTML =
+    '<div id="healthArchOverview"></div>' +
+    ARCHITECTURE_DETAILS.map(
+      (d) =>
+        '<details class="health-arch-details" data-arch="' +
+        d.id +
+        '"><summary>' +
+        escHtml(d.title) +
+        '</summary><div class="health-arch-host" id="' +
+        d.id +
+        '"></div></details>',
+    ).join("");
+
+  const overview = document.getElementById("healthArchOverview");
+  _renderInto(overview, "healthArchSvg", ARCHITECTURE_OVERVIEW, () => {
+    diagramRendered = false;
+  });
+
+  host.querySelectorAll("details.health-arch-details").forEach((det) => {
+    det.addEventListener("toggle", () => {
+      if (!det.open || det.dataset.rendered) return;
+      det.dataset.rendered = "1";
+      const d = ARCHITECTURE_DETAILS.find((x) => x.id === det.dataset.arch);
+      const el = det.querySelector(".health-arch-host");
+      if (!d || !el) return;
+      _renderInto(el, d.id + "Svg", d.src, () => {
+        delete det.dataset.rendered; // re-render on next open
+      });
+    });
+  });
 }
 
 // Minimal scoped styles so the tab is self-contained (no edits to the shared
@@ -382,6 +430,10 @@ function _injectStylesOnce() {
     .health-offline{opacity:.7;font-size:14px;padding:20px;text-align:center}
     .health-diagram-card{margin-top:4px;overflow-x:auto}
     #healthDiagram svg{max-width:100%;height:auto}
+    .health-arch-details{margin-top:10px;border-top:1px solid rgba(255,255,255,.08);padding-top:8px}
+    .health-arch-details summary{cursor:pointer;font-size:13px;opacity:.75}
+    .health-arch-details summary:hover{opacity:1}
+    .health-arch-host{margin-top:8px;overflow-x:auto}
   `;
   document.head.appendChild(style);
 }
