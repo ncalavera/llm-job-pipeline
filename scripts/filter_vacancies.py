@@ -573,12 +573,10 @@ def compute_stats(categories: dict) -> dict:
     # Ready breakdown
     ready_by_tier = Counter()
     ready_by_region = Counter()
-    ready_by_relevance = Counter()
     ready_by_org = Counter()
     for _, vac in categories["ready"]:
         ready_by_tier[vac.get("tier") or "C"] += 1
         ready_by_region[vac.get("region", "other")] += 1
-        ready_by_relevance[vac.get("relevance_score", 0)] += 1
         ready_by_org[vac.get("org", "Unknown")] += 1
 
     # Per-org table (across all categories)
@@ -617,7 +615,6 @@ def compute_stats(categories: dict) -> dict:
             )
         ),
         "ready_by_region": dict(ready_by_region.most_common()),
-        "ready_by_relevance": dict(sorted(ready_by_relevance.items(), reverse=True)),
         "ready_by_org": dict(ready_by_org.most_common(15)),
         "org_stats": dict(sorted(org_stats.items(), key=lambda x: (-x[1]["delete"], x[0]))),
     }

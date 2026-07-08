@@ -1,0 +1,11 @@
+-- 0018_field_mece_cleanup — SQLite variant: intentional NO-OP.
+--
+-- The four columns dropped by the Postgres variant
+-- (company.is_unverified, vacancy.mission_rescue, vacancy.location_match,
+-- vacancy.relevance_score) were never declared in the SQLite frozen baseline
+-- (sql/schema.sqlite.sql). They are Postgres-only pre-baseline drift, so a
+-- SQLite install has nothing to drop.
+--
+-- SQLite has no `DROP COLUMN IF EXISTS`, and issuing a bare DROP on a column
+-- that does not exist would error. This file is therefore comment-only: it
+-- records version 0018 as applied on SQLite without touching the schema.
