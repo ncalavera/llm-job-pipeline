@@ -109,9 +109,10 @@ function _boardsBlock(boards) {
       const dot = b.presumed_broken
         ? ""
         : '<span class="health-dot" aria-hidden="true" title="fetching"></span>';
-      // relativeTime WITHOUT the T dictionary: the tab's copy is English, and
-      // the shared dictionary localises only time strings — mixing "2 дн назад"
-      // into English labels read as a bug (design FINDING-003).
+      // relativeTime is called WITHOUT the T dictionary on purpose: the tab's
+      // copy is English, and the shared dictionary would localise the time
+      // string, so a Russian relative time could leak into an English label
+      // and read as a bug (design FINDING-003).
       const fetched = b.last_fetched
         ? escHtml(relativeTime(b.last_fetched))
         : escHtml(T("health_never", "never"));
