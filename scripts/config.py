@@ -246,10 +246,12 @@ LLM_SCORE_THRESHOLD = int(
 )
 
 #: A board-sourced unseen vacancy not re-seen by ANY source for this many days is
-#: auto-archived during fetch reconciliation. Board rows have no ATS to reconcile
-#: against (gone-from-source only runs on a direct re-fetch), so they need a
-#: time-based sweep. Default comes from defaults.toml ([thresholds]
-#: board_stale_days); BOARD_STALE_DAYS env var overrides.
+#: auto-archived during fetch reconciliation — only for boards successfully
+#: fetched in that run. Board rows have no ATS to reconcile against
+#: (gone-from-source only runs on a direct re-fetch), so they need this sweep.
+#: 0 disables it entirely (same convention as LLM_SCORE_THRESHOLD). Default
+#: comes from defaults.toml ([thresholds] board_stale_days); BOARD_STALE_DAYS
+#: env var overrides.
 BOARD_STALE_DAYS = int(
     os.environ.get("BOARD_STALE_DAYS", settings.thresholds()["board_stale_days"])
 )
