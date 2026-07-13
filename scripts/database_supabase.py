@@ -7,7 +7,7 @@ commit at logical checkpoints.
 import hashlib
 import json
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from dateutil import parser as dateutil_parser
@@ -20,6 +20,7 @@ from company_registry import (
 import settings
 from config import (
     LLM_SCORE_THRESHOLD,
+    BOARD_STALE_DAYS,
     PROTECT_SCORE,
     VACANCIES_DIR,
     GEO_BANNED_COUNTRIES,
@@ -1368,6 +1369,9 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     # re-archived each run when the ATS still lists it. Loaded
     # once (not per row).
     archived_hashes = get_archived_hashes(include_gone=False)
+    # Resurrects must clear a machine-archival reason (board_stale /
+    # board_disabled) so it never sits on a live row. Guarded once (0014).
+    has_status_reason = _vacancy_has_column("status_reason")
     # Index this company's existing rows once so a renamed / re-punctuated /
     # language variant merges onto the live row instead of forking a new one.
     dedup_index = _build_dedup_index(cur, org_name, company_id)
@@ -1441,6 +1445,10 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
                 updates["status"] = "unseen"
                 # Reset the expiring alert so a future expiry re-alerts.
                 updates["expiring_alerted_at"] = None
+                if has_status_reason:
+                    # Re-listed = alive: a stale archival reason must not
+                    # linger on the now-live row.
+                    updates["status_reason"] = None
                 resurrected += 1
 
             # A true rename over time: point the surviving row at the new title
@@ -1543,6 +1551,9 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
     # Only the direct-ATS path (save_vacancies) leaves it empty. Guarded once so
     # a pre-migration install (no source_board column) still saves, unstamped.
     write_source_board = bool(board_name) and _vacancy_has_column("source_board")
+    # Resurrects must clear a machine-archival reason (board_stale /
+    # board_disabled) so it never sits on a live row. Guarded once (0014).
+    has_status_reason = _vacancy_has_column("status_reason")
 
     # Board path: full archived set (include_gone=True) so a lagging feed cannot
     # resurrect a posting the source already closed. Loaded once (not per row).
@@ -1659,6 +1670,10 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
             if existing.get("status") in ("archived", "expiring"):
                 updates["status"] = "unseen"
                 updates["expiring_alerted_at"] = None
+                if has_status_reason:
+                    # Re-listed = alive: a stale archival reason must not
+                    # linger on the now-live row.
+                    updates["status_reason"] = None
                 resurrected += 1
             # A true rename over time: repoint the surviving row at the new title.
             if is_rename:
@@ -2734,6 +2749,116 @@ def pass_expired_vacancies() -> int:
     if protected:
         print(f"  PROTECTED {protected} expired high-fit roles → expiring", flush=True)
     return count
+
+
+def archive_stale_board_vacancies(
+    fetched_boards, stale_days: int | None = None
+) -> "ArchivedCount":
+    """Auto-archive board-sourced vacancies not re-seen by any source in a while.
+
+    Gone-from-source reconciliation (archive_gone_vacancies) only runs on a
+    direct-ATS re-fetch, so it never covers board rows: a board-sourced vacancy
+    that drops off its board is never revisited and lingers 'unseen' forever,
+    accumulating zombies that waste LLM scoring budget. This is the board-row
+    analogue: a row whose board WAS successfully fetched this run yet whose
+    last_seen (bumped every run the role is still listed by ANY source) is older
+    than ``stale_days`` days is treated as gone and archived in place
+    (status -> 'archived', never a delete), recording status_reason =
+    'board_stale' -- a bare machine token, mirroring archive_board_vacancies's
+    'board_disabled'.
+
+    ``fetched_boards`` is the POSITIVE-EVIDENCE precondition: the set of board
+    display names (as stamped into vacancy.source_board) successfully fetched in
+    THIS run. Only rows from those boards are eligible -- wall-clock staleness
+    alone is never enough, otherwise a --no-boards run, a TTL-skipped board
+    (hn_whoishiring's ttl_days=30 exceeds the default window by construction)
+    or a silently broken fetcher would convert fetch absence into mass archival
+    of live roles. Empty/None set -> no-op.
+
+    Latency protection (KTD1/KTD2), mirroring both sibling sweeps: rows with
+    llm_score >= PROTECT_SCORE are NOT silently archived -- they flip to
+    'expiring' (kept visible, alerted) and are never tombstoned. Archived rows
+    ARE tombstoned as 'gone_from_source' via record_archived_hashes, exactly
+    like archive_gone_vacancies, so a stale board snapshot cannot resurrect the
+    closed posting while a direct-ATS re-listing still can.
+
+    Only status = 'unseen' rows are touched -- decided statuses (liked/to_apply/
+    passed/applied/expiring) and company-fetched rows (source_board IS NULL,
+    reconciled against their own ATS) are never revisited.
+
+    ``stale_days`` defaults to BOARD_STALE_DAYS (resolved at call time, so
+    patching the module global works); 0 disables the sweep entirely, matching
+    the llm_score_threshold convention. Does NOT commit -- mirrors
+    pass_expired_vacancies; the fetch driver commits. Degrades to a no-op on a
+    schema predating migration 0013/0014 (no source_board / status_reason
+    column). Returns ArchivedCount (archived, .protected).
+    """
+    if stale_days is None:
+        stale_days = BOARD_STALE_DAYS
+    if stale_days <= 0:  # 0 = disabled, like llm_score_threshold
+        return ArchivedCount(0)
+    if not fetched_boards:  # no board successfully fetched -> no absence evidence
+        return ArchivedCount(0)
+    if not (_vacancy_has_column("source_board") and _vacancy_has_column("status_reason")):
+        return ArchivedCount(0)
+
+    # last_seen is stored as an ISO 'YYYY-MM-DD' date string (see save_* /
+    # refresh_* paths), so a lexicographic compare against a cutoff string works
+    # on both backends without INTERVAL / julianday branching.
+    cutoff = (datetime.now(DASHBOARD_TZ).date() - timedelta(days=stale_days)).isoformat()
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    board_ph = ", ".join(["%s"] * len(fetched_boards))
+    cur.execute(
+        "SELECT v.id, v.dedup_hash, v.title, v.llm_score, c.canonical_name AS org "
+        "FROM vacancy v LEFT JOIN company c ON v.company_id = c.id "
+        f"WHERE v.status = 'unseen' AND v.source_board IN ({board_ph}) "
+        "AND v.last_seen < %s",
+        (*sorted(fetched_boards), cutoff),
+    )
+    rows = cur.fetchall()
+    protected = [r for r in rows if (r["llm_score"] or 0) >= PROTECT_SCORE]
+    to_archive = [r for r in rows if (r["llm_score"] or 0) < PROTECT_SCORE]
+
+    if protected:
+        ids = [r["id"] for r in protected]
+        ph = ", ".join(["%s"] * len(ids))
+        cur.execute(
+            "UPDATE vacancy SET status = 'expiring', status_updated_at = NOW() "
+            f"WHERE id IN ({ph})",
+            ids,
+        )
+    if to_archive:
+        ids = [r["id"] for r in to_archive]
+        ph = ", ".join(["%s"] * len(ids))
+        cur.execute(
+            "UPDATE vacancy SET status = 'archived', status_updated_at = NOW(), "
+            f"status_reason = 'board_stale' WHERE id IN ({ph})",
+            ids,
+        )
+    cur.close()
+    if to_archive:
+        record_archived_hashes(
+            [
+                (
+                    r["dedup_hash"],
+                    "gone_from_source",
+                    make_normalized_id(r["org"] or "", r["title"] or ""),
+                )
+                for r in to_archive
+            ]
+        )
+        print(
+            f"  Auto-archived {len(to_archive)} board-sourced vacancies "
+            f"not re-seen for {stale_days} days",
+            flush=True,
+        )
+    if protected:
+        print(
+            f"  PROTECTED {len(protected)} stale board-sourced high-fit roles → expiring",
+            flush=True,
+        )
+    return ArchivedCount(len(to_archive), len(protected))
 
 
 # ---------------------------------------------------------------------------

@@ -117,6 +117,14 @@ company_paid_min_vacancy_score = 60
 # Set to 0 to disable auto-archive entirely.
 llm_score_threshold = 20
 
+# A board-sourced vacancy (source_board IS NOT NULL) not re-seen by ANY source
+# for this many days is auto-archived during fetch reconciliation — but only
+# when its board was successfully fetched in that run (a skipped or broken
+# board is not evidence). Company-fetched rows are reconciled against their own
+# ATS and are never touched by this rule. Set to 0 to disable the sweep
+# entirely. Env BOARD_STALE_DAYS overrides.
+board_stale_days = 14
+
 # Score → tier cut-offs (highest first). S = best fit. Used by the dashboard /
 # tier helpers; not a geography or discipline preference.
 tier_s = 82

@@ -160,6 +160,7 @@ from database_supabase import (
     update_source_tracking,
     print_reconciliation_report,
     pass_expired_vacancies,
+    archive_stale_board_vacancies,
     is_fetch_error,
 )
 
@@ -665,9 +666,11 @@ def _fetch_one_company(org_name, config, tier, strategy, fetch_stats) -> int:
     return new_count
 
 
-def _fetch_one_board(board_id, board_cfg, strategy) -> int:
+def _fetch_one_board(board_id, board_cfg, strategy) -> tuple[int, str]:
     """Fetch one job board, save its vacancies, update source tracking and mark
-    the board fetched. Returns the count of new vacancies added."""
+    the board fetched. Returns (count of new vacancies added, fetch status —
+    'ok' or an error string); the caller uses the status as the
+    positive-evidence gate for the stale-board archival sweep."""
     board_name = board_cfg["name"]
     print(f"\n--- {board_name} (board, tier {board_cfg.get('tier', 'C')}) ---")
 
@@ -730,7 +733,7 @@ def _fetch_one_board(board_id, board_cfg, strategy) -> int:
     # Record health telemetry: RAW rows returned (len(jobs)), not new_count —
     # a board returning 200 rows of which 0 are new is healthy; 0 rows is not.
     mark_board_fetched(board_id, jobs_returned=len(jobs), fetch_status=board_fetch_status)
-    return new_count
+    return new_count, board_fetch_status
 
 
 def main():
@@ -844,6 +847,12 @@ def main():
 
         # --- Job Board Aggregators ---
         manual_boards = []
+        # Boards SUCCESSFULLY fetched this run (display names, as stamped into
+        # vacancy.source_board) — the positive-evidence gate for the stale-board
+        # archival sweep below. Skipped (--no-boards / --free-only / TTL) and
+        # failed boards stay out, so their rows are never archived on wall-clock
+        # staleness alone.
+        fetched_ok_boards = set()
         if JOB_BOARDS and not args.no_boards:
             print(f"\n{'─' * 60}")
             print("  JOB BOARDS")
@@ -875,7 +884,9 @@ def main():
                     fetch_stats["boards"]["ttl_skipped"] += 1
                     continue
 
-                board_new = _fetch_one_board(board_id, board_cfg, strategy)
+                board_new, board_status = _fetch_one_board(board_id, board_cfg, strategy)
+                if board_status == "ok":
+                    fetched_ok_boards.add(board_name)
                 total_new += board_new
                 fetch_stats["boards"]["fetched"] += 1
                 if board_new > 0:
@@ -935,6 +946,13 @@ def main():
         # left staged for generate_dashboard's snapshot commit to pick up by
         # accident in report-only mode.
         pass_expired_vacancies()
+        # Board rows have no ATS to reconcile against (archive_gone_vacancies
+        # only runs on a direct re-fetch), so sweep board-sourced 'unseen' rows
+        # not re-seen by ANY source for board_stale_days days — otherwise they
+        # accumulate as zombies and waste scoring budget. Scoped to boards
+        # successfully fetched THIS run: absence is only evidence when the
+        # board actually answered.
+        archive_stale_board_vacancies(fetched_ok_boards)
         get_conn().commit()
 
     # Generate dashboard. This is report OUTPUT (public/data.js in simple mode,
