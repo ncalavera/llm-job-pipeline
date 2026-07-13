@@ -7,7 +7,7 @@ commit at logical checkpoints.
 import hashlib
 import json
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from dateutil import parser as dateutil_parser
@@ -20,6 +20,7 @@ from company_registry import (
 import settings
 from config import (
     LLM_SCORE_THRESHOLD,
+    BOARD_STALE_DAYS,
     PROTECT_SCORE,
     VACANCIES_DIR,
     GEO_BANNED_COUNTRIES,
@@ -2733,6 +2734,53 @@ def pass_expired_vacancies() -> int:
         print(f"  Auto-passed {count} expired unseen vacancies", flush=True)
     if protected:
         print(f"  PROTECTED {protected} expired high-fit roles → expiring", flush=True)
+    return count
+
+
+def archive_stale_board_vacancies(stale_days: int = BOARD_STALE_DAYS) -> int:
+    """Auto-archive board-sourced vacancies not re-seen by any source in a while.
+
+    Gone-from-source reconciliation (archive_gone_vacancies) only runs on a
+    direct-ATS re-fetch, so it never covers board rows: a board-sourced vacancy
+    that drops off its board is never revisited and lingers 'unseen' forever,
+    accumulating zombies that waste LLM scoring budget. This is the board-row
+    analogue -- a time-based sweep keyed on last_seen (bumped every run the role
+    is still listed by ANY source): a row not re-seen for ``stale_days`` days is
+    treated as gone and archived in place (status -> 'archived', never a delete),
+    recording status_reason so the reason is auditable, mirroring
+    archive_board_vacancies (board_disabled).
+
+    Only status = 'unseen', source_board IS NOT NULL rows are touched -- decided
+    statuses (liked/to_apply/passed/applied/expiring) and company-fetched rows
+    (source_board IS NULL, reconciled against their own ATS) are never revisited.
+
+    Does NOT commit -- mirrors pass_expired_vacancies; the fetch driver commits.
+    Degrades to a no-op on a schema predating migration 0013/0014 (no
+    source_board / status_reason column). Returns the count archived.
+    """
+    if not (_vacancy_has_column("source_board") and _vacancy_has_column("status_reason")):
+        return 0
+
+    # last_seen is stored as an ISO 'YYYY-MM-DD' date string (see save_* /
+    # refresh_* paths), so a lexicographic compare against a cutoff string works
+    # on both backends without INTERVAL / julianday branching.
+    cutoff = (datetime.now(DASHBOARD_TZ).date() - timedelta(days=stale_days)).isoformat()
+    reason = f"gone_from_source — board-sourced, not re-seen for {stale_days} days"
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE vacancy SET status = 'archived', status_updated_at = NOW(), "
+        "status_reason = %s "
+        "WHERE status = 'unseen' AND source_board IS NOT NULL AND last_seen < %s",
+        (reason, cutoff),
+    )
+    count = cur.rowcount
+    cur.close()
+    if count:
+        print(
+            f"  Auto-archived {count} board-sourced vacancies not re-seen for {stale_days} days",
+            flush=True,
+        )
     return count
 
 

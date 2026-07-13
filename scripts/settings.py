@@ -98,7 +98,7 @@ def _num(section: dict, key: str, fallback: float) -> float:
 def thresholds() -> dict:
     """Numeric thresholds with neutral fallbacks (today's numbers).
 
-    Keys: llm_score_threshold, tier_s/a/b/c, composite_alignment_weight,
+    Keys: llm_score_threshold, board_stale_days, tier_s/a/b/c, composite_alignment_weight,
     composite_boost_weight, auto_discovery_status,
     auto_review {enabled, approve, reject}.
     """
@@ -106,6 +106,7 @@ def thresholds() -> dict:
     auto = sec.get("auto_review", {}) if isinstance(sec.get("auto_review"), dict) else {}
     return {
         "llm_score_threshold": int(_num(sec, "llm_score_threshold", 20)),
+        "board_stale_days": int(_num(sec, "board_stale_days", 14)),
         "tier_s": int(_num(sec, "tier_s", 65)),
         "tier_a": int(_num(sec, "tier_a", 50)),
         "tier_b": int(_num(sec, "tier_b", 35)),

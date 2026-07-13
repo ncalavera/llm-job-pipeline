@@ -160,6 +160,7 @@ from database_supabase import (
     update_source_tracking,
     print_reconciliation_report,
     pass_expired_vacancies,
+    archive_stale_board_vacancies,
     is_fetch_error,
 )
 
@@ -935,6 +936,11 @@ def main():
         # left staged for generate_dashboard's snapshot commit to pick up by
         # accident in report-only mode.
         pass_expired_vacancies()
+        # Board rows have no ATS to reconcile against (archive_gone_vacancies
+        # only runs on a direct re-fetch), so sweep board-sourced 'unseen' rows
+        # not re-seen by ANY source for board_stale_days days — otherwise they
+        # accumulate as zombies and waste scoring budget.
+        archive_stale_board_vacancies()
         get_conn().commit()
 
     # Generate dashboard. This is report OUTPUT (public/data.js in simple mode,
