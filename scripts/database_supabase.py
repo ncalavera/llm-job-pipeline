@@ -341,15 +341,85 @@ def _normalize_title_core(title: str) -> str:
     return re.sub(r"\s+", " ", base).strip()
 
 
+# Trailing title segments (after a comma, pipe, mid-dot, or spaced dash) that
+# name a place or work mode, not the role: "Head of X, London", "Y - Remote".
+# Matching is vocabulary-driven — the segment must equal a KNOWN city/country
+# from geo's curated maps (or a work-mode word below) — so a distinguishing
+# qualifier like "Program Officer, Climate" is never stripped. Same-time pairs
+# of genuinely distinct regional roles stay protected by the batch-alive and
+# URL guards in _find_existing_vacancy.
+_WORKMODE_SEGMENTS = frozenset(
+    {"remote", "hybrid", "onsite", "on site", "global", "worldwide", "flexible"}
+)
+_TITLE_SEG_SPLIT = re.compile(r"\s*(?:,|\||·|\s[–—-]\s)\s*")
+
+_GEO_SEGMENTS: "frozenset[str] | None" = None
+
+
+def _geo_segments() -> "frozenset[str]":
+    """Lowercased known city/country names + work-mode words, built lazily.
+
+    geo (via settings) is imported on first use, mirroring the lazy
+    filter_vacancies import in description_fingerprint(), to keep module import
+    order untangled.
+    """
+    global _GEO_SEGMENTS
+    if _GEO_SEGMENTS is None:
+        import geo
+
+        terms = set(_WORKMODE_SEGMENTS)
+        for bucket in geo._CITY_MAP.values():
+            terms.update(t.lower() for t in bucket)
+        for bucket in geo._COUNTRY_MAP.values():
+            terms.update(t.lower() for t in bucket)
+        _GEO_SEGMENTS = frozenset(terms)
+    return _GEO_SEGMENTS
+
+
+def _strip_geo_segments(title: str) -> str:
+    """Drop trailing comma/dash segments that name a known place or work mode.
+
+    "Head of Community Engagement, London" -> "Head of Community Engagement";
+    "Program Officer, Climate" is untouched ("climate" is not in the geo
+    vocabulary). Never strips down to nothing.
+    """
+    parts = _TITLE_SEG_SPLIT.split(title)
+    geo_terms = _geo_segments()
+    while len(parts) > 1 and parts[-1].strip().lower() in geo_terms:
+        parts.pop()
+    return ", ".join(p for p in parts if p.strip())
+
+
+def _singularize_token(word: str) -> str:
+    """Deterministic plural fold for dedup keys ("heads" == "head").
+
+    Cheap suffix rules, applied identically to both sides of a comparison —
+    occasional over-stemming ("sales" -> "sale") is harmless because the result
+    is only ever a hash key, never displayed. Words ending in -ss/-us/-is
+    (business, status, analysis) are left alone.
+    """
+    if len(word) > 4 and word.endswith("ies"):
+        return word[:-3] + "y"
+    if len(word) > 4 and word.endswith(("ches", "shes", "sses", "xes", "zes")):
+        return word[:-2]
+    if len(word) > 3 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
+        return word[:-1]
+    return word
+
+
 def _normalize_title_strong(title: str) -> str:
     """Aggressively normalize a title for cross-variant dedup.
 
-    Core normalization (see _normalize_title_core) plus removal of standalone
-    seniority words. An empty result (the title was only level words) falls back
-    to the core form so unrelated stub titles don't all collapse together.
+    Trailing geo/work-mode segment strip, then core normalization (see
+    _normalize_title_core), then removal of standalone seniority words and a
+    plural fold — so "Heads of Community Engagement" and "Head of Community
+    Engagement, London" produce ONE key. An empty result (the title was only
+    level words) falls back to the core form so unrelated stub titles don't all
+    collapse together.
     """
-    base = _normalize_title_core(title)
+    base = _normalize_title_core(_strip_geo_segments(title))
     stripped = re.sub(r"\s+", " ", _LEVEL_RE.sub(" ", base)).strip()
+    stripped = " ".join(_singularize_token(w) for w in stripped.split())
     return stripped or base
 
 
@@ -501,6 +571,7 @@ def _find_existing_vacancy(
     desc_fp,
     candidate_url,
     batch_claimed: set,
+    candidate_desc_len: int = 0,
 ):
     """Return (existing row, match_kind, insert_hash) for this signature.
 
@@ -561,7 +632,20 @@ def _find_existing_vacancy(
     row = cur.fetchone()
     if row is not None:
         row_fp = description_fingerprint(row.get("full_description"))
-        if desc_fp and row_fp and desc_fp != row_fp:
+        row_desc_len = len(row.get("full_description") or "")
+        # Scrape-depth guard: two sources scraping the SAME posting can ship
+        # wildly different bodies (a full JD vs a board's summary stub), and
+        # their fingerprints then differ for reasons that say nothing about
+        # role identity. When one body is under a third of the other's length
+        # the fp comparison is not trustworthy — fold onto the canonical row
+        # instead of forking a sibling. Two genuinely distinct roles both carry
+        # full, comparably-sized JDs.
+        comparable_bodies = (
+            not candidate_desc_len
+            or not row_desc_len
+            or min(candidate_desc_len, row_desc_len) * 3 >= max(candidate_desc_len, row_desc_len)
+        )
+        if desc_fp and row_fp and desc_fp != row_fp and comparable_bodies:
             # Same org+title, DIFFERENT full description. Normally two distinct
             # roles colliding on the canonical hash → fork. But fold instead when
             # this is a per-facet variant of a posting already claimed in THIS
@@ -1431,6 +1515,7 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
             desc_fp,
             job.get("url"),
             batch_claimed,
+            candidate_desc_len=len(job.get("full_description") or ""),
         )
         batch_claimed.add(dedup_hash)
 
@@ -1660,6 +1745,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
             desc_fp,
             job.get("url"),
             batch_claimed,
+            candidate_desc_len=len(job.get("full_description") or ""),
         )
         batch_claimed.add(dedup_hash)
 
