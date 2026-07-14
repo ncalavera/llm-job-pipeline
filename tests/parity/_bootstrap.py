@@ -182,7 +182,13 @@ def bootstrap_postgres(monkeypatch):
     import migrate
 
     importlib.reload(migrate)
-    rc = migrate.cmd_migrate(allow_destructive=False, do_backup=False)
+    # allow_destructive: this is a THROWAWAY one-shot Postgres that was created
+    # seconds ago from the frozen baseline — there is no data a destructive
+    # migration could destroy. Without it, any migration containing a reviewed
+    # DROP (e.g. 0018's dead-column cleanup, a no-op on a fresh baseline) aborts
+    # the whole parity suite. Prod keeps the interactive gate: jobs-update runs
+    # migrate.py without this flag.
+    rc = migrate.cmd_migrate(allow_destructive=True, do_backup=False)
     assert rc == 0, "Postgres migration bootstrap failed"
 
     import database_supabase as dal
