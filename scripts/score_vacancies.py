@@ -228,7 +228,13 @@ def _load_and_dedup(
         role_groups.setdefault(key, []).append(v)
 
     roles = []
-    stats = {"blacklisted": 0, "blind": 0, "total": len(vacancies), "candidates": candidate_count}
+    stats = {
+        "blacklisted": 0,
+        "company_title_filtered": 0,
+        "blind": 0,
+        "total": len(vacancies),
+        "candidates": candidate_count,
+    }
     for key, members in role_groups.items():
         rep = max(
             members,
@@ -240,6 +246,17 @@ def _load_and_dedup(
             desc
         ):
             stats["blacklisted"] += 1
+            continue
+        # Per-company title INCLUDE-filter — for a listed company, keep the role
+        # out of scoring unless its title matches the company's include-list.
+        ctf_reason = filters.company_title_filter_reason(rep["org"], rep["title"])
+        if ctf_reason:
+            stats["company_title_filtered"] += 1
+            print(
+                f"  [COMPANY TITLE FILTER] {rep['org']:25s} {rep['title'][:50]} ({ctf_reason})",
+                file=sys.stderr,
+                flush=True,
+            )
             continue
         # Blind / junk gate — skip a role with no real job content behind it.
         # Either the desc is empty, OR it is pure page boilerplate (nav chrome,

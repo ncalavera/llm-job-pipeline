@@ -142,9 +142,15 @@ REGION_KEYWORDS: dict[str, list[str]] = {
 # profile. See scripts/hard_filters.py for the loader.
 # ---------------------------------------------------------------------------
 
-from hard_filters import load_hard_filters  # noqa: E402
+from hard_filters import load_hard_filters, load_company_title_filters  # noqa: E402
 
 _HARD_FILTERS = load_hard_filters()
+
+#: Per-company title INCLUDE-lists from ``## COMPANY_TITLE_FILTERS`` (see
+#: hard_filters.py). ``{company_name: [include patterns]}``. For a listed
+#: company a vacancy survives the filter stage only when its title matches one
+#: of the patterns; unlisted companies are unaffected. Empty {} → feature off.
+COMPANY_TITLE_FILTERS = load_company_title_filters()
 
 #: Countries the user never wants. A vacancy is dropped only when EVERY one of
 #: its locations is in one of these countries. Empty → drop nothing on geo.

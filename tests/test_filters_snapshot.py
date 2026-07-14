@@ -470,6 +470,7 @@ GOLDEN_CLASSIFY = {
 
 GOLDEN_SCORE_STATS = {
     "blacklisted": 2,
+    "company_title_filtered": 0,
     "blind": 2,
     "total": 9,
     "candidates": 0,

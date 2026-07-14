@@ -190,6 +190,39 @@ onsite_penalty: 0
 exclude_countries: (none)
 exclude_title_keywords: (none)
 
+## COMPANY_TITLE_FILTERS
+
+<!--
+Per-company title INCLUDE-lists. HARD_FILTERS above is GLOBAL — a word banned
+there is banned everywhere. This section is the opposite tool: keep a high-volume
+company ACTIVE but let ONLY profile-relevant titles through to scoring. Use it
+when a word is safe to kill at one org but a real fit elsewhere (so it can't go
+in the global exclude_title_keywords).
+
+One entry per line:
+
+    - <canonical company name> :: <comma-separated include patterns>
+
+Semantics: for a LISTED company, a vacancy reaches scoring ONLY if its title
+matches at least one pattern (whole-word, case-insensitive — the same matching
+the title blacklist uses). Company names are alias-resolved, so a board spelling
+("WFP") still hits an include-list declared under the canonical name. Every
+other role at that company is kept out of scoring with the reason
+"company_title_filter — not in <Company> include list": the filter stage flags
+it as a delete candidate alongside the other title filters (reviewable in
+/jobs-review before anything is deleted), and the scoring gate skips it with a
+logged line — the same handling the title blacklist gets. UNLISTED companies
+are completely unaffected. A missing or empty section = feature OFF. A
+malformed line is skipped with a warning.
+
+Example — keep WFP and FHI 360 active but only surface programme/data roles:
+
+    - World Food Programme :: monitoring, evaluation, programme officer, data
+    - FHI 360 :: research, evaluation, data, strategy
+
+The template below is EMPTY on purpose. Add your own only if you are sure.
+-->
+
 ## VOLUME
 
 <!--
