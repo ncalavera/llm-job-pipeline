@@ -472,6 +472,7 @@ def classify_vacancies(db: dict = None) -> dict:
     """
     categories = {
         "delete_blacklist": [],
+        "delete_company_title_filter": [],
         "delete_junk": [],
         "delete_rearchived": [],
         "delete_geo": [],
@@ -502,6 +503,17 @@ def classify_vacancies(db: dict = None) -> dict:
         # Priority 1: title blacklist match
         if filters.title_words_blacklisted(title):
             categories["delete_blacklist"].append((vid, vac))
+            continue
+
+        # Priority 1b: per-company title INCLUDE-filter. For a company listed in
+        # the profile's ## COMPANY_TITLE_FILTERS, keep ONLY roles whose title
+        # matches an include pattern; everything else at that company is dropped
+        # here (unlisted companies are untouched). Mirrors the blacklist drop but
+        # carries a rule-named reason so the learning review can revisit it.
+        ctf_reason = filters.company_title_filter_reason(org, title)
+        if ctf_reason:
+            vac["_filter_reason"] = ctf_reason
+            categories["delete_company_title_filter"].append((vid, vac))
             continue
 
         # Priority 2: content junk (reCAPTCHA, donation widgets, error pages)
@@ -561,6 +573,7 @@ def compute_stats(categories: dict) -> dict:
     total = sum(len(v) for v in categories.values())
     delete_count = (
         len(categories["delete_blacklist"])
+        + len(categories.get("delete_company_title_filter", []))
         + len(categories.get("delete_junk", []))
         + len(categories.get("delete_rearchived", []))
         + len(categories.get("delete_geo", []))
@@ -585,6 +598,7 @@ def compute_stats(categories: dict) -> dict:
     )
     delete_cats = [
         "delete_blacklist",
+        "delete_company_title_filter",
         "delete_junk",
         "delete_rearchived",
         "delete_geo",
@@ -689,6 +703,12 @@ def _render_delete_sections(categories: dict) -> str:
     delete_cats = [
         ("delete_blacklist", "Blacklist Match", "#D4787A", "Title matched GLOBAL_BLACKLIST"),
         (
+            "delete_company_title_filter",
+            "Company Title Filter",
+            "#B07BA8",
+            "Company kept active but title not in its profile include-list",
+        ),
+        (
             "delete_junk",
             "Content Junk",
             "#9B59B6",
@@ -704,7 +724,7 @@ def _render_delete_sections(categories: dict) -> str:
         ("delete_stale_blind", "Stale Blind", "#A89680", "Has URL, no description, >7 days"),
     ]
     for cat_key, cat_label, cat_color, cat_desc in delete_cats:
-        items = categories[cat_key]
+        items = categories.get(cat_key, [])
         if not items:
             continue
         rows = ""
@@ -1341,6 +1361,7 @@ def main():
     print("\n--- Filter Summary ---", file=sys.stderr, flush=True)
     for cat in [
         "delete_blacklist",
+        "delete_company_title_filter",
         "delete_junk",
         "delete_rearchived",
         "delete_geo",
@@ -1377,6 +1398,7 @@ def main():
     delete_ids = {}
     for cat in [
         "delete_blacklist",
+        "delete_company_title_filter",
         "delete_junk",
         "delete_rearchived",
         "delete_geo",

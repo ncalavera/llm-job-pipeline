@@ -18,6 +18,7 @@ from config import (
     GLOBAL_BLACKLIST,
     GLOBAL_BLACKLIST_SUBSTR,
     GLOBAL_BLACKLIST_DESC_SUBSTR,
+    COMPANY_TITLE_FILTERS,
     resolve_canonical_name,
 )
 
@@ -92,6 +93,60 @@ def title_words_blacklisted(title: str) -> bool:
     if _TITLE_BLACKLIST_PATTERN.search(t):
         return True
     return False
+
+
+def title_matches_patterns(title: str, patterns) -> bool:
+    """True when the title matches any of ``patterns``.
+
+    Uses the live title-filter matching semantics — the same whole-word,
+    case-insensitive, plural-tolerant regex the blacklist uses
+    (``build_title_blacklist_pattern``) — so an include-list and the blacklist
+    can never drift on what "the title contains this word" means. An empty
+    pattern list matches nothing.
+    """
+    if not patterns:
+        return False
+    return bool(build_title_blacklist_pattern(patterns).search((title or "").lower()))
+
+
+# ---------------------------------------------------------------------------
+# Per-company title INCLUDE-filters
+#
+# COMPANY_TITLE_FILTERS (profile ## COMPANY_TITLE_FILTERS) maps a company to a
+# list of title include patterns. For a listed company, a role passes only when
+# its title matches at least one pattern; unlisted companies are unaffected.
+# Patterns are precompiled once here (keyed by a normalized company name) so the
+# per-role lookup during scoring/filtering is a dict hit plus one regex search.
+# ---------------------------------------------------------------------------
+
+
+def _normalize_company_key(name: str) -> str:
+    """Lowercase + whitespace-collapse a company name for filter lookups."""
+    return re.sub(r"\s+", " ", (name or "").strip()).lower()
+
+
+_COMPANY_TITLE_INCLUDE = {
+    _normalize_company_key(company): list(patterns)
+    for company, patterns in COMPANY_TITLE_FILTERS.items()
+    if patterns
+}
+
+
+def company_title_filter_reason(org: str, title: str) -> str | None:
+    """Kill reason when a per-company title include-filter drops this role.
+
+    Returns a reason string naming the rule when ``org`` has an include-list AND
+    ``title`` matches none of its patterns; returns None when the company has no
+    include-list (unaffected) or the title matches. The reason follows the
+    existing title-filter reason convention so the learning review can revisit
+    the drop: ``"company_title_filter — not in <Company> include list"``.
+    """
+    patterns = _COMPANY_TITLE_INCLUDE.get(_normalize_company_key(org))
+    if not patterns:
+        return None
+    if title_matches_patterns(title, patterns):
+        return None
+    return f"company_title_filter — not in {org} include list"
 
 
 def description_words_blacklisted(desc: str) -> bool:

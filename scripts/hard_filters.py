@@ -49,6 +49,10 @@ _ATX_HEADING = re.compile(r"^\s*#{1,6}\s*(.+?)\s*$")
 # detected rather than silently skipped.
 _FIELD_LINE = re.compile(r"^([a-z][a-z_]*)\s*:")
 
+# A profile bullet line: "- text" or "* text". Used by the per-company title
+# filter parser to spot the intended entries in ## COMPANY_TITLE_FILTERS.
+_BULLET_LINE = re.compile(r"^[-*]\s+(.*\S)\s*$")
+
 
 def _warn(message: str) -> None:
     """Loud stderr warning, matching the profile-fallback warning style."""
@@ -213,3 +217,78 @@ def load_hard_filters() -> dict:
     if not body:
         return dict(_GEO_DEFAULTS)  # section present but empty → intentional.
     return _parse_section(body)
+
+
+# ---------------------------------------------------------------------------
+# Per-company title INCLUDE-filters (## COMPANY_TITLE_FILTERS)
+#
+# HARD_FILTERS above is GLOBAL — a word banned there is banned everywhere. Some
+# high-volume orgs need the opposite: keep the company active but let ONLY
+# profile-relevant titles through to scoring. This section expresses that as a
+# per-company INCLUDE-list: for a listed company, a vacancy survives the filter
+# stage only when its title matches one of the company's include patterns.
+# Unlisted companies are completely unaffected; a missing/empty section is off.
+# ---------------------------------------------------------------------------
+
+
+def _parse_company_title_filters(body: str) -> dict[str, list[str]]:
+    """Parse a ``## COMPANY_TITLE_FILTERS`` body into {company: [patterns]}.
+
+    Each entry is one bullet line ``- <company> :: <comma-separated patterns>``.
+    Patterns are lowercased/trimmed (reusing ``_split_csv``). A malformed entry —
+    a bullet or ``::``-bearing line with no ``::``, an empty company, or an empty
+    pattern list — is skipped with a loud warning, never a crash. Prose lines
+    that are neither a bullet nor carry ``::`` are ignored silently.
+    """
+    body = _HTML_COMMENT.sub("", body or "")
+    out: dict[str, list[str]] = {}
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        m = _BULLET_LINE.match(stripped)
+        content = m.group(1).strip() if m else stripped
+        # Only lines that look like an intended entry (a bullet, or any line that
+        # carries the "::" separator) are validated; everything else is prose.
+        if m is None and "::" not in content:
+            continue
+        if "::" not in content:
+            _warn(
+                f"profile COMPANY_TITLE_FILTERS entry '{stripped}' is malformed — "
+                "expected '- <company> :: <comma-separated title patterns>'. "
+                "Skipped (that company keeps NO title filter)."
+            )
+            continue
+        company, _, rhs = content.partition("::")
+        company = company.strip()
+        patterns = _split_csv(rhs)
+        if not company or not patterns:
+            _warn(
+                f"profile COMPANY_TITLE_FILTERS entry '{stripped}' is malformed — "
+                "need a company name and at least one include pattern. Skipped."
+            )
+            continue
+        bucket = out.setdefault(company, [])
+        for pattern in patterns:
+            if pattern not in bucket:
+                bucket.append(pattern)
+    return out
+
+
+def load_company_title_filters() -> dict[str, list[str]]:
+    """Return the per-company title INCLUDE-lists from the active profile.
+
+    ``{company_name: [include patterns]}``. For a listed company a vacancy
+    survives the filter stage ONLY when its title matches one of the patterns;
+    unlisted companies are untouched. A missing/empty ``## COMPANY_TITLE_FILTERS``
+    section → ``{}`` (feature off). Never raises — a missing/broken profile yields
+    ``{}`` so the pipeline still runs out of the box.
+    """
+    try:
+        sections = _load_user_profile()
+    except Exception:
+        return {}
+    body = sections.get("COMPANY_TITLE_FILTERS")
+    if not body:
+        return {}
+    return _parse_company_title_filters(body)
