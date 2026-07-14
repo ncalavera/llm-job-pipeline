@@ -11,6 +11,7 @@ and stdlib. It must NOT import the data-access layer (database_supabase /
 db_conn / db_backend), so the DAL can import filters without a cycle.
 """
 
+import html
 import re
 from difflib import SequenceMatcher
 
@@ -95,28 +96,17 @@ def title_words_blacklisted(title: str) -> bool:
     return False
 
 
-def title_matches_patterns(title: str, patterns) -> bool:
-    """True when the title matches any of ``patterns``.
-
-    Uses the live title-filter matching semantics — the same whole-word,
-    case-insensitive, plural-tolerant regex the blacklist uses
-    (``build_title_blacklist_pattern``) — so an include-list and the blacklist
-    can never drift on what "the title contains this word" means. An empty
-    pattern list matches nothing.
-    """
-    if not patterns:
-        return False
-    return bool(build_title_blacklist_pattern(patterns).search((title or "").lower()))
-
-
 # ---------------------------------------------------------------------------
 # Per-company title INCLUDE-filters
 #
 # COMPANY_TITLE_FILTERS (profile ## COMPANY_TITLE_FILTERS) maps a company to a
 # list of title include patterns. For a listed company, a role passes only when
 # its title matches at least one pattern; unlisted companies are unaffected.
-# Patterns are precompiled once here (keyed by a normalized company name) so the
-# per-role lookup during scoring/filtering is a dict hit plus one regex search.
+# Keys are ALIAS-PROOF: both the profile spelling and the queried org go through
+# resolve_canonical_name (the same alias resolution find_duplicates uses), after
+# HTML-entity unescaping, so a board delivering "WFP" still hits an include-list
+# declared as "WFP - World Food Programme". Patterns are COMPILED once at import
+# so the per-role check is a dict hit plus one regex search.
 # ---------------------------------------------------------------------------
 
 
@@ -125,11 +115,36 @@ def _normalize_company_key(name: str) -> str:
     return re.sub(r"\s+", " ", (name or "").strip()).lower()
 
 
-_COMPANY_TITLE_INCLUDE = {
-    _normalize_company_key(company): list(patterns)
-    for company, patterns in COMPANY_TITLE_FILTERS.items()
-    if patterns
-}
+def _canonical_company_key(name: str) -> str:
+    """Alias-proof lookup key for a company name.
+
+    HTML entities are unescaped first (board feeds ship "&amp;" spellings), then
+    the name is resolved through resolve_canonical_name — the same alias
+    resolution the cross-board dedup uses — so the profile's canonical spelling
+    and a board's alias spelling land on the same key.
+    """
+    return _normalize_company_key(resolve_canonical_name(html.unescape(name or "")))
+
+
+def _build_company_title_include(company_filters: dict) -> dict[str, re.Pattern]:
+    """``{canonical company key: compiled include-pattern}`` from the profile map.
+
+    The alternation regex is compiled ONCE per company here — never per call.
+    Two profile spellings that resolve to the same canonical company merge their
+    pattern lists before compiling.
+    """
+    merged: dict[str, list[str]] = {}
+    for company, patterns in company_filters.items():
+        if not patterns:
+            continue
+        bucket = merged.setdefault(_canonical_company_key(company), [])
+        for pattern in patterns:
+            if pattern not in bucket:
+                bucket.append(pattern)
+    return {key: build_title_blacklist_pattern(pats) for key, pats in merged.items()}
+
+
+_COMPANY_TITLE_INCLUDE = _build_company_title_include(COMPANY_TITLE_FILTERS)
 
 
 def company_title_filter_reason(org: str, title: str) -> str | None:
@@ -137,14 +152,14 @@ def company_title_filter_reason(org: str, title: str) -> str | None:
 
     Returns a reason string naming the rule when ``org`` has an include-list AND
     ``title`` matches none of its patterns; returns None when the company has no
-    include-list (unaffected) or the title matches. The reason follows the
-    existing title-filter reason convention so the learning review can revisit
-    the drop: ``"company_title_filter — not in <Company> include list"``.
+    include-list (unaffected) or the title matches. The reason names the rule so
+    a later review can trace the drop:
+    ``"company_title_filter — not in <Company> include list"``.
     """
-    patterns = _COMPANY_TITLE_INCLUDE.get(_normalize_company_key(org))
-    if not patterns:
+    compiled = _COMPANY_TITLE_INCLUDE.get(_canonical_company_key(org))
+    if compiled is None:
         return None
-    if title_matches_patterns(title, patterns):
+    if compiled.search((title or "").lower()):
         return None
     return f"company_title_filter — not in {org} include list"
 

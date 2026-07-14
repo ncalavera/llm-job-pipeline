@@ -205,11 +205,15 @@ One entry per line:
 
 Semantics: for a LISTED company, a vacancy reaches scoring ONLY if its title
 matches at least one pattern (whole-word, case-insensitive — the same matching
-the title blacklist uses). Every other role at that company is dropped before
-scoring with the reason "company_title_filter — not in <Company> include list",
-and is archived down the same path as the other title filters (so the learning
-review can revisit it). UNLISTED companies are completely unaffected. A missing
-or empty section = feature OFF. A malformed line is skipped with a warning.
+the title blacklist uses). Company names are alias-resolved, so a board spelling
+("WFP") still hits an include-list declared under the canonical name. Every
+other role at that company is kept out of scoring with the reason
+"company_title_filter — not in <Company> include list": the filter stage flags
+it as a delete candidate alongside the other title filters (reviewable in
+/jobs-review before anything is deleted), and the scoring gate skips it with a
+logged line — the same handling the title blacklist gets. UNLISTED companies
+are completely unaffected. A missing or empty section = feature OFF. A
+malformed line is skipped with a warning.
 
 Example — keep WFP and FHI 360 active but only surface programme/data roles:
 

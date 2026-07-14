@@ -209,3 +209,81 @@ def test_empty_section_is_a_noop(tmp_path, restore_default_profile):
 
     assert config.COMPANY_TITLE_FILTERS == {}
     assert filters.company_title_filter_reason("World Food Programme", "Anything At All") is None
+
+
+# ---------------------------------------------------------------------------
+# Alias resolution, HTML entities, regex-special patterns, compile-once cache
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def filters_mod():
+    import filters
+
+    return filters
+
+
+def test_alias_spelling_still_hits_include_list(monkeypatch, filters_mod):
+    """Profile lists the long board spelling; the org arrives as the short alias.
+
+    Both sides go through resolve_canonical_name, so they land on the same key
+    and the include-filter still bites — the exact high-volume-org use case.
+    """
+    aliases = {
+        "wfp - world food programme": "World Food Programme",
+        "wfp": "World Food Programme",
+    }
+    monkeypatch.setattr(
+        filters_mod, "resolve_canonical_name", lambda n: aliases.get(n.strip().lower(), n)
+    )
+    monkeypatch.setattr(
+        filters_mod,
+        "_COMPANY_TITLE_INCLUDE",
+        filters_mod._build_company_title_include(
+            {"WFP - World Food Programme": ["programme officer", "data"]}
+        ),
+    )
+    # Alias org spelling + non-matching title → still dropped.
+    assert (
+        filters_mod.company_title_filter_reason("WFP", "Chief Financial Officer")
+        == "company_title_filter — not in WFP include list"
+    )
+    # Alias org spelling + matching title → passes.
+    assert filters_mod.company_title_filter_reason("WFP", "Programme Officer") is None
+
+
+def test_html_entity_org_spelling_matches(monkeypatch, filters_mod):
+    """A board delivering the org with &amp; still hits the include-list."""
+    monkeypatch.setattr(
+        filters_mod,
+        "_COMPANY_TITLE_INCLUDE",
+        filters_mod._build_company_title_include({"Health & Hope": ["research"]}),
+    )
+    assert (
+        filters_mod.company_title_filter_reason("Health &amp; Hope", "Fundraising Manager")
+        == "company_title_filter — not in Health &amp; Hope include list"
+    )
+    assert filters_mod.company_title_filter_reason("Health &amp; Hope", "Research Officer") is None
+
+
+def test_regex_special_pattern_is_escaped(monkeypatch, filters_mod):
+    """A regex-special include pattern ('M&E') matches literally, never crashes."""
+    monkeypatch.setattr(
+        filters_mod,
+        "_COMPANY_TITLE_INCLUDE",
+        filters_mod._build_company_title_include({"Big NGO": ["m&e"]}),
+    )
+    assert filters_mod.company_title_filter_reason("Big NGO", "M&E Officer") is None
+    assert filters_mod.company_title_filter_reason("Big NGO", "Finance Officer") is not None
+
+
+def test_include_map_holds_precompiled_patterns(monkeypatch, filters_mod):
+    """The map caches COMPILED patterns (dict hit + one search per role)."""
+    import re as _re
+
+    built = filters_mod._build_company_title_include({"Org A": ["data"], "org a": ["evaluation"]})
+    assert list(built) == ["org a"]  # same canonical key → merged, compiled once
+    assert all(isinstance(p, _re.Pattern) for p in built.values())
+    # Merged pattern list covers both profile spellings' patterns.
+    assert built["org a"].search("data analyst")
+    assert built["org a"].search("evaluation officer")
