@@ -53,6 +53,16 @@ The save layer's content classification: descriptions that are boilerplate (cook
 ### Blind vacancy
 A saved vacancy with no usable description — the listing was real but the detail content could not be obtained. Blind rows keep their title, company, location, and link, remain visible and scoreable in degraded form, and are queued for an enrichment sweep that tries to fetch the missing description; hosts the scraper provably cannot reach are excluded from the sweep. A blind row heals when a later fetch supplies the description, or ages out after staying blind past its window.
 
+### Cross-variant dedup
+The additive matching layer that folds retitled re-listings of one role onto its existing row: seniority renames, punctuation and plural variants, trailing geo/work-mode/continent decorations, language copies sharing a description body, and same-apply-URL retitles where one normalized title contains the other. Additive means the exact dedup hash formula never changes — stored rows and tombstones keep matching by their old hash. Stripping is vocabulary-driven on purpose: only segments provably not part of role identity (known cities, countries, continents, work modes) are removed, so a distinguishing qualifier like a portfolio name survives.
+*Avoid:* fuzzy dedup (implies similarity scoring; this layer is exact keys over normalized forms).
+
+### Sibling vacancy
+A second, genuinely distinct role that shares company and title with an already-stored row. The first-seen role keeps the canonical dedup hash; the sibling is stored under a hash salted with its description fingerprint so both coexist and each re-matches its own row on later fetches. Fingerprints only count as a distinct-role signal when both bodies are comparably sized — a shallow board scrape of the same posting folds instead of forking a false sibling.
+
+### Archived-hash tombstone
+A recorded dedup hash of an archived vacancy that blocks the same role from being re-saved as new on a later fetch. Tombstones are exact-hash only by contract: tombstoning a normalized (cross-variant) key would also block the live spelling of the role, silently skip its refresh, and get it swept as stale.
+
 ## Applications
 
 ### Application dossier
