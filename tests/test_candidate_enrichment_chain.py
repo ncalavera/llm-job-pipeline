@@ -293,7 +293,7 @@ def test_company_scoring_closes_valve_when_screen_crashes(rd, monkeypatch):
     monkeypatch.setattr(
         run_daily,
         "_run_capture",
-        lambda cmd, opts: (calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, "[]", "")),
+        lambda cmd, opts: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, "[]", ""),
     )
     # Screen crashed: no run marker written → _screen_candidates returns None.
     monkeypatch.setattr(run_daily, "_screen_candidates", lambda opts: None)
@@ -307,8 +307,12 @@ def test_company_scoring_closes_valve_when_screen_crashes(rd, monkeypatch):
     # No PAID enrichment subprocess ran (only the free junk prefilter may have).
     joined = [" ".join(str(x) for x in c) for c in calls]
     assert not any(
-        s for s in joined if "find_company_urls" in s or "fetch_companies" in s
-        or "collect_company_evidence" in s or "score_companies" in s
+        s
+        for s in joined
+        if "find_company_urls" in s
+        or "fetch_companies" in s
+        or "collect_company_evidence" in s
+        or "score_companies" in s
     )
     # A blocking warning was recorded → publish gate will treat the run as dirty.
     blocking = [w for w in state["warnings"] if w["blocking"]]

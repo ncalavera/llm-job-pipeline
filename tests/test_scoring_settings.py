@@ -239,7 +239,9 @@ def test_company_paid_min_vacancy_score_default(monkeypatch, tmp_path):
 
     _point_defaults(monkeypatch, tmp_path, "digest_size = 5")
     try:
-        assert ss.company_paid_min_vacancy_score() == ss.DEFAULT_COMPANY_PAID_MIN_VACANCY_SCORE == 60
+        assert (
+            ss.company_paid_min_vacancy_score() == ss.DEFAULT_COMPANY_PAID_MIN_VACANCY_SCORE == 60
+        )
     finally:
         settings.clear_cache()
 

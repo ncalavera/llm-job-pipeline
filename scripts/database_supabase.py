@@ -2902,9 +2902,7 @@ def pass_expired_vacancies() -> int:
     return count
 
 
-def archive_stale_board_vacancies(
-    fetched_boards, stale_days: int | None = None
-) -> "ArchivedCount":
+def archive_stale_board_vacancies(fetched_boards, stale_days: int | None = None) -> "ArchivedCount":
     """Auto-archive board-sourced vacancies not re-seen by any source in a while.
 
     Gone-from-source reconciliation (archive_gone_vacancies) only runs on a
@@ -2975,8 +2973,7 @@ def archive_stale_board_vacancies(
         ids = [r["id"] for r in protected]
         ph = ", ".join(["%s"] * len(ids))
         cur.execute(
-            "UPDATE vacancy SET status = 'expiring', status_updated_at = NOW() "
-            f"WHERE id IN ({ph})",
+            f"UPDATE vacancy SET status = 'expiring', status_updated_at = NOW() WHERE id IN ({ph})",
             ids,
         )
     if to_archive:

@@ -277,7 +277,9 @@ def load_fresh_candidates(
     )
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id, canonical_name, description, category " + tail, (min_vacancy_score,))
+        cur.execute(
+            "SELECT id, canonical_name, description, category " + tail, (min_vacancy_score,)
+        )
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
     except Exception as exc:  # noqa: BLE001 — degrade to name-only, never crash the valve
