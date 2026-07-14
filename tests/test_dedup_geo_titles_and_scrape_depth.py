@@ -186,9 +186,7 @@ def test_short_stub_of_same_posting_folds_not_forks(dal):
 def test_comparable_distinct_bodies_still_fork_sibling(dal):
     """Two genuinely different same-title reqs (both full JDs) stay two rows."""
     dal.ensure_company("Acme Fund", status="active")
-    dal.save_vacancies(
-        "Acme Fund", "A", [_job("Program Officer", desc=_FULL_JD, url=_REQ_URL)]
-    )
+    dal.save_vacancies("Acme Fund", "A", [_job("Program Officer", desc=_FULL_JD, url=_REQ_URL)])
     _commit(dal)
     new = dal.save_vacancies(
         "Acme Fund",

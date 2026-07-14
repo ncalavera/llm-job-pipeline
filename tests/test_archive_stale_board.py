@@ -86,8 +86,17 @@ def _insert(
         "INSERT INTO vacancy (dedup_hash, company_id, title, first_seen, last_seen, "
         "status, source_board, llm_score, status_reason) "
         "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-        (dedup_hash, company_id, title, last_seen, last_seen, status, source_board,
-         llm_score, status_reason),
+        (
+            dedup_hash,
+            company_id,
+            title,
+            last_seen,
+            last_seen,
+            status,
+            source_board,
+            llm_score,
+            status_reason,
+        ),
     )
     dal.get_conn().commit()
     cur.close()
@@ -95,9 +104,7 @@ def _insert(
 
 def _row(dal, dedup_hash):
     cur = dal.get_conn().cursor()
-    cur.execute(
-        "SELECT status, status_reason FROM vacancy WHERE dedup_hash = %s", (dedup_hash,)
-    )
+    cur.execute("SELECT status, status_reason FROM vacancy WHERE dedup_hash = %s", (dedup_hash,))
     r = cur.fetchone()
     cur.close()
     return {"status": r[0], "status_reason": r[1]}
@@ -116,8 +123,9 @@ def test_stale_board_row_is_archived_with_token_and_tombstone(company):
     fetched this run, is archived with the machine token and a gone_from_source
     tombstone (so a stale board snapshot cannot resurrect it)."""
     dal = company
-    _insert(dal, dedup_hash="h_stale", title="Stale Board Role", last_seen=STALE,
-            source_board=BOARD)
+    _insert(
+        dal, dedup_hash="h_stale", title="Stale Board Role", last_seen=STALE, source_board=BOARD
+    )
 
     n = dal.archive_stale_board_vacancies({BOARD}, stale_days=14)
     dal.get_conn().commit()
@@ -133,8 +141,14 @@ def test_high_fit_row_flips_to_expiring_not_archived(company):
     """Latency protection (KTD1/KTD2): a stale board row scoring >= PROTECT_SCORE
     is flipped to 'expiring' (visible, alerted), never archived or tombstoned."""
     dal = company
-    _insert(dal, dedup_hash="h_fit", title="High Fit Role", last_seen=STALE,
-            source_board=BOARD, llm_score=84)
+    _insert(
+        dal,
+        dedup_hash="h_fit",
+        title="High Fit Role",
+        last_seen=STALE,
+        source_board=BOARD,
+        llm_score=84,
+    )
 
     n = dal.archive_stale_board_vacancies({BOARD}, stale_days=14)
     dal.get_conn().commit()
@@ -151,8 +165,7 @@ def test_unfetched_board_is_never_swept(company):
     successfully fetched this run (skipped via --no-boards / TTL, or a broken
     fetcher) is untouched — wall-clock staleness alone is not evidence."""
     dal = company
-    _insert(dal, dedup_hash="h_skip", title="TTL Skipped Role", last_seen=STALE,
-            source_board=BOARD)
+    _insert(dal, dedup_hash="h_skip", title="TTL Skipped Role", last_seen=STALE, source_board=BOARD)
 
     assert dal.archive_stale_board_vacancies(set(), stale_days=14) == 0
     assert dal.archive_stale_board_vacancies({"Other Board"}, stale_days=14) == 0
@@ -164,8 +177,9 @@ def test_company_sourced_row_is_not_touched(company):
     """A company-fetched row (source_board NULL) is reconciled against its own ATS,
     never by this rule — even when equally stale."""
     dal = company
-    _insert(dal, dedup_hash="h_company", title="Direct ATS Role", last_seen=STALE,
-            source_board=None)
+    _insert(
+        dal, dedup_hash="h_company", title="Direct ATS Role", last_seen=STALE, source_board=None
+    )
 
     n = dal.archive_stale_board_vacancies({BOARD}, stale_days=14)
     dal.get_conn().commit()
@@ -177,8 +191,9 @@ def test_company_sourced_row_is_not_touched(company):
 def test_fresh_board_row_stays(company):
     """A board-sourced row still re-seen within the window is left untouched."""
     dal = company
-    _insert(dal, dedup_hash="h_fresh", title="Fresh Board Role", last_seen=FRESH,
-            source_board=BOARD)
+    _insert(
+        dal, dedup_hash="h_fresh", title="Fresh Board Role", last_seen=FRESH, source_board=BOARD
+    )
 
     n = dal.archive_stale_board_vacancies({BOARD}, stale_days=14)
     dal.get_conn().commit()
@@ -192,8 +207,14 @@ def test_decided_statuses_survive_the_sweep(company):
     on (liked/to_apply) or that are held visible (expiring) are never revisited."""
     dal = company
     for i, status in enumerate(("liked", "to_apply", "expiring")):
-        _insert(dal, dedup_hash=f"h_dec{i}", title=f"Decided Role {i}",
-                last_seen=STALE, source_board=BOARD, status=status)
+        _insert(
+            dal,
+            dedup_hash=f"h_dec{i}",
+            title=f"Decided Role {i}",
+            last_seen=STALE,
+            source_board=BOARD,
+            status=status,
+        )
 
     n = dal.archive_stale_board_vacancies({BOARD}, stale_days=14)
     dal.get_conn().commit()
@@ -207,8 +228,7 @@ def test_zero_stale_days_disables_the_sweep(company):
     """board_stale_days = 0 means DISABLED (llm_score_threshold convention) —
     NOT 'archive everything older than today'."""
     dal = company
-    _insert(dal, dedup_hash="h_zero", title="Would Be Swept", last_seen=STALE,
-            source_board=BOARD)
+    _insert(dal, dedup_hash="h_zero", title="Would Be Swept", last_seen=STALE, source_board=BOARD)
 
     n = dal.archive_stale_board_vacancies({BOARD}, stale_days=0)
     dal.get_conn().commit()
@@ -230,8 +250,15 @@ def test_board_resurrect_clears_status_reason(company):
     dal = company
     org, title = "Acme Labs", "Reopened Role"
     h = dal.make_vacancy_id(org, title)
-    _insert(dal, dedup_hash=h, title=title, last_seen=STALE, source_board=BOARD,
-            status="archived", status_reason="board_stale")
+    _insert(
+        dal,
+        dedup_hash=h,
+        title=title,
+        last_seen=STALE,
+        source_board=BOARD,
+        status="archived",
+        status_reason="board_stale",
+    )
 
     # No tombstone in archived_hash here: the board genuinely re-lists the role.
     board_cfg = {"name": BOARD, "url": "https://board.test/feed", "tier": "B"}

@@ -880,7 +880,9 @@ def test_fetch_algolia_board_keeps_full_description(monkeypatch):
     # description_short is the only role text the 80k index carries and it runs
     # past 400 chars for most postings — full_description must keep ALL of it
     # (snippet stays a capped preview).
-    long_text = " ".join(f"Sentence {i} about the actual day-to-day of the role." for i in range(40))
+    long_text = " ".join(
+        f"Sentence {i} about the actual day-to-day of the role." for i in range(40)
+    )
     assert len(long_text) > 400
     hit = {
         "objectID": "20142",

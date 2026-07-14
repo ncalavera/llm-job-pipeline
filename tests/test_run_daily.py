@@ -1284,7 +1284,9 @@ def test_prefilter_records_warning_on_nonzero_exit(rd, monkeypatch):
 
 def test_publish_gate_blocks_on_blocking_warning(rd):
     state = _clean_state(rd)
-    rd._add_warning(state, "company_scoring", "screen failed — paid enrichment withheld", blocking=True)
+    rd._add_warning(
+        state, "company_scoring", "screen failed — paid enrichment withheld", blocking=True
+    )
     allowed, reasons = rd.check_publish_gate(state, fetch_stats={"orgs": {}})
     assert allowed is False
     assert any("screen failed" in r for r in reasons)

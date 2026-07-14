@@ -56,10 +56,7 @@ def test_parse_multiple_entries_and_merge_dedup():
 
 
 def test_parse_ignores_html_comment_examples():
-    body = (
-        "<!-- - Example Org :: should, not, parse -->\n"
-        "- Real Org :: policy officer\n"
-    )
+    body = "<!-- - Example Org :: should, not, parse -->\n- Real Org :: policy officer\n"
     parsed = hf._parse_company_title_filters(body)
     assert parsed == {"Real Org": ["policy officer"]}
 
@@ -169,9 +166,7 @@ def test_listed_company_nonmatching_title_is_dropped(tmp_path, restore_default_p
     assert config.COMPANY_TITLE_FILTERS == {
         "World Food Programme": ["monitoring", "evaluation", "data"]
     }
-    reason = filters.company_title_filter_reason(
-        "World Food Programme", "Chief Financial Officer"
-    )
+    reason = filters.company_title_filter_reason("World Food Programme", "Chief Financial Officer")
     assert reason == "company_title_filter — not in World Food Programme include list"
 
 
@@ -183,7 +178,9 @@ def test_listed_company_matching_title_passes(tmp_path, restore_default_profile)
     _config, filters = _reload_pipeline(profile)
 
     # Whole-word, case-insensitive match anywhere in the title.
-    assert filters.company_title_filter_reason("World Food Programme", "Senior Data Analyst") is None
+    assert (
+        filters.company_title_filter_reason("World Food Programme", "Senior Data Analyst") is None
+    )
     assert (
         filters.company_title_filter_reason(
             "world food programme", "Monitoring & Evaluation Officer"
