@@ -199,3 +199,47 @@ def test_comparable_distinct_bodies_still_fork_sibling(dal):
 
     assert new == 1
     assert len(_raw_rows(dal)) == 2
+
+
+# ---------------------------------------------------------------------------
+# Continent suffixes and same-URL retitles (board re-listing patterns)
+# ---------------------------------------------------------------------------
+
+
+def test_continent_suffix_folds_to_one_key(dal):
+    k = lambda t: dal.make_normalized_id("Acme Fund", t)
+    assert k("Director of MEAL, Africa") == k("Director of MEAL")
+    assert k("Short Term Analyst, Academy, Latin America") == k("Short Term Analyst, Academy")
+
+
+def test_same_url_retitle_merges_over_time(dal):
+    """A re-listing under the SAME apply URL with a containment retitle is one
+    role even when normalized titles no longer match ("- Deal Operations")."""
+    url = "https://example.test/req/900"
+    dal.ensure_company("Acme Fund", status="active")
+    dal.save_vacancies("Acme Fund", "A", [_job("Program Manager, Business Practices", url=url)])
+    _commit(dal)
+    new = dal.save_vacancies(
+        "Acme Fund",
+        "A",
+        [_job("Program Manager, Business Practices - Deal Operations", url=url)],
+    )
+    _commit(dal)
+
+    raw = _raw_rows(dal)
+    assert new == 0
+    assert len(raw) == 1
+    assert raw[0]["title"] == "Program Manager, Business Practices - Deal Operations"
+
+
+def test_generic_shared_url_without_containment_stays_two_rows(dal):
+    """Orgs whose fetcher stamps ONE careers URL on every role must not collapse."""
+    url = "https://example.test/careers"
+    dal.ensure_company("Acme Fund", status="active")
+    dal.save_vacancies("Acme Fund", "A", [_job("Director of Partnerships", url=url)])
+    _commit(dal)
+    new = dal.save_vacancies("Acme Fund", "A", [_job("Head of Finance Systems", url=url)])
+    _commit(dal)
+
+    assert new == 1
+    assert len(_raw_rows(dal)) == 2

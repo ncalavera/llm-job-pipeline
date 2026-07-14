@@ -351,6 +351,36 @@ def _normalize_title_core(title: str) -> str:
 _WORKMODE_SEGMENTS = frozenset(
     {"remote", "hybrid", "onsite", "on site", "global", "worldwide", "flexible"}
 )
+# Continents / macro-regions boards append the same way ("Director of MEAL,
+# Africa"). Curated like the work-mode set: only unambiguous place-words that
+# never name a portfolio. Same-time distinct regional roles ("Director, Europe"
+# + "Director, Asia" both live) stay protected by the batch-alive + URL guards.
+_CONTINENT_SEGMENTS = frozenset(
+    {
+        "africa",
+        "asia",
+        "americas",
+        "north america",
+        "south america",
+        "latin america",
+        "central america",
+        "europe",
+        "oceania",
+        "middle east",
+        "east africa",
+        "west africa",
+        "southern africa",
+        "sub saharan africa",
+        "sub-saharan africa",
+        "south asia",
+        "southeast asia",
+        "central asia",
+        "apac",
+        "emea",
+        "mena",
+        "lac",
+    }
+)
 _TITLE_SEG_SPLIT = re.compile(r"\s*(?:,|\||·|\s[–—-]\s)\s*")
 
 _GEO_SEGMENTS: "frozenset[str] | None" = None
@@ -367,7 +397,7 @@ def _geo_segments() -> "frozenset[str]":
     if _GEO_SEGMENTS is None:
         import geo
 
-        terms = set(_WORKMODE_SEGMENTS)
+        terms = set(_WORKMODE_SEGMENTS) | set(_CONTINENT_SEGMENTS)
         for bucket in geo._CITY_MAP.values():
             terms.update(t.lower() for t in bucket)
         for bucket in geo._COUNTRY_MAP.values():
@@ -479,24 +509,33 @@ def description_fingerprint(description: str | None) -> str | None:
     return hashlib.md5(text.encode()).hexdigest()[:16]
 
 
-def _index_row(index: dict, org: str, row_id, dedup_hash: str, title: str, description, status):
-    """Register one row's normalized-title and description keys into `index`.
+def _index_row(
+    index: dict, org: str, row_id, dedup_hash: str, title: str, description, status, locations=None
+):
+    """Register one row's normalized-title, description, and URL keys into `index`.
 
     The stored entry carries the row's own exact dedup_hash so the caller can
     tell whether that row's exact title is also live in the current fetch (the
-    batch-alive guard in _find_existing_vacancy).
+    batch-alive guard in _find_existing_vacancy). URL entries also carry the
+    row's title: a same-URL hit only merges when one normalized title CONTAINS
+    the other (see _find_existing_vacancy), so orgs whose fetcher stamps one
+    generic careers URL on every role never collapse together.
     """
     entry = {"id": row_id, "status": status, "dedup_hash": dedup_hash}
     index["norm"].setdefault(make_normalized_id(org, title or ""), entry)
     fp = description_fingerprint(description)
     if fp:
         index["desc"].setdefault(fp, entry)
+    for loc in locations or []:
+        u = (loc.get("url") or "").strip()
+        if u:
+            index["url"].setdefault(u, {**entry, "title": title or ""})
 
 
 def _build_dedup_index(cur, org: str, company_id) -> dict:
     """Index a company's EXISTING rows by normalized title and description body.
 
-    Returns {"norm": {hash: {"id","status","dedup_hash"}}, "desc": {fp: {...}}}.
+    Returns {"norm": {hash: entry}, "desc": {fp: entry}, "url": {url: entry+title}}.
     When several rows share a key (a pre-existing duplicate), the one carrying a
     user decision wins so a later variant inherits it. The index reflects the
     pre-batch state only: rows inserted during the save loop are deliberately
@@ -504,13 +543,14 @@ def _build_dedup_index(cur, org: str, company_id) -> dict:
     (a same-time level pair is not a rename — see _find_existing_vacancy).
     """
     cur.execute(
-        "SELECT id, dedup_hash, title, full_description, status FROM vacancy WHERE company_id = %s",
+        "SELECT id, dedup_hash, title, full_description, status, locations"
+        " FROM vacancy WHERE company_id = %s",
         (company_id,),
     )
     rows = cur.fetchall()
     # Decided-status rows first so setdefault keeps them as the canonical target.
     rows.sort(key=lambda r: (0 if r.get("status") in _DECIDED_STATUSES else 1, str(r.get("id"))))
-    index: dict = {"norm": {}, "desc": {}}
+    index: dict = {"norm": {}, "desc": {}, "url": {}}
     for r in rows:
         _index_row(
             index,
@@ -520,6 +560,7 @@ def _build_dedup_index(cur, org: str, company_id) -> dict:
             r.get("title") or "",
             r.get("full_description"),
             r.get("status"),
+            r.get("locations"),
         )
     return index
 
@@ -533,7 +574,7 @@ def _consume_index_entry(index: dict, row_id) -> None:
     first claims the old row (rename); the second must fork its own row, not
     overwrite the first.
     """
-    for bucket in ("norm", "desc"):
+    for bucket in ("norm", "desc", "url"):
         for key in [k for k, entry in index[bucket].items() if entry["id"] == row_id]:
             del index[bucket][key]
 
@@ -572,6 +613,7 @@ def _find_existing_vacancy(
     candidate_url,
     batch_claimed: set,
     candidate_desc_len: int = 0,
+    candidate_title: str = "",
 ):
     """Return (existing row, match_kind, insert_hash) for this signature.
 
@@ -662,6 +704,27 @@ def _find_existing_vacancy(
                 return sibling, "exact", salted
             return None, "fork", salted
         return row, "exact", dedup_hash
+    # Same-company, same apply URL: an apply URL identifies one requisition, so
+    # a retitled re-listing of it ("Director of MEAL" -> "Director of MEAL,
+    # Africa"; "Program Manager, X" -> "Program Manager, X - Deal Operations")
+    # is the SAME role even when the normalized titles no longer match. Two
+    # guards keep this from over-merging: one normalized title must CONTAIN the
+    # other (orgs whose fetcher stamps one generic careers URL on every role
+    # never pass this), and the batch-alive rule below still applies (both
+    # spellings live in ONE fetch stay two rows — e.g. a level pair sharing a
+    # landing URL).
+    if candidate_url and candidate_title:
+        hit = index["url"].get(candidate_url)
+        if hit is not None and hit["dedup_hash"] not in batch_hashes:
+            a = _normalize_title_strong(candidate_title)
+            b = _normalize_title_strong(hit.get("title", ""))
+            if a and b and (a in b or b in a):
+                cur.execute("SELECT * FROM vacancy WHERE id = %s", (hit["id"],))
+                cand = cur.fetchone()
+                if cand is not None:
+                    _consume_index_entry(index, hit["id"])
+                    return cand, "norm", dedup_hash
+
     for kind, key in (("norm", norm_hash), ("desc", desc_fp)):
         if not key:
             continue
@@ -1516,6 +1579,7 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
             job.get("url"),
             batch_claimed,
             candidate_desc_len=len(job.get("full_description") or ""),
+            candidate_title=title,
         )
         batch_claimed.add(dedup_hash)
 
@@ -1746,6 +1810,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
             job.get("url"),
             batch_claimed,
             candidate_desc_len=len(job.get("full_description") or ""),
+            candidate_title=title,
         )
         batch_claimed.add(dedup_hash)
 
