@@ -9,6 +9,7 @@ import json
 import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from dateutil import parser as dateutil_parser
 
@@ -527,7 +528,7 @@ def _index_row(
     if fp:
         index["desc"].setdefault(fp, entry)
     for loc in locations or []:
-        u = (loc.get("url") or "").strip()
+        u = normalize_apply_url(loc.get("url"))
         if u:
             index["url"].setdefault(u, {**entry, "title": title or ""})
 
@@ -579,11 +580,57 @@ def _consume_index_entry(index: dict, row_id) -> None:
             del index[bucket][key]
 
 
+# Query params that only track WHERE a click came from, never WHICH req the
+# URL points at. Job boards decorate the same ATS link differently (80,000
+# Hours appends ?utm_source=...&utm_medium=job-board to the same Ashby URL that
+# Probably Good links bare), so these must not make two URLs read as two reqs.
+# Job-identifying params (gh_jid, jobId, ...) are deliberately NOT listed.
+_TRACKING_PARAMS = {"ref", "src", "source", "fbclid", "gclid", "mc_cid", "mc_eid", "gh_src"}
+
+
+# Connective words whose presence/absence never distinguishes two reqs sharing
+# one apply URL: "Director of X" and "Director, X" are the same posting retitled.
+_TITLE_STOPWORDS = {"of", "the", "a", "an", "and", "for", "to"}
+
+
+def _titles_equal_sans_stopwords(a: str, b: str) -> bool:
+    """True when two strong-normalized titles differ only by connective words.
+
+    Used ONLY under the same-apply-URL merge — equality (not containment) after
+    dropping stopwords, so it cannot over-merge unrelated roles that happen to
+    share a generic careers URL.
+    """
+    fold_a = " ".join(w for w in a.split() if w not in _TITLE_STOPWORDS)
+    fold_b = " ".join(w for w in b.split() if w not in _TITLE_STOPWORDS)
+    return bool(fold_a) and fold_a == fold_b
+
+
+def normalize_apply_url(url) -> str:
+    """Canonical form of an apply URL for dedup comparison.
+
+    Lowercases scheme/host, drops the fragment and tracking-only query params
+    (utm_*, ref, gclid, ...), keeps everything that can identify the req. Two
+    boards linking the same posting then compare equal.
+    """
+    u = (url or "").strip()
+    if not u:
+        return ""
+    parts = urlsplit(u)
+    kept = [
+        p
+        for p in parts.query.split("&")
+        if p
+        and not p.split("=", 1)[0].lower().startswith("utm_")
+        and p.split("=", 1)[0].lower() not in _TRACKING_PARAMS
+    ]
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, "&".join(kept), ""))
+
+
 def _row_apply_urls(row) -> set:
-    """Non-empty apply/job URLs recorded on an existing row's locations[]."""
+    """Non-empty apply/job URLs (normalized) recorded on an existing row's locations[]."""
     urls = set()
     for loc in row.get("locations") or []:
-        u = (loc.get("url") or "").strip()
+        u = normalize_apply_url(loc.get("url"))
         if u:
             urls.add(u)
     return urls
@@ -669,7 +716,7 @@ def _find_existing_vacancy(
     A claimed inexact match is consumed from the index so a second batch variant
     of the same vanished title forks its own row instead of collapsing again.
     """
-    candidate_url = (candidate_url or "").strip()
+    candidate_url = normalize_apply_url(candidate_url)
     cur.execute("SELECT * FROM vacancy WHERE dedup_hash = %s", (dedup_hash,))
     row = cur.fetchone()
     if row is not None:
@@ -718,7 +765,7 @@ def _find_existing_vacancy(
         if hit is not None and hit["dedup_hash"] not in batch_hashes:
             a = _normalize_title_strong(candidate_title)
             b = _normalize_title_strong(hit.get("title", ""))
-            if a and b and (a in b or b in a):
+            if a and b and (a in b or b in a or _titles_equal_sans_stopwords(a, b)):
                 cur.execute("SELECT * FROM vacancy WHERE id = %s", (hit["id"],))
                 cand = cur.fetchone()
                 if cand is not None:
