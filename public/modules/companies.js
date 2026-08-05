@@ -1982,13 +1982,27 @@ function companyRolesBlockHtml(c, roles, counts, t) {
 // ---------------------------------------------------------------------------
 
 function companyFactsHtml(c, t) {
-  // Quiet 5-row facts block per the mock (DHA-412 #10): HQ, Size, Founded,
+  // Quiet facts block per the mock (DHA-412 #10): Website, HQ, Size, Founded,
   // Funding, ATS. The deeper enrichment signals that had swollen this to ~12
-  // rows (Offices, Sector, Glassdoor, LinkedIn, experience/interest ratings,
-  // Website/Careers links) are dropped to keep the side rail quiet — the fit
-  // ratings already surface in the reading column, and the ATS type also shows
-  // under Monitoring, exactly as the mock has it.
+  // rows (Offices, Sector, Glassdoor, LinkedIn, experience/interest ratings)
+  // are dropped to keep the side rail quiet — the fit ratings already surface
+  // in the reading column, and the ATS type also shows under Monitoring.
+  // Website returned by request: it's the one external link a profile needs.
   var facts = [];
+  var siteUrl = safeUrl(c.website);
+  if (siteUrl) {
+    var siteLabel = siteUrl
+      .replace(/^https?:\/\/(www\.)?/, "")
+      .replace(/\/$/, "");
+    facts.push([
+      t("cp_website", "Website"),
+      '<a class="vac-loc--link" href="' +
+        escHtml(siteUrl) +
+        '" target="_blank" rel="noopener">' +
+        escHtml(siteLabel) +
+        "</a>",
+    ]);
+  }
   if (c.hq_location && c.hq_location !== "N/A")
     facts.push([t("cp_hq", "HQ"), escHtml(c.hq_location)]);
   if (c.employee_count && c.employee_count !== "N/A")
