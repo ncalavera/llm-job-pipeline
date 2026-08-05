@@ -3,7 +3,7 @@
 Covers the four things the driver MUST get right (acceptance criteria):
   1. stage order is fixed and cannot be violated,
   2. checkpoint + resume continues from where it stopped,
-  3. the publish gate blocks a dirty run,
+  3. the publish gate flags a dirty run (warn-only — publish still refreshes),
   4. the per-run scoring cap is a fuse; a full re-score is an explicit opt-in.
 
 Plus a network-free integration slice over the first real stages (validate
@@ -306,33 +306,69 @@ def _clean_state(rd):
     return state
 
 
-def test_publish_gate_allows_a_clean_run(rd):
-    allowed, reasons = rd.check_publish_gate(_clean_state(rd), fetch_stats={"orgs": {}})
-    assert allowed is True
+def test_publish_gate_reports_a_clean_run(rd):
+    clean, reasons = rd.check_publish_gate(_clean_state(rd), fetch_stats={"orgs": {}})
+    assert clean is True
     assert reasons == []
 
 
-def test_publish_gate_blocks_on_a_stage_error(rd):
+def test_publish_gate_flags_a_stage_error(rd):
     state = _clean_state(rd)
     rd._stage(state, "enrich")["status"] = "error"
-    allowed, reasons = rd.check_publish_gate(state, fetch_stats={"orgs": {}})
-    assert allowed is False
+    clean, reasons = rd.check_publish_gate(state, fetch_stats={"orgs": {}})
+    assert clean is False
     assert any("enrich" in r for r in reasons)
 
 
-def test_publish_gate_blocks_on_mass_gone_archive(rd):
-    """A truncated fetch that archived most of an org's live roles blocks publish."""
+def test_publish_gate_flags_mass_gone_archive(rd):
+    """A truncated fetch that archived most of an org's live roles dirties the run."""
     stats = {"orgs": {"Globex": {"gone": 40, "live": 5}}}
-    allowed, reasons = rd.check_publish_gate(_clean_state(rd), fetch_stats=stats)
-    assert allowed is False
+    clean, reasons = rd.check_publish_gate(_clean_state(rd), fetch_stats=stats)
+    assert clean is False
     assert any("Globex" in r for r in reasons)
 
 
 def test_publish_gate_ignores_tiny_and_normal_orgs(rd):
     # gone=2 is below the min-count floor; gone=5/25 is a normal ~20% share.
     stats = {"orgs": {"Tiny": {"gone": 2, "live": 0}, "Normal": {"gone": 5, "live": 20}}}
-    allowed, reasons = rd.check_publish_gate(_clean_state(rd), fetch_stats=stats)
-    assert allowed is True, reasons
+    clean, reasons = rd.check_publish_gate(_clean_state(rd), fetch_stats=stats)
+    assert clean is True, reasons
+
+
+def test_publish_still_refreshes_on_a_dirty_run_and_warns(rd, monkeypatch):
+    """Warn-only gate: a dirty run publishes anyway, and the note says so loudly."""
+    calls = []
+    monkeypatch.setattr(rd, "_run", lambda cmd, opts: (calls.append(cmd), 0)[1])
+    state = _clean_state(rd)
+    rd._stage(state, "enrich")["status"] = "error"
+
+    kind, note = rd._h_publish(state, rd._stage(state, "publish"), rd.Opts())
+
+    assert kind == "advance"  # stage lands as "done", not skipped
+    assert calls, "the dashboard refresh must still run on a dirty run"
+    assert "WITH WARNINGS" in note and "run not clean" in note and "enrich" in note
+
+
+def test_publish_clean_run_refreshes_without_warning(rd, monkeypatch):
+    calls = []
+    monkeypatch.setattr(rd, "_run", lambda cmd, opts: (calls.append(cmd), 0)[1])
+
+    kind, note = rd._h_publish(_clean_state(rd), {}, rd.Opts())
+
+    assert kind == "advance"
+    assert calls
+    assert note == "dashboard refreshed (clean run)"
+
+
+def test_no_publish_suppresses_the_refresh_even_on_a_dirty_run(rd, monkeypatch):
+    monkeypatch.setattr(rd, "_run", lambda cmd, opts: pytest.fail("must not publish"))
+    state = _clean_state(rd)
+    rd._stage(state, "enrich")["status"] = "error"
+
+    kind, note = rd._h_publish(state, rd._stage(state, "publish"), rd.Opts(no_publish=True))
+
+    assert kind == "skip"
+    assert "--no-publish" in note and "run not clean" in note
 
 
 # ---------------------------------------------------------------------------
@@ -1282,21 +1318,21 @@ def test_prefilter_records_warning_on_nonzero_exit(rd, monkeypatch):
     assert not state["warnings"][0]["blocking"]  # degraded, not publish-blocking
 
 
-def test_publish_gate_blocks_on_blocking_warning(rd):
+def test_publish_gate_flags_a_blocking_warning(rd):
     state = _clean_state(rd)
     rd._add_warning(
         state, "company_scoring", "screen failed — paid enrichment withheld", blocking=True
     )
-    allowed, reasons = rd.check_publish_gate(state, fetch_stats={"orgs": {}})
-    assert allowed is False
+    clean, reasons = rd.check_publish_gate(state, fetch_stats={"orgs": {}})
+    assert clean is False
     assert any("screen failed" in r for r in reasons)
 
 
-def test_publish_gate_allows_nonblocking_warning(rd):
+def test_publish_gate_ignores_nonblocking_warning(rd):
     state = _clean_state(rd)
     rd._add_warning(state, "company_scoring", "evidence collection degraded")
-    allowed, reasons = rd.check_publish_gate(state, fetch_stats={"orgs": {}})
-    assert allowed is True and reasons == []
+    clean, reasons = rd.check_publish_gate(state, fetch_stats={"orgs": {}})
+    assert clean is True and reasons == []
 
 
 def test_stage_verdict_maps_each_status(rd):
@@ -1311,7 +1347,7 @@ def test_stage_verdict_maps_each_status(rd):
 
 def test_stage_verdict_blocking_warning_reads_failed(rd):
     # The valve skips paid work on purpose, but a blocking warning is a real
-    # failure — it reads FAILED on the card and blocks publish, not a benign SKIP.
+    # failure — it reads FAILED on the card and dirties publish, not a benign SKIP.
     stage = {"name": "company_scoring", "status": "skipped"}
     warnings = [{"stage": "company_scoring", "message": "screen failed", "blocking": True}]
     assert rd._stage_verdict(stage, warnings) == "FAILED"
