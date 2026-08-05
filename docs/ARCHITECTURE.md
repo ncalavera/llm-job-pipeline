@@ -67,7 +67,7 @@ not in a runbook and not in anyone's head (STRATEGY guardrail 4).
 | 8 | `company_scoring` | GATE | WANT-score new candidate companies (1 company = 1 subagent). |
 | 9 | `vacancy_scoring` | GATE | Two-pass per-vacancy scoring (see below). |
 | 10 | `verdicts` | GATE | Show top fresh matches; capture like / pass / to_apply, each committed immediately. |
-| 11 | `publish` | AUTO | Publish only a clean run (see the publish gate). |
+| 11 | `publish` | AUTO | Always publish; warn loudly on a dirty run (see the publish gate). |
 
 Exit codes the runbook branches on: `0` done, `10` gate, `20` abort
 (bad profile / DB outage — fix, do not retry blindly), `30` stage error
@@ -94,13 +94,17 @@ the dashboard can distinguish a cheap screen score from a confirmed one.
 
 ### The publish gate
 
-`publish` refuses a dirty run: it publishes only when no stage crashed AND no
-single org lost a large share of its live roles to gone-from-source archival
-(the signature of a truncated fetch). A dirty run keeps the previous good
-snapshot. In full mode publish refreshes the hosted dashboard snapshot (a
-browser refresh, no redeploy); in simple mode it rewrites the local
-`public/data.js`. Both go through the same driver — no mode branching.
-(`vercel --prod` is only ever for dashboard *code* changes.)
+The gate is a warn-only detector, not a blocker: `publish` always refreshes the
+dashboard, and a dirty run — a crashed stage, a blocking warning, or a single
+org losing a large share of its live roles to gone-from-source archival (the
+signature of a truncated fetch) — is flagged loudly on the publish note and the
+report card instead of being withheld. (Skipping never protected anything: the
+scoring stage's `--save` already regenerates the live snapshot before `publish`
+runs, so the site is kept fresh and the operator is warned.) In full mode
+publish refreshes the hosted dashboard snapshot (a browser refresh, no
+redeploy); in simple mode it rewrites the local `public/data.js`. Both go
+through the same driver — no mode branching. (`vercel --prod` is only ever for
+dashboard *code* changes.)
 
 ## Health & observability
 
