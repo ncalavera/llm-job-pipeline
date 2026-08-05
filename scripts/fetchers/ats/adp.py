@@ -84,7 +84,7 @@ def fetch_adp_json(org_name: str, config: dict) -> list[dict]:
         "https://workforcenow.adp.com/mascsr/default/careercenter/public/"
         f"events/staffing/v1/job-requisitions?cid={cid}"
     )
-    cc_id = ((config.get("ats_config") or {}).get("ccId") or "").strip()
+    cc_id = ((config.get("ats_config") or {}).get("ccId") or config.get("ccId") or "").strip()
     if cc_id:
         url += f"&ccId={cc_id}&lang=en_US"
     print(f"  [{org_name}] ADP Workforce Now: {url}")
