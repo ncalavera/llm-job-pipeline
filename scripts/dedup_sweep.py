@@ -60,8 +60,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from db_backend import Json, RealDictCursor, IS_SQLITE, print_backend_banner  # noqa: E402
 from database_supabase import (  # noqa: E402
     VACANCIES_DIR,
+    _normalize_title_strong,
+    _titles_equal_sans_stopwords,
     make_normalized_id,
     description_fingerprint,
+    normalize_apply_url,
     serialize_vacancy_rows,
     get_conn,
 )
@@ -121,10 +124,13 @@ def _load_rows():
 
 
 def _urls(row):
-    """Non-empty apply/job URLs recorded on a row's locations[]."""
+    """Non-empty apply/job URLs (normalized) recorded on a row's locations[].
+
+    Normalization strips tracking query params (utm_* etc.), so the same req
+    linked from two boards with different decorations compares equal."""
     urls = set()
     for loc in row.get("locations") or []:
-        u = (loc.get("url") or "").strip()
+        u = normalize_apply_url(loc.get("url"))
         if u:
             urls.add(u)
     return urls
@@ -156,6 +162,7 @@ def _cluster(rows):
         uf = _Union()
         norm_seen: dict = {}
         desc_seen: dict = {}
+        url_seen: dict = {}
         for r in company_rows:
             uf.find(r["id"])  # ensure the row is a node even if it stays a singleton
             nkey = make_normalized_id(r["org"], r["title"] or "")
@@ -171,6 +178,21 @@ def _cluster(rows):
                     desc_seen[fp] = r["id"]
                 elif _url_compatible(by_id[prev_d], r):
                     uf.union(r["id"], prev_d)
+            # Shared normalized apply URL = one requisition — union even when
+            # neither the title key nor the description fingerprint matches (a
+            # board's stub body vs the ATS's full JD). Mirrors the save-path
+            # same-URL merge: titles must contain each other or differ only by
+            # connective words, so orgs stamping one generic careers URL on
+            # every role never collapse together.
+            for u in _urls(r):
+                prev_u = url_seen.get(u)
+                if prev_u is None:
+                    url_seen[u] = r["id"]
+                    continue
+                ta = _normalize_title_strong(r.get("title") or "")
+                tb = _normalize_title_strong(by_id[prev_u].get("title") or "")
+                if ta and tb and (ta in tb or tb in ta or _titles_equal_sans_stopwords(ta, tb)):
+                    uf.union(r["id"], prev_u)
 
         groups: dict = {}
         for r in company_rows:
@@ -195,8 +217,18 @@ def _live_rows(cluster):
 def _needs_manual_review(cluster):
     """A cluster where >= 2 rows are still live is NOT an over-time rename —
     both roles may be genuinely open right now — so it is left for a human
-    instead of auto-collapsed (mirrors the save-path batch-alive guard)."""
-    return len(_live_rows(cluster)) >= 2
+    instead of auto-collapsed (mirrors the save-path batch-alive guard).
+
+    Exception: when every live row shares a common normalized apply URL, that
+    URL identifies ONE requisition (an apply link points at a single req), so
+    the pair is a same-req double listing, not two open roles — collapse it."""
+    live = _live_rows(cluster)
+    if len(live) < 2:
+        return False
+    url_sets = [_urls(r) for r in live]
+    if all(url_sets) and set.intersection(*url_sets):
+        return False
+    return True
 
 
 def _pick_survivor(cluster):
