@@ -69,6 +69,8 @@ def fetch_adp_json(org_name: str, config: dict) -> list[dict]:
 
     Endpoint: ``workforcenow.adp.com/mascsr/default/careercenter/public/events/
     staffing/v1/job-requisitions?cid=<CID>`` where ``cid`` comes from config.
+    Some portals (e.g. Skoll) return an empty feed unless the career-center id
+    ``ccId`` is also passed; set ``ats_config.ccId`` to append it.
     Parses ``jobRequisitions`` into job dicts. The list feed carries no
     description, so the snippet is built from location + pay range (a per-job
     detail fetch is skipped — these boards are low-fit/US-only). Unblocks
@@ -82,6 +84,9 @@ def fetch_adp_json(org_name: str, config: dict) -> list[dict]:
         "https://workforcenow.adp.com/mascsr/default/careercenter/public/"
         f"events/staffing/v1/job-requisitions?cid={cid}"
     )
+    cc_id = ((config.get("ats_config") or {}).get("ccId") or "").strip()
+    if cc_id:
+        url += f"&ccId={cc_id}&lang=en_US"
     print(f"  [{org_name}] ADP Workforce Now: {url}")
     resp = http.get(
         url, headers={"Accept": "application/json", "User-Agent": _LOCAL_UA}, timeout=20

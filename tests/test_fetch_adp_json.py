@@ -116,6 +116,19 @@ class TestFetchAdpJson:
         # cid was passed to the feed URL.
         assert any(f"cid={CID}" in u for u in fake.calls)
 
+    def test_ccid_appended_to_feed_url(self, monkeypatch):
+        fake = FakeRequests(FakeResponse(json_data=ADP_FEED))
+        monkeypatch.setattr(fetchers, "requests", fake)
+        jobs = fetch_adp_json("Skoll", {"ats_config": {"cid": CID, "ccId": "9201357733031_3"}})
+        assert len(jobs) == 2
+        assert any(f"cid={CID}&ccId=9201357733031_3&lang=en_US" in u for u in fake.calls)
+
+    def test_no_ccid_leaves_feed_url_unchanged(self, monkeypatch):
+        fake = FakeRequests(FakeResponse(json_data=ADP_FEED))
+        monkeypatch.setattr(fetchers, "requests", fake)
+        fetch_adp_json("Rockefeller", {"ats_slug": CID})
+        assert all("ccId" not in u for u in fake.calls)
+
     def test_empty_feed_returns_empty(self, monkeypatch):
         fake = FakeRequests(FakeResponse(json_data=ADP_EMPTY))
         monkeypatch.setattr(fetchers, "requests", fake)
