@@ -267,9 +267,17 @@ test("companyProfileHtml: Facts rail is the quiet 5-row block, not the 12-row en
     reviewStatus: "approved",
     counts,
   });
-  // Kept: HQ, Size, Founded, Funding, ATS.
+  // Kept: Website, HQ, Size, Founded, Funding, ATS.
   assert.ok(html.includes("Oakland, CA")); // HQ
   assert.ok(html.includes(">ATS<")); // ATS fact key
+  assert.ok(
+    html.includes('href="https://givewell.org"'),
+    "Website fact links to the company site",
+  );
+  assert.ok(
+    html.includes(">givewell.org</a>"),
+    "Website label is the bare domain",
+  );
   // Dropped: the deeper enrichment rows that had swollen the rail.
   assert.ok(!html.includes("Oakland, Remote"), "Offices row removed");
   assert.ok(!html.includes("Glassdoor"), "Glassdoor row removed");
