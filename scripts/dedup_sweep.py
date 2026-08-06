@@ -60,7 +60,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from db_backend import Json, RealDictCursor, IS_SQLITE, print_backend_banner  # noqa: E402
 from database_supabase import (  # noqa: E402
     VACANCIES_DIR,
+    _comparable_bodies,
     _normalize_title_strong,
+    _title_segment_keys,
     _titles_equal_sans_stopwords,
     make_normalized_id,
     description_fingerprint,
@@ -145,6 +147,37 @@ def _url_compatible(a, b):
     return True
 
 
+def _seg_mergeable(a, b):
+    """Save-path board-prefix rules for two stored rows matched via a segment
+    key: distinctness is decided by the body guard, not the apply URL (a
+    cross-board copy of one req never shares a URL across boards)."""
+    fa = description_fingerprint(a.get("full_description"))
+    fb = description_fingerprint(b.get("full_description"))
+    if (
+        fa
+        and fb
+        and fa != fb
+        and _comparable_bodies(
+            len(a.get("full_description") or ""), len(b.get("full_description") or "")
+        )
+    ):
+        return False
+    return True
+
+
+def _board_prefix_pair(a, b):
+    """True when one row's full title is a substantial segment of the other's
+    ("Charity Entrepreneurship Incubation Program" vs "Non-profit Entrepreneur
+    — Charity Entrepreneurship Incubation Program") and the body guard does not
+    read them as two distinct roles."""
+    na = make_normalized_id(a["org"], a.get("title") or "")
+    nb = make_normalized_id(b["org"], b.get("title") or "")
+    return (
+        na in _title_segment_keys(b["org"], b.get("title") or "")
+        or nb in _title_segment_keys(a["org"], a.get("title") or "")
+    ) and _seg_mergeable(a, b)
+
+
 def _cluster(rows):
     """Return clusters (lists of >= 2 rows) that are cross-variant duplicates.
 
@@ -163,6 +196,7 @@ def _cluster(rows):
         norm_seen: dict = {}
         desc_seen: dict = {}
         url_seen: dict = {}
+        seg_seen: dict = {}
         for r in company_rows:
             uf.find(r["id"])  # ensure the row is a node even if it stays a singleton
             nkey = make_normalized_id(r["org"], r["title"] or "")
@@ -171,6 +205,20 @@ def _cluster(rows):
                 norm_seen[nkey] = r["id"]
             elif _url_compatible(by_id[prev], r):
                 uf.union(r["id"], prev)
+            # Board-prefix retitle: this row's full title equals a segment of an
+            # earlier row's title, or vice versa ("X" vs "Label — X"). Mirrors
+            # the save path: never segment-vs-segment; the body guard (not the
+            # URL) decides whether the pair is one req.
+            seg_keys = _title_segment_keys(r["org"], r["title"] or "")
+            for other_id in [seg_seen.get(nkey)] + [norm_seen.get(k) for k in seg_keys]:
+                if (
+                    other_id is not None
+                    and other_id != r["id"]
+                    and _seg_mergeable(by_id[other_id], r)
+                ):
+                    uf.union(r["id"], other_id)
+            for k in seg_keys:
+                seg_seen.setdefault(k, r["id"])
             fp = description_fingerprint(r.get("full_description"))
             if fp:
                 prev_d = desc_seen.get(fp)
@@ -219,14 +267,19 @@ def _needs_manual_review(cluster):
     both roles may be genuinely open right now — so it is left for a human
     instead of auto-collapsed (mirrors the save-path batch-alive guard).
 
-    Exception: when every live row shares a common normalized apply URL, that
-    URL identifies ONE requisition (an apply link points at a single req), so
-    the pair is a same-req double listing, not two open roles — collapse it."""
+    Exceptions that collapse instead: when every live row shares a common
+    normalized apply URL, that URL identifies ONE requisition (an apply link
+    points at a single req); and when the live pair is a board-prefix double
+    listing (one full title is a segment of the other and the body guard does
+    not read them as distinct roles) — one req listed bare on one board and
+    decorated on another."""
     live = _live_rows(cluster)
     if len(live) < 2:
         return False
     url_sets = [_urls(r) for r in live]
     if all(url_sets) and set.intersection(*url_sets):
+        return False
+    if len(live) == 2 and _board_prefix_pair(live[0], live[1]):
         return False
     return True
 

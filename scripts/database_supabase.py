@@ -466,6 +466,32 @@ def make_normalized_id(org: str, title: str) -> str:
     return hashlib.md5(key.encode()).hexdigest()[:16]
 
 
+# A title segment shorter than this many significant words never produces a
+# segment key: "Climate" or "Ops Lead" alone is too generic to identify a role.
+_MIN_SEGMENT_KEY_WORDS = 3
+
+
+def _title_segment_keys(org: str, title: str) -> list[str]:
+    """Org-scoped dedup keys for each substantial dash/comma segment of a title.
+
+    Some boards decorate a role's own title with a generic label segment —
+    Idealist lists "Non-profit Entrepreneur — Charity Entrepreneurship
+    Incubation Program" where 80,000 Hours lists the bare program title.
+    Keying every segment that is substantial on its own (>= 3 significant
+    words after strong normalization) lets the save path recognize the bare
+    title as one segment of the decorated one. A segment equal to the whole
+    normalized title produces no key (that is the ordinary "norm" key).
+    """
+    full = _normalize_title_strong(title or "")
+    keys: dict = {}
+    for seg in _TITLE_SEG_SPLIT.split(title or ""):
+        norm = _normalize_title_strong(seg)
+        if norm == full or len(norm.split()) < _MIN_SEGMENT_KEY_WORDS:
+            continue
+        keys.setdefault(make_normalized_id(org, seg))
+    return list(keys)
+
+
 def make_sibling_vacancy_id(canonical_hash: str, desc_fp: str) -> str:
     """Disambiguated dedup_hash for a distinct role that shares org+title with an
     already-stored role but has its OWN, different job description.
@@ -524,6 +550,8 @@ def _index_row(
     """
     entry = {"id": row_id, "status": status, "dedup_hash": dedup_hash}
     index["norm"].setdefault(make_normalized_id(org, title or ""), entry)
+    for seg_key in _title_segment_keys(org, title or ""):
+        index["seg"].setdefault(seg_key, entry)
     fp = description_fingerprint(description)
     if fp:
         index["desc"].setdefault(fp, entry)
@@ -551,7 +579,7 @@ def _build_dedup_index(cur, org: str, company_id) -> dict:
     rows = cur.fetchall()
     # Decided-status rows first so setdefault keeps them as the canonical target.
     rows.sort(key=lambda r: (0 if r.get("status") in _DECIDED_STATUSES else 1, str(r.get("id"))))
-    index: dict = {"norm": {}, "desc": {}, "url": {}}
+    index: dict = {"norm": {}, "desc": {}, "url": {}, "seg": {}}
     for r in rows:
         _index_row(
             index,
@@ -575,7 +603,7 @@ def _consume_index_entry(index: dict, row_id) -> None:
     first claims the old row (rename); the second must fork its own row, not
     overwrite the first.
     """
-    for bucket in ("norm", "desc", "url"):
+    for bucket in ("norm", "desc", "url", "seg"):
         for key in [k for k, entry in index[bucket].items() if entry["id"] == row_id]:
             del index[bucket][key]
 
@@ -594,14 +622,17 @@ _TITLE_STOPWORDS = {"of", "the", "a", "an", "and", "for", "to"}
 
 
 def _titles_equal_sans_stopwords(a: str, b: str) -> bool:
-    """True when two strong-normalized titles differ only by connective words.
+    """True when two strong-normalized titles carry the same significant words.
 
-    Used ONLY under the same-apply-URL merge — equality (not containment) after
-    dropping stopwords, so it cannot over-merge unrelated roles that happen to
-    share a generic careers URL.
+    Used ONLY under the same-apply-URL merge — multiset equality (not
+    containment) of non-stopword tokens, so connective-word retitles
+    ("Director of X" == "Director, X") and reorderings ("Incubation Program,
+    Charity Entrepreneurship" == "Charity Entrepreneurship Incubation
+    Program") of ONE req's title match, while different roles that happen to
+    share a generic careers URL never do.
     """
-    fold_a = " ".join(w for w in a.split() if w not in _TITLE_STOPWORDS)
-    fold_b = " ".join(w for w in b.split() if w not in _TITLE_STOPWORDS)
+    fold_a = sorted(w for w in a.split() if w not in _TITLE_STOPWORDS)
+    fold_b = sorted(w for w in b.split() if w not in _TITLE_STOPWORDS)
     return bool(fold_a) and fold_a == fold_b
 
 
@@ -636,6 +667,21 @@ def _row_apply_urls(row) -> set:
     return urls
 
 
+def _comparable_bodies(a_len: int, b_len: int) -> bool:
+    """True when two description bodies are close enough in size for a
+    fingerprint difference to be a trustworthy distinct-role signal.
+
+    Two sources scraping the SAME posting can ship wildly different bodies (a
+    full JD vs a board's summary stub); when the shorter is under a third of
+    the longer — or either is absent — the comparison says nothing about role
+    identity (scrape-depth guard). Two genuinely distinct roles both carry
+    full, comparably-sized JDs.
+    """
+    if not a_len or not b_len:
+        return False
+    return min(a_len, b_len) * 3 >= max(a_len, b_len)
+
+
 def _row_already_settled(row) -> bool:
     """True when a row already carries a user decision OR a real LLM score.
 
@@ -661,11 +707,12 @@ def _find_existing_vacancy(
     batch_claimed: set,
     candidate_desc_len: int = 0,
     candidate_title: str = "",
+    org: str = "",
 ):
     """Return (existing row, match_kind, insert_hash) for this signature.
 
     ``existing`` is the row to merge onto, or None to insert a new row.
-    ``match_kind`` is "exact", "norm", "desc", "fork" or None. ``insert_hash`` is
+    ``match_kind`` is "exact", "norm", "desc", "seg", "fork" or None. ``insert_hash`` is
     the dedup_hash the caller MUST use when it inserts (existing is None):
     normally the canonical ``dedup_hash``, but a body-salted hash when this is a
     distinct sibling colliding with the canonical row (match_kind == "fork").
@@ -711,7 +758,10 @@ def _find_existing_vacancy(
         apply URLs and none overlap, they are two distinct reqs: skip — UNLESS
         the matched row is already settled (scored/decided), in which case a
         differing URL is just a re-posted variant of a role we already scored
-        and it folds rather than spawning a re-scoreable copy (per-facet dup fix).
+        and it folds rather than spawning a re-scoreable copy (per-facet dup fix),
+        OR the match came through a segment key ("seg"): a board-prefix copy of
+        one req never shares a URL across boards, so there the body guard alone
+        decides distinctness.
 
     A claimed inexact match is consumed from the index so a second batch variant
     of the same vanished title forks its own row instead of collapsing again.
@@ -722,19 +772,16 @@ def _find_existing_vacancy(
     if row is not None:
         row_fp = description_fingerprint(row.get("full_description"))
         row_desc_len = len(row.get("full_description") or "")
-        # Scrape-depth guard: two sources scraping the SAME posting can ship
-        # wildly different bodies (a full JD vs a board's summary stub), and
-        # their fingerprints then differ for reasons that say nothing about
-        # role identity. When one body is under a third of the other's length
-        # the fp comparison is not trustworthy — fold onto the canonical row
-        # instead of forking a sibling. Two genuinely distinct roles both carry
-        # full, comparably-sized JDs.
-        comparable_bodies = (
-            not candidate_desc_len
-            or not row_desc_len
-            or min(candidate_desc_len, row_desc_len) * 3 >= max(candidate_desc_len, row_desc_len)
-        )
-        if desc_fp and row_fp and desc_fp != row_fp and comparable_bodies:
+        # Scrape-depth guard: a fingerprint difference only counts as a
+        # distinct-role signal when the bodies are comparably sized (see
+        # _comparable_bodies) — otherwise fold onto the canonical row instead
+        # of forking a sibling.
+        if (
+            desc_fp
+            and row_fp
+            and desc_fp != row_fp
+            and _comparable_bodies(candidate_desc_len, row_desc_len)
+        ):
             # Same org+title, DIFFERENT full description. Normally two distinct
             # roles colliding on the canonical hash → fork. But fold instead when
             # this is a per-facet variant of a posting already claimed in THIS
@@ -772,10 +819,20 @@ def _find_existing_vacancy(
                     _consume_index_entry(index, hit["id"])
                     return cand, "norm", dedup_hash
 
-    for kind, key in (("norm", norm_hash), ("desc", desc_fp)):
+    # Board-prefix retitles ("seg"): the same req listed bare on one board and
+    # under a "<generic label> — <title>" decoration on another. Match the
+    # candidate's full-title key against stored rows' segment keys and the
+    # candidate's own segment keys against stored full titles — never
+    # segment-vs-segment (two roles decorated with the same program name are
+    # two roles).
+    lookups = [("norm", "norm", norm_hash), ("desc", "desc", desc_fp)]
+    if candidate_title:
+        lookups.append(("seg", "seg", norm_hash))
+        lookups.extend(("seg", "norm", k) for k in _title_segment_keys(org, candidate_title))
+    for kind, bucket, key in lookups:
         if not key:
             continue
-        hit = index[kind].get(key)
+        hit = index[bucket].get(key)
         if hit is None:
             continue
         # Both live in the current fetch → a same-time pair, not a rename.
@@ -785,12 +842,28 @@ def _find_existing_vacancy(
         cand = cur.fetchone()
         if cand is None:
             continue
+        if kind == "seg":
+            # Body guard (mirrors the exact-hash guard): two full, comparably
+            # sized but DIFFERENT bodies mean the segment match found a second
+            # genuine role — do not merge.
+            row_fp = description_fingerprint(cand.get("full_description"))
+            row_desc_len = len(cand.get("full_description") or "")
+            if (
+                desc_fp
+                and row_fp
+                and desc_fp != row_fp
+                and _comparable_bodies(candidate_desc_len, row_desc_len)
+            ):
+                continue
         existing_urls = _row_apply_urls(cand)
         if candidate_url and existing_urls and candidate_url not in existing_urls:
             # Two distinct reqs — do not merge — unless the matched row is
-            # already scored/decided: then this is a re-titled variant of a role
-            # we already settled and folding it prevents a re-scoreable copy.
-            if not _row_already_settled(cand):
+            # already scored/decided (then this is a re-titled variant of a
+            # role we already settled and folding it prevents a re-scoreable
+            # copy), or this is a segment match: boards link their OWN posting
+            # pages, so a cross-board copy of one req never shares a URL, and
+            # distinctness is already decided by the body guard above.
+            if kind != "seg" and not _row_already_settled(cand):
                 continue
         _consume_index_entry(index, hit["id"])
         return cand, kind, dedup_hash
@@ -1627,6 +1700,7 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
             batch_claimed,
             candidate_desc_len=len(job.get("full_description") or ""),
             candidate_title=title,
+            org=org_name,
         )
         batch_claimed.add(dedup_hash)
 
@@ -1858,6 +1932,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
             batch_claimed,
             candidate_desc_len=len(job.get("full_description") or ""),
             candidate_title=title,
+            org=org,
         )
         batch_claimed.add(dedup_hash)
 
