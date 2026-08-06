@@ -395,6 +395,43 @@ class TestCleanDescriptionMarketingPage:
         )
         assert is_marketing_page(one_marker) is False
 
+    def test_QD37_grant_solicitation_page_rejected(self):
+        # A funder's "apply for funding" page scraped as a vacancy (the EA
+        # Funds incident): addresses grant applicants, zero JD structure.
+        funding_page = (
+            "Get funding for your high-impact project\n\n"
+            "Apply for funding\n\nAlways open to applications\n\n"
+            "Grants range between\n\n $1,000-$500,000\n\nApply in less than 1h\n\n"
+            "We're funding\n\n people, projects, non-profits and institutions\n\n"
+            "Frequently asked questions\n\n How do I apply for funding?\n\n"
+            "How quickly does the fund disburse the grant money to the grantee?\n\n"
+            "Can I reapply if my proposal was rejected?\n\n"
+            "Aims to improve the work of projects that use these principles, by "
+            "increasing their access to talent, capital, and knowledge.\n\n"
+            "This Fund currently isn't accepting applications.\n"
+        )
+        assert is_marketing_page(funding_page) is True
+        assert is_boilerplate_junk(funding_page) is True
+        _, verdict = clean_description(funding_page)
+        assert verdict == "marketing_page"
+
+    def test_QD38_grantmaker_jd_mentioning_funding_not_flagged(self):
+        # A grants-manager JD legitimately talks about funding and grants — the
+        # JD-structure conjunction must keep it a real posting.
+        grants_jd = (
+            "Grants Manager\n\n"
+            "We are looking for a Grants Manager to run our funding rounds.\n\n"
+            "Responsibilities:\n"
+            "- Guide organisations that apply for funding through due diligence\n"
+            "- Track how our grants range from small seed awards to major gifts\n\n"
+            "Requirements:\n"
+            "- 4+ years in grantmaking operations\n\n"
+            "Apply now with a short cover letter.\n"
+        )
+        assert is_marketing_page(grants_jd) is False
+        _, verdict = clean_description(grants_jd)
+        assert verdict == "ok"
+
 
 class TestCleanDescriptionTooShort:
     """Content < min_chars → too_short."""
