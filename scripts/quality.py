@@ -267,6 +267,13 @@ _MARKETING_MARKERS = (
     re.compile(r"funding partners", re.IGNORECASE),
     re.compile(r"our impact stories", re.IGNORECASE),
     re.compile(r"newsletter sign", re.IGNORECASE),
+    # Grant-solicitation pages: a funder's "apply for funding" page scraped as
+    # a JD (the EA Funds incident: funds.effectivealtruism.org/apply-for-funding
+    # saved as a "vacancy" titled from a mid-sentence fragment). These phrases
+    # address grant APPLICANTS, which a job description never does.
+    re.compile(r"apply for funding", re.IGNORECASE),
+    re.compile(r"grants? range (?:between|from)", re.IGNORECASE),
+    re.compile(r"we(?:'re| are) funding\b", re.IGNORECASE),
 )
 # Structural signals a genuine JD carries. Presence of MORE than one means the
 # page is a real posting even if it also happens to mention news/marketing copy,
@@ -284,10 +291,12 @@ MARKETING_MAX_JD_SIGNALS = 1  # more JD structure than this → it's a real post
 
 
 def is_marketing_page(text: str) -> bool:
-    """True when the text is a company homepage / news / marketing page, not a JD.
+    """True when the text is a company homepage / news / marketing page — or a
+    funder's grant-solicitation page — not a JD.
 
     Requires several DISTINCT homepage-only markers (news feed, video embed,
-    subscriber count, funding-partner strip) AND almost no JD structure — the
+    subscriber count, funding-partner strip, apply-for-funding copy) AND almost
+    no JD structure — the
     conjunction keeps a genuine media/comms posting that merely mentions a
     newsletter from being rejected. Length-independent: the pages it guards are
     long, well-formed prose that every length-capped detector above lets through.
