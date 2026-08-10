@@ -50,6 +50,11 @@ WANTED_STATUSES = LIKED_BASKET + REJECTED_STATUSES
 #: A candidate filter word must recur in at least this many garbage titles before
 #: it is even worth backtesting — one fluke should never propose a filter.
 MIN_GARBAGE_HITS = 2
+#: Below this, a STRONG-model score counts as junk for filter proposals without
+#: the user hand-flagging it (``auto_garbage_titles``). Set under the weakest
+#: role in his liked basket (15), so a role he might have wanted is never
+#: harvested as junk. Only ever feeds PROPOSALS, which still face the backtest.
+AUTO_GARBAGE_SCORE = 15
 #: Vacancies at/above this score are "good enough that a filter must not kill
 #: them" — the backtest reference set alongside liked history (ticket: ">= 40").
 BACKTEST_MIN_SCORE = 40
@@ -206,6 +211,48 @@ def undiscussed_garbage() -> list[dict]:
             }
         )
     return out
+
+
+def auto_garbage_titles(max_titles: int = 200) -> list[str]:
+    """Titles the STRONG model scored near zero — free filter signal.
+
+    Hand-flagged garbage never scaled: it needs the user to notice a bad row and
+    run a command, so in the whole ledger only a handful exist. Now that every
+    role is scored by the strong model in one pass (no cheap screen), a very low
+    score IS a considered judgement and can seed filter proposals by itself.
+
+    Deliberately narrow:
+
+    * ``AUTO_GARBAGE_SCORE`` sits below the weakest role in the liked basket, so
+      a title he might have wanted is never harvested as junk.
+    * Only ``scored_by`` = the strong model counts. A cheap screen score is a
+      guess, and guesses must not teach filters.
+    * Only ``unseen`` rows — once he has judged a role, HIS verdict is the
+      signal, not the model's.
+
+    This proposes nothing on its own: the words still need to recur across
+    ``MIN_GARBAGE_HITS`` titles, still face the clean backtest against everything
+    he ever wanted, and still need his explicit yes to apply.
+    """
+    from scoring_settings import scoring_model
+
+    cur = _conn().cursor()
+    sql = (
+        "SELECT title FROM vacancy "
+        "WHERE status = 'unseen' AND llm_score IS NOT NULL AND llm_score < %s "
+        "AND scored_by = %s"
+    )
+    params: list = [AUTO_GARBAGE_SCORE, scoring_model()]
+    ts = cursor_ts()
+    if ts is not None:
+        sql += " AND llm_scored_at > %s"
+        params.append(ts)
+    sql += " ORDER BY llm_scored_at DESC LIMIT %s"
+    params.append(max_titles)
+    cur.execute(sql, params)
+    rows = cur.fetchall()
+    cur.close()
+    return [r[0] for r in rows if r[0]]
 
 
 def record_garbage(vacancy_id: str, title: str, source: str = "", score=None) -> None:
@@ -874,10 +921,19 @@ def build_review() -> dict:
     decided = decided_since_cursor()
     liked = liked_titles()
     high = high_scored_titles()
+    # Hand-flagged junk first, then everything the strong model scored near
+    # zero. Both feed the SAME proposal machinery — recurrence threshold, clean
+    # backtest, explicit yes — so the wider net cannot loosen the guards.
     garbage_titles = [g["title"] for g in garbage if g["title"]]
+    try:
+        auto_titles = auto_garbage_titles()
+    except Exception:
+        # A learning extra must never take down the gate that reviews it.
+        auto_titles = []
+    proposal_titles = garbage_titles + auto_titles
 
     filter_props = propose_filter_words(
-        garbage_titles, liked, high, existing=personal_filter_words()
+        proposal_titles, liked, high, existing=personal_filter_words()
     )
 
     try:
@@ -886,7 +942,7 @@ def build_review() -> dict:
         penalties = [f.text for f in by_strength(load_factors(), PENALTY)]
     except Exception:
         penalties = []
-    factor_moves = propose_factor_moves(penalties, garbage_titles, liked, high)
+    factor_moves = propose_factor_moves(penalties, proposal_titles, liked, high)
 
     revision = sample_filter_kills() if revision_due() else []
 
