@@ -8,6 +8,7 @@ from config import (
     COMPANIES,
     PROJECT_ROOT,
     APPLYABLE_SCORE,
+    CATALOG_MIN_SCORE,
     DASHBOARD_TZ,
     resolve_canonical_name,
 )
@@ -458,11 +459,25 @@ def prepare_report_data(db: dict = None) -> dict:
         status_exclude=["archived"],
         score_floor_any_company=40,
     )
-    # Exclude unscored vacancies from dashboard — they appear after /score
+    # Exclude unscored vacancies from dashboard — they appear after /score.
+    #
+    # Also drop the weak tail: an UNDECIDED role below CATALOG_MIN_SCORE never
+    # reaches the dashboard at all (decision 2026-08-10). The 40 floor used to
+    # live only in the Catalog tab's client-side filter and in
+    # score_floor_any_company above, which gates unapproved companies — so a
+    # weak role at an APPROVED company was shipped and shown everywhere else.
+    # That is how "EA Funds — Director" (32, a scraped fundraiser page) and
+    # "Elevate Philanthropy — Historical Projects" (28, no description) ended up
+    # in front of him. One floor, applied once, before the data leaves Python.
+    #
+    # Anything he ACTED on stays regardless of score: the weakest role in his
+    # liked basket scores 15, and a decision outranks a number.
     vacancies = [
         v
         for v in all_vacs.values()
-        if v.get("llm_score") is not None and v.get("llm_score", -1) >= 0
+        if v.get("llm_score") is not None
+        and v.get("llm_score", -1) >= 0
+        and (v.get("status") != "unseen" or v.get("llm_score", -1) >= CATALOG_MIN_SCORE)
     ]
     # Fetched-but-not-yet-scored vacancies (rows NOT shipped in `groups`) — the one
     # count the browser can't derive from the raw payload; see the docstring.

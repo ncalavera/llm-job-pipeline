@@ -273,7 +273,17 @@ _MIN_DESC_FP_CHARS = 1000
 # Statuses that carry a user decision — a renamed/language variant must inherit
 # one of these rather than resurface as 'unseen'.
 _DECIDED_STATUSES = frozenset(
-    {"applied", "liked", "to_apply", "to_research", "to_network", "passed", "skipped"}
+    {
+        "applied",
+        "interview",
+        "declined",
+        "liked",
+        "to_apply",
+        "to_research",
+        "to_network",
+        "passed",
+        "skipped",
+    }
 )
 
 # Common title abbreviations expanded to their long form so a spelled-out role
@@ -3457,6 +3467,8 @@ VALID_STATUSES = {
     "to_network",
     "skipped",
     "applied",
+    "interview",
+    "declined",
     "expiring",
     "archived",
 }

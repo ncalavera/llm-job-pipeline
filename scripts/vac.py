@@ -86,18 +86,11 @@ from database_supabase import (
 )
 from geo import geo_bucket
 
-VALID_STATUSES = {
-    "unseen",
-    "liked",
-    "passed",
-    "to_apply",
-    "to_research",
-    "to_network",
-    "skipped",
-    "applied",
-    "expiring",
-    "archived",
-}
+# Imported, not re-listed. This file used to keep its own copy, which silently
+# drifted the moment a status was added elsewhere: `vac.py mark <id> declined`
+# was rejected here while the database, the API and the board all accepted it.
+# One list, one place — database_supabase.VALID_STATUSES is the source.
+from database_supabase import VALID_STATUSES  # noqa: E402
 
 GEO_BUCKETS = {"uk", "germany", "europe", "us", "cis", "other", "unknown"}
 
