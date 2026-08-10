@@ -2251,9 +2251,45 @@ def get_vacancy_statuses() -> dict[str, str]:
     return result
 
 
-def update_vacancy_status(vacancy_uuid: str, status: str):
+#: An application, once made, is permanent history. These statuses record that
+#: the user put his name in front of an employer — the record of what he tried,
+#: how far he got, and what came back. Losing one silently corrupts the only
+#: honest statistics he has about his own search.
+#:
+#: Every AUTOMATIC archival path already scopes itself to ``status = 'unseen'``,
+#: so none of them can reach these. The hole was here: ``update_vacancy_status``
+#: is the single choke point for status writes and would archive anything it was
+#: asked to. A bulk cleanup, a sweeper, or a well-meaning one-off script would
+#: erase an application without a trace.
+APPLICATION_STATUSES = frozenset({"applied", "interview", "declined"})
+
+
+class ApplicationArchiveBlocked(RuntimeError):
+    """Raised when something tries to archive a role the user applied to."""
+
+
+def update_vacancy_status(vacancy_uuid: str, status: str, *, force: bool = False):
+    """Set a vacancy's status.
+
+    Refuses to archive a role in an APPLICATION_STATUSES state: those are the
+    user's own history and must stay visible on the board. Pass ``force=True``
+    only for a deliberate, user-confirmed correction (e.g. an application logged
+    against the wrong role).
+    """
     conn = get_conn()
     cur = conn.cursor()
+    if status == "archived" and not force:
+        cur.execute("SELECT status FROM vacancy WHERE id = %s", (vacancy_uuid,))
+        row = cur.fetchone()
+        current = row[0] if row else None
+        if current in APPLICATION_STATUSES:
+            cur.close()
+            raise ApplicationArchiveBlocked(
+                f"Refusing to archive vacancy {vacancy_uuid}: status is "
+                f"'{current}', which records an application. Applications stay on "
+                "the board — they are the search statistics. Pass force=True only "
+                "for a deliberate correction."
+            )
     cur.execute(
         "UPDATE vacancy SET status = %s, status_updated_at = now() WHERE id = %s",
         (status, vacancy_uuid),
