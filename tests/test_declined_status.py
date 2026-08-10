@@ -1,10 +1,10 @@
 """Tests for the 'interview' and 'declined' statuses.
 
-The failure these close: a role the user actually wanted (FundraiseUp Senior
-Product Manager) sat untriaged for two months, he applied through another
-channel, was declined, and the pipeline never knew any of it. The board ended at
-'applied', so an application had nowhere to finish, and the employer's own
-answer — the strongest calibration signal available — was recorded nowhere.
+The failure these close: a role the user actually wanted sat untriaged for two
+months, he applied through another channel, was declined, and the pipeline never
+knew any of it. The board ended at 'applied', so an application had nowhere to
+finish, and the employer's own answer — the strongest calibration signal
+available — was recorded nowhere.
 """
 
 import learning
@@ -23,9 +23,9 @@ def test_DS01_new_statuses_are_valid():
 
 def test_DS02_new_statuses_are_decided():
     """Decided = a re-listing by the employer never overwrites it. This is the
-    exact protection the FundraiseUp role lacked: 'expiring' is undecided, so
-    when the job was re-listed it was reset to 'unseen' and fell back into the
-    untriaged catalogue."""
+    protection the lost role lacked: 'expiring' is undecided, so when the job was
+    re-listed it was reset to 'unseen' and fell back into the untriaged
+    catalogue."""
     assert "interview" in _DECIDED_STATUSES
     assert "declined" in _DECIDED_STATUSES
 

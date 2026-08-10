@@ -1,6 +1,6 @@
 """The strong model's near-zero scores seed filter proposals by themselves.
 
-Hand-flagged garbage never scaled: it needs the owner to notice a bad row and
+Hand-flagged garbage never scaled: it needs the user to notice a bad row and
 run a command, so the whole ledger holds a handful. Now that every role gets one
 strong-model pass (no cheap screen), a near-zero score is a considered judgement
 and can do that work automatically — without loosening any guard.
