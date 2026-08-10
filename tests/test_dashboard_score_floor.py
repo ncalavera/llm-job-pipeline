@@ -8,6 +8,7 @@ case-study heading with no description (scored 28) ended up on the dashboard.
 """
 
 from config import CATALOG_MIN_SCORE
+from report.data_prep import _ACTIVE_STATUSES
 
 
 def _keep(vacancy):
@@ -15,7 +16,7 @@ def _keep(vacancy):
     score = vacancy.get("llm_score")
     if score is None or score < 0:
         return False
-    return vacancy.get("status") != "unseen" or score >= CATALOG_MIN_SCORE
+    return vacancy.get("status") in _ACTIVE_STATUSES or score >= CATALOG_MIN_SCORE
 
 
 # ---------------------------------------------------------------------------
@@ -39,11 +40,27 @@ def test_SF02_undecided_at_or_above_floor_is_kept():
 # ---------------------------------------------------------------------------
 
 
-def test_SF03_a_role_he_acted_on_survives_any_score():
-    """The weakest role in his liked basket scores 15. Hiding it because a model
-    disagreed with him would be the pipeline overruling its user."""
-    for status in ("liked", "to_apply", "applied", "interview", "declined", "passed"):
+def test_SF03_a_role_being_worked_survives_any_score():
+    """The weakest role in the liked basket scores 15. Hiding it because a model
+    disagreed would be the pipeline overruling its user."""
+    for status in ("liked", "to_apply", "to_research", "to_network", "applied", "interview"):
         assert _keep({"llm_score": 15, "status": status}) is True
+
+
+def test_SF04_a_declined_role_survives_any_score():
+    """A closed application is history the user asked to keep — it is the record
+    of what he tried, and it feeds scoring calibration."""
+    assert _keep({"llm_score": 15, "status": "declined"}) is True
+
+
+def test_SF05_rejected_roles_below_the_floor_are_dropped():
+    """'passed' and 'skipped' are dead ends, not decisions to keep in view.
+    Treating them as active shipped a bulk pass of 190 roles straight back onto
+    the board. Above the floor they stay, so a strong role he rejected is still
+    visible."""
+    for status in ("passed", "skipped"):
+        assert _keep({"llm_score": 15, "status": status}) is False
+        assert _keep({"llm_score": CATALOG_MIN_SCORE, "status": status}) is True
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +68,6 @@ def test_SF03_a_role_he_acted_on_survives_any_score():
 # ---------------------------------------------------------------------------
 
 
-def test_SF04_unscored_is_dropped_whatever_the_status():
+def test_SF06_unscored_is_dropped_whatever_the_status():
     assert _keep({"llm_score": None, "status": "unseen"}) is False
     assert _keep({"llm_score": None, "status": "liked"}) is False

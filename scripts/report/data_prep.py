@@ -13,6 +13,14 @@ from config import (
     resolve_canonical_name,
 )
 from company_registry import PARSING_ARTIFACTS
+
+#: Statuses that mean "this role is live work" — the user picked it up, or an
+#: application is running, or it closed with the employer's own answer. These
+#: survive the dashboard score floor at any score. Everything else (unseen below
+#: the floor, passed, skipped) is either noise or history.
+_ACTIVE_STATUSES = frozenset(
+    {"liked", "to_apply", "to_research", "to_network", "applied", "interview", "declined"}
+)
 from database_supabase import load_vacancies, load_all_enrichment
 from db_conn import get_conn
 
@@ -470,14 +478,21 @@ def prepare_report_data(db: dict = None) -> dict:
     # "Elevate Philanthropy — Historical Projects" (28, no description) ended up
     # in front of him. One floor, applied once, before the data leaves Python.
     #
-    # Anything he ACTED on stays regardless of score: the weakest role in his
-    # liked basket scores 15, and a decision outranks a number.
+    # An ACTIVE decision outranks the score: the weakest role in the liked
+    # basket scores 15, and a role being worked cannot be hidden by a number.
+    # 'passed' / 'skipped' are NOT such decisions — they are dead ends, and
+    # keeping every one of them shipped the whole rejected pile back onto the
+    # board (a bulk pass of 190 roles reappeared in the list immediately).
+    # Below the floor they are history, not work; the Archive tab still has them.
     vacancies = [
         v
         for v in all_vacs.values()
         if v.get("llm_score") is not None
         and v.get("llm_score", -1) >= 0
-        and (v.get("status") != "unseen" or v.get("llm_score", -1) >= CATALOG_MIN_SCORE)
+        and (
+            v.get("status") in _ACTIVE_STATUSES
+            or v.get("llm_score", -1) >= CATALOG_MIN_SCORE
+        )
     ]
     # Fetched-but-not-yet-scored vacancies (rows NOT shipped in `groups`) — the one
     # count the browser can't derive from the raw payload; see the docstring.
