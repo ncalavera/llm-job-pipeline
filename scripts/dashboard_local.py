@@ -43,6 +43,8 @@ VALID_STATUSES = {
     "to_network",
     "skipped",
     "applied",
+    "interview",
+    "declined",
     "expiring",
     "archived",
 }

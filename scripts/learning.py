@@ -34,10 +34,18 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 #: Statuses that mean active interest (a "liked" verdict, in the broad sense).
-LIKED_BASKET = ("liked", "to_apply", "to_research", "to_network", "applied")
+LIKED_BASKET = ("liked", "to_apply", "to_research", "to_network", "applied", "interview")
+#: The employer said no. NOT a user verdict — he wanted this role, someone else
+#: closed it. Kept out of ``DECISION_STATUSES`` so it never reads as "he passed",
+#: but folded into the backtest reference set below: a role he applied to is
+#: proof of fit, so a filter word that would have killed it is dirty.
+REJECTED_STATUSES = ("declined",)
 #: A verdict the user actually MADE (a decision) — liked basket plus an explicit
 #: pass. ``skipped``/``unseen`` are deferrals, not verdicts.
 DECISION_STATUSES = LIKED_BASKET + ("passed",)
+#: Statuses proving the user wanted the role, whoever decided afterwards. This
+#: is the backtest reference set — wider than DECISION_STATUSES on purpose.
+WANTED_STATUSES = LIKED_BASKET + REJECTED_STATUSES
 
 #: A candidate filter word must recur in at least this many garbage titles before
 #: it is even worth backtesting — one fluke should never propose a filter.
@@ -253,8 +261,11 @@ def _titles_where(where: str, params: tuple = ()) -> list[str]:
 
 
 def liked_titles() -> list[str]:
-    placeholders = ", ".join(["%s"] * len(LIKED_BASKET))
-    return _titles_where(f"status IN ({placeholders})", tuple(LIKED_BASKET))
+    """Titles the user wanted — the backtest reference set. Includes roles he
+    applied to and was declined for: the employer's no does not make the role a
+    bad fit, so a filter word that would have killed it is still dirty."""
+    placeholders = ", ".join(["%s"] * len(WANTED_STATUSES))
+    return _titles_where(f"status IN ({placeholders})", tuple(WANTED_STATUSES))
 
 
 def high_scored_titles(min_score: int = BACKTEST_MIN_SCORE) -> list[str]:
@@ -384,7 +395,9 @@ def propose_board_disables(
         for loc in vac.get("locations", []) or []:
             if isinstance(loc, dict) and loc.get("source"):
                 srcs.add(str(loc["source"]))
-        is_good = vac.get("status") in LIKED_BASKET
+        # A board that surfaced a role he applied to has earned its keep, even
+        # if the employer said no — hence WANTED_STATUSES, not LIKED_BASKET.
+        is_good = vac.get("status") in WANTED_STATUSES
         for s in srcs:
             if s not in known_boards:
                 continue

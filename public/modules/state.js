@@ -77,11 +77,13 @@ export const STATUS_PRI = {
   to_research: 1,
   to_network: 2,
   applied: 3,
-  skipped: 4,
-  liked: 5,
-  expiring: 6,
-  passed: 7,
-  unseen: 8,
+  interview: 4,
+  declined: 5,
+  skipped: 6,
+  liked: 7,
+  expiring: 8,
+  passed: 9,
+  unseen: 10,
 };
 
 export const STATUS_BASKET = {
@@ -90,12 +92,19 @@ export const STATUS_BASKET = {
   to_research: "liked",
   to_network: "liked",
   applied: "liked",
+  // An application still in flight is active work, so it stays in the Liked
+  // basket alongside 'applied'.
+  interview: "liked",
   // A protected, about-to-disappear role with a decision still pending belongs
   // in the active (Liked) basket, not Passed.
   expiring: "liked",
   unseen: "unseen",
   passed: "passed",
   skipped: "passed",
+  // The employer said no. A closed outcome, not a role still to consider — so
+  // it leaves the active basket. Unlike 'passed' it records THEIR decision,
+  // which is the strongest calibration signal scoring has.
+  declined: "passed",
 };
 
 export const TRIAGE_COLUMNS = [
@@ -124,6 +133,19 @@ export const TRIAGE_COLUMNS = [
     key: "applied",
     label: "Applied",
     color: "var(--coral)",
+  },
+  {
+    key: "interview",
+    label: "Interview",
+    color: "var(--orange)",
+  },
+  {
+    // The employer's own no. Kept on the board (not folded into Passed) so an
+    // application always has somewhere to end, and so the count of real
+    // rejections stays visible next to the count of applications.
+    key: "declined",
+    label: "Declined",
+    color: "var(--slate)",
   },
   {
     // Roles that fell out of actuality (deadline lapsed or gone from source):
