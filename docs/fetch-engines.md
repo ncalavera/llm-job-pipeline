@@ -233,7 +233,7 @@ recipes read the network but write nothing to any real DB.
 
 ---
 
-## Board engines (`BOARD_FETCHERS`, 14)
+## Board engines (`BOARD_FETCHERS`, 15)
 
 Every board applies `GLOBAL_BLACKLIST` and drops generic pipeline titles; all
 but `firecrawl_board` also apply their own (empty-by-default) `board_blacklist`.
@@ -272,6 +272,15 @@ here.
 - **Pagination & caps:** WP `per_page=100` newest-first until `max_jobs`; detail loop paced at `request_delay`. Postings that 301 to the `data.org/jobs/` index are treated as expired.
 - **Failure signatures:** a listing-page error breaks; nothing fetched + error → re-raised. (Needs `beautifulsoup4`.)
 - **Debug:** `from fetchers.boards.datadotorg import fetch_datadotorg_board; print(len(fetch_datadotorg_board({"name":"data.org","url":"https://data.org/jobs/","max_jobs":5})))`
+
+### `ea_opportunities_next_data` — EA Opportunities Board embedded in its page
+<!-- ENGINE: ea_opportunities_next_data -->
+- **Surface / auth:** `GET https://www.effectivealtruism.org/opportunities`. The Centre for Effective Altruism's board is server-rendered Next.js over Airtable: the whole board (~1000 rows, ~700 KB gzipped) arrives inside the page's `__NEXT_DATA__` script tag. No key, no login. The lighter JSON twin at `/_next/data/<buildId>/opportunities.json` is deliberately **not** used — the buildId changes on every deploy of their site and a stale one answers 404, while the page address never changes.
+- **Config keys:** `page_url` (opt, default the board URL), `board_blacklist`.
+- **Pagination & caps:** none — one request is the complete board. Uncapped on purpose: rows arrive newest-first with no relevance ranking, so a cap would trade completeness for nothing. If the payload ever carries fewer rows than its own `totalCount`, the shortfall is printed.
+- **Filtering:** the board lists more than employment, so rows whose every `opportunityTypes` entry is Funding / Course / Event / Contest / Advising / Independent project are dropped as **not vacancies**. Unpaid and junior work (Volunteer, Internship, Fellowship, Part-time) stays and goes to scoring like any other row (STRATEGY guardrail 1).
+- **Failure signatures:** a page without `__NEXT_DATA__` raises rather than returning `[]` — a board that changed shape must never read as a board with no jobs. Cloudflare answers 403 to a nameless agent, so the request sends a browser User-Agent.
+- **Debug:** `from fetchers.boards.ea_opportunities import fetch_ea_opportunities_board; print(len(fetch_ea_opportunities_board({"name":"EA Opportunities Board","url":"https://www.effectivealtruism.org/opportunities","board_blacklist":[]})))`
 
 ### `fastforward_board` — Fast Forward on Getro
 <!-- ENGINE: fastforward_board -->
@@ -381,6 +390,7 @@ works). Several IDs can share one engine, and one configured strategy
 | `linkedin` | `linkedin_guest` |
 | `consultants_for_impact` | `cfi_board_json` |
 | `probablygood` | `probablygood_algolia` |
+| `ea_opportunities` | `ea_opportunities_next_data` |
 | `a16z`, `sequoia` | `consider_board` — **not registered** (fetcher not wired in this repo; enabling them fetches nothing, per the catalogue note) |
 
 `firecrawl_board` and `algolia_api` are **generic** engines: `algolia_api` backs

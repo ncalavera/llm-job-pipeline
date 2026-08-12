@@ -4,6 +4,7 @@ opt-in selection and quality-gate junk rejection on the merge path.
 """
 
 import importlib
+import json
 import sys
 
 import pytest
@@ -504,6 +505,19 @@ def test_cfi_board_registered_and_disabled_by_default(monkeypatch):
     assert set(cfg._select_enabled_boards()) == {"consultants_for_impact"}
 
 
+def test_ea_opportunities_board_registered_and_disabled_by_default(monkeypatch):
+    import config as cfg
+
+    assert "ea_opportunities" in cfg._ALL_JOB_BOARDS
+    assert cfg._ALL_JOB_BOARDS["ea_opportunities"]["strategy"] == "ea_opportunities_next_data"
+
+    monkeypatch.delenv("JOB_BOARDS", raising=False)
+    assert "ea_opportunities" not in cfg._select_enabled_boards()
+
+    monkeypatch.setenv("JOB_BOARDS", "ea_opportunities")
+    assert set(cfg._select_enabled_boards()) == {"ea_opportunities"}
+
+
 # ---------------------------------------------------------------------------
 # Idealist (Algolia POST) / Fast Forward (Getro POST) / LinkedIn (guest GET)
 # ---------------------------------------------------------------------------
@@ -708,6 +722,173 @@ def test_fetch_probablygood_board_no_external_url_falls_back_to_site(monkeypatch
     )
     assert out[0]["url"] == "https://jobs.probablygood.org/jobs/some-role"
     assert out[0]["org_url"] == "https://jobs.probablygood.org"
+
+
+# ---------------------------------------------------------------------------
+# EA Opportunities Board (whole board embedded in the page as __NEXT_DATA__)
+# ---------------------------------------------------------------------------
+
+EA_BOARD_CFG = {
+    "name": "EA Opportunities Board",
+    "url": "https://www.effectivealtruism.org/opportunities",
+    "board_blacklist": [],
+}
+
+
+def _ea_page(*opportunities, total_count=None):
+    """The board's page: one script tag of JSON, wrapped in enough markup to be real."""
+    payload = {
+        "props": {
+            "pageProps": {
+                "opportunities": list(opportunities),
+                "totalCount": len(opportunities) if total_count is None else total_count,
+            }
+        }
+    }
+    return (
+        '<html><body><div id="__next">rendered cards</div>'
+        '<script id="__NEXT_DATA__" type="application/json">'
+        + json.dumps(payload)
+        + "</script></body></html>"
+    )
+
+
+def test_fetch_ea_opportunities_board(monkeypatch):
+    job = {
+        "id": "recCAvhaNtyVdPPGi",
+        "title": "Research Fellow, Malaria Vector Control",
+        "organizations": [
+            {
+                "id": "recnhkYsOELZlDIIr",
+                "name": "London School of Hygiene & Tropical Medicine",
+                "link": "https://www.lshtm.ac.uk/",
+            }
+        ],
+        "causeAreas": ["Global health & development"],
+        "opportunityTypes": ["Full-time"],
+        "applicationLink": "https://jobs.lshtm.ac.uk/vacancy.aspx?ref=EPH-2026-09",
+        "applicationDeadline": "2026-09-04",
+        "description": "Lead field trials of new malaria vector control tools.",
+        "location": "London, UK",
+        "locationFilter": ["UK"],
+        "routesToImpact": ["Direct high impact on an important cause"],
+        "skillSet": ["Research", "Communication"],
+        "education": ["PhD"],
+        "salary": "£45,000 - £52,000",
+        "createdAt": "2026-08-11T15:42:40.000Z",
+    }
+    grant = {
+        "id": "recFundingRow00",
+        "title": "Transformative AI Fund",
+        "organizations": [{"name": "EA Funds", "link": "https://funds.effectivealtruism.org/"}],
+        "opportunityTypes": ["Funding"],
+        "applicationLink": "https://funds.effectivealtruism.org/funds/transformative-ai",
+        "description": "Early-stage grants for work on risks from advanced AI.",
+        "location": "Remote",
+        "locationFilter": ["Remote"],
+    }
+
+    directory = {
+        "id": "recDirectoryRow",
+        "title": "List of Recurring Fellowships Relevant to Top Problems",
+        "organizations": [],
+        "organization": [],
+        "opportunityTypes": ["Fellowship"],
+        "applicationLink": "https://airtable.com/app53PsYpHxJW61l3/shrQSYXSW9z96y5WE",
+        "description": "An index of other listings.",
+    }
+
+    def router(verb, url, json=None, params=None):
+        assert verb == "GET" and url == "https://www.effectivealtruism.org/opportunities"
+        return _Resp(text=_ea_page(job, grant, directory))
+
+    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
+    out = fetchers.fetch_ea_opportunities_board(EA_BOARD_CFG)
+
+    # The grant call is not a vacancy; the employer-less row is the board's own
+    # index of other listings. Neither reaches scoring.
+    assert len(out) == 1
+    row = out[0]
+    assert row["title"] == "Research Fellow, Malaria Vector Control"
+    assert row["org_override"] == "London School of Hygiene & Tropical Medicine"
+    assert row["org_url"] == "https://www.lshtm.ac.uk/"
+    assert row["url"] == "https://jobs.lshtm.ac.uk/vacancy.aspx?ref=EPH-2026-09"
+    assert row["external_id"] == "recCAvhaNtyVdPPGi"
+    assert row["location"] == "London, UK"
+    assert row["department"] == "Global health & development"
+    assert row["deadline"] == "2026-09-04"
+    assert row["compensation"] == "£45,000 - £52,000"
+    assert "Lead field trials" in row["full_description"]
+    assert "Skills: Research, Communication" in row["full_description"]
+    assert "Education: PhD" in row["full_description"]
+
+
+def test_fetch_ea_opportunities_keeps_unpaid_and_junior_work(monkeypatch):
+    """Volunteer/internship rows are work — scoring judges them, not the fetcher."""
+    rows = [
+        {
+            "id": f"rec{kind}",
+            "title": f"{kind} Role",
+            "organizations": [{"name": "Some Org", "link": ""}],
+            "opportunityTypes": [kind],
+            "applicationLink": f"https://example.test/{kind.lower()}",
+            "description": "A real description of the work involved.",
+            "location": "",
+            "locationFilter": ["Remote", "USA"],
+        }
+        for kind in ("Volunteer", "Internship", "Fellowship", "Part-time", "Event", "Course")
+    ]
+
+    def router(verb, url, json=None, params=None):
+        return _Resp(text=_ea_page(*rows))
+
+    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
+    out = fetchers.fetch_ea_opportunities_board(EA_BOARD_CFG)
+
+    assert [r["title"] for r in out] == [
+        "Volunteer Role",
+        "Internship Role",
+        "Fellowship Role",
+        "Part-time Role",
+    ]
+    # No free-text location: the board's own filter vocabulary stands in.
+    assert out[0]["location"] == "Remote, USA"
+    assert out[0]["org_url"] == EA_BOARD_CFG["url"]
+
+
+def test_fetch_ea_opportunities_prefers_the_written_salary(monkeypatch):
+    """`salary` is a bare number the board derives; `salaryOriginal` is the range."""
+    written = {
+        "id": "recWritten",
+        "title": "Workshop Lead",
+        "organizations": [{"name": "CBAI", "link": "https://cbai.ai/"}],
+        "opportunityTypes": ["Full-time"],
+        "applicationLink": "https://jobs.ashbyhq.com/cbai/db757c40",
+        "description": "Run alignment workshops.",
+        "salary": 90000,
+        "salaryOriginal": "$90,000 – $150,000",
+    }
+    number_only = dict(written, id="recNumber", title="Founding Engineer", salary=180000)
+    del number_only["salaryOriginal"]
+
+    def router(verb, url, json=None, params=None):
+        return _Resp(text=_ea_page(written, number_only))
+
+    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
+    out = fetchers.fetch_ea_opportunities_board(EA_BOARD_CFG)
+    assert [r["compensation"] for r in out] == ["$90,000 – $150,000", "180000"]
+
+
+def test_fetch_ea_opportunities_refuses_a_page_it_cannot_read(monkeypatch):
+    """A board that changed shape is a failure, never a board with no jobs."""
+
+    def router(verb, url, json=None, params=None):
+        return _Resp(text="<html><body>We have moved!</body></html>")
+
+    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
+    fetchers._last_fetch_errors.pop("EA Opportunities Board", None)
+    assert fetchers.fetch_ea_opportunities_board(EA_BOARD_CFG) == []
+    assert "__NEXT_DATA__" in fetchers.get_fetch_errors()["EA Opportunities Board"]
 
 
 def test_fetch_fastforward_board(monkeypatch):
