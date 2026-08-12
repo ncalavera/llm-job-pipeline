@@ -40,7 +40,7 @@ A few boards take optional narrowing via env vars:
 ## The boards
 
 <!-- BEGIN AUTO-GENERATED BOARD TABLE (scripts/gen_board_table.py) -->
-The pipeline ships **15 built-in job boards**. Every one is opt-in (off by default) and free (public API/feed, no key).
+The pipeline ships **16 built-in job boards**. Every one is opt-in (off by default) and free (public API/feed, no key).
 
 | ID | Board | Who it fits |
 | --- | --- | --- |
@@ -59,6 +59,7 @@ The pipeline ships **15 built-in job boards**. Every one is opt-in (off by defau
 | `sequoia` | Sequoia Portfolio | Venture-backed startup roles (Sequoia portfolio): engineering, product, GTM. |
 | `consultants_for_impact` | Consultants for Impact | Strategy / management consultants moving into social-impact work. |
 | `probablygood` | Probably Good | High-impact roles across global health, biosecurity, AI safety, and nonprofit operations. |
+| `ea_opportunities` | EA Opportunities Board | Roles, fellowships and internships at effective altruism organisations, run by the Centre for Effective Altruism. |
 <!-- END AUTO-GENERATED BOARD TABLE -->
 
 > **Portfolio boards `a16z` and `sequoia`** are defined so they appear in the

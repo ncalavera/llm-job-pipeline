@@ -876,3 +876,15 @@ board_blacklist = []
 ttl_days = 3
 tier = "B"
 free = true
+
+[boards.ea_opportunities]
+strategy = "ea_opportunities_next_data"
+name = "EA Opportunities Board"
+audience = "Roles, fellowships and internships at effective altruism organisations, run by the Centre for Effective Altruism."
+audience_ru = "Вакансии, стипендии и стажировки в организациях эффективного альтруизма; ведёт Centre for Effective Altruism."
+audience_tags = ["effective altruism", "global health", "animal welfare", "ai safety", "policy", "research", "operations"]
+url = "https://www.effectivealtruism.org/opportunities"
+board_blacklist = []
+ttl_days = 3
+tier = "B"
+free = true
