@@ -13,9 +13,7 @@ _DEFAULT_PAGE_URL = "https://www.effectivealtruism.org/opportunities"
 
 # The page is server-rendered Next.js: every opportunity arrives inside this
 # one script tag, so there is no pagination and no cap to work around.
-_NEXT_DATA = re.compile(
-    r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S
-)
+_NEXT_DATA = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
 
 # The board lists more than employment — it also carries grant calls, reading
 # groups, conferences and career-advising slots. Those are dropped here because

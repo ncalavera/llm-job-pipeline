@@ -746,7 +746,7 @@ def _ea_page(*opportunities, total_count=None):
         }
     }
     return (
-        "<html><body><div id=\"__next\">rendered cards</div>"
+        '<html><body><div id="__next">rendered cards</div>'
         '<script id="__NEXT_DATA__" type="application/json">'
         + json.dumps(payload)
         + "</script></body></html>"
