@@ -17,9 +17,7 @@ def test_AG01_threshold_sits_below_the_weakest_wanted_role():
 
 def test_AG02_auto_titles_still_face_the_recurrence_threshold():
     """One junk title must never propose a filter word, however it was found."""
-    result = learning.propose_filter_words(
-        ["Chief Strategy and Scale Officer"], liked=[], high=[]
-    )
+    result = learning.propose_filter_words(["Chief Strategy and Scale Officer"], liked=[], high=[])
     assert result["proposals"] == []
 
 
@@ -28,9 +26,7 @@ def test_AG03_auto_titles_still_face_the_backtest():
     anything he wanted — the widened net cannot bypass this."""
     junk = ["Programme Officer, Malaria", "Programme Officer, Nutrition"]
 
-    blocked = learning.propose_filter_words(
-        junk, liked=["Programme Officer, Strategy"], high=[]
-    )
+    blocked = learning.propose_filter_words(junk, liked=["Programme Officer, Strategy"], high=[])
     assert [p["word"] for p in blocked["proposals"]] == []
     assert any(r["word"] == "programme" for r in blocked["rejected"])
 
@@ -83,9 +79,7 @@ def test_AG05_a_broken_harvest_never_takes_down_the_review(monkeypatch):
     monkeypatch.setattr(learning, "revision_due", lambda: False)
     monkeypatch.setattr(learning, "cursor_ts", lambda: None)
     monkeypatch.setattr(learning, "applied_log", lambda limit=5: [])
-    monkeypatch.setattr(
-        learning, "scoring_agreement", lambda: {"value": None, "measured": False}
-    )
+    monkeypatch.setattr(learning, "scoring_agreement", lambda: {"value": None, "measured": False})
 
     review = learning.build_review()
     assert review["ready"] is True

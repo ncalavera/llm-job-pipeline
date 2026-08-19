@@ -489,10 +489,7 @@ def prepare_report_data(db: dict = None) -> dict:
         for v in all_vacs.values()
         if v.get("llm_score") is not None
         and v.get("llm_score", -1) >= 0
-        and (
-            v.get("status") in _ACTIVE_STATUSES
-            or v.get("llm_score", -1) >= CATALOG_MIN_SCORE
-        )
+        and (v.get("status") in _ACTIVE_STATUSES or v.get("llm_score", -1) >= CATALOG_MIN_SCORE)
     ]
     # Fetched-but-not-yet-scored vacancies (rows NOT shipped in `groups`) — the one
     # count the browser can't derive from the raw payload; see the docstring.
