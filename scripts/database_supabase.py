@@ -569,6 +569,9 @@ def _index_row(
         u = normalize_apply_url(loc.get("url"))
         if u:
             index["url"].setdefault(u, {**entry, "title": title or ""})
+        rk = extract_req_key(loc.get("url"))
+        if rk:
+            index["req"].setdefault(rk, {**entry, "title": title or ""})
 
 
 def _build_dedup_index(cur, org: str, company_id) -> dict:
@@ -589,7 +592,7 @@ def _build_dedup_index(cur, org: str, company_id) -> dict:
     rows = cur.fetchall()
     # Decided-status rows first so setdefault keeps them as the canonical target.
     rows.sort(key=lambda r: (0 if r.get("status") in _DECIDED_STATUSES else 1, str(r.get("id"))))
-    index: dict = {"norm": {}, "desc": {}, "url": {}, "seg": {}}
+    index: dict = {"norm": {}, "desc": {}, "url": {}, "seg": {}, "req": {}}
     for r in rows:
         _index_row(
             index,
@@ -613,7 +616,7 @@ def _consume_index_entry(index: dict, row_id) -> None:
     first claims the old row (rename); the second must fork its own row, not
     overwrite the first.
     """
-    for bucket in ("norm", "desc", "url", "seg"):
+    for bucket in ("norm", "desc", "url", "seg", "req"):
         for key in [k for k, entry in index[bucket].items() if entry["id"] == row_id]:
             del index[bucket][key]
 
@@ -657,13 +660,19 @@ def normalize_apply_url(url) -> str:
     if not u:
         return ""
     parts = urlsplit(u)
-    kept = [
-        p
-        for p in parts.query.split("&")
-        if p
-        and not p.split("=", 1)[0].lower().startswith("utm_")
-        and p.split("=", 1)[0].lower() not in _TRACKING_PARAMS
-    ]
+    kept = []
+    for p in parts.query.split("&"):
+        # Probably Good glues its utm decoration straight onto the previous
+        # param's VALUE with no separator ("...ashby_jid=<id>utm_source=PG_board"),
+        # so the plain prefix filters below never see it. Cut a glued utm tail
+        # out of the param before filtering.
+        p = _GLUED_UTM_RE.sub("", p)
+        if (
+            p
+            and not p.split("=", 1)[0].lower().startswith("utm_")
+            and p.split("=", 1)[0].lower() not in _TRACKING_PARAMS
+        ):
+            kept.append(p)
     return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, "&".join(kept), ""))
 
 
@@ -675,6 +684,90 @@ def _row_apply_urls(row) -> set:
         if u:
             urls.add(u)
     return urls
+
+
+_UUID_RE = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+# Glued utm decoration inside a query param's value (no & before it) — see
+# normalize_apply_url and extract_req_key.
+_GLUED_UTM_RE = re.compile(r"utm_[a-z]+=[^&]*", re.I)
+# Workday's requisition code trails the last path segment after an underscore:
+# ".../job/Cairo-Egypt/Supply-Chain-Expert--SSA--L10-_JR123456".
+_WORKDAY_REQ_RE = re.compile(r"_([A-Za-z]{0,6}-?\d{4,}(?:-\d+)?)$")
+
+
+def extract_req_key(url) -> str | None:
+    """The ATS requisition identity carried by an apply URL, or None.
+
+    Boards decorate, re-spell, or outright corrupt the links they copy from an
+    ATS, but the requisition id inside survives every observed mangle (even
+    Probably Good's glued "...<ashby uuid>utm_source=PG_board" keeps the UUID
+    intact). Two same-company rows sharing a req key point at ONE posting
+    regardless of org spelling, title punctuation, or description chrome. Keys
+    are prefixed with the ATS family so numeric ids from two systems never
+    collide; comparisons are only ever made within one company's rows.
+    """
+    u = (url or "").strip()
+    if not u:
+        return None
+    ul = u.lower()
+    uuid_m = _UUID_RE.search(u)
+    if uuid_m and ("ashby_jid=" in ul or "ashbyhq.com/" in ul):
+        return f"ashby:{uuid_m.group(0).lower()}"
+    if uuid_m and "lever.co/" in ul:
+        return f"lever:{uuid_m.group(0).lower()}"
+    if uuid_m and "pinpointhq.com" in ul:
+        return f"pinpoint:{uuid_m.group(0).lower()}"
+    if "greenhouse.io" in ul or "gh_jid=" in ul:
+        m = re.search(r"gh_jid=(\d{5,})", ul) or (
+            re.search(r"/jobs/(\d{5,})", ul) if "greenhouse.io" in ul else None
+        )
+        if m:
+            return f"greenhouse:{m.group(1)}"
+    if "myworkdayjobs.com" in ul or "myworkdaysite.com" in ul:
+        last_seg = urlsplit(ul).path.rstrip("/").rsplit("/", 1)[-1]
+        m = _WORKDAY_REQ_RE.search(last_seg)
+        if m:
+            return f"workday:{m.group(1)}"
+    if "smartrecruiters.com/" in ul:
+        m = re.search(r"smartrecruiters\.com/[^/]+/(\d{9,})", ul)
+        if m:
+            return f"smartrecruiters:{m.group(1)}"
+    if "linkedin.com/jobs/view/" in ul:
+        m = re.search(r"linkedin\.com/jobs/view/(?:[^?#]*?)(\d{8,})", ul)
+        if m:
+            return f"linkedin:{m.group(1)}"
+    if "idealist.org" in ul:
+        m = re.search(r"/(?:[a-z-]+-job|job|internship|volunteer-opportunity)/([0-9a-f]{16,})", ul)
+        if m:
+            return f"idealist:{m.group(1)}"
+    if uuid_m:
+        return f"uuid:{uuid_m.group(0).lower()}"
+    return None
+
+
+def _row_req_keys(row) -> set:
+    """Req keys of every apply URL recorded on an existing row's locations[]."""
+    keys = set()
+    for loc in row.get("locations") or []:
+        k = extract_req_key(loc.get("url"))
+        if k:
+            keys.add(k)
+    return keys
+
+
+def _title_token_overlap(a: str, b: str) -> float:
+    """Jaccard overlap of two titles' significant words (strong-normalized,
+    stopwords out). Used only under a same-req-key match, where the question is
+    not "same role?" (the req key already says yes) but "did a source stamp one
+    URL on several DIFFERENT roles?" — unrelated titles score near 0, retitles
+    and wording variants of one posting score high."""
+    ta = {w for w in _normalize_title_strong(a or "").split() if w not in _TITLE_STOPWORDS}
+    tb = {w for w in _normalize_title_strong(b or "").split() if w not in _TITLE_STOPWORDS}
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
 
 
 def _comparable_bodies(a_len: int, b_len: int) -> bool:
@@ -722,7 +815,7 @@ def _find_existing_vacancy(
     """Return (existing row, match_kind, insert_hash) for this signature.
 
     ``existing`` is the row to merge onto, or None to insert a new row.
-    ``match_kind`` is "exact", "norm", "desc", "seg", "fork" or None. ``insert_hash`` is
+    ``match_kind`` is "exact", "req", "norm", "desc", "seg", "fork" or None. ``insert_hash`` is
     the dedup_hash the caller MUST use when it inserts (existing is None):
     normally the canonical ``dedup_hash``, but a body-salted hash when this is a
     distinct sibling colliding with the canonical row (match_kind == "fork").
@@ -799,6 +892,13 @@ def _find_existing_vacancy(
             # both cases must not spawn a re-scoreable parallel row (per-facet dup fix).
             if dedup_hash in batch_claimed or _row_already_settled(row):
                 return row, "exact", dedup_hash
+            # Same ATS requisition id in the apply URL = the SAME posting, no
+            # matter how much the bodies differ (two sources wrap one JD in
+            # different chrome): fold, never fork a parallel copy.
+            if candidate_url:
+                cand_req = extract_req_key(candidate_url)
+                if cand_req and cand_req in _row_req_keys(row):
+                    return row, "exact", dedup_hash
             # Re-match this role's own salted row, else fork so the live sibling
             # is not merged away.
             salted = make_sibling_vacancy_id(dedup_hash, desc_fp)
@@ -808,6 +908,26 @@ def _find_existing_vacancy(
                 return sibling, "exact", salted
             return None, "fork", salted
         return row, "exact", dedup_hash
+    # Same-company, same ATS requisition id: the strongest cross-source signal.
+    # Boards decorate, re-spell, or corrupt the links they copy from an ATS,
+    # but the req id inside survives (extract_req_key), so two rows sharing one
+    # identify ONE posting even when org spelling, title punctuation, and body
+    # chrome all differ. One guard: a source that stamps a single URL onto
+    # SEVERAL of a company's roles must not collapse them — fold only when the
+    # bodies fingerprint alike or the titles share most significant words.
+    if candidate_url and candidate_title:
+        cand_req = extract_req_key(candidate_url)
+        hit = index["req"].get(cand_req) if cand_req else None
+        if hit is not None and hit["dedup_hash"] not in batch_hashes:
+            cur.execute("SELECT * FROM vacancy WHERE id = %s", (hit["id"],))
+            cand = cur.fetchone()
+            if cand is not None:
+                row_fp = description_fingerprint(cand.get("full_description"))
+                same_body = bool(desc_fp and row_fp and desc_fp == row_fp)
+                if same_body or _title_token_overlap(candidate_title, hit.get("title", "")) >= 0.5:
+                    _consume_index_entry(index, hit["id"])
+                    return cand, "req", dedup_hash
+
     # Same-company, same apply URL: an apply URL identifies one requisition, so
     # a retitled re-listing of it ("Director of MEAL" -> "Director of MEAL,
     # Africa"; "Program Manager, X" -> "Program Manager, X - Deal Operations")

@@ -63,7 +63,9 @@ from database_supabase import (  # noqa: E402
     _comparable_bodies,
     _normalize_title_strong,
     _title_segment_keys,
+    _title_token_overlap,
     _titles_equal_sans_stopwords,
+    extract_req_key,
     make_normalized_id,
     description_fingerprint,
     normalize_apply_url,
@@ -138,6 +140,27 @@ def _urls(row):
     return urls
 
 
+def _req_keys(row):
+    """ATS requisition keys of a row's apply URLs (see extract_req_key)."""
+    keys = set()
+    for loc in row.get("locations") or []:
+        k = extract_req_key(loc.get("url"))
+        if k:
+            keys.add(k)
+    return keys
+
+
+def _req_mergeable(a, b):
+    """Save-path guard for two rows sharing a req key: fold unless the shared
+    URL looks stamped onto two DIFFERENT roles (bodies fingerprint apart AND
+    the titles share almost no significant words)."""
+    fa = description_fingerprint(a.get("full_description"))
+    fb = description_fingerprint(b.get("full_description"))
+    if fa and fb and fa == fb:
+        return True
+    return _title_token_overlap(a.get("title") or "", b.get("title") or "") >= 0.5
+
+
 def _url_compatible(a, b):
     """False only when both rows carry non-empty apply URLs that do not overlap
     — that pair is two distinct reqs and must not be clustered together."""
@@ -197,6 +220,7 @@ def _cluster(rows):
         desc_seen: dict = {}
         url_seen: dict = {}
         seg_seen: dict = {}
+        req_seen: dict = {}
         for r in company_rows:
             uf.find(r["id"])  # ensure the row is a node even if it stays a singleton
             nkey = make_normalized_id(r["org"], r["title"] or "")
@@ -241,6 +265,16 @@ def _cluster(rows):
                 tb = _normalize_title_strong(by_id[prev_u].get("title") or "")
                 if ta and tb and (ta in tb or tb in ta or _titles_equal_sans_stopwords(ta, tb)):
                     uf.union(r["id"], prev_u)
+            # Shared ATS requisition key = one posting even when the boards
+            # mangled everything else (org spelling, title wording, URL
+            # decoration, body chrome). Mirrors the save-path req merge and its
+            # stamped-URL guard (_req_mergeable).
+            for k in _req_keys(r):
+                prev_r = req_seen.get(k)
+                if prev_r is None:
+                    req_seen[k] = r["id"]
+                elif _req_mergeable(by_id[prev_r], r):
+                    uf.union(r["id"], prev_r)
 
         groups: dict = {}
         for r in company_rows:
@@ -278,6 +312,11 @@ def _needs_manual_review(cluster):
         return False
     url_sets = [_urls(r) for r in live]
     if all(url_sets) and set.intersection(*url_sets):
+        return False
+    # Every live row carries the same ATS requisition key → one posting listed
+    # by several boards at once, safe to auto-collapse.
+    req_sets = [_req_keys(r) for r in live]
+    if all(req_sets) and set.intersection(*req_sets):
         return False
     if len(live) == 2 and _board_prefix_pair(live[0], live[1]):
         return False
