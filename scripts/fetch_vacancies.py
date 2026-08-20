@@ -150,6 +150,7 @@ from fetchers import (
 )
 from database_supabase import (
     get_conn,
+    get_archived_hashes,
     save_vacancies,
     refresh_unchanged_company_last_seen,
     archive_gone_vacancies,
@@ -527,9 +528,13 @@ def _filter_companies(args) -> dict:
     return filtered
 
 
-def _fetch_one_company(org_name, config, tier, strategy, fetch_stats) -> int:
+def _fetch_one_company(org_name, config, tier, strategy, fetch_stats, archived_hashes=None) -> int:
     """Fetch one tracked company, save its vacancies, and record source tracking
-    + gone-detection telemetry. Returns the count of new vacancies added."""
+    + gone-detection telemetry. Returns the count of new vacancies added.
+
+    ``archived_hashes`` — the run-wide ``get_archived_hashes(include_gone=False)``
+    set, loaded once in main() and threaded through to save_vacancies (which
+    loads it itself when None — single-company callers and tests)."""
     print(f"\n--- {org_name} (Tier {tier}) ---")
 
     jobs = []
@@ -621,7 +626,7 @@ def _fetch_one_company(org_name, config, tier, strategy, fetch_stats) -> int:
                 f"  [{org_name}] department filter: {excluded}/{before} excluded, {len(jobs)} remaining"
             )
 
-    new_count = save_vacancies(org_name, tier, jobs)
+    new_count = save_vacancies(org_name, tier, jobs, archived_hashes)
 
     # Firecrawl reported the careers page byte-identical to the last scrape
     # (changeStatus == "same"): it returns an empty UnchangedListing sentinel, so
@@ -666,11 +671,15 @@ def _fetch_one_company(org_name, config, tier, strategy, fetch_stats) -> int:
     return new_count
 
 
-def _fetch_one_board(board_id, board_cfg, strategy) -> tuple[int, str]:
+def _fetch_one_board(board_id, board_cfg, strategy, archived_hashes=None) -> tuple[int, str]:
     """Fetch one job board, save its vacancies, update source tracking and mark
     the board fetched. Returns (count of new vacancies added, fetch status —
     'ok' or an error string); the caller uses the status as the
-    positive-evidence gate for the stale-board archival sweep."""
+    positive-evidence gate for the stale-board archival sweep.
+
+    ``archived_hashes`` — the run-wide ``get_archived_hashes(include_gone=True)``
+    set, loaded once in main() and threaded through to save_board_vacancies
+    (which loads it itself when None — single-board callers and tests)."""
     board_name = board_cfg["name"]
     print(f"\n--- {board_name} (board, tier {board_cfg.get('tier', 'C')}) ---")
 
@@ -719,7 +728,7 @@ def _fetch_one_board(board_id, board_cfg, strategy) -> tuple[int, str]:
     # Save raw fetch log
     _save_fetch_log(f"{strategy}_{board_id}", jobs, board_fetch_status)
 
-    new_count = save_board_vacancies(board_cfg, jobs)
+    new_count = save_board_vacancies(board_cfg, jobs, archived_hashes)
     update_source_tracking(
         board_name,
         board_cfg.get("tier", "C"),
@@ -808,6 +817,12 @@ def main():
         # Collect manual-check companies to show at the end
         manual_companies = []
 
+        # Tombstone set for the direct-ATS path, loaded ONCE for the whole run
+        # — save_vacancies used to re-pull it for every company. Tombstones
+        # written DURING the run are 'gone_from_source' (gone-detection), which
+        # this set excludes by definition, so the hoist loses nothing.
+        direct_archived_hashes = get_archived_hashes(include_gone=False)
+
         for org_idx, (org_name, config) in enumerate(filtered.items()):
             run_status.step(org_name, org_idx, new=total_new)
             strategy = config["strategy"]
@@ -836,7 +851,9 @@ def main():
                 print(f"  [{org_name}] Skipped (--free-only mode)")
                 continue
 
-            company_new = _fetch_one_company(org_name, config, tier, strategy, fetch_stats)
+            company_new = _fetch_one_company(
+                org_name, config, tier, strategy, fetch_stats, direct_archived_hashes
+            )
             total_new += company_new
             fetch_stats["career_sites"]["total"] += 1
             if company_new > 0:
@@ -862,6 +879,12 @@ def main():
             # config so the dashboard's Boards tab has a single source of truth.
             sync_boards(JOB_BOARDS)
 
+            # Full tombstone set for the board path, loaded ONCE for all boards.
+            # Loaded HERE — after the company loop — so 'gone_from_source'
+            # tombstones written by this run's direct-ATS gone-detection are in
+            # the set, exactly as when each board reloaded it.
+            board_archived_hashes = get_archived_hashes(include_gone=True)
+
             for board_idx, (board_id, board_cfg) in enumerate(JOB_BOARDS.items()):
                 strategy = board_cfg["strategy"]
                 board_name = board_cfg["name"]
@@ -884,7 +907,9 @@ def main():
                     fetch_stats["boards"]["ttl_skipped"] += 1
                     continue
 
-                board_new, board_status = _fetch_one_board(board_id, board_cfg, strategy)
+                board_new, board_status = _fetch_one_board(
+                    board_id, board_cfg, strategy, board_archived_hashes
+                )
                 if board_status == "ok":
                     fetched_ok_boards.add(board_name)
                 total_new += board_new

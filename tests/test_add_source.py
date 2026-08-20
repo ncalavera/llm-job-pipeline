@@ -69,7 +69,11 @@ def _company_row(db, canonical):
 
 def test_merge_vacancies_signature(dal):
     sig = inspect.signature(dal.save_vacancies)
-    assert list(sig.parameters) == ["org_name", "tier", "jobs"]
+    params = list(sig.parameters)
+    assert params[:3] == ["org_name", "tier", "jobs"]
+    # archived_hashes is the optional run-wide tombstone set (loaded once per
+    # run by fetch_vacancies.main); 3-arg callers keep working unchanged.
+    assert sig.parameters["archived_hashes"].default is None
 
 
 def test_update_source_tracking_signature(dal):

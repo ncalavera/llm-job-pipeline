@@ -1745,10 +1745,17 @@ def _print_merge_summary(
         )
 
 
-def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
+def save_vacancies(
+    org_name: str, tier, jobs: list[dict], archived_hashes: set[str] | None = None
+) -> int:
     """Save fetched jobs into the DB. Returns count of new vacancies.
 
     Same role (org + title) at different locations → one entry with locations[].
+
+    ``archived_hashes`` — the ``get_archived_hashes(include_gone=False)`` set.
+    A multi-company run (fetch_vacancies.main) loads it ONCE and passes it in;
+    loading it here per company re-pulled the whole tombstone table for every
+    org. When omitted (tests, one-off callers) it is loaded here as before.
     """
     org_name = resolve_canonical_name(org_name)
     company_id = resolve_company_id(org_name)
@@ -1763,9 +1770,10 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     # company's own re-listing resurrects a role the source had merely dropped.
     # Every OTHER tombstone reason — crucially 'score_below_threshold' — STAYS in
     # the set, so a role we buried for a low score is NOT re-imported / re-scored /
-    # re-archived each run when the ATS still lists it. Loaded
-    # once (not per row).
-    archived_hashes = get_archived_hashes(include_gone=False)
+    # re-archived each run when the ATS still lists it. Loaded once per RUN by
+    # the caller when possible (see docstring), not per company, never per row.
+    if archived_hashes is None:
+        archived_hashes = get_archived_hashes(include_gone=False)
     # Resurrects must clear a machine-archival reason (board_stale /
     # board_disabled) so it never sits on a live row. Guarded once (0014).
     has_status_reason = _vacancy_has_column("status_reason")
@@ -1934,11 +1942,17 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     return new_count
 
 
-def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
+def save_board_vacancies(
+    board_cfg: dict, jobs: list[dict], archived_hashes: set[str] | None = None
+) -> int:
     """Save job board results into the DB. Returns count of new vacancies.
 
     Unknown orgs → ensure_company(status=_auto_discovery_status()), "candidate"
     by default (see that function). Skips inactive companies.
+
+    ``archived_hashes`` — the ``get_archived_hashes(include_gone=True)`` set.
+    A multi-board run (fetch_vacancies.main) loads it ONCE and passes it in;
+    when omitted (tests, one-off callers) it is loaded here as before.
     """
     today = datetime.now(DASHBOARD_TZ).date().isoformat()
     tier = board_cfg.get("tier", "C")
@@ -1956,8 +1970,10 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
     has_status_reason = _vacancy_has_column("status_reason")
 
     # Board path: full archived set (include_gone=True) so a lagging feed cannot
-    # resurrect a posting the source already closed. Loaded once (not per row).
-    archived_hashes = get_archived_hashes(include_gone=True)
+    # resurrect a posting the source already closed. Loaded once per RUN by the
+    # caller when possible (see docstring), not per board, never per row.
+    if archived_hashes is None:
+        archived_hashes = get_archived_hashes(include_gone=True)
     # Per-company dedup index, built lazily (a board batch spans many orgs) so a
     # renamed / re-punctuated / language variant merges onto the live row.
     dedup_index_cache: dict = {}

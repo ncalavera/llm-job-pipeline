@@ -1707,9 +1707,9 @@ def _h_verdicts(state, entry, opts):
 
 def _h_publish(state, entry, opts):
     # Warn-only: the gate detects a dirty run but never withholds the refresh.
-    # Skipping here never protected anything — score --save already regenerated
-    # the live snapshot before this stage runs — so the site stays fresh and the
-    # dirt is reported loudly on the stage note instead.
+    # This stage is the run's ONE dashboard rebuild (score --save no longer
+    # regenerates it per chunk — that is opt-in via --dashboard now), so the
+    # site stays fresh and the dirt is reported loudly on the stage note.
     _allowed, reasons = check_publish_gate(state)
     if opts.no_publish:
         if reasons:

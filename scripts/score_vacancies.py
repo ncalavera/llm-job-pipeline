@@ -69,6 +69,13 @@ def build_parser() -> argparse.ArgumentParser:
         "score. Omit to leave scored_by unset.",
     )
     parser.add_argument(
+        "--dashboard",
+        action="store_true",
+        help="With --save: regenerate the dashboard after saving (default: off — "
+        "run_daily's publish stage rebuilds it once per run; per-chunk rebuilds "
+        "were redundant work)",
+    )
+    parser.add_argument(
         "--files",
         nargs="+",
         metavar="FILE",
@@ -676,11 +683,16 @@ def cmd_save(args):
     else:
         archive_vacancies()  # prints the "paused" notice; no-op without --archive
 
-    # Regenerate dashboard so ticker and stats reflect new scores
-    from report import generate_dashboard
+    # Dashboard regeneration is opt-in (--dashboard): a scoring run saves in
+    # chunks, and rebuilding the multi-MB snapshot on every --save was
+    # redundant — run_daily's publish stage rebuilds it exactly once per run.
+    if getattr(args, "dashboard", False):
+        from report import generate_dashboard
 
-    generate_dashboard()
-    print("Dashboard regenerated.")
+        generate_dashboard()
+        print("Dashboard regenerated.")
+    else:
+        print("Dashboard not regenerated (pass --dashboard, or let the publish stage build it).")
 
 
 # ---------------------------------------------------------------------------
