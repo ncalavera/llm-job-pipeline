@@ -4,10 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "node server.js",
     "test:js": "node --test"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2"
+    "@supabase/supabase-js": "^2",
+    "pg": "^8"
   },
   "engines": {
     "node": ">=18"
