@@ -101,8 +101,26 @@ def _supabase_url() -> str | None:
     return os.environ.get("SUPABASE_DB_URL") or os.environ.get("SUPABASE_DIRECT_URL")
 
 
-#: True when running on the local SQLite backend (no Supabase configured).
+#: True when running on the local SQLite backend (no Postgres URL configured).
 IS_SQLITE = _supabase_url() is None
+
+
+def _pg_host_label() -> str:
+    """Human-readable host of the configured Postgres URL, for banners only.
+
+    The env var is still named SUPABASE_DB_URL for compatibility, but since the
+    2026-08 self-host migration it points at the forge server's Postgres
+    (usually through an SSH tunnel on 127.0.0.1), so banners must not claim
+    "Supabase" — they print the actual host instead.
+    """
+    url = _supabase_url() or ""
+    m = re.search(r"@([^/@:]+)(?::(\d+))?/", url)
+    if not m:
+        return "postgres"
+    host = m.group(1)
+    if host in ("127.0.0.1", "localhost"):
+        return f"local tunnel {host}:{m.group(2) or '5432'}"
+    return host
 
 
 def _psycopg2_missing(exc: ImportError) -> None:
@@ -140,7 +158,7 @@ def print_backend_banner(stream=None) -> None:
     if IS_SQLITE:
         print(f"Backend: local SQLite ({sqlite_db_path()})", file=out, flush=True)
     else:
-        print("Backend: Postgres (Supabase)", file=out, flush=True)
+        print(f"Backend: Postgres ({_pg_host_label()})", file=out, flush=True)
     _warn_backend_mismatch(out)
 
 
@@ -162,14 +180,14 @@ def _warn_backend_mismatch(out) -> None:
     banner = None
     if env_declares_supabase and IS_SQLITE:
         banner = (
-            "WARNING: .env is configured for Supabase, but this run is on local SQLite.\n"
+            "WARNING: .env is configured for Postgres, but this run is on local SQLite.\n"
             "  Reason: SUPABASE_DB_URL is empty/unset in the active environment and\n"
             "  overrides the .env value (an already-exported shell var wins over .env).\n"
             "  Fix: unset the empty SUPABASE_DB_URL in this shell, or export a real one."
         )
     elif not env_declares_supabase and not IS_SQLITE:
         banner = (
-            "WARNING: .env is NOT configured for Supabase, but this run connects to Postgres.\n"
+            "WARNING: .env is NOT configured for Postgres, but this run connects to Postgres.\n"
             "  Reason: SUPABASE_DB_URL is set in your shell environment (inherited from\n"
             "  another project) and takes priority over .env.\n"
             "  Fix: `unset SUPABASE_DB_URL SUPABASE_DIRECT_URL` to use the local SQLite demo."
@@ -808,7 +826,7 @@ def _connect_supabase():
             conn.commit()
             cur.execute("SELECT current_database(), current_user")
             db_name, db_user = cur.fetchone()
-            print(f"  Supabase: connected ({db_name}, {db_user})")
+            print(f"  Postgres: connected ({db_name}, {db_user} @ {_pg_host_label()})")
             cur.close()
             return conn
         except psycopg2.OperationalError:
