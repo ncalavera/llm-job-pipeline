@@ -10,7 +10,7 @@ Adds a source to the pipeline. The first argument selects the mode:
 | --- | --- | --- |
 | `board` | **Board** | Enable a built-in job board for fetching (persisted; survives sessions). |
 | `vacancy` / `job` | **Single vacancy** | Hand-add ONE vacancy; it lands `unseen` and is auto-scored by `/jobs-new`. |
-| _(anything else)_ / `company` | **Company** (default) | Auto-detect a company's ATS and add it to Supabase. |
+| _(anything else)_ / `company` | **Company** (default) | Auto-detect a company's ATS and add it to the database. |
 
 ## Step 0: Route on the first argument
 
@@ -347,9 +347,9 @@ Record that will be added to the company table:
 
 Ask: "Does this look correct? Should I add it and run a test fetch?"
 
-Wait for confirmation before adding to Supabase.
+Wait for confirmation before adding to the database.
 
-### Step 3: Add to Supabase company table
+### Step 3: Add to the company table
 
 **Check for duplicates first:**
 
@@ -428,7 +428,7 @@ Options:
   3. Switch to firecrawl_scrape strategy (uses Firecrawl credits)
 ```
 
-### Step 5: Merge into Supabase (if fetch succeeded)
+### Step 5: Merge into the database (if fetch succeeded)
 
 If the test fetch returned vacancies, offer to merge them into the database:
 
@@ -460,7 +460,7 @@ elif strategy == 'firecrawl_scrape':
 
 new_count = save_vacancies(org_name, config.get('tier', 2), jobs)
 update_source_tracking(org_name, config.get('tier', 2), strategy, new_count)
-print(f'Merged: {new_count} new vacancies added to Supabase')
+print(f'Merged: {new_count} new vacancies added to the database')
 "
 ```
 
@@ -504,12 +504,12 @@ This is needed for cross-board deduplication.
 
 ### Important rules (company mode)
 
-- **Always confirm with the user** before adding to Supabase
-- **Always run a test fetch** before merging into Supabase
+- **Always confirm with the user** before adding to the database
+- **Always run a test fetch** before merging into the database
 - **Flag blind scoring risk** prominently if descriptions are missing
 - **Never use firecrawl_scrape as first choice** — only if no ATS detected
 - **Check for duplicates** before adding (check `company_registry.COMPANIES`)
-- **Supabase `company` table is the single source of truth** — `company_registry.py` loads COMPANIES from it
+- **The `company` table is the single source of truth** — `company_registry.py` loads COMPANIES from it
 
 ---
 

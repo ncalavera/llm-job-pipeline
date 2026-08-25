@@ -233,3 +233,93 @@ def test_sweep_collapses_both_live_same_url_pair(dal, monkeypatch, capsys):
     rows = _raw_rows(dal)
     live = [r for r in rows if r["status"] != "archived"]
     assert len(live) == 1, [(r["title"], r["status"]) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# One careers-page req, three sources: trailing slash + an "X or Y" dual title
+# ---------------------------------------------------------------------------
+#
+# Production regression (run 2026-08-24): one COO opening was stored THREE
+# times — the direct fetch, one board that spelled the acronym out and dropped
+# the URL's trailing slash, and one board that wrote the dual title with "or".
+# The careers-page URL carries no ATS requisition id, so the req-key path never
+# fires and the same-URL path is the only cross-source anchor; a trailing slash
+# and a connective "or" were enough to break it.
+
+_COO_SLASH = "https://www.northlight.test/careers/chief-operating-officer/"
+_COO_BARE = "https://www.northlight.test/careers/chief-operating-officer"
+
+
+def test_trailing_slash_is_not_a_second_req(dal):
+    n = dal.normalize_apply_url
+    assert n(_COO_SLASH) == n(_COO_BARE)
+    assert n(_COO_SLASH + "?utm_source=x") == n(_COO_BARE)
+    assert n("https://acme.test/") == n("https://acme.test")
+
+
+def test_titles_equal_sans_stopwords_tolerates_or(dal):
+    strong = dal._normalize_title_strong
+    eq = dal._titles_equal_sans_stopwords
+    assert eq(strong("COO / Director of Operations"), strong("COO or Director of Operations"))
+    assert not eq(strong("Director of Finance"), strong("Director or Head of Programs"))
+
+
+def test_one_req_listed_by_three_sources_stays_one_row(dal):
+    dal.ensure_company("Northlight Foundation", status="active")
+    # Direct fetch: full body, trailing-slash URL.
+    dal.save_vacancies(
+        "Northlight Foundation", "A", [_job("COO / Director of Operations", url=_COO_SLASH)]
+    )
+    _commit(dal)
+
+    # Board 1 spells the acronym out and links the URL without the slash.
+    dal.save_board_vacancies(
+        {"name": "80,000 Hours", "url": "https://80k.test"},
+        [
+            {
+                **_job(
+                    "Chief Operating Officer / Director of Operations",
+                    url=_COO_BARE,
+                    desc="One board's own short stub for the same role. " * 6,
+                ),
+                "org_override": "Northlight Foundation",
+            }
+        ],
+    )
+    _commit(dal)
+
+    # Board 2 writes the same dual title with "or" instead of the slash.
+    dal.save_board_vacancies(
+        {"name": "Probably Good", "url": "https://probablygood.test"},
+        [
+            {
+                **_job(
+                    "COO or Director of Operations",
+                    url=_COO_SLASH,
+                    desc="Another board's short stub for the same role. " * 6,
+                ),
+                "org_override": "Northlight Foundation",
+            }
+        ],
+    )
+    _commit(dal)
+
+    rows = _raw_rows(dal)
+    assert len(rows) == 1, [r["title"] for r in rows]
+
+
+def test_trailing_slash_never_merges_different_roles(dal):
+    """The slash fold must not turn a shared generic careers URL into a merge
+    licence: two genuinely different roles stay two rows."""
+    dal.ensure_company("Acme Fund", status="active")
+    dal.save_vacancies(
+        "Acme Fund", "A", [_job("Director of Finance", url="https://acme.test/jobs")]
+    )
+    _commit(dal)
+    dal.save_vacancies(
+        "Acme Fund", "A", [_job("Director of Programs", url="https://acme.test/jobs/")]
+    )
+    _commit(dal)
+
+    rows = _raw_rows(dal)
+    assert len(rows) == 2, [r["title"] for r in rows]

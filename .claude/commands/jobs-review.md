@@ -167,7 +167,7 @@ Deep review of `liked` vacancies — walks through them one by one and helps mak
     (e.g. `application_research`) keeps it profile-only. Both surface in the
     company profile's "Applications & Research" block and on the vacancy card.
 
-8. After all companies are reviewed — update vacancy statuses in Supabase:
+8. After all companies are reviewed — update vacancy statuses in the database:
 
    | Verdict | Status |
    |---------|--------|
@@ -202,7 +202,7 @@ The auto-archive by score threshold is currently paused under pure-fit scoring �
 - **Save after every company** — incremental DB save is mandatory, not optional.
 - **1 tracker issue = 1 company** — not one per vacancy, to avoid tracker spam.
 - **Calibration changes need confirmation** — never auto-edit the scoring prompt or blacklist.
-- **Supabase `vacancy.status` is the source of truth** — `triage.json` stores metadata only.
+- **The `vacancy.status` column is the source of truth** — `triage.json` stores metadata only.
 
 ### Files (apply)
 
@@ -213,7 +213,7 @@ The auto-archive by score threshold is currently paused under pure-fit scoring �
 - `config.CASE_BANK_DIR` / `config.APPLICATION_ARTIFACTS_DIR` — the gitignored private zone
   (`JOBSEARCH_PRIVATE_DIR`) for the case bank + application artifacts. Never a hardcoded path.
 - `vacancy.triage` JSONB column — stores notes and decision metadata.
-- `triage/jobs-apply.json` — session history (metadata only; Supabase `vacancy.status` is the source of truth).
+- `triage/jobs-apply.json` — session history (metadata only; The `vacancy.status` column is the source of truth).
 - `triage/session-notes-{date}.md` — running Markdown notes for the session.
 
 ---
@@ -349,7 +349,7 @@ for i, path in enumerate(archives):
 
 Ask: browse a specific archive or restore vacancies?
 
-To restore specific vacancies, update their `status` back to `unseen` in Supabase via `database_supabase.get_conn()`.
+To restore specific vacancies, update their `status` back to `unseen` in the database via `database_supabase.get_conn()`.
 
 ### Important rules (archive)
 
@@ -363,7 +363,7 @@ To restore specific vacancies, update their `status` back to `unseen` in Supabas
 
 ## Mode: vac
 
-Thin triage CLI that runs against whatever backend is active — local SQLite by default (simple mode), or Postgres/Supabase when `SUPABASE_DB_URL` is set. Use it when you do not want to open the dashboard or are on a server without a browser. Pass the sub-command and flags straight through to `scripts/vac.py`.
+Thin triage CLI that runs against whatever backend is active — local SQLite by default (simple mode), or Postgres when `SUPABASE_DB_URL` is set (legacy name; any Postgres). Use it when you do not want to open the dashboard or are on a server without a browser. Pass the sub-command and flags straight through to `scripts/vac.py`.
 
 ```bash
 python3 scripts/vac.py <command>
