@@ -784,6 +784,23 @@ def _require_psycopg2():
         _psycopg2_missing(exc)
 
 
+def _url_host(db_url: str | None) -> str:
+    """host:port of a Postgres URL, for honest connection messages.
+
+    The database moved off Supabase to the self-hosted `forge` box (2026-08-20);
+    the env var name stayed ``SUPABASE_DB_URL`` so the documented rollback keeps
+    working. Printing the real host stops the output claiming "Supabase" when the
+    run actually writes to forge through the local SSH tunnel.
+    """
+    from urllib.parse import urlparse
+
+    try:
+        parts = urlparse(db_url or "")
+        return f"{parts.hostname or '?'}:{parts.port or 5432}"
+    except ValueError:
+        return "?"
+
+
 def _connect_supabase():
     db_url = _supabase_url()
     import sys
@@ -808,14 +825,14 @@ def _connect_supabase():
             conn.commit()
             cur.execute("SELECT current_database(), current_user")
             db_name, db_user = cur.fetchone()
-            print(f"  Supabase: connected ({db_name}, {db_user})")
+            print(f"  Postgres: connected ({db_name}, {db_user}) at {_url_host(db_url)}")
             cur.close()
             return conn
         except psycopg2.OperationalError:
             if attempt == 0:
                 continue
             raise
-    print("ERROR: could not connect to Supabase", file=sys.stderr)
+    print(f"ERROR: could not connect to Postgres at {_url_host(db_url)}", file=sys.stderr)
     sys.exit(1)
 
 

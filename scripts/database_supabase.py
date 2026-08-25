@@ -631,7 +631,12 @@ _TRACKING_PARAMS = {"ref", "src", "source", "fbclid", "gclid", "mc_cid", "mc_eid
 
 # Connective words whose presence/absence never distinguishes two reqs sharing
 # one apply URL: "Director of X" and "Director, X" are the same posting retitled.
-_TITLE_STOPWORDS = {"of", "the", "a", "an", "and", "for", "to"}
+# "or" belongs here for the same reason: a dual title is written "COO / Director
+# of Operations" by one source and "COO or Director of Operations" by the next —
+# the slash already normalizes to whitespace, so the spelled-out connective must
+# fold too. Role NAMES are never stopwords, so two different roles sharing one
+# generic careers URL still keep distinct significant words.
+_TITLE_STOPWORDS = {"of", "the", "a", "an", "and", "or", "for", "to"}
 
 
 def _titles_equal_sans_stopwords(a: str, b: str) -> bool:
@@ -652,9 +657,15 @@ def _titles_equal_sans_stopwords(a: str, b: str) -> bool:
 def normalize_apply_url(url) -> str:
     """Canonical form of an apply URL for dedup comparison.
 
-    Lowercases scheme/host, drops the fragment and tracking-only query params
-    (utm_*, ref, gclid, ...), keeps everything that can identify the req. Two
-    boards linking the same posting then compare equal.
+    Lowercases scheme/host, drops the fragment, a trailing path slash, and
+    tracking-only query params (utm_*, ref, gclid, ...), keeps everything that
+    can identify the req. Two boards linking the same posting then compare equal.
+
+    The trailing slash is decoration, never identity: a careers page serves the
+    same posting at "/careers/chief-operating-officer" and at that path plus a
+    slash, but boards copy the link both ways (one board strips it, the ATS
+    emits it). Left in, the byte-wise URL guard reads one req as two — the
+    2026-08-24 COO triplicate.
     """
     u = (url or "").strip()
     if not u:
@@ -673,7 +684,8 @@ def normalize_apply_url(url) -> str:
             and p.split("=", 1)[0].lower() not in _TRACKING_PARAMS
         ):
             kept.append(p)
-    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, "&".join(kept), ""))
+    path = parts.path.rstrip("/")
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, "&".join(kept), ""))
 
 
 def _row_apply_urls(row) -> set:
