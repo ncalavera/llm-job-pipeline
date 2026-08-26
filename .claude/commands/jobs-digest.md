@@ -1,5 +1,5 @@
 ---
-description: Send a daily Telegram digest of top unseen vacancies and poll button responses back into Supabase.
+description: Send a daily Telegram digest of top unseen vacancies and poll button responses back into the database.
 ---
 
 # /jobs-digest
@@ -18,7 +18,7 @@ Sends the top unseen vacancies to a Telegram chat with inline Like/Pass buttons,
 Environment variables required — set them in your `.env` file or shell environment before running:
 - `TELEGRAM_BOT_TOKEN` — bot token from BotFather
 - `TELEGRAM_CHAT_ID` — target chat or user ID
-- `SUPABASE_DB_URL` — Postgres connection string for Supabase
+- `SUPABASE_DB_URL` — Postgres connection string (legacy name; any Postgres, hosted or self-hosted)
 
 ## Commands
 
@@ -55,5 +55,5 @@ Only one process should consume `getUpdates` at a time — running two pollers o
 ## Notes
 
 - `digest_sent_at` is set at send time — re-running `send` will not re-send already-sent vacancies.
-- Inline button presses update `vacancy.status` directly in Supabase; no intermediate storage.
+- Inline button presses update `vacancy.status` directly in the database; no intermediate storage.
 - The bot must have permission to send messages to the target chat.

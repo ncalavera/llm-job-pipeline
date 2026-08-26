@@ -27,7 +27,7 @@ _NON_VACANCY_TYPES = {"funding", "course", "event", "contest", "advising", "inde
 
 @board_fetcher("ea_opportunities_next_data")
 def fetch_ea_opportunities_board(board_cfg: dict) -> list[dict]:
-    """Fetch opportunities from the Centre for Effective Altruism's board.
+    """Fetch opportunities from the EA Opportunities Board.
 
     Airtable behind it, no public API, and the JSON twin at
     ``/_next/data/<buildId>/opportunities.json`` is deliberately not used: the

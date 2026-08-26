@@ -1,10 +1,10 @@
 """Cross-source dedup anchored on the ATS requisition id (req key).
 
-Production regression (2026-08-19): the SAME Ashby requisition at CEA reached
+Production regression (2026-08-19): the SAME Ashby requisition at one org reached
 the DB twice — Probably Good stored the apply link with its utm decoration
 GLUED onto the ashby_jid value with no separator
 (".../careers?ashby_jid=<uuid>utm_source=PG_board"), so the normalized-URL
-merge read the two boards' links as two different reqs. Nikita had already
+merge read the two boards' links as two different reqs. A user had already
 applied through one row while the other sat in the browse queue. A second
 same-day pair ("Director of Community Growth" vs "Director, Community Growth")
 slipped through the same crack. Earlier same-family escapes: J-PAL / WFP / FHI
