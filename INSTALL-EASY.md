@@ -1,7 +1,7 @@
 # Install Guide — Easy Mode
 
 The no-account, no-server path. Everything runs on your own machine against a
-local database file. No Supabase, no server to host, no SQL editor, no cloud signups.
+local database file. Nothing to host, nothing to install on a server, no signups.
 
 If you are comfortable with databases and want multi-device sync and a daily
 phone digest, read [INSTALL.md](INSTALL.md) (the hardcore path) instead. You can
@@ -21,14 +21,14 @@ upgrade from easy to hardcore later without losing anything.
 
 | | Easy (this guide) | Hardcore ([INSTALL.md](INSTALL.md)) |
 |---|---|---|
-| Accounts to create | **none** | Supabase (free) + a VPS to host the dashboard |
-| Database | local SQLite file | hosted Postgres (Supabase) |
+| What you need | **nothing** | a server you control (a small VPS is enough) |
+| Database | local SQLite file | Postgres on your server |
 | Dashboard | `localhost`, while your terminal is open | always-on URL, any device |
-| Use from your phone | no | yes (the hosted dashboard) |
+| Use from your phone | no | yes (the always-on dashboard) |
 | Daily Telegram digest with 👍/👎 | no (needs a server) | yes |
 | Multi-device / share with a friend | no | yes |
-| Setup time | **~5 min, no signups** | ~15 min, mostly signups |
-| Your data leaves your machine | no | yes (lives in Supabase) |
+| Setup time | **~5 min, nothing to set up** | ~15 min, mostly setting up the server |
+| Your data leaves your machine | no | yes (lives on your server) |
 
 Everything else — fetching, filtering, company review, scoring quality, the
 dashboard UI — is identical. A board/ATS-discovered company lands in the same
@@ -66,7 +66,7 @@ python3 -m pip install requests beautifulsoup4 python-dateutil
 With the venv active, run every later `python3 ...` command from the same shell.
 
 Those three packages cover fetching and the local database. (You do **not** need
-`psycopg2-binary` — that is only for the Supabase path. Installing the full
+`psycopg2-binary` — that is only for the Postgres path. Installing the full
 `requirements.txt` also works and does no harm.)
 
 If you want to run the test suite (`python3 -m pytest tests/ -q`), also install
@@ -208,8 +208,9 @@ public forks.
 
 ## Upgrading to hardcore later
 
-Point `.env` at Supabase and the exact same scripts talk to Postgres instead of
-SQLite — no code changes. Two things easy mode skipped are required now:
+Point `.env` at a Postgres database and the exact same scripts talk to it
+instead of SQLite — no code changes. Two things easy mode skipped are required
+now:
 
 1. **Install the Postgres driver.** Easy mode never installed `psycopg2`, so the
    full-mode scripts would fail with a driver error. Install everything:
@@ -218,14 +219,15 @@ SQLite — no code changes. Two things easy mode skipped are required now:
    ```
    (Skip this and you get a clear "psycopg2 is not installed — pip install -r
    requirements.txt" error, not a crash.)
-2. **Fill `.env` with Supabase.** Set `SUPABASE_DB_URL` (and the dashboard env
-   vars). The scripts auto-load the repo-root `.env` — no manual `export`. Every
-   fetch/score/filter run prints its backend; confirm the line starts with
-   `Backend: Postgres (` and names the host you configured.
+2. **Point `.env` at Postgres.** Set `SUPABASE_DB_URL` to the connection
+   string (the name is historical — it is a plain Postgres URL). The scripts
+   auto-load the repo-root `.env` — no manual `export`. Every fetch/score/filter
+   run prints its backend; confirm the line starts with `Backend: Postgres (`
+   and names the host you configured.
 
-Then follow [INSTALL.md](INSTALL.md) from step 3 (create the Supabase project and
-schema), and re-add your companies (or migrate the SQLite rows). Your commands
-(`/jobs-new`, `/jobs-review`, `/jobs-add`, …) keep working.
+Then follow [INSTALL.md](INSTALL.md) from step 3 (install Postgres on your
+server and apply the schema), and re-add your companies (or migrate the SQLite
+rows). Your commands (`/jobs-new`, `/jobs-review`, `/jobs-add`, …) keep working.
 
 ## Troubleshooting
 

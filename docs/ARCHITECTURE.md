@@ -148,8 +148,8 @@ guardrail 2).
 
 | | Full mode (canonical) | Simple mode (honest demo) |
 | --- | --- | --- |
-| Backend | Postgres (Supabase), `SUPABASE_DB_URL` set | local SQLite file (`data/jobsearch.db`), auto-created |
-| Signups | Supabase (free tier); the dashboard is self-hosted | none |
+| Backend | self-hosted Postgres, `SUPABASE_DB_URL` set (historical name, plain Postgres URL) | local SQLite file (`data/jobsearch.db`), auto-created |
+| What you need | a server you control, running Postgres and `server.js` | nothing |
 | Dashboard | always-on self-hosted Node server (`server.js`) on a VPS, any device, Basic-Auth at the reverse proxy | `localhost` via `dashboard_local.py`, while your terminal is open |
 | Telegram digest | yes | no (needs a server) |
 | Multi-device / sync | yes | no |
@@ -159,13 +159,13 @@ Postgres is the canonical daily path. SQLite is the zero-signup way to try the
 product — everything the pipeline *computes* (fetching, filtering, dedup,
 company review, scoring quality) is identical, and a crash on the demo path is
 still a bug. The differences above are **documented product features that need a
-server**, not silent gaps: simple mode never promises the hosted dashboard, the
-digest, or multi-device sync. Simple mode upgrades to full at any time — point
-`.env` at Supabase and the same scripts switch to Postgres, no code changes
-(the one extra step is installing `psycopg2`, which simple mode skips).
+server**, not silent gaps: simple mode never promises the always-on dashboard,
+the digest, or multi-device sync. Simple mode upgrades to full at any time —
+point `.env` at a Postgres database and the same scripts switch to it, no code
+changes (the one extra step is installing `psycopg2`, which simple mode skips).
 
 Because Postgres is always the live prod database (there is no separate
-staging project), `db_backend.get_conn()` blocks INSERT/UPDATE/DELETE against
+staging database), `db_backend.get_conn()` blocks INSERT/UPDATE/DELETE against
 it from anything it doesn't recognize as pytest or one of the repo's KNOWN
 pipeline entrypoints (an explicit allowlist in `db_backend.py` — location
 under `scripts/` alone is not identity) — the guard that stops a stray ad-hoc

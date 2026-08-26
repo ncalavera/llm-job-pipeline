@@ -9,7 +9,7 @@ Steps marked **[human]** need you; everything else an agent can do.
 
 ## What you'll end up with
 
-- A Supabase (Postgres) database with your companies and vacancies
+- A Postgres database you run yourself, holding your companies and vacancies
 - Scripts that fetch vacancies from company career pages (Greenhouse, Lever,
   Ashby, Workable, Workday and more — no scraping subscriptions needed for most)
 - LLM scoring of every vacancy against *your* profile by your coding agent
@@ -17,7 +17,7 @@ Steps marked **[human]** need you; everything else an agent can do.
 - A dashboard to triage results (optional, a Node server you host yourself)
 - A daily Telegram digest with 👍/👎 buttons (optional)
 
-Time: ~15 minutes of human attention, mostly account signups.
+Time: ~15 minutes of human attention, mostly setting up the server.
 
 ## 1. Prerequisites
 
@@ -25,7 +25,9 @@ Time: ~15 minutes of human attention, mostly account signups.
 - **A coding agent** — [Claude Code](https://claude.com/claude-code) recommended,
   Codex and others work too (see AGENTS.md) — used both for setup and
   as the scoring engine
-- **[human]** A free [Supabase](https://supabase.com) account (free tier is plenty)
+- **[human]** A server you control for Postgres and the dashboard — a small
+  VPS is enough. Everything runs on one box; there is no hosted service to
+  sign up for
 - Optional: a [Firecrawl](https://firecrawl.dev) API key — only needed to
   enrich descriptions from career pages without a parseable ATS
 - Optional: a Telegram bot token (via [@BotFather](https://t.me/BotFather)) —
@@ -46,11 +48,19 @@ pre-commit guard blocks you from ever committing your profile, `.env`,
 
 ## 3. Create the database
 
-1. **[human]** Create a new Supabase project (any name, pick a region near you).
-2. In the Supabase dashboard open **SQL Editor**, paste the contents of
-   `sql/schema.sql`, run it. This creates the two tables (`company`,
-   `vacancy`) and indexes.
-3. Copy the connection string: **Project Settings → Database → Session pooler**.
+Full mode runs Postgres on your own server. `sql/schema.sql` and the
+`sql/migrations/*.postgres.sql` files are the whole schema.
+
+1. **[human]** Install Postgres on the server (this project runs on 17), then
+   create a role and an empty database for the pipeline.
+2. Apply the schema to it, for example:
+   ```bash
+   psql "postgresql://user:password@host:5432/dbname" -f sql/schema.sql
+   ```
+   This creates the two tables (`company`, `vacancy`) and their indexes.
+3. Note the connection string. Keeping Postgres bound to localhost and reaching
+   it over an SSH tunnel is the safer setup — then the connection string your
+   laptop uses points at `127.0.0.1` and the tunnel's local port.
 
 ## 3b. Apply schema migrations
 
@@ -73,10 +83,13 @@ cp .env.example .env
 
 Fill in `.env`:
 
-- `SUPABASE_DB_URL` — the Session pooler connection string from step 3
-- `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` — from **Project Settings → API**
-  (only needed if you deploy the dashboard)
+- `SUPABASE_DB_URL` — the Postgres connection string from step 3. The name is
+  kept for compatibility with existing setups; it is a plain Postgres URL and
+  no longer implies a hosted service.
 - `FIRECRAWL_API_KEY` — optional (see prerequisites)
+
+The dashboard server reads its own `DATABASE_URL` (step 8) rather than this
+file.
 
 The Python scripts auto-load `.env` from the repo root — no manual `export`
 needed. A variable you already exported in your shell takes priority over the
@@ -176,6 +189,10 @@ binds to `127.0.0.1:3000` by default (`HOST`/`PORT` override), so put a reverse
 proxy in front of it for TLS and a password — it shows your private job search,
 keep a login on it. [MIGRATION.md](MIGRATION.md) has the systemd unit and a
 Caddy site block that does both.
+
+Run this on the server that holds Postgres. [MIGRATION.md](MIGRATION.md) walks
+the full deploy: clone the repo to `/opt/llm-job-pipeline`, `npm install
+--omit=dev`, install the systemd unit and env file, then put Caddy in front.
 
 Regenerate dashboard data any time:
 
