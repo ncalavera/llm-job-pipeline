@@ -20,7 +20,7 @@ scheduler — one command a day.
 | `config/defaults.toml` | Machine mechanics — thresholds, geo tables, junk words, the `[boards.*]` catalogue, the `[volume]` window. Neutral; ships for any field. |
 | `config/user_profile.example.md` | The template for your candidate profile. Copy to `config/user_profile.md` (gitignored) — the single place personal taste lives. |
 | `sql/` | `schema.sql` (Postgres) + `schema.sqlite.sql` (SQLite) and `migrations/` (numbered, dual-dialect). |
-| `api/` | Vercel serverless routes (Node) the hosted dashboard calls for live status writes. |
+| `server.js` | The self-hosted Node HTTP server: serves `public/` and answers the `/api/*` routes the dashboard calls for live reads and status writes. |
 | `public/` | The static dashboard (vanilla JS/CSS) — six sections: Today, Vacancies, Companies, Applications, Boards, Settings. |
 | `docs/` | This file, the [board catalogue](job-boards-catalogue.md), the [fetch-engine reference](fetch-engines.md), and the onboarding questionnaire (`index.html`, served by GitHub Pages). |
 | `tests/` | Offline pytest suite — guards, characterizations, parity checks. |
@@ -115,7 +115,7 @@ reading logs:
 - **Run report card** — every `run_daily.py` run ends with a per-stage verdict
   table (`OK / OK-BUT / FAILED / SKIPPED`) rendered from `run_state.json`.
 - **Health tab** (dashboard) — `public/modules/health.js` renders four blocks
-  from the live `api/health-detail.js` endpoint (read-only, no LLM spend):
+  from the live `/api/health-detail` endpoint (read-only, no LLM spend):
   - **Boards** — per enabled board: freshness, failure streak, vacancy count,
     and a **PRESUMED BROKEN** flag (3+ consecutive failures, or fetched yet zero
     vacancies).

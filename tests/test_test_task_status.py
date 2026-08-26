@@ -33,17 +33,20 @@ def test_TT01_test_task_is_a_valid_status():
 
 
 def test_TT02_every_writer_accepts_it():
-    """Three hand-maintained copies of the status set gate a write: the DAL, the
-    simple-mode dashboard and the self-hosted server.
-    A status missing from any one of them is rejected at that door only — the
-    board offers a column the save then refuses."""
+    """Three copies of the status set gate a write: the DAL, the simple-mode
+    dashboard and the self-hosted server. A status missing from any one of them
+    is rejected at that door only — the board offers a column the save then
+    refuses.
+
+    The Python copies now read one vocabulary (scripts/statuses.py), so only the
+    server's JavaScript list can drift. Its own suite asserts membership against
+    the parsed array; this is the cheap cross-language check from here."""
     from dashboard_local import VALID_STATUSES as LOCAL_STATUSES
 
     assert "test_task" in LOCAL_STATUSES
 
-    for rel in ("server.js",):
-        source = (_ROOT / rel).read_text()
-        assert '"test_task"' in source, f"{rel} does not accept 'test_task'"
+    source = (_ROOT / "server.js").read_text()
+    assert '"test_task"' in source, "server.js does not accept 'test_task'"
 
 
 def test_TT03_test_task_is_decided():
