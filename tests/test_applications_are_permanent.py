@@ -1,9 +1,9 @@
 """An application, once made, never disappears from the board.
 
-Applied / interview / declined are the record of what the user actually tried:
-how many applications went out, how far each got, and what came back. That is
-the only honest statistic he has about his own search, and it is unrecoverable
-if a sweeper quietly archives it.
+Applied / test_task / interview / declined are the record of what the user
+actually tried: how many applications went out, how far each got, and what came
+back. That is the only honest statistic he has about his own search, and it is
+unrecoverable if a sweeper quietly archives it.
 
 Three layers have to hold:
   1. no AUTOMATIC archive path may select a role in an application status;
@@ -49,7 +49,7 @@ def test_AP01_every_archive_statement_is_scoped_to_unseen():
 
 
 def test_AP02_application_statuses_are_the_expected_set():
-    assert APPLICATION_STATUSES == {"applied", "interview", "declined"}
+    assert APPLICATION_STATUSES == {"applied", "test_task", "interview", "declined"}
 
 
 @pytest.mark.parametrize("current", sorted(APPLICATION_STATUSES))

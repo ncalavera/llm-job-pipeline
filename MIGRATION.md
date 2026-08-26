@@ -78,8 +78,8 @@ Persist a vacancy triage status.
   Authorization` (POST) / `Authorization` (GET); `OPTIONS` → 204; wrong
   method → 405; missing DB config → 500 `{"error":"Server misconfigured"}`.
 - Body: `{"id": <vacancy uuid>, "status": <one of unseen, liked, passed,
-  to_apply, to_research, to_network, skipped, applied, interview, declined,
-  expiring, archived>}`.
+  to_apply, to_research, to_network, skipped, applied, test_task, interview,
+  declined, expiring, archived>}`.
 - Missing field → 400 `{"error":"Missing id or status"}`; unknown status →
   400 `{"error":"Invalid status"}`.
 - Updates `vacancy.status` + `status_updated_at`. Update-only: unknown id →

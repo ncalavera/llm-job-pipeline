@@ -43,7 +43,15 @@ def test_SF02_undecided_at_or_above_floor_is_kept():
 def test_SF03_a_role_being_worked_survives_any_score():
     """The weakest role in the liked basket scores 15. Hiding it because a model
     disagreed would be the pipeline overruling its user."""
-    for status in ("liked", "to_apply", "to_research", "to_network", "applied", "interview"):
+    for status in (
+        "liked",
+        "to_apply",
+        "to_research",
+        "to_network",
+        "applied",
+        "test_task",
+        "interview",
+    ):
         assert _keep({"llm_score": 15, "status": status}) is True
 
 

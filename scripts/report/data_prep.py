@@ -19,7 +19,16 @@ from company_registry import PARSING_ARTIFACTS
 #: survive the dashboard score floor at any score. Everything else (unseen below
 #: the floor, passed, skipped) is either noise or history.
 _ACTIVE_STATUSES = frozenset(
-    {"liked", "to_apply", "to_research", "to_network", "applied", "interview", "declined"}
+    {
+        "liked",
+        "to_apply",
+        "to_research",
+        "to_network",
+        "applied",
+        "test_task",
+        "interview",
+        "declined",
+    }
 )
 from database_supabase import load_vacancies, load_all_enrichment
 from db_conn import get_conn

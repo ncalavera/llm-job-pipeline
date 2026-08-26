@@ -275,6 +275,7 @@ _MIN_DESC_FP_CHARS = 1000
 _DECIDED_STATUSES = frozenset(
     {
         "applied",
+        "test_task",
         "interview",
         "declined",
         "liked",
@@ -2397,7 +2398,7 @@ def get_vacancy_statuses() -> dict[str, str]:
 #: is the single choke point for status writes and would archive anything it was
 #: asked to. A bulk cleanup, a sweeper, or a well-meaning one-off script would
 #: erase an application without a trace.
-APPLICATION_STATUSES = frozenset({"applied", "interview", "declined"})
+APPLICATION_STATUSES = frozenset({"applied", "test_task", "interview", "declined"})
 
 
 class ApplicationArchiveBlocked(RuntimeError):
@@ -3639,6 +3640,7 @@ VALID_STATUSES = {
     "to_network",
     "skipped",
     "applied",
+    "test_task",
     "interview",
     "declined",
     "expiring",

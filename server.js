@@ -346,6 +346,7 @@ const VALID_STATUSES = [
   "to_network",
   "skipped",
   "applied",
+  "test_task",
   "interview",
   "declined",
   "expiring",

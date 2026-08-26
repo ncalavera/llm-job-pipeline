@@ -77,13 +77,14 @@ export const STATUS_PRI = {
   to_research: 1,
   to_network: 2,
   applied: 3,
-  interview: 4,
-  declined: 5,
-  skipped: 6,
-  liked: 7,
-  expiring: 8,
-  passed: 9,
-  unseen: 10,
+  test_task: 4,
+  interview: 5,
+  declined: 6,
+  skipped: 7,
+  liked: 8,
+  expiring: 9,
+  passed: 10,
+  unseen: 11,
 };
 
 export const STATUS_BASKET = {
@@ -92,6 +93,9 @@ export const STATUS_BASKET = {
   to_research: "liked",
   to_network: "liked",
   applied: "liked",
+  // A take-home assignment is the most active work an application ever asks
+  // for, so it stays in the Liked basket alongside 'applied'.
+  test_task: "liked",
   // An application still in flight is active work, so it stays in the Liked
   // basket alongside 'applied'.
   interview: "liked",
@@ -133,6 +137,14 @@ export const TRIAGE_COLUMNS = [
     key: "applied",
     label: "Applied",
     color: "var(--coral)",
+  },
+  {
+    // The employer sent a take-home assignment. Its own column between Applied
+    // and Interview, because "work is owed" and "waiting for a reply" are
+    // different situations and only one of them needs the user's evening.
+    key: "test_task",
+    label: "Test task",
+    color: "var(--raspberry)",
   },
   {
     key: "interview",

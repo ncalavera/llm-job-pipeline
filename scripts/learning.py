@@ -34,7 +34,15 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 #: Statuses that mean active interest (a "liked" verdict, in the broad sense).
-LIKED_BASKET = ("liked", "to_apply", "to_research", "to_network", "applied", "interview")
+LIKED_BASKET = (
+    "liked",
+    "to_apply",
+    "to_research",
+    "to_network",
+    "applied",
+    "test_task",
+    "interview",
+)
 #: The employer said no. NOT a user verdict — he wanted this role, someone else
 #: closed it. Kept out of ``DECISION_STATUSES`` so it never reads as "he passed",
 #: but folded into the backtest reference set below: a role he applied to is

@@ -99,8 +99,9 @@ CREATE TABLE IF NOT EXISTS vacancy (
                           CHECK (status IN ('unseen', 'liked', 'passed',
                                             'to_apply', 'to_research',
                                             'to_network', 'skipped', 'applied',
-                                            'interview', 'declined',
-                                            'expiring', 'archived')),
+                                            'test_task', 'interview',
+                                            'declined', 'expiring',
+                                            'archived')),
     status_updated_at     TIMESTAMPTZ,
 
     -- LLM scoring output (filled by scripts/score_vacancies.py).

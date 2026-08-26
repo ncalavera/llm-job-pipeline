@@ -12,6 +12,11 @@
      — Skipped already owns that, and "they said no" must read differently from
      "I never looked". Consumed from JS via TRIAGE_COLUMNS, like --gold. */
   --slate: #64748b;
+  /* Test task column (triage board): a warm raspberry. Deliberately its own
+     hue — the columns on either side are Applied (--coral) and Interview
+     (--orange), and "they set me work" must not read as either of them.
+     Consumed from JS via TRIAGE_COLUMNS, like --gold and --slate. */
+  --raspberry: #d6336c;
   --text: #1a1612;
   --muted: #6b6460;
   /* Restored in U18 review (DHA-402): still consumed from JS, not just CSS —
