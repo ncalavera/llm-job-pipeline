@@ -2250,15 +2250,24 @@ export function companyProfileHtml(c, roles, opts) {
 
 // Composite sort: status group first (liked/apply-track ahead of unseen ahead
 // of passed), then score DESC within group — unchanged from the pre-U7 list.
-var ROLE_STATUS_GROUP = {
+// Group 0 is the active basket: a role the user wants, at any stage from
+// `liked` through an application in flight (applied -> test_task ->
+// interview). `expiring` joins it — a protected role still awaiting a
+// decision is active work, not a dead end. Group 2 is closed: passed and
+// skipped are the user's no, `declined` is the employer's.
+export var _ROLE_STATUS_GROUP = {
   liked: 0,
   to_apply: 0,
   to_research: 0,
   to_network: 0,
   applied: 0,
+  test_task: 0,
+  interview: 0,
+  expiring: 0,
   unseen: 1,
   passed: 2,
   skipped: 2,
+  declined: 2,
 };
 
 function getCompanyRoles(c) {
@@ -2267,8 +2276,8 @@ function getCompanyRoles(c) {
     var stA = (state.dbData[a] && state.dbData[a].status) || "unseen";
     var stB = (state.dbData[b] && state.dbData[b].status) || "unseen";
     var grpDiff =
-      (ROLE_STATUS_GROUP[stA] != null ? ROLE_STATUS_GROUP[stA] : 1) -
-      (ROLE_STATUS_GROUP[stB] != null ? ROLE_STATUS_GROUP[stB] : 1);
+      (_ROLE_STATUS_GROUP[stA] != null ? _ROLE_STATUS_GROUP[stA] : 1) -
+      (_ROLE_STATUS_GROUP[stB] != null ? _ROLE_STATUS_GROUP[stB] : 1);
     if (grpDiff !== 0) return grpDiff;
     var ga = groupsById.get(a);
     var gb = groupsById.get(b);

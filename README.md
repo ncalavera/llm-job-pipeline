@@ -199,13 +199,15 @@ python3 scripts/fetch_vacancies.py --report-only    # regenerate dashboard data
 ### 7. Deploy the dashboard (optional)
 
 ```bash
-npm install -g vercel
-vercel --prod
+npm install --omit=dev
+DATABASE_URL=postgres://user:pass@localhost/jobs npm start
 ```
 
-Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `AUTH_USER`, `AUTH_PASS` in
-the Vercel project. Basic Auth protects the whole dashboard — it's your
-private job search, keep a password on it.
+`server.js` serves `public/` and every `/api/*` endpoint from one process. It
+binds to `127.0.0.1:3000` by default (`HOST`/`PORT` override), so put a reverse
+proxy in front of it for TLS and a password — the dashboard is your private job
+search, keep a login on it. [MIGRATION.md](MIGRATION.md) has the systemd unit
+and a Caddy site block that does both.
 
 ### 8. Telegram digest (optional)
 

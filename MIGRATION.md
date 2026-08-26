@@ -3,19 +3,27 @@
 Target: one Node HTTP server (`server.js`) on a Hetzner VPS behind Caddy.
 Caddy terminates TLS and enforces Basic Auth (replacing `middleware.js`).
 Postgres 17 runs on localhost; the server talks to it via `DATABASE_URL`
-with the `pg` package. The Vercel deployment and everything under `api/`
-stay untouched and keep working until cutover.
+with the `pg` package.
+
+**The Vercel path is removed.** `api/` (nine serverless handlers),
+`vercel.json` and `middleware.js` were deleted once `server.js` reimplemented
+every endpoint: two copies of the same nine contracts drifted (the ETag
+helpers were already duplicated by hand), and nothing imported the Vercel
+files any more. `server.js` is the only server. There is no DNS rollback to
+Vercel — see Rollback below.
 
 Prerequisite: the target database has ALL migrations under `sql/migrations/`
-applied. The Vercel handlers carry defensive fallbacks for partially-migrated
-databases (unknown-column retries in `api/board-statuses.js` and
-`api/health-detail.js`); `server.js` deliberately drops them and assumes the
-full schema.
+applied. The retired Vercel handlers carried defensive fallbacks for
+partially-migrated databases (unknown-column retries in board-statuses and
+health-detail); `server.js` deliberately drops them and assumes the full
+schema.
 
 ## Endpoint contract map
 
-Every endpoint below is reimplemented in `server.js` with an identical
-request/response contract, so nothing under `public/` changes.
+Every endpoint below is served by `server.js`. The file name in parentheses
+is the retired Vercel handler the contract was ported from — kept as
+provenance for anyone reading the old code in git history, not a live path.
+Nothing under `public/` changed across the port.
 
 ### GET /api/vacancies (`api/vacancies.js`)
 
@@ -49,7 +57,7 @@ stale between pipeline runs).
 - Same-origin only (no CORS header), `Cache-Control: no-store`. Carries PII.
 - `OPTIONS` → 204; non-GET → 405.
 - Response: `{"companies": [...]}` where each element is the exact mapped
-  shape built in `api/companies.js` — `company_id` (stringified uuid),
+  shape the ported handler built — `company_id` (stringified uuid),
   `name`, `slug` (lowercased, spaces→`-`, dots stripped), `status`
   (lowercased), `review_status` (active→approved, candidate→pending,
   inactive→rejected, else pending), `calculated_tier`, `alignment_score`
@@ -276,16 +284,17 @@ answers 401 with a `WWW-Authenticate: Basic` challenge — the same contract
    `SUPABASE_DB_URL` (see `scripts/db_backend.py`); point it at the new
    Postgres so `generate_dashboard()` upserts the snapshot the new server
    reads. Until then the new dashboard serves data frozen at the dump.
-6. **Flip DNS** — move the dashboard hostname to the VPS. Vercel stays
-   deployed and untouched.
+6. **Flip DNS** — move the dashboard hostname to the VPS. Nothing to keep
+   warm on the other side: the Vercel path is gone.
 7. **Verify** — login, Companies tab, a status save (`/api/save` 200), the
    Boards and Health tabs, and one 60s poll cycle returning 304
    (`curl -H 'If-None-Match: <etag>'`).
 
 ## Rollback
 
-DNS is the only cutover switch: point the hostname back at Vercel. The
-Vercel deployment, `api/*`, `middleware.js` and its env vars were never
-touched. Writes made while on the VPS (statuses, reviews, board toggles)
-live in the local Postgres — dump/restore them back to Supabase (or accept
-the gap) before flipping, if any happened.
+There is no rollback to Vercel: `api/`, `vercel.json` and `middleware.js` are
+deleted, so the serverless deployment cannot be rebuilt from this branch. Roll
+back inside the VPS instead — check out the previous tag, `npm ci --omit=dev`,
+restart the systemd unit. Recovering the Vercel path at all means restoring
+those files from git history AND re-provisioning Supabase; treat that as a
+rebuild, not a switch.

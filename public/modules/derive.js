@@ -172,14 +172,19 @@ export const HOT_MIN_SCORE = 55;
 
 // Statuses that disqualify a role from "applyable now" — already decided
 // (passed), removed (archived), already applied, skipped, or protected-but-
-// disappearing (expiring). Mirrors _NON_APPLYABLE_STATUSES in
-// scripts/report/data_prep.py; deadline-in-the-past is handled via
-// opts.isExpired so expiry stays the one shared notion across the dashboard.
-const NON_APPLYABLE_STATUSES = new Set([
+// disappearing (expiring). Everything past `applied` on the board is an
+// application already in flight (test_task, interview) or one the employer
+// closed (declined): none of them is a role still waiting to be applied to.
+// deadline-in-the-past is handled via opts.isExpired so expiry stays the one
+// shared notion across the dashboard.
+export const NON_APPLYABLE_STATUSES = new Set([
   "archived",
   "passed",
   "expiring",
   "applied",
+  "test_task",
+  "interview",
+  "declined",
   "skipped",
 ]);
 
@@ -298,7 +303,12 @@ function _undecidedAge(g, opts) {
 //   committed:   [{ g, overdue }]  status to_apply. Never dropped for lapsing —
 //                                  a committed role whose deadline passed or
 //                                  whose source went stale stays, flagged.
-//   awaiting:    [g]               status applied (awaiting a reply)
+//   testTask:    [g]               status test_task — work is owed. Its own
+//                                  population, because "finish the assignment"
+//                                  needs an evening and "wait for a reply"
+//                                  needs nothing.
+//   awaiting:    [g]               status applied or interview (an application
+//                                  in flight, waiting on the employer)
 //   liked:       [g]               status liked, still live (expired ones drop)
 //   closingSoon: [{ g, expiring }] "about to disappear, decide now": protected
 //                                  status='expiring' roles lead (expiring:true —
@@ -313,6 +323,7 @@ function _undecidedAge(g, opts) {
 //   working:     [g]               status to_research / to_network, still live
 export function selectTodayRoles(groups, opts) {
   const committed = [];
+  const testTask = [];
   const awaiting = [];
   const liked = [];
   const closingSoon = [];
@@ -331,7 +342,15 @@ export function selectTodayRoles(groups, opts) {
       committed.push({ g, overdue: !opts.isLiveRole(g) });
       continue;
     }
-    if (status === "applied") {
+    if (status === "test_task") {
+      // Work is owed, so this never drops for a lapsed deadline or a stale
+      // source: the employer asked, and the answer is still due.
+      testTask.push(g);
+      continue;
+    }
+    if (status === "applied" || status === "interview") {
+      // Both are "sent, now waiting" — the difference is how far it got, not
+      // what the user has to do today.
       awaiting.push(g);
       continue;
     }
@@ -380,6 +399,8 @@ export function selectTodayRoles(groups, opts) {
   };
 
   committed.sort((a, b) => byDeadline(a.g, b.g));
+  // Soonest deadline first — a take-home usually comes with one.
+  testTask.sort(byDeadline);
   awaiting.sort(byScoreDesc);
   liked.sort(byDeadline);
   // Protected expiring rows lead (they're already lapsing), then soonest
@@ -393,6 +414,7 @@ export function selectTodayRoles(groups, opts) {
 
   return {
     committed,
+    testTask,
     awaiting,
     liked,
     closingSoon,

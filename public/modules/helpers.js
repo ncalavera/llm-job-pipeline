@@ -1045,12 +1045,19 @@ export function computeTriageFunnel(entries, opts) {
   const metrics = {
     base_total: baseTotal,
     liked_queue: at("liked"),
+    // Triaged = the user cast a verdict on it. Everything past `applied` on the
+    // board (test_task, interview, declined) is a role that was triaged and
+    // then moved on; leaving them out made the funnel shrink as applications
+    // progressed.
     triaged_total:
       at("to_apply") +
       at("to_research") +
       at("to_network") +
       at("skipped") +
-      at("applied"),
+      at("applied") +
+      at("test_task") +
+      at("interview") +
+      at("declined"),
     in_work: at("to_apply") + at("to_research") + at("to_network"),
     applied_total: at("applied"),
     skipped_total: at("skipped"),
@@ -1277,6 +1284,15 @@ export const TOAST_MESSAGES = {
     fallback: "\uD83E\uDD1D Marked for networking",
   },
   applied: { key: "toast_applied", fallback: "\u2705 Marked as applied" },
+  test_task: {
+    key: "toast_test_task",
+    fallback: "\uD83D\uDCDD Test task received",
+  },
+  interview: {
+    key: "toast_interview",
+    fallback: "\uD83D\uDCC5 Interview stage",
+  },
+  declined: { key: "toast_declined", fallback: "\uD83D\uDEAB Declined" },
 };
 
 // Resolve a status to its toast copy, or null when the status is not one a UI

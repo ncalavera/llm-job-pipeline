@@ -99,7 +99,7 @@ export function vacancyActions(status) {
 
 // Header status chip so a change confirms in place (F3/R18, non-Browse entry).
 // `unseen` (nothing decided) and `expiring` (shown as its own badge) get none.
-const STATUS_CHIP_KEYS = {
+export const _STATUS_CHIP_KEYS = {
   liked: ["vac_status_liked", "Liked"],
   passed: ["vac_status_passed", "Passed"],
   skipped: ["vac_status_passed", "Passed"],
@@ -107,12 +107,17 @@ const STATUS_CHIP_KEYS = {
   to_research: ["vac_status_to_research", "Research"],
   to_network: ["vac_status_to_network", "Networking"],
   applied: ["vac_status_applied", "Applied"],
+  // The stages after `applied`: each is a different answer to "where is this
+  // application", so each needs its own chip instead of reading as "Applied".
+  test_task: ["vac_status_test_task", "Test task"],
+  interview: ["vac_status_interview", "Interview"],
+  declined: ["vac_status_declined", "Declined"],
   archived: ["vac_status_archived", "Archived"],
 };
 
 export function statusChipLabel(status, t) {
   const translate = t || ((k, fb) => fb);
-  const entry = STATUS_CHIP_KEYS[status];
+  const entry = _STATUS_CHIP_KEYS[status];
   return entry ? translate(entry[0], entry[1]) : null;
 }
 
@@ -169,8 +174,8 @@ export function buildFactsRail(g, company, opts) {
 
   // The application entity's own status (draft/applied/interview/offer/
   // rejected/withdrawn — scripts/applications.py VALID_STATUSES) is a finer
-  // lifecycle than the vacancy's coarse review status (STATUS_CHIP_KEYS has no
-  // entry for interview/offer/rejected/withdrawn/draft at all), so the header
+  // lifecycle than the vacancy's coarse review status (_STATUS_CHIP_KEYS has no
+  // entry for offer/rejected/withdrawn/draft at all), so the header
   // status chip alone can't show it. Relocated from the retired Browse card's
   // "✉ applied" badge (U5 parity) — same raw status text, applied_at now
   // formatted via fmtDate instead of a hover-only tooltip.
