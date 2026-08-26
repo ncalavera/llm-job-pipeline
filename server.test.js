@@ -1,14 +1,29 @@
 // Tests for server.js — the self-hosted dashboard server.
 //
-// The ETag helpers are duplicated from api/vacancies.js (which keeps its own
-// copy for the Vercel deployment until cutover), so they get the same test
-// cases here: a drifted copy must fail loudly, not silently break the 304
-// poll path. Routing is exercised through handleRequest with mock req/res —
-// no socket, no database (DATABASE_URL is cleared per test).
+// The ETag helpers are duplicated from the retired Vercel handler, so they get
+// the same test cases here: a drifted copy must fail loudly, not silently break
+// the 304 poll path. Routing is exercised through handleRequest with mock
+// req/res — no socket. The DB is a stub pool injected through setPool(), so the
+// handlers run their real SQL-to-JSON shaping instead of stopping at the
+// "Server misconfigured" gate (which is all they used to do here).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeETag, isNotModified, handleRequest } from "./server.js";
+import { readFileSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  computeETag,
+  isNotModified,
+  handleRequest,
+  setPool,
+  logError,
+  isRecoverableError,
+  VALID_STATUSES,
+  DECISION_STATUSES,
+} from "./server.js";
+
+const ROOT = fileURLToPath(new URL(".", import.meta.url));
 
 test("computeETag wraps updated_at in quotes", () => {
   assert.equal(
@@ -32,12 +47,12 @@ test("isNotModified matches exact, weak, and list forms", () => {
 
 // --- Mock req/res --------------------------------------------------------
 
-function mockReq({ method = "GET", url = "/", body } = {}) {
+function mockReq({ method = "GET", url = "/", body, headers = {} } = {}) {
   const listeners = {};
   return {
     method,
     url,
-    headers: {},
+    headers,
     on(event, fn) {
       listeners[event] = fn;
       // Emit the whole body as soon as 'end' is registered.
@@ -59,6 +74,7 @@ function mockRes() {
     headers: {},
     body: "",
     headersSent: false,
+    destroyed: false,
   };
   res.finished = new Promise((resolve) => (resolveFinished = resolve));
   res.setHeader = (k, v) => {
@@ -70,8 +86,20 @@ function mockRes() {
     res.headersSent = true;
     return res;
   };
+  res.write = (data) => {
+    if (data) res.body += data;
+    return true;
+  };
   res.end = (data) => {
     if (data) res.body += data;
+    resolveFinished();
+    return res;
+  };
+  res.on = () => res;
+  res.once = () => res;
+  res.emit = () => false;
+  res.destroy = () => {
+    res.destroyed = true;
     resolveFinished();
     return res;
   };
@@ -83,6 +111,43 @@ async function call(opts) {
   const res = mockRes();
   await handleRequest(req, res);
   return res;
+}
+
+// --- Stub pool ------------------------------------------------------------
+
+// Match a handler's SQL by substring against a table of replies, so each test
+// states only the rows it cares about. Whitespace is collapsed first — the SQL
+// in server.js is multi-line.
+function stubPool(replies) {
+  const seen = [];
+  setPool({
+    async query(sql, params) {
+      const flat = String(sql).replace(/\s+/g, " ").trim();
+      seen.push({ sql: flat, params });
+      for (const [needle, rows] of replies) {
+        if (flat.includes(needle)) {
+          if (rows instanceof Error) throw rows;
+          return { rows, rowCount: rows.length };
+        }
+      }
+      throw new Error(`stub pool: no reply for SQL: ${flat}`);
+    },
+  });
+  return seen;
+}
+
+/** Run `fn` with DATABASE_URL set and a stub pool installed, then clean up. */
+async function withStubDb(replies, fn) {
+  const previous = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = "postgres://stub/stub";
+  const seen = stubPool(replies);
+  try {
+    return await fn(seen);
+  } finally {
+    setPool(null);
+    if (previous === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previous;
+  }
 }
 
 // --- Routing contracts (no DB configured) ---------------------------------
@@ -133,6 +198,413 @@ test("/api/health answers 200 ok:false when the DB is not configured", async () 
   assert.equal(body.backend, "postgres");
 });
 
+// --- Endpoints against a stub database ------------------------------------
+
+test("/api/vacancies serves the snapshot payload with an ETag", async () => {
+  await withStubDb(
+    [
+      ["to_json(updated_at)", [{ updated_at: "2026-08-20T09:53:29.68+04:00" }]],
+      ["SELECT payload", [{ payload: { groups: [{ id: "v1" }] } }]],
+    ],
+    async () => {
+      const res = await call({ url: "/api/vacancies" });
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers.ETag, '"2026-08-20T09:53:29.68+04:00"');
+      assert.deepEqual(JSON.parse(res.body), { groups: [{ id: "v1" }] });
+    },
+  );
+});
+
+test("/api/vacancies answers 304 when the client's ETag is current", async () => {
+  await withStubDb(
+    [["to_json(updated_at)", [{ updated_at: "v-current" }]]],
+    async () => {
+      const res = await call({
+        url: "/api/vacancies",
+        headers: { "if-none-match": 'W/"v-current"' },
+      });
+      assert.equal(res.statusCode, 304);
+      assert.equal(res.body, "");
+    },
+  );
+});
+
+test("/api/vacancies answers 503 (not 404) before the first snapshot", async () => {
+  // 404 is bootstrap.js's "endpoint absent → fall back to static data.js"
+  // signal; answering it here would silently blank a full-mode dashboard.
+  await withStubDb([["to_json(updated_at)", []]], async () => {
+    const res = await call({ url: "/api/vacancies" });
+    assert.equal(res.statusCode, 503);
+    assert.deepEqual(JSON.parse(res.body), {
+      error: "Snapshot not generated yet",
+    });
+  });
+});
+
+test("/api/companies shapes a company row and rolls up its live roles", async () => {
+  await withStubDb(
+    [
+      [
+        "FROM company",
+        [
+          {
+            id: "c-1",
+            canonical_name: "Example Org Inc.",
+            status: "ACTIVE",
+            tier: "A",
+            alignment_score: "82",
+            mission_fit: { alignment_label: "strong", dimensions: {} },
+            about: { description: "Does things.", sector: "health" },
+            website: "https://example.test",
+            careers_url: null,
+            offices: null,
+            category: null,
+            fetch_strategy: "greenhouse",
+            fetch_status: "ok",
+            last_fetched: null,
+            notes: null,
+            experience_match: 4,
+            personal_interest: 3,
+          },
+        ],
+      ],
+      [
+        "FROM vacancy WHERE status <> 'archived'",
+        [
+          { id: "v1", company_id: "c-1", status: "unseen" },
+          { id: "v2", company_id: "c-1", status: "test_task" },
+          { id: "v3", company_id: "c-1", status: "passed" },
+        ],
+      ],
+    ],
+    async () => {
+      const res = await call({ url: "/api/companies" });
+      assert.equal(res.statusCode, 200);
+      const [c] = JSON.parse(res.body).companies;
+      assert.equal(c.company_id, "c-1");
+      assert.equal(c.slug, "example-org-inc");
+      assert.equal(c.status, "active");
+      assert.equal(c.review_status, "approved");
+      assert.equal(c.alignment_score, 82);
+      assert.equal(c.vacancy_count, 3);
+      // "Selected" = touched and kept, so a take-home counts and a pass does not.
+      assert.equal(c.liked_count, 1);
+      assert.equal(c.new_count, 1);
+      assert.equal(c.website, "https://example.test");
+      assert.equal(c.careers_url, undefined); // absent, not ""
+      assert.equal(c.fit_dimensions, undefined); // empty object collapses
+    },
+  );
+});
+
+test("/api/statuses returns the status and timestamp maps", async () => {
+  await withStubDb(
+    [
+      [
+        "SELECT id, status, status_updated_at FROM vacancy",
+        [
+          { id: "v1", status: "test_task", status_updated_at: "2026-08-20" },
+          { id: "v2", status: "liked", status_updated_at: null },
+        ],
+      ],
+    ],
+    async () => {
+      const res = await call({ url: "/api/statuses" });
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.body);
+      assert.deepEqual(body.statuses, { v1: "test_task", v2: "liked" });
+      assert.deepEqual(body.timestamps, { v1: "2026-08-20" });
+    },
+  );
+});
+
+test("/api/company-statuses maps company status to a review verdict", async () => {
+  await withStubDb(
+    [
+      [
+        "SELECT id, status FROM company",
+        [
+          { id: "c1", status: "active" },
+          { id: "c2", status: "candidate" },
+          { id: "c3", status: "inactive" },
+          { id: "c4", status: "something-else" },
+        ],
+      ],
+    ],
+    async () => {
+      const res = await call({ url: "/api/company-statuses" });
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(JSON.parse(res.body).statuses, {
+        c1: "approved",
+        c2: "pending",
+        c3: "rejected",
+        c4: "pending",
+      });
+    },
+  );
+});
+
+test("/api/board-statuses joins the catalog with its vacancy counts", async () => {
+  const stale = new Date(Date.now() - 30 * 86400000).toISOString();
+  await withStubDb(
+    [
+      [
+        "SELECT id, name, strategy, tier, ttl_days",
+        [
+          {
+            id: "b1",
+            name: "Board One",
+            strategy: "rss",
+            tier: 1,
+            ttl_days: 7,
+            url: "https://board.test",
+            last_fetched: stale,
+            enabled: null,
+            hidden: null,
+          },
+        ],
+      ],
+      [
+        "GROUP BY source_board",
+        [{ source_board: "Board One", total: 12, recent: 3 }],
+      ],
+    ],
+    async () => {
+      const res = await call({ url: "/api/board-statuses" });
+      assert.equal(res.statusCode, 200);
+      const [b] = JSON.parse(res.body).boards;
+      assert.equal(b.enabled, true); // null normalises to enabled
+      assert.equal(b.hidden, false);
+      assert.equal(b.vac_total, 12);
+      assert.equal(b.vac_recent, 3);
+      assert.equal(b.overdue, true); // 30d old against a 7d ttl
+    },
+  );
+});
+
+test("/api/health-detail assembles all four blocks", async () => {
+  await withStubDb(
+    [
+      [
+        "SELECT id, name, last_fetched, enabled, hidden",
+        [
+          {
+            id: "b1",
+            name: "Healthy",
+            last_fetched: "2026-08-20",
+            enabled: true,
+            hidden: false,
+            last_success: "2026-08-20",
+            consecutive_failures: 0,
+          },
+          {
+            id: "b2",
+            name: "Broken",
+            last_fetched: "2026-08-20",
+            enabled: true,
+            hidden: false,
+            last_success: null,
+            consecutive_failures: 5,
+          },
+          {
+            id: "b3",
+            name: "Off",
+            last_fetched: null,
+            enabled: false,
+            hidden: false,
+            last_success: null,
+            consecutive_failures: 0,
+          },
+        ],
+      ],
+      ["GROUP BY source_board", [{ source_board: "Healthy", total: 9 }]],
+      [
+        "WHERE status = 'active'",
+        [
+          {
+            canonical_name: "Failing Org",
+            fetch_status: "js_required",
+            last_fetched: "2026-08-01",
+            fetch_strategy: "scrape",
+            consecutive_failures: 1,
+            coverage: "direct",
+          },
+          {
+            canonical_name: "Hand Checked",
+            fetch_status: "ok",
+            last_fetched: null,
+            fetch_strategy: "manual_check",
+            consecutive_failures: 0,
+            coverage: "direct",
+          },
+        ],
+      ],
+      ["WHERE status = 'candidate'", [{ n: 4 }]],
+      ["SELECT first_seen FROM vacancy", [{ first_seen: "2026-08-01" }]],
+      ["WHERE kind = 'reviewed'", [{ created_at: "2026-08-10T00:00:00Z" }]],
+      ["WHERE kind = 'applied'", [{ n: 2 }]],
+      ["WHERE status = ANY($1)", [{ n: 7 }]],
+      // Both remaining COUNT(*) queries over vacancy (unseen_scored).
+      ["llm_score IS NOT NULL", [{ n: 11 }]],
+    ],
+    async () => {
+      const res = await call({ url: "/api/health-detail" });
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers["Cache-Control"], "no-store");
+      const body = JSON.parse(res.body);
+      // Disabled boards are dropped; broken ones sort first.
+      assert.deepEqual(
+        body.boards.map((b) => b.name),
+        ["Broken", "Healthy"],
+      );
+      assert.equal(body.boards[0].presumed_broken, true);
+      assert.deepEqual(
+        body.companies.failing.map((c) => c.name),
+        ["Failing Org"],
+      );
+      assert.deepEqual(
+        body.companies.manual_check.map((c) => c.name),
+        ["Hand Checked"],
+      );
+      assert.equal(body.waiting.candidates_pending, 4);
+      assert.equal(body.learning.applied_since, 2);
+      assert.equal(body.learning.verdicts_pending, 7);
+    },
+  );
+});
+
+test("/api/health-detail counts verdicts over the full decision vocabulary", async () => {
+  // The regression this guards: DECISION_STATUSES lost test_task/interview and
+  // the Health tab quietly reported fewer pending verdicts than the board had.
+  await withStubDb(
+    [
+      ["SELECT id, name, last_fetched, enabled, hidden", []],
+      ["GROUP BY source_board", []],
+      ["WHERE status = 'active'", []],
+      ["WHERE status = 'candidate'", [{ n: 0 }]],
+      ["SELECT first_seen FROM vacancy", []],
+      ["WHERE kind = 'reviewed'", []],
+      ["WHERE kind = 'applied'", [{ n: 0 }]],
+      ["WHERE status = ANY($1)", [{ n: 0 }]],
+      ["llm_score IS NOT NULL", [{ n: 0 }]],
+    ],
+    async (seen) => {
+      await call({ url: "/api/health-detail" });
+      const verdictQuery = seen.find((q) => q.sql.includes("status = ANY($1)"));
+      assert.deepEqual(verdictQuery.params[0], DECISION_STATUSES);
+      assert.ok(verdictQuery.params[0].includes("test_task"));
+      assert.ok(verdictQuery.params[0].includes("interview"));
+    },
+  );
+});
+
+test("a database failure answers 500 without leaking the SQL error", async () => {
+  const pgError = Object.assign(new Error('column "nope" does not exist'), {
+    code: "42703",
+    table: "vacancy",
+  });
+  await withStubDb([["SELECT id, status", pgError]], async () => {
+    const res = await call({ url: "/api/company-statuses" });
+    assert.equal(res.statusCode, 500);
+    assert.deepEqual(JSON.parse(res.body), { error: "Database error" });
+  });
+});
+
+// --- /api/save ------------------------------------------------------------
+
+test("/api/save rejects a missing field with 400", async () => {
+  await withStubDb([], async () => {
+    const res = await call({
+      method: "POST",
+      url: "/api/save",
+      body: { id: "v1" },
+    });
+    assert.equal(res.statusCode, 400);
+    assert.deepEqual(JSON.parse(res.body), { error: "Missing id or status" });
+  });
+});
+
+test("/api/save rejects a status outside the vocabulary with 400", async () => {
+  await withStubDb([], async () => {
+    const res = await call({
+      method: "POST",
+      url: "/api/save",
+      body: { id: "v1", status: "not_a_status" },
+    });
+    assert.equal(res.statusCode, 400);
+    assert.deepEqual(JSON.parse(res.body), { error: "Invalid status" });
+  });
+});
+
+test("/api/save answers 404 for an id no row matches", async () => {
+  await withStubDb([["UPDATE vacancy", []]], async () => {
+    const res = await call({
+      method: "POST",
+      url: "/api/save",
+      body: { id: "missing", status: "liked" },
+    });
+    assert.equal(res.statusCode, 404);
+    assert.deepEqual(JSON.parse(res.body), {
+      error: "Vacancy not found",
+      id: "missing",
+    });
+  });
+});
+
+test("/api/save writes every valid status and answers 200", async () => {
+  await withStubDb([["UPDATE vacancy", [{ id: "v1" }]]], async (seen) => {
+    for (const status of VALID_STATUSES) {
+      const res = await call({
+        method: "POST",
+        url: "/api/save",
+        body: { id: "v1", status },
+      });
+      assert.equal(res.statusCode, 200, `status ${status} was refused`);
+      assert.equal(JSON.parse(res.body).ok, true);
+    }
+    assert.equal(seen.length, VALID_STATUSES.length);
+    assert.equal(seen[0].params[0], VALID_STATUSES[0]);
+  });
+});
+
+test("VALID_STATUSES carries the whole board vocabulary", () => {
+  // An array assertion, not a substring grep: a status mentioned only in a
+  // comment used to satisfy the old check while the save still refused it.
+  for (const status of ["test_task", "interview", "declined"]) {
+    assert.ok(
+      VALID_STATUSES.includes(status),
+      `VALID_STATUSES is missing ${status}`,
+    );
+  }
+});
+
+// --- Cross-language drift -------------------------------------------------
+
+test("DECISION_STATUSES mirrors scripts/learning.py", () => {
+  // Two hand-maintained copies of one vocabulary. Read the Python source and
+  // compare, so adding a status on one side fails the build on the other.
+  const py = readFileSync(join(ROOT, "scripts/learning.py"), "utf8");
+
+  const basket = py.match(/^LIKED_BASKET = \(([\s\S]*?)\n\)/m);
+  assert.ok(basket, "LIKED_BASKET not found in scripts/learning.py");
+  const liked = [...basket[1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  assert.ok(liked.length > 0);
+
+  // The formula itself, so a change from `+ ("passed",)` also fails here.
+  assert.ok(
+    /^DECISION_STATUSES = LIKED_BASKET \+ \("passed",\)/m.test(py),
+    "scripts/learning.py no longer builds DECISION_STATUSES as LIKED_BASKET + passed — update server.js and this test",
+  );
+
+  assert.deepEqual(
+    [...DECISION_STATUSES].sort(),
+    [...liked, "passed"].sort(),
+    "server.js DECISION_STATUSES has drifted from scripts/learning.py",
+  );
+});
+
+// --- Static files ---------------------------------------------------------
+
 test("static: / serves public/index.html with the vercel.json cache header", async () => {
   // HEAD, not GET — the GET path pipes a file stream into res, which the
   // mock is not; headers and status are what this test is about.
@@ -149,4 +621,91 @@ test("static: / serves public/index.html with the vercel.json cache header", asy
 test("static: encoded path traversal is refused", async () => {
   const res = await call({ method: "HEAD", url: "/%2e%2e/package.json" });
   assert.equal(res.statusCode, 404);
+});
+
+test("static: a GET streams the file body", async () => {
+  const res = await call({ method: "GET", url: "/index.html" });
+  await res.finished;
+  assert.equal(res.statusCode, 200);
+  assert.ok(res.body.length > 0);
+});
+
+test(
+  "static: a file that stats but cannot be opened answers 500, not a crash",
+  {
+    // Root ignores the mode bits, so the unreadable file would still open.
+    skip:
+      typeof process.getuid === "function" && process.getuid() === 0
+        ? "running as root"
+        : false,
+  },
+  async () => {
+    // The bug: stat() succeeds, then open() fails (a deploy rsync swapped the
+    // file, a mode change locked it), the stream emits 'error' with no listener,
+    // and an unhandled EventEmitter 'error' takes the ENTIRE process down — every
+    // other in-flight request with it. One unreadable file must cost one request.
+    const name = `__unreadable-${process.pid}.txt`;
+    const path = join(ROOT, "public", name);
+    writeFileSync(path, "secret");
+    chmodSync(path, 0o000);
+    try {
+      const res = await call({ method: "GET", url: `/${name}` });
+      await res.finished;
+      assert.equal(res.statusCode, 500);
+      assert.equal(res.body, "");
+    } finally {
+      chmodSync(path, 0o600);
+      rmSync(path, { force: true });
+    }
+  },
+);
+
+// --- Diagnostics ----------------------------------------------------------
+
+test("logError prints the stack, the pg fields and the request context", () => {
+  const lines = [];
+  const original = console.error;
+  console.error = (line) => lines.push(line);
+  try {
+    const err = Object.assign(new Error("relation does not exist"), {
+      code: "42P01",
+      table: "vacancy",
+      constraint: "vacancy_pkey",
+      detail: "no such table",
+    });
+    logError("save", err, { rid: "7", route: "/api/save", id: "v1" });
+  } finally {
+    console.error = original;
+  }
+  const line = lines.join("\n");
+  assert.match(line, /^save: relation does not exist/);
+  for (const fragment of [
+    '"code":"42P01"',
+    '"table":"vacancy"',
+    '"constraint":"vacancy_pkey"',
+    '"detail":"no such table"',
+    '"rid":"7"',
+    '"route":"/api/save"',
+    '"id":"v1"',
+  ]) {
+    assert.ok(line.includes(fragment), `log line lacks ${fragment}`);
+  }
+  assert.match(line, /server\.test\.js/); // the stack came along
+});
+
+test("isRecoverableError keeps I/O noise alive and lets real bugs exit", () => {
+  assert.equal(
+    isRecoverableError(Object.assign(new Error("x"), { code: "EPIPE" })),
+    true,
+  );
+  assert.equal(
+    isRecoverableError(Object.assign(new Error("x"), { code: "ECONNRESET" })),
+    true,
+  );
+  assert.equal(
+    isRecoverableError(Object.assign(new Error("x"), { code: "EACCES" })),
+    true,
+  );
+  assert.equal(isRecoverableError(new TypeError("x is not a function")), false);
+  assert.equal(isRecoverableError(undefined), false);
 });

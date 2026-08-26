@@ -10,7 +10,10 @@
 //
 //   1. Committed      — status to_apply → mark applied (lapsed rows flagged
 //                       overdue, never dropped — the user committed to them)
-//   2. Awaiting reply — status applied (read-only; awaiting a reply)
+//   1b. Test task     — status test_task: work is owed, so it sits above
+//                       Awaiting reply and shows its own line (read-only)
+//   2. Awaiting reply — status applied / interview (read-only; the ball is
+//                       with the employer)
 //   3. Liked, undecided — status liked → queue / pass
 //   4. Closing soon   — protected status='expiring' roles lead (the pipeline
 //                       kept them alive for a decision; flagged source-gone /
@@ -324,6 +327,7 @@ export function renderToday() {
   // with no run.
   const {
     committed,
+    testTask,
     awaiting,
     liked,
     closingSoon,
@@ -384,8 +388,26 @@ export function renderToday() {
       committedActions,
     ),
   );
-  // Block 2 — Awaiting reply (applied). Read-only: already sent, nothing to do.
-  const awaitingRows = awaiting.map((g) => todayRowHtml(g, null, []));
+  // Block 1b — Test task. Work is owed; the deadline (when the employer gave
+  // one) is the whole point of the line, so it carries the deadline sub.
+  const testTaskRows = testTask.map((g) =>
+    todayRowHtml(
+      g,
+      _deadlineSub(g) || T("today_test_task_sub", "work owed"),
+      [],
+    ),
+  );
+  // Block 2 — Awaiting reply (applied / interview). Read-only: the ball is with
+  // the employer, so the sub says which stage it reached, not what to do.
+  const awaitingRows = awaiting.map((g) =>
+    todayRowHtml(
+      g,
+      getGroupStatus(g) === "interview"
+        ? T("today_interviewing", "interviewing")
+        : null,
+      [],
+    ),
+  );
   // Block 3 — Liked, undecided.
   const likedRows = liked.map((g) =>
     todayRowHtml(g, _deadlineSub(g), likedActions),
@@ -434,6 +456,10 @@ export function renderToday() {
 
   const inbox =
     todayGroupHtml(T("today_committed", "Committed — send it"), committedRows) +
+    todayGroupHtml(
+      T("today_test_task", "Test task — work owed"),
+      testTaskRows,
+    ) +
     todayGroupHtml(T("today_awaiting", "Awaiting reply"), awaitingRows) +
     todayGroupHtml(T("today_liked", "Liked — decide"), likedRows) +
     closingBlock +

@@ -1,19 +1,21 @@
-// server.js — self-hosted replacement for the Vercel deployment.
+// server.js — the dashboard server.
 //
-// One plain-Node HTTP server: serves public/ statically and reimplements the
-// api/*.js endpoints against local Postgres (`pg` + DATABASE_URL) with
-// contracts identical to the Supabase-backed handlers, so nothing under
-// public/ changes. See MIGRATION.md for the full contract map, the systemd
-// unit and the Caddy site block (Caddy owns TLS + Basic Auth — the
-// middleware.js gate does NOT move here; bind stays on 127.0.0.1).
+// One plain-Node HTTP server: serves public/ statically and answers every
+// /api/* endpoint against local Postgres (`pg` + DATABASE_URL). It replaced a
+// Vercel deployment whose nine serverless handlers (api/*.js), vercel.json and
+// middleware.js are now deleted — the contracts were ported unchanged, so
+// nothing under public/ moved with them. See MIGRATION.md for the full
+// contract map, the systemd unit and the Caddy site block (Caddy owns TLS +
+// Basic Auth, which is why the old middleware gate has no successor here; the
+// bind stays on 127.0.0.1).
 //
 // Assumes a fully migrated database (every sql/migrations/*.postgres.sql
-// applied). The Vercel handlers' unknown-column fallbacks for
+// applied). The retired handlers' unknown-column fallbacks for
 // partially-migrated DBs are deliberately not carried over.
 //
 // Starts fine without a database: static files serve, API routes answer
 // 500 "Server misconfigured" (no DATABASE_URL) or "Database error"
-// (unreachable DB) — the same errors the Vercel handlers give.
+// (unreachable DB) — the same errors the retired handlers gave.
 
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
@@ -23,6 +25,71 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 
 const PUBLIC_DIR = join(fileURLToPath(new URL(".", import.meta.url)), "public");
+
+// ---------------------------------------------------------------------------
+// Error logging
+// ---------------------------------------------------------------------------
+//
+// One formatter for every failure this process can see. A bare `err.message`
+// ("column x does not exist") names the symptom and hides everything needed to
+// act on it, so each line carries: the stack, the pg error fields the driver
+// attaches, the route + request id, and whatever parameters the handler was
+// working with.
+
+// The fields node-postgres copies off a Postgres ErrorResponse. `code` is the
+// SQLSTATE, which is what turns "Database error" into a diagnosis.
+const ERROR_FIELDS = [
+  "code",
+  "severity",
+  "detail",
+  "hint",
+  "position",
+  "where",
+  "schema",
+  "table",
+  "column",
+  "dataType",
+  "constraint",
+  "routine",
+  "errno",
+  "syscall",
+  "path",
+];
+
+function formatError(err, extra) {
+  const e = err || {};
+  const meta = {};
+  for (const field of ERROR_FIELDS) {
+    if (e[field] != null) meta[field] = e[field];
+  }
+  for (const [k, v] of Object.entries(extra || {})) {
+    if (v !== undefined) meta[k] = v;
+  }
+  const message = e.message || String(err);
+  const context = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : "";
+  const stack = e.stack ? `\n${e.stack}` : "";
+  return `${message}${context}${stack}`;
+}
+
+/** Log a failure with full diagnostics. `extra` carries route/request/params. */
+export function logError(label, err, extra) {
+  console.error(`${label}: ${formatError(err, extra)}`);
+}
+
+/** Same diagnostics at warning level — a degraded path, not a failed request. */
+export function logWarn(label, err, extra) {
+  console.warn(`${label}: ${formatError(err, extra)}`);
+}
+
+/** Request identity for a log line. `req.id` is set by handleRequest. */
+function reqMeta(req, extra) {
+  return {
+    rid: req && req.id,
+    route: req && req.url,
+    method: req && req.method,
+    ...(extra || {}),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Postgres
@@ -35,20 +102,29 @@ pg.types.setTypeParser(1082, (v) => v);
 pg.types.setTypeParser(20, (v) => parseInt(v, 10));
 
 let _pool = null;
+let _injectedPool = null;
+
+/** Test seam: run the handlers against a stub `{ query }` instead of a real
+ * pool. Pass null to restore the real one. Never called by the server itself. */
+export function setPool(pool) {
+  _injectedPool = pool;
+}
+
 function getPool() {
+  if (_injectedPool) return _injectedPool;
   if (!_pool) {
     _pool = new pg.Pool({
       connectionString: process.env.DATABASE_URL,
       max: 5,
     });
     // A dropped idle connection must not crash the process.
-    _pool.on("error", (err) => console.error("pg pool error:", err.message));
+    _pool.on("error", (err) => logError("pg pool", err));
   }
   return _pool;
 }
 
 // ---------------------------------------------------------------------------
-// Small response helpers (the subset of the Vercel res API the handlers used)
+// Small response helpers (the subset of the old res API the handlers used)
 // ---------------------------------------------------------------------------
 
 function sendJson(res, status, body) {
@@ -66,7 +142,7 @@ function sendEmpty(res, status) {
 }
 
 /** Read and JSON-parse a request body; an unparseable/empty body yields {}
- * so the handlers' own "Missing …" 400 checks fire, like Vercel's parser. */
+ * so the handlers' own "Missing …" 400 checks fire, like the old parser. */
 function readJsonBody(req) {
   return new Promise((resolvePromise) => {
     const chunks = [];
@@ -92,9 +168,8 @@ function readJsonBody(req) {
 }
 
 // ---------------------------------------------------------------------------
-// ETag helpers — copied verbatim from api/vacancies.js (kept there for the
-// Vercel deployment until cutover; duplicated so this server does not import
-// the @supabase/supabase-js dependency chain).
+// ETag helpers — ported from the retired api/vacancies.js. This is now the only
+// copy; the duplicate went with the Vercel path.
 // ---------------------------------------------------------------------------
 
 /** Build the ETag for a snapshot version from its `updated_at` timestamp. */
@@ -120,9 +195,9 @@ export function isNotModified(ifNoneMatch, etag) {
 }
 
 // ---------------------------------------------------------------------------
-// Handler preambles (ports of api/vacancies.js's inline gate and
-// api/_handler.js's withHandler — minus the Vercel-specific AUTH_USER /
-// AUTH_PASS fail-closed check, which Caddy + the loopback bind replace).
+// Handler preambles (ports of the retired same-origin gate and the shared
+// withHandler wrapper — minus the Vercel-specific AUTH_USER / AUTH_PASS
+// fail-closed check, which Caddy + the loopback bind replace).
 // ---------------------------------------------------------------------------
 
 /** Same-origin PII readers (/api/vacancies, /api/companies): no CORS header,
@@ -138,7 +213,7 @@ function piiPreamble(req, res, label) {
     return true;
   }
   if (!process.env.DATABASE_URL) {
-    console.error(`${label}: missing DATABASE_URL`);
+    logError(label, new Error("missing DATABASE_URL"), reqMeta(req));
     sendJson(res, 500, { error: "Server misconfigured" });
     return true;
   }
@@ -163,7 +238,7 @@ function wrappedPreamble(req, res, method, label) {
     return true;
   }
   if (!process.env.DATABASE_URL) {
-    console.error(`${label}: missing DATABASE_URL`);
+    logError(label, new Error("missing DATABASE_URL"), reqMeta(req));
     sendJson(res, 500, { error: "Server misconfigured" });
     return true;
   }
@@ -171,7 +246,7 @@ function wrappedPreamble(req, res, method, label) {
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/vacancies — see api/vacancies.js
+// GET /api/vacancies — contract in MIGRATION.md
 // ---------------------------------------------------------------------------
 
 async function handleVacancies(req, res) {
@@ -205,13 +280,13 @@ async function handleVacancies(req, res) {
     }
     return sendJson(res, 200, data.rows[0].payload);
   } catch (err) {
-    console.error("vacancies: error", err.message);
+    logError("vacancies", err, reqMeta(req));
     return sendJson(res, 500, { error: "Database error" });
   }
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/companies — see api/companies.js
+// GET /api/companies — contract in MIGRATION.md
 // ---------------------------------------------------------------------------
 
 const REVIEW_MAP = {
@@ -328,16 +403,19 @@ async function handleCompanies(req, res) {
 
     return sendJson(res, 200, { companies });
   } catch (err) {
-    console.error("companies: error", err.message);
+    logError("companies", err, reqMeta(req));
     return sendJson(res, 500, { error: "Database error" });
   }
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/save — see api/save.js
+// POST /api/save — contract in MIGRATION.md
 // ---------------------------------------------------------------------------
 
-const VALID_STATUSES = [
+// The status vocabulary this door accepts. Hand-maintained twin of
+// scripts/database_supabase.py VALID_STATUSES and dashboard_local.py — a status
+// missing here is a board column whose save the server refuses.
+export const VALID_STATUSES = [
   "unseen",
   "liked",
   "passed",
@@ -373,13 +451,13 @@ async function handleSave(req, res) {
     }
     return sendJson(res, 200, { ok: true, ts: new Date().toISOString() });
   } catch (err) {
-    console.error(`save: error — id=${id} status=${status}`, err.message);
+    logError("save", err, reqMeta(req, { id, status }));
     return sendJson(res, 500, { error: "Database error" });
   }
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/statuses — see api/statuses.js
+// GET /api/statuses — contract in MIGRATION.md
 // ---------------------------------------------------------------------------
 
 async function handleStatuses(req, res) {
@@ -399,13 +477,13 @@ async function handleStatuses(req, res) {
     }
     return sendJson(res, 200, { statuses, timestamps });
   } catch (err) {
-    console.error("statuses: error", err.message);
+    logError("statuses", err, reqMeta(req));
     return sendJson(res, 500, { error: "Database error" });
   }
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/company-review — see api/company-review.js
+// POST /api/company-review — contract in MIGRATION.md
 // ---------------------------------------------------------------------------
 
 const VALID_ACTIONS = ["approve", "reject"];
@@ -443,16 +521,13 @@ async function handleCompanyReview(req, res) {
       ts: new Date().toISOString(),
     });
   } catch (err) {
-    console.error(
-      `company-review: error — ${company_id} ${action}`,
-      err.message,
-    );
+    logError("company-review", err, reqMeta(req, { company_id, action }));
     return sendJson(res, 500, { error: "Database error" });
   }
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/company-statuses — see api/company-statuses.js
+// GET /api/company-statuses — contract in MIGRATION.md
 // ---------------------------------------------------------------------------
 
 async function handleCompanyStatuses(req, res) {
@@ -465,13 +540,13 @@ async function handleCompanyStatuses(req, res) {
     }
     return sendJson(res, 200, { statuses });
   } catch (err) {
-    console.error("company-statuses: error", err.message);
+    logError("company-statuses", err, reqMeta(req));
     return sendJson(res, 500, { error: "Database error" });
   }
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/board-statuses — see api/board-statuses.js
+// GET /api/board-statuses — contract in MIGRATION.md
 // ---------------------------------------------------------------------------
 
 /** One grouped pass over vacancy.source_board replaces the per-board COUNT
@@ -524,13 +599,13 @@ async function handleBoardStatuses(req, res) {
 
     return sendJson(res, 200, { boards });
   } catch (err) {
-    console.error("board-statuses: error", err.message);
+    logError("board-statuses", err, reqMeta(req));
     return sendJson(res, 500, { error: "Database error" });
   }
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/board-toggle — see api/board-toggle.js
+// POST /api/board-toggle — contract in MIGRATION.md
 // ---------------------------------------------------------------------------
 
 async function handleBoardToggle(req, res) {
@@ -562,16 +637,13 @@ async function handleBoardToggle(req, res) {
       ts: new Date().toISOString(),
     });
   } catch (err) {
-    console.error(
-      `board-toggle: error — ${board_id} enabled=${enabled}`,
-      err.message,
-    );
+    logError("board-toggle", err, reqMeta(req, { board_id, enabled }));
     return sendJson(res, 500, { error: "Database error" });
   }
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/health — see api/health.js
+// GET /api/health — contract in MIGRATION.md
 // ---------------------------------------------------------------------------
 
 async function handleHealth(req, res) {
@@ -584,7 +656,7 @@ async function handleHealth(req, res) {
       await getPool().query("SELECT COUNT(*) FROM vacancy");
       connected = true;
     } catch (err) {
-      console.error("health: backend probe failed —", err.message);
+      logError("health: backend probe failed", err, reqMeta(req));
     }
   }
   // Minimal by design: liveness + backend kind, nothing that leaks
@@ -597,16 +669,21 @@ async function handleHealth(req, res) {
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/health-detail — see api/health-detail.js
+// GET /api/health-detail — contract in MIGRATION.md
 // ---------------------------------------------------------------------------
 
-// Triage decisions that count as a verdict (mirrors learning.DECISION_STATUSES).
-const DECISION_STATUSES = [
+// Triage decisions that count as a verdict — the liked basket plus an explicit
+// pass. Mirrors scripts/learning.py DECISION_STATUSES (= LIKED_BASKET +
+// ("passed",)); server.test.js reads that file and fails on drift, because a
+// status missing here silently undercounts verdicts_pending on the Health tab.
+export const DECISION_STATUSES = [
   "liked",
   "to_apply",
   "to_research",
   "to_network",
   "applied",
+  "test_task",
+  "interview",
   "passed",
 ];
 
@@ -746,7 +823,7 @@ async function learningBlock(pool) {
       verdicts_pending: verdicts.rows[0].n || 0,
     };
   } catch (err) {
-    console.warn("health-detail: learning block unavailable —", err.message);
+    logWarn("health-detail: learning block unavailable", err);
     return {
       last_review: null,
       last_review_age_days: null,
@@ -770,13 +847,14 @@ async function handleHealthDetail(req, res) {
     res.setHeader("Cache-Control", "no-store");
     return sendJson(res, 200, { boards, companies, waiting, learning });
   } catch (err) {
-    console.error("health-detail: error", err.message);
+    logError("health-detail", err, reqMeta(req));
     return sendJson(res, 500, { error: "Database error" });
   }
 }
 
 // ---------------------------------------------------------------------------
-// Static files — public/ at the site root, matching the vercel.json headers.
+// Static files — public/ at the site root, with the cache headers the
+// retired vercel.json set.
 // ---------------------------------------------------------------------------
 
 const MIME = {
@@ -818,14 +896,44 @@ async function handleStatic(req, res, pathname) {
   }
   if (!info.isFile()) return sendEmpty(res, 404);
 
-  res.writeHead(200, {
+  const headers = {
     "Content-Type": MIME[extname(filePath)] || "application/octet-stream",
     "Content-Length": info.size,
-    // vercel.json set this for /, /index.html and *.js|css; uniform here.
+    // The retired vercel.json set this for /, /index.html and *.js|css.
     "Cache-Control": "public, max-age=0, must-revalidate",
+  };
+  if (req.method === "HEAD") {
+    res.writeHead(200, headers);
+    return res.end();
+  }
+
+  // stat() and open() are separate syscalls, so everything can change between
+  // them: a deploy rsync replaces the file, a mode change makes it unreadable.
+  // An unhandled 'error' on the stream is an unhandled 'error' on an
+  // EventEmitter, which takes the whole process down — one bad file would end
+  // every in-flight request. Headers therefore wait for 'open': until the fd
+  // exists the response is still free to become a 404/500.
+  await new Promise((done) => {
+    const stream = createReadStream(filePath);
+    let opened = false;
+    stream.on("error", (err) => {
+      logError("static", err, reqMeta(req, { file: filePath, opened }));
+      if (!opened && !res.headersSent) {
+        sendEmpty(res, err.code === "ENOENT" ? 404 : 500);
+      } else {
+        // Content-Length was already promised and cannot be met — cutting the
+        // socket is the only way the client learns the body is incomplete.
+        res.destroy(err);
+      }
+      done();
+    });
+    stream.on("open", () => {
+      opened = true;
+      res.writeHead(200, headers);
+      stream.pipe(res);
+    });
+    stream.on("close", done);
   });
-  if (req.method === "HEAD") return res.end();
-  createReadStream(filePath).pipe(res);
 }
 
 // ---------------------------------------------------------------------------
@@ -845,24 +953,81 @@ const API_ROUTES = {
   "/api/health-detail": handleHealthDetail,
 };
 
+let _reqSeq = 0;
+
 export async function handleRequest(req, res) {
+  // Short per-process request id so a log line ties back to one request.
+  req.id = (++_reqSeq).toString(36);
   const pathname = new URL(req.url, "http://localhost").pathname;
   const route = API_ROUTES[pathname];
   try {
     if (route) {
       await route(req, res);
     } else if (pathname.startsWith("/api/")) {
-      // Vercel answers 404 for a function that does not exist; bootstrap.js
-      // relies on that for /api/vacancies in simple mode.
+      // 404 for an endpoint that does not exist — bootstrap.js relies on it
+      // for /api/vacancies in simple mode (it means "fall back to data.js").
       sendJson(res, 404, { error: "Not found" });
     } else {
       await handleStatic(req, res, pathname);
     }
   } catch (err) {
-    console.error(`unhandled error on ${pathname}:`, err);
+    logError("unhandled", err, reqMeta(req, { pathname }));
     if (!res.headersSent) sendJson(res, 500, { error: "Internal error" });
     else res.end();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Process-level safety net
+// ---------------------------------------------------------------------------
+
+// I/O the process cannot control: a client that hung up, a file that vanished
+// or turned unreadable, a socket the kernel reset. These reach 'uncaughtException'
+// only because some emitter had no local listener; the process state itself is
+// fine, so it logs and keeps serving. Anything else (a real bug — a TypeError,
+// an assertion) leaves memory in an unknown state, and Node's own advice is to
+// exit and let systemd restart.
+const RECOVERABLE_CODES = new Set([
+  "EPIPE",
+  "ECONNRESET",
+  "ECONNABORTED",
+  "ETIMEDOUT",
+  "EACCES",
+  "EPERM",
+  "ENOENT",
+  "EISDIR",
+  "EBADF",
+  "EMFILE",
+  "ENFILE",
+  "ERR_STREAM_PREMATURE_CLOSE",
+  "ERR_STREAM_DESTROYED",
+  "ERR_STREAM_WRITE_AFTER_END",
+  "ERR_HTTP_HEADERS_SENT",
+]);
+
+/** True when the failure is transport/filesystem noise, not corrupted state. */
+export function isRecoverableError(err) {
+  return !!(err && err.code && RECOVERABLE_CODES.has(err.code));
+}
+
+/** Install the last-resort handlers. Called only when the server actually runs;
+ * importing this module in tests must not swallow their failures. */
+export function installProcessGuards() {
+  process.on("uncaughtException", (err, origin) => {
+    logError("uncaughtException", err, { origin, pid: process.pid });
+    if (!isRecoverableError(err)) {
+      logError("fatal — exiting", err, { origin, pid: process.pid });
+      process.exit(1);
+    }
+  });
+  process.on("unhandledRejection", (reason) => {
+    const err = reason instanceof Error ? reason : new Error(String(reason));
+    logError("unhandledRejection", err, { pid: process.pid });
+    if (!isRecoverableError(err)) {
+      logError("fatal — exiting", err, { pid: process.pid });
+      process.exit(1);
+    }
+  });
 }
 
 // Listen only when run directly (node server.js) — importing this module in
@@ -871,6 +1036,7 @@ if (
   process.argv[1] &&
   import.meta.url === new URL(`file://${process.argv[1]}`).href
 ) {
+  installProcessGuards();
   const port = Number(process.env.PORT) || 3000;
   const host = process.env.HOST || "127.0.0.1";
   if (!process.env.DATABASE_URL) {
@@ -878,7 +1044,13 @@ if (
       "DATABASE_URL is not set — static files will serve, API routes will answer 500",
     );
   }
-  createServer(handleRequest).listen(port, host, () => {
+  const server = createServer(handleRequest);
+  // A socket that dies mid-response emits here, not on the response object.
+  server.on("clientError", (err, socket) => {
+    logError("clientError", err);
+    if (socket.writable) socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+  });
+  server.listen(port, host, () => {
     console.log(`dashboard server listening on http://${host}:${port}`);
   });
 }
