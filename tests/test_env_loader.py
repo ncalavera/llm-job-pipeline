@@ -212,7 +212,9 @@ def test_banner_names_postgres(monkeypatch):
     # is expected to fire (see test_warns_ambient_supabase_url_with_no_dotenv_
     # file_at_all for the dedicated assertions).
     out = _banner(monkeypatch, is_sqlite=False, dotenv={})
-    assert "Backend: Postgres (Supabase)" in out
+    # The banner names the ACTUAL host (self-hosted Postgres since 2026-08), so
+    # it asserts the prefix, not a provider name — see _pg_host_label.
+    assert "Backend: Postgres (" in out
     assert "WARNING" in out
 
 
@@ -226,7 +228,7 @@ def test_warns_when_env_wants_supabase_but_run_is_sqlite(monkeypatch):
         dotenv={"SUPABASE_DB_URL": "postgresql://real/db"},
     )
     assert "WARNING" in out
-    assert "configured for Supabase" in out
+    assert "configured for Postgres" in out
     assert "local SQLite" in out
     assert "!" * 10 in out  # loud rule, not a lone stderr line
 
@@ -274,6 +276,60 @@ def test_no_warning_when_postgres_url_comes_from_dotenv(monkeypatch):
         dotenv={"SUPABASE_DB_URL": "postgresql://real/db"},
     )
     assert "WARNING" not in out
+
+
+# --- the host label the banner prints --------------------------------------
+
+
+def _label(monkeypatch, url):
+    monkeypatch.setenv("SUPABASE_DB_URL", url)
+    monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
+    return db_backend._pg_host_label()
+
+
+def test_host_label_names_a_remote_host(monkeypatch):
+    assert _label(monkeypatch, "postgresql://user:pw@db.example.test:5432/jobsearch") == (
+        "db.example.test"
+    )
+
+
+def test_host_label_reads_a_url_with_no_database_path(monkeypatch):
+    """The regex this replaced required a trailing "/dbname" and fell back to
+    the useless "postgres" without one — hiding the host the banner exists to
+    show."""
+    assert _label(monkeypatch, "postgresql://user:pw@db.example.test:5432") == "db.example.test"
+
+
+def test_host_label_survives_an_at_sign_in_the_password(monkeypatch):
+    assert _label(monkeypatch, "postgresql://user:p@ss@db.example.test/jobsearch") == (
+        "db.example.test"
+    )
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost"])
+def test_host_label_names_a_tunnel_with_its_port(monkeypatch, host):
+    assert _label(monkeypatch, f"postgresql://user:pw@{host}:15432/jobsearch") == (
+        f"local tunnel {host}:15432"
+    )
+
+
+def test_host_label_defaults_the_tunnel_port(monkeypatch):
+    assert _label(monkeypatch, "postgresql://user:pw@127.0.0.1/jobsearch") == (
+        "local tunnel 127.0.0.1:5432"
+    )
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "",
+        "not-a-url",
+        "postgresql://user:pw@db.example.test:not-a-port/jobsearch",
+    ],
+)
+def test_host_label_falls_back_instead_of_raising(monkeypatch, url):
+    """A banner must never be the thing that crashes a run."""
+    assert _label(monkeypatch, url) == "postgres"
 
 
 # --- missing psycopg2 driver ----------------------------------------------

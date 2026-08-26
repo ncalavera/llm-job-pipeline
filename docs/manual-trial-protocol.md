@@ -97,8 +97,8 @@ Follows INSTALL-EASY.md verbatim. No `.env` at any point in this section.
    yes/no; on approval, runs the first fetch → filter → score cycle; opens
    the local dashboard.
    Fails if: any step is skipped silently, the agent asks something the
-   onboarding gate text does not cover, or the banner says
-   `Backend: Postgres (Supabase)` — the latter means `SUPABASE_DB_URL` leaked
+   onboarding gate text does not cover, or the banner starts with
+   `Backend: Postgres (` — the latter means `SUPABASE_DB_URL` leaked
    from your shell environment (a documented trap in INSTALL-EASY.md); running
    `unset SUPABASE_DB_URL SUPABASE_DIRECT_URL` and restarting the shell is the
    documented fix, not a bug — but if the banner is silently wrong (no warning
@@ -176,7 +176,8 @@ path it's meant to exercise.
    picked.
 
 6. **Action.** `python3 scripts/fetch_vacancies.py --report-only`.
-   Expected: the banner explicitly prints `Backend: Postgres (Supabase)`.
+   Expected: the banner explicitly prints `Backend: Postgres (<host>)`, naming
+   the host from your `.env`.
    Fails if: it still says SQLite — `.env` is not being picked up.
 
 7. **Action.** Add a single vacancy at an org the database has never seen,

@@ -49,6 +49,7 @@ from config import (
     GEO_ACTIVE,
 )
 from geo import canonical_country, country_for_location, country_banned
+from statuses import PROTECTED_STATUSES
 from db_backend import RealDictCursor
 import filters
 from database_supabase import (
@@ -88,16 +89,12 @@ def _strip_html(raw: str) -> str:
 # ---------------------------------------------------------------------------
 
 _FUZZY_THRESHOLD: float = 0.85
-_PROTECTED_STATUSES: frozenset[str] = frozenset(
-    {
-        "liked",
-        "to_apply",
-        "to_research",
-        "to_network",
-        "applied",
-        "archived",
-    }
-)
+#: Never delete, never tombstone: every status that records a user decision,
+#: plus 'archived'. Imported from statuses.py rather than listed here — the
+#: hand-written copy this replaces was missing 'test_task', 'interview' and
+#: 'declined', so the filter stage deleted and tombstoned applications that
+#: were still in flight.
+_PROTECTED_STATUSES: frozenset[str] = PROTECTED_STATUSES
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 

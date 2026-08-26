@@ -470,7 +470,7 @@ def cmd_save(args):
     be split apart after the fact) — that failure is reported clearly instead
     of crashing with a raw traceback.
     """
-    from database_supabase import update_llm_score, get_conn
+    from database_supabase import update_llm_score_many, get_conn
     from llm_json import read_result_files
 
     bad_files: list[str] = []
@@ -601,9 +601,11 @@ def cmd_save(args):
             errors += 1
             continue
 
+        # One statement for every row of the role, not one per row: the ids in
+        # member_ids all receive the SAME score.
+        written = set(update_llm_score_many(member_ids, score_data))
         for member_id in member_ids:
-            rowcount = update_llm_score(member_id, score_data)
-            if rowcount == 0:
+            if str(member_id) not in written:
                 print(
                     f"WARNING: UUID {member_id} not found in DB — score not saved "
                     f"for {entry.get('org', '?')} — {entry.get('title', '?')}",

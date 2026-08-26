@@ -62,7 +62,9 @@ the scorer. The loop:
    produce the JSON object the prompt requests (score, reasoning, tags,
    hard_requirements, short_summary).
 3. Collect results as a JSON array and pipe it to
-   `python3 scripts/score_vacancies.py --save` (stdin). Use `member_ids` from
+   `python3 scripts/score_vacancies.py --save` (stdin). Saving writes scores
+   only — the dashboard snapshot is rebuilt once by the publish stage, or on
+   demand with `--dashboard`. Use `member_ids` from
    step 1 to address vacancies — not your own ids. If you saved each
    subagent's raw result to its own file, pass them as `--files r1.json
    r2.json ...` instead of assembling one array — a malformed file (a kill

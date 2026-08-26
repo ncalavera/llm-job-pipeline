@@ -28,8 +28,11 @@ writes nothing without an explicit ``--apply``. Point it at a throwaway SQLite
 DB with ``JOBSEARCH_DB_PATH`` and no ``SUPABASE_DB_URL`` to rehearse.
 
 Canonical (survivor) selection per cluster, in order:
-  1. the most-decided status (applied > to_apply > liked > … > unseen > archived)
-     — so a variant you already applied to or passed is the one that survives;
+  1. the most-decided status (an application — applied/test_task/interview/
+     declined — first, then to_apply > liked > … > unseen > archived), so a
+     variant you already applied to or passed is the one that survives. A
+     cluster holding TWO application rows is never collapsed at all: it goes to
+     manual review, because collapsing would delete one of them;
   2. the highest llm_score;
   3. the oldest first_seen (the most established row).
 
@@ -59,6 +62,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from db_backend import Json, RealDictCursor, IS_SQLITE, print_backend_banner  # noqa: E402
 from database_supabase import (  # noqa: E402
+    APPLICATION_STATUSES,
+    ApplicationArchiveBlocked,
     VACANCIES_DIR,
     _comparable_bodies,
     _normalize_title_strong,
@@ -76,8 +81,14 @@ from database_supabase import (  # noqa: E402
 # Higher = more worth keeping. A user decision (applied/passed/…) always beats
 # an undecided 'unseen', so the survivor inherits the decision (the point of the
 # whole exercise: a renamed copy must not resurface as unseen).
+#
+# The APPLICATION statuses are added on top from APPLICATION_STATUSES rather
+# than listed by hand: a hand list is what broke here. 'test_task', 'interview'
+# and 'declined' shipped into the DAL but never reached this table, so an
+# application in flight ranked 0 — below even 'archived' — and the sweep picked
+# it as the LOSER and hard-DELETEd it. Deriving the top of the ranking from the
+# same frozenset the DAL guards means a new funnel stage can never rank 0 again.
 _STATUS_RANK = {
-    "applied": 100,
     "to_apply": 90,
     "liked": 80,
     "to_research": 70,
@@ -88,6 +99,7 @@ _STATUS_RANK = {
     "unseen": 20,
     "archived": 10,
 }
+_STATUS_RANK.update({status: 100 + i for i, status in enumerate(sorted(APPLICATION_STATUSES))})
 
 # A row in one of these states is no longer "live" in the source listing.
 _GONE_STATUSES = frozenset({"archived", "expiring"})
@@ -296,17 +308,31 @@ def _live_rows(cluster):
     ]
 
 
+def _application_rows(cluster):
+    """Rows whose status records an application (see APPLICATION_STATUSES)."""
+    return [r for r in cluster if r.get("status") in APPLICATION_STATUSES]
+
+
 def _needs_manual_review(cluster):
     """A cluster where >= 2 rows are still live is NOT an over-time rename —
     both roles may be genuinely open right now — so it is left for a human
-    instead of auto-collapsed (mirrors the save-path batch-alive guard).
+    instead of auto-collapsed (mirrors the save-path batch-alive guard). A
+    cluster holding two application rows is left alone for a different reason,
+    below.
 
     Exceptions that collapse instead: when every live row shares a common
     normalized apply URL, that URL identifies ONE requisition (an apply link
     points at a single req); and when the live pair is a board-prefix double
     listing (one full title is a segment of the other and the body guard does
     not read them as distinct roles) — one req listed bare on one board and
-    decorated on another."""
+    decorated on another.
+
+    The application check has no exception: collapsing a cluster deletes every
+    loser, and an application row is the only record that the user applied at
+    all. Two of them in one cluster means one would have to go, so the whole
+    cluster is left for a human."""
+    if len(_application_rows(cluster)) > 1:
+        return True
     live = _live_rows(cluster)
     if len(live) < 2:
         return False
@@ -393,7 +419,23 @@ def _merge_fields(survivor, losers):
 
 
 def _apply_merge(survivor, losers):
-    """Fold losers into the survivor and delete them. Caller commits."""
+    """Fold losers into the survivor and delete them. Caller commits.
+
+    Refuses outright if any loser records an application. The ranking above
+    already makes such a row the survivor, and _needs_manual_review sends a
+    cluster holding two of them to a human — this is the last check before the
+    DELETE, so a future change to either cannot quietly erase an application.
+    Nothing is committed until every cluster has passed here, so raising leaves
+    the database untouched.
+    """
+    doomed = _application_rows(losers)
+    if doomed:
+        raise ApplicationArchiveBlocked(
+            "Refusing to delete "
+            + ", ".join(f"{r['id']} ({r['status']})" for r in doomed)
+            + ": the status records an application. Applications stay on the "
+            "board — they are the search statistics."
+        )
     fields = _merge_fields(survivor, losers)
     conn = get_conn()
     cur = conn.cursor()
@@ -448,13 +490,21 @@ def _archive_losers(all_losers):
 
 
 def _print_manual(clusters):
-    """Report clusters left for a human (both-live, not a rename)."""
+    """Report clusters left for a human, naming which guard held them back."""
     for i, cluster in enumerate(clusters, 1):
         live = _live_rows(cluster)
-        print(
-            f"[M{i}] {cluster[0]['org']}  — MANUAL REVIEW: {len(live)} rows still "
-            f"live in the latest fetch (not an over-time rename, left untouched)"
-        )
+        applications = _application_rows(cluster)
+        if len(applications) > 1:
+            reason = (
+                f"{len(applications)} rows record an application "
+                f"(collapsing would delete one, left untouched)"
+            )
+        else:
+            reason = (
+                f"{len(live)} rows still live in the latest fetch "
+                f"(not an over-time rename, left untouched)"
+            )
+        print(f"[M{i}] {cluster[0]['org']}  — MANUAL REVIEW: {reason}")
         for r in cluster:
             tag = "live " if r in live else "stale"
             print(f'    {tag} {r["status"]:<10} "{r["title"]}"  last seen {r.get("last_seen")}')

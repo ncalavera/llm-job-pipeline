@@ -33,6 +33,28 @@ _ACTIVE_STATUSES = frozenset(
 from database_supabase import load_vacancies, load_all_enrichment
 from db_conn import get_conn
 
+
+def keep_on_dashboard(vacancy: dict) -> bool:
+    """Does this role reach the dashboard at all?
+
+    One floor, applied once, before the data leaves Python. A role is kept when
+    it is scored AND (it is live work, or it clears CATALOG_MIN_SCORE). The 40
+    floor used to live only in the Catalog tab's client-side filter and in
+    ``score_floor_any_company``, which gates unapproved companies — so a weak
+    role at an APPROVED company shipped and showed up everywhere else.
+
+    An ACTIVE decision outranks the score: the weakest role in the liked basket
+    scores 15, and a role being worked cannot be hidden by a number. 'passed' /
+    'skipped' are NOT such decisions — they are dead ends, and keeping every one
+    of them shipped the whole rejected pile back onto the board. Below the floor
+    they are history, not work; the Archive tab still has them.
+    """
+    score = vacancy.get("llm_score")
+    if score is None or score < 0:
+        return False
+    return vacancy.get("status") in _ACTIVE_STATUSES or score >= CATALOG_MIN_SCORE
+
+
 # Per-company vacancy NUMBERS (vacancy_count, applyable_count, avg score and the
 # hot-vacancy signal) are no longer baked here — they derive in the browser from
 # the shipped roles (KISS derivation, phase 2; public/modules/derive.js
@@ -476,30 +498,10 @@ def prepare_report_data(db: dict = None) -> dict:
         status_exclude=["archived"],
         score_floor_any_company=40,
     )
-    # Exclude unscored vacancies from dashboard — they appear after /score.
-    #
-    # Also drop the weak tail: an UNDECIDED role below CATALOG_MIN_SCORE never
-    # reaches the dashboard at all (decision 2026-08-10). The 40 floor used to
-    # live only in the Catalog tab's client-side filter and in
-    # score_floor_any_company above, which gates unapproved companies — so a
-    # weak role at an APPROVED company was shipped and shown everywhere else.
-    # That is how "EA Funds — Director" (32, a scraped fundraiser page) and
-    # "Elevate Philanthropy — Historical Projects" (28, no description) ended up
-    # in front of him. One floor, applied once, before the data leaves Python.
-    #
-    # An ACTIVE decision outranks the score: the weakest role in the liked
-    # basket scores 15, and a role being worked cannot be hidden by a number.
-    # 'passed' / 'skipped' are NOT such decisions — they are dead ends, and
-    # keeping every one of them shipped the whole rejected pile back onto the
-    # board (a bulk pass of 190 roles reappeared in the list immediately).
-    # Below the floor they are history, not work; the Archive tab still has them.
-    vacancies = [
-        v
-        for v in all_vacs.values()
-        if v.get("llm_score") is not None
-        and v.get("llm_score", -1) >= 0
-        and (v.get("status") in _ACTIVE_STATUSES or v.get("llm_score", -1) >= CATALOG_MIN_SCORE)
-    ]
+    # Exclude unscored vacancies (they appear after /score) and the weak tail
+    # (decision 2026-08-10) — see keep_on_dashboard, which owns the rule and is
+    # what tests/test_dashboard_score_floor.py exercises.
+    vacancies = [v for v in all_vacs.values() if keep_on_dashboard(v)]
     # Fetched-but-not-yet-scored vacancies (rows NOT shipped in `groups`) — the one
     # count the browser can't derive from the raw payload; see the docstring.
     unscored_count = _count_unscored(all_vacs)

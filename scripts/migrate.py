@@ -39,6 +39,13 @@ Data safety — the whole point of this runner:
   accidental data-dropping migration can never run silently. A column backfill
   (``UPDATE ... SET``) is allowed — it is the normal additive pattern. The scan
   ignores keywords inside comments/strings and matches only at statement starts.
+* **One deliberate waiver, declared in the file.** A migration whose FIRST line
+  is ``-- migrate:allow-destructive <reason>`` runs unattended despite the scan,
+  and the reason is printed on every run that applies it. It exists for the one
+  pattern SQLite forces on us: widening a CHECK constraint means rebuilding the
+  table (create → copy → drop → rename), so the DROP is the migration, not an
+  accident. Write it only when the DROP provably removes nothing the copy above
+  it has not already carried over — the runner still takes its backup first.
 
 Applied versions are tracked in a ``schema_migrations`` ledger so each runs once.
 ``--baseline`` adopts an already-current database by recording every pending
@@ -98,6 +105,16 @@ _DESTRUCTIVE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A migration may waive the gate for itself by declaring, on its FIRST line:
+#   -- migrate:allow-destructive <reason>
+# The reason is required (and printed), so the waiver is never a silent flag —
+# it is a sentence the author had to write and a reviewer reads first. Only the
+# first line counts: a directive buried further down could be a leftover from a
+# statement that was edited away.
+_ALLOW_DESTRUCTIVE_RE = re.compile(
+    r"\A[ \t]*--[ \t]*migrate:allow-destructive[ \t]+(?P<reason>\S[^\n]*)", re.IGNORECASE
+)
+
 # Length-preserving-ish removal of SQL comments and string/identifier literals,
 # so keyword scans never match text inside them.
 _BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
@@ -153,19 +170,33 @@ def _discover():
     return out
 
 
-def _scan_destructive(loaded) -> list[str]:
-    """Return labels of pending migrations containing destructive statements.
+def _allow_destructive_reason(sql: str) -> str | None:
+    """The reason a migration declares for waiving the destructive gate, if any."""
+    m = _ALLOW_DESTRUCTIVE_RE.match(sql)
+    return m.group("reason") if m else None
 
-    ``loaded`` is ``[(version, label, path, sql_text_or_None)]`` — the SQL was
-    already read once by the caller, so this does no extra I/O.
+
+def _scan_destructive(loaded) -> tuple[list[str], list[str]]:
+    """Split pending migrations that contain destructive statements into
+    ``(blocked, waived)`` label lists.
+
+    ``waived`` are the ones declaring ``-- migrate:allow-destructive <reason>``
+    on their first line; their label carries the reason so the caller can print
+    it. ``loaded`` is ``[(version, label, path, sql_text_or_None)]`` — the SQL
+    was already read once by the caller, so this does no extra I/O.
     """
-    hits = []
+    blocked, waived = [], []
     for version, label, path, sql in loaded:
         if sql is None:
             continue
-        if _DESTRUCTIVE_RE.search(_strip_sql_noise(sql)):
-            hits.append(f"{version} {label} ({path.name})")
-    return hits
+        if not _DESTRUCTIVE_RE.search(_strip_sql_noise(sql)):
+            continue
+        reason = _allow_destructive_reason(sql)
+        if reason:
+            waived.append(f"{version} {label} ({path.name}): {reason}")
+        else:
+            blocked.append(f"{version} {label} ({path.name})")
+    return blocked, waived
 
 
 def _rotate_backups(prefix: str):
@@ -472,7 +503,9 @@ def cmd_migrate(allow_destructive: bool, do_backup: bool) -> int:
         ]
 
         # Safety gate: refuse destructive migrations unless explicitly allowed.
-        destructive = _scan_destructive(loaded)
+        destructive, waived = _scan_destructive(loaded)
+        for w in waived:
+            print(f"  ! destructive by declaration — {w}", file=sys.stderr)
         if destructive and not allow_destructive:
             print(
                 "ABORTED — these pending migrations contain destructive statements:",

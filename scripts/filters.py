@@ -22,6 +22,7 @@ from config import (
     COMPANY_TITLE_FILTERS,
     resolve_canonical_name,
 )
+from statuses import PROTECTED_STATUSES
 
 # ---------------------------------------------------------------------------
 # Blacklist constants — self-describing names, data sourced from config.
@@ -271,16 +272,12 @@ def is_recently_archived(archived_hashes: set[str], dedup_hash: str) -> bool:
 # ---------------------------------------------------------------------------
 
 _FUZZY_THRESHOLD: float = 0.85
-_PROTECTED_STATUSES: frozenset[str] = frozenset(
-    {
-        "liked",
-        "to_apply",
-        "to_research",
-        "to_network",
-        "applied",
-        "archived",
-    }
-)
+#: Never delete, never tombstone: every status that records a user decision,
+#: plus 'archived'. Imported from statuses.py rather than listed here — the
+#: hand-written copy this replaces was missing 'test_task', 'interview' and
+#: 'declined', so the filter stage deleted and tombstoned applications that
+#: were still in flight.
+_PROTECTED_STATUSES: frozenset[str] = PROTECTED_STATUSES
 
 
 def _strip_punct(title: str) -> str:

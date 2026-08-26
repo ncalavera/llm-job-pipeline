@@ -98,9 +98,10 @@ The gate is a warn-only detector, not a blocker: `publish` always refreshes the
 dashboard, and a dirty run — a crashed stage, a blocking warning, or a single
 org losing a large share of its live roles to gone-from-source archival (the
 signature of a truncated fetch) — is flagged loudly on the publish note and the
-report card instead of being withheld. (Skipping never protected anything: the
-scoring stage's `--save` already regenerates the live snapshot before `publish`
-runs, so the site is kept fresh and the operator is warned.) In full mode
+report card instead of being withheld. (Skipping protects nothing and costs
+something: `publish` is the run's only dashboard rebuild — `score --save`
+regenerates the snapshot only when passed `--dashboard` — so withholding it
+would leave the board on stale data and hide the bad run.) In full mode
 publish refreshes the hosted dashboard snapshot (a browser refresh, no
 redeploy); in simple mode it rewrites the local `public/data.js`. Both go
 through the same driver — no mode branching. (`vercel --prod` is only ever for

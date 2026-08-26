@@ -23,6 +23,7 @@ import re
 import sqlite3
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 # ---------------------------------------------------------------------------
 # Backend selection
@@ -109,17 +110,26 @@ def _pg_host_label() -> str:
     """Human-readable host of the configured Postgres URL, for banners only.
 
     The env var is still named SUPABASE_DB_URL for compatibility, but since the
-    2026-08 self-host migration it points at the forge server's Postgres
-    (usually through an SSH tunnel on 127.0.0.1), so banners must not claim
-    "Supabase" — they print the actual host instead.
+    2026-08 self-host migration it points at a self-hosted Postgres (usually
+    through an SSH tunnel on 127.0.0.1), so banners must not claim "Supabase" —
+    they print the actual host instead.
+
+    Parsed with urlsplit, not a regex: the hand-rolled pattern needed a
+    trailing "/dbname" and returned the useless "postgres" for the perfectly
+    valid ``postgresql://user:pw@host:5432`` — the banner then hid the very
+    thing it exists to show. urlsplit also splits user:pw@host correctly when
+    the password itself contains an "@".
     """
     url = _supabase_url() or ""
-    m = re.search(r"@([^/@:]+)(?::(\d+))?/", url)
-    if not m:
+    try:
+        parts = urlsplit(url)
+        host, port = parts.hostname, parts.port
+    except ValueError:  # non-numeric port, or otherwise malformed
+        host, port = None, None
+    if not host:
         return "postgres"
-    host = m.group(1)
     if host in ("127.0.0.1", "localhost"):
-        return f"local tunnel {host}:{m.group(2) or '5432'}"
+        return f"local tunnel {host}:{port or 5432}"
     return host
 
 

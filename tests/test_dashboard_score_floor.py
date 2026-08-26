@@ -8,15 +8,11 @@ case-study heading with no description (scored 28) ended up on the dashboard.
 """
 
 from config import CATALOG_MIN_SCORE
-from report.data_prep import _ACTIVE_STATUSES
+from report.data_prep import keep_on_dashboard as _keep
 
-
-def _keep(vacancy):
-    """The rule under test, mirroring scripts/report/data_prep.py."""
-    score = vacancy.get("llm_score")
-    if score is None or score < 0:
-        return False
-    return vacancy.get("status") in _ACTIVE_STATUSES or score >= CATALOG_MIN_SCORE
+# `_keep` IS the production rule (report.data_prep.keep_on_dashboard), not a
+# copy of it: this file used to re-implement the filter, so the two could drift
+# and the test would still pass while the dashboard shipped the weak tail.
 
 
 # ---------------------------------------------------------------------------

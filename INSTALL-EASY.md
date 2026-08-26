@@ -84,8 +84,8 @@ pipeline creates `data/jobsearch.db` and its tables for you.
 > unset SUPABASE_DB_URL SUPABASE_DIRECT_URL
 > ```
 > Every fetch/score/filter run prints which backend it used —
-> `Backend: local SQLite (...)` is what you want here. If you see
-> `Backend: Postgres (Supabase)`, stop and unset the variable.
+> `Backend: local SQLite (...)` is what you want here. If the line starts with
+> `Backend: Postgres (` — whatever host it names — stop and unset the variable.
 
 ## 2b. Apply schema migrations
 
@@ -220,8 +220,8 @@ SQLite — no code changes. Two things easy mode skipped are required now:
    requirements.txt" error, not a crash.)
 2. **Fill `.env` with Supabase.** Set `SUPABASE_DB_URL` (and the dashboard env
    vars). The scripts auto-load the repo-root `.env` — no manual `export`. Every
-   fetch/score/filter run prints its backend; confirm it says
-   `Backend: Postgres (Supabase)`.
+   fetch/score/filter run prints its backend; confirm the line starts with
+   `Backend: Postgres (` and names the host you configured.
 
 Then follow [INSTALL.md](INSTALL.md) from step 3 (create the Supabase project and
 schema), and re-add your companies (or migrate the SQLite rows). Your commands

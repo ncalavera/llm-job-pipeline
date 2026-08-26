@@ -152,6 +152,10 @@ python3 scripts/score_vacancies.py --save < chunk.json
 python3 scripts/score_vacancies.py --save --files r1.json r2.json ...
 ```
 
+`--save` writes scores only; it does not rebuild the dashboard (pass
+`--dashboard` if you want the snapshot refreshed mid-run). The publish stage
+below rebuilds it once, at the end.
+
 1. **Screen** — score every vacancy with `[## VOLUME] screen_model` (default
    Haiku, the cheapest tier). Fast, cheap first pass.
 2. **Escalate** — the driver keeps only the roles whose screen score clears
@@ -197,10 +201,12 @@ The deep structured review of liked roles lives in `/jobs-review`. Then
 
 ## Publish — automatic, gated
 
-The driver publishes only a **clean** run: zero stage crashes AND no single org
-that lost a large share of its live roles to gone-from-source archival (the
-signature of a truncated fetch). A dirty run keeps the previous good snapshot;
-the driver says so in the summary. In full mode publish refreshes the live
+The driver always publishes, and says how the run went. A **dirty** run — a
+stage crash, a blocking warning, or a single org that lost a large share of its
+live roles to gone-from-source archival (the signature of a truncated fetch) —
+is flagged as a loud warning on the publish note and the summary, not withheld:
+publish is the run's only dashboard rebuild, so skipping it would leave the
+board stale and hide the bad run. In full mode publish refreshes the live
 dashboard snapshot (browser refresh, no deploy); in simple mode it rewrites the
 local `public/data.js`. Both go through the same driver — no mode branching.
 `vercel --prod` is only for dashboard **code** changes and is never run here.
