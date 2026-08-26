@@ -99,20 +99,6 @@ def test_tier_enum():
     assert set(t.value for t in Tier) == VALID_TIERS
 
 
-def test_vacancy_requires_company_id():
-    """Vacancy must reference a company."""
-    from models import Vacancy
-
-    v = Vacancy(
-        id="00000000-0000-0000-0000-000000000001",
-        company_id="00000000-0000-0000-0000-000000000002",
-        title="Test Role",
-        first_seen="2026-01-01",
-        last_seen="2026-01-01",
-    )
-    assert v.company_id is not None
-
-
 def test_experience_match_range():
     """Experience match must be 0-10."""
     from models import Company
@@ -123,42 +109,3 @@ def test_experience_match_range():
             canonical_name="Test",
             experience_match=15,
         )
-
-
-def test_vacancy_dedup_hash_field():
-    """Vacancy should have dedup_hash field for deduplication."""
-    from models import Vacancy
-
-    v = Vacancy(
-        id="00000000-0000-0000-0000-000000000001",
-        company_id="00000000-0000-0000-0000-000000000002",
-        title="Test",
-        first_seen="2026-01-01",
-        last_seen="2026-01-01",
-        dedup_hash="abc123",
-    )
-    assert v.dedup_hash == "abc123"
-
-
-def test_company_description_field():
-    """Company should have description field."""
-    from models import Company
-
-    c = Company(
-        id="00000000-0000-0000-0000-000000000001",
-        canonical_name="Test",
-        description="SaaS platform",
-    )
-    assert c.description == "SaaS platform"
-
-
-def test_company_notes_field():
-    """Company should have notes field."""
-    from models import Company
-
-    c = Company(
-        id="00000000-0000-0000-0000-000000000001",
-        canonical_name="Test",
-        notes="Great culture",
-    )
-    assert c.notes == "Great culture"

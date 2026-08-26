@@ -2,7 +2,8 @@
 
 Covers:
   1. quality.clean_description() — every verdict + edge cases
-  2. Title blacklist — non-vacancy junk patterns via _is_blacklisted
+  2. (moved) title-blacklist junk-pattern tests now live in test_filters.py —
+     see the TRIM note in section 2 below
   3. _gate_description() in database_supabase.py — unit, no DB write
   4. Deadline / hot_vacancy helpers
   5. Read-only integration checks (skipped without SUPABASE_DB_URL)
@@ -488,114 +489,15 @@ class TestCleanDescriptionNoFalsePositives:
 
 # ===========================================================================
 # 2. Title blacklist — non-vacancy junk patterns
+#
+# TRIM (2026-08-26): TestBlacklistJunkMatched, TestBlacklistFormatWordsNotJunk
+# and TestBlacklistLegitNotMatched (~21 tests) were dropped from here. They
+# re-tested filters.title_words_blacklisted / description_words_blacklisted
+# polarity on a corpus that overlapped almost 1:1 with tests/test_filters.py's
+# TestUniversalJunk, TestFormatRolesNotJunk and TestNegativeNoFalsePositives /
+# TestDisciplinesNotBlacklistedByDefault classes (absorbed from
+# test_blacklist.py), which survive there.
 # ===========================================================================
-
-
-class TestBlacklistJunkMatched:
-    """Universal-junk listings must match — only "there is no concrete single
-    role here at all" markers (talent pools, generic applications, volunteer
-    calls). Discipline-/format-flavored words are NOT universal junk and are
-    asserted absent in TestBlacklistFormatWordsNotJunk below."""
-
-    @pytest.fixture(autouse=True)
-    def import_blacklist(self):
-        import filters
-
-        self._is_blacklisted = lambda title, desc="": (
-            filters.title_words_blacklisted(title) or filters.description_words_blacklisted(desc)
-        )
-
-    def test_talent_pool(self):
-        assert self._is_blacklisted("Talent Pool — Future Roles") is True
-
-    def test_expression_of_interest(self):
-        assert self._is_blacklisted("Expression of Interest: General") is True
-
-    def test_general_application(self):
-        assert self._is_blacklisted("General Application") is True
-
-    def test_open_application(self):
-        assert self._is_blacklisted("Open Application — Any Team") is True
-
-    def test_talent_network(self):
-        assert self._is_blacklisted("Join Our Talent Network") is True
-
-    def test_speculative_application(self):
-        assert self._is_blacklisted("Speculative Application") is True
-
-    def test_register_your_interest(self):
-        assert self._is_blacklisted("Register Your Interest") is True
-
-    def test_banco_de_talentos(self):
-        assert self._is_blacklisted("[Banco de Talentos] Pessoas com deficiência") is True
-
-
-class TestBlacklistFormatWordsNotJunk:
-    """Format-/discipline-flavored words ship NEUTRAL: they are the user's
-    optional taste (profile exclude_title_keywords), never universal junk. A
-    bootcamp instructor, a paid fellowship, a funding-strategy lead can be real
-    roles. With an empty profile none of these are dropped."""
-
-    @pytest.fixture(autouse=True)
-    def import_blacklist(self):
-        import filters
-
-        self._is_blacklisted = lambda title, desc="": (
-            filters.title_words_blacklisted(title) or filters.description_words_blacklisted(desc)
-        )
-
-    def test_bootcamp_not_junk(self):
-        # "Data Science Bootcamp" instructor is a real job
-        assert self._is_blacklisted("Data Science Bootcamp Lead Instructor") is False
-
-    def test_course_not_junk(self):
-        assert self._is_blacklisted("Course, Intro to X") is False
-
-    def test_summer_school_not_junk(self):
-        assert self._is_blacklisted("Summer School Coordinator") is False
-
-    def test_training_on_not_junk(self):
-        assert self._is_blacklisted("Training on M&E Methods for NGOs") is False
-
-    def test_fellowship_not_junk(self):
-        # Many real paid staff roles are called fellowships
-        assert self._is_blacklisted("Fellowship Programme in AI Governance") is False
-
-    def test_funding_not_junk(self):
-        # Grant/funding calls are real jobs for fundraisers
-        assert self._is_blacklisted("Funding Strategy Lead 2026") is False
-
-
-class TestBlacklistLegitNotMatched:
-    """Legitimate titles must NOT match."""
-
-    @pytest.fixture(autouse=True)
-    def import_blacklist(self):
-        import filters
-
-        self._is_blacklisted = lambda title, desc="": (
-            filters.title_words_blacklisted(title) or filters.description_words_blacklisted(desc)
-        )
-
-    def test_program_director_not_blacklisted(self):
-        assert self._is_blacklisted("Program Director") is False
-
-    def test_senior_operations_manager_not_blacklisted(self):
-        assert self._is_blacklisted("Senior Operations Manager") is False
-
-    def test_crowdfunding_lead_not_blacklisted(self):
-        assert self._is_blacklisted("Crowdfunding Lead") is False
-
-    def test_head_of_courses_strategy_not_blacklisted(self):
-        assert self._is_blacklisted("Head of Courses Strategy") is False
-
-    def test_director_of_training_not_blacklisted(self):
-        # "training on" needs "on"; "Director of Training" has none
-        assert self._is_blacklisted("Director of Training") is False
-
-    def test_head_of_fundraising_not_blacklisted(self):
-        # "fundraising" does not contain "funding,"
-        assert self._is_blacklisted("Head of Fundraising") is False
 
 
 # ===========================================================================

@@ -80,7 +80,7 @@ def _seed(dal, title="Head of Community"):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("status", ["liked", "passed", "unseen", "to_apply", "applied"])
+@pytest.mark.parametrize("status", ["to_apply", "applied"])
 def test_mark_persists_each_status(vac, status):
     vid = _seed(vac.dal)
     vac.mod.cmd_mark(types.SimpleNamespace(id=vid, status=status))

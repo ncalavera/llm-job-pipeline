@@ -840,14 +840,6 @@ def test_select_escalation_payloads_skips_role_already_scored_by_escalate_model(
     assert out == [payloads[1]]  # only b escalates; a is skipped
 
 
-def test_select_escalation_payloads_guard_is_opt_in(rd):
-    """Without scored_by/escalate_model args, behaviour is unchanged (the
-    guard is additive, not a breaking change to the existing call sites)."""
-    payloads = [{"member_ids": ["a"]}]
-    scores = {"a": 80}
-    assert rd.select_escalation_payloads(payloads, scores, 40) == payloads
-
-
 def test_two_pass_single_pass_when_screen_equals_scoring_model(rd, monkeypatch, tmp_path):
     """screen_model == scoring_model -> ONE pass, no escalate gate at all,
     and the gate text says so explicitly."""

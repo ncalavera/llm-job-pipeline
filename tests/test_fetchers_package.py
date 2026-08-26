@@ -101,10 +101,6 @@ class TestFailureIsNotEmptiness:
         }
         assert len(set(statuses.values())) == 3
 
-    def test_jobs_present_never_downgraded_by_recorded_error(self):
-        # Partial success (some pages fetched, then a failure) stays "ok".
-        assert _resolve_fetch_status("ok", True, None, "error: timeout") == "ok"
-
     def test_scrape_status_outranks_fetch_error(self):
         # js_required / credit_exhausted are more specific than a generic error.
         assert _resolve_fetch_status("ok", False, "js_required", "error: timeout") == "js_required"

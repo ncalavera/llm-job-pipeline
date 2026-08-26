@@ -8,9 +8,18 @@ The ``application`` table is migration-only (0010), exactly like scored_by
 (0009): a fresh baseline connection does NOT have it, so these tests apply the
 migration explicitly before exercising the DAL — the same thing a real
 ``python3 scripts/migrate.py`` run does. Fully invented companies/roles.
+
+Absorbs test_applications_are_permanent.py: an application, once made, never
+disappears from the board. Applied / test_task / interview / declined are the
+record of what the user actually tried — the only honest statistic he has
+about his own search, unrecoverable if a sweeper quietly archives it. Three
+layers have to hold: no AUTOMATIC archive path may select a role in an
+application status; the single status-write choke point must refuse to
+archive one; the dashboard must ship it whatever it scored.
 """
 
 import importlib
+import re
 import sys
 from pathlib import Path
 
@@ -20,6 +29,11 @@ REPO = Path(__file__).resolve().parent.parent
 SCRIPTS = str(REPO / "scripts")
 if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
+
+from database_supabase import APPLICATION_STATUSES
+from report.data_prep import _ACTIVE_STATUSES
+
+_DAL = REPO / "scripts" / "database_supabase.py"
 
 _CHAIN = (
     "database_supabase",
@@ -405,3 +419,131 @@ def test_application_artifact_values_and_notes_never_reach_payload(tmp_path, mon
     # ...but the artifact KEYS are display metadata and MUST survive.
     assert "cover_letter_path" in payload
     assert "answers" in payload
+
+
+# ===========================================================================
+# --- from test_applications_are_permanent.py ---
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Layer 1 — every automatic archival is scoped to untouched rows
+# ---------------------------------------------------------------------------
+
+
+def test_AP01_every_archive_statement_is_scoped_to_unseen():
+    """Each `SET status = 'archived'` must be reachable only for 'unseen' rows —
+    either by a WHERE clause on this statement or by the SELECT that built its
+    id list. A new archival path that forgets this fails here."""
+    source = _DAL.read_text()
+
+    # Each archiving UPDATE, with the ~25 lines of context that scope it.
+    for match in re.finditer(r"UPDATE vacancy SET status = 'archived'", source):
+        start = source.rfind("\ndef ", 0, match.start())
+        window = source[start : match.end() + 700]
+        assert "'unseen'" in window, (
+            "An archiving UPDATE is not scoped to unseen rows:\n"
+            + source[match.start() - 200 : match.end() + 300]
+        )
+
+
+# ---------------------------------------------------------------------------
+# Layer 2 — the choke point refuses
+# ---------------------------------------------------------------------------
+
+
+def test_AP02_application_statuses_are_the_expected_set():
+    assert APPLICATION_STATUSES == {"applied", "test_task", "interview", "declined"}
+
+
+@pytest.mark.parametrize("current", sorted(APPLICATION_STATUSES))
+def test_AP03_archiving_an_application_is_blocked(monkeypatch, current):
+    import database_supabase as dal
+
+    executed = []
+
+    class _Cur:
+        def execute(self, sql, params=None):
+            executed.append(sql)
+
+        def fetchone(self):
+            return (current,)
+
+        def close(self):
+            pass
+
+    class _Conn:
+        def cursor(self, *a, **kw):
+            return _Cur()
+
+    monkeypatch.setattr(dal, "get_conn", lambda: _Conn())
+
+    with pytest.raises(dal.ApplicationArchiveBlocked):
+        dal.update_vacancy_status("some-uuid", "archived")
+
+    assert not any("SET status" in s for s in executed), "the UPDATE must not run"
+
+
+@pytest.mark.parametrize("current", ["unseen", "passed", "skipped", "liked", "expiring"])
+def test_AP04_archiving_anything_else_still_works(monkeypatch, current):
+    """The guard must not turn into a blanket ban on archiving."""
+    import database_supabase as dal
+
+    executed = []
+
+    class _Cur:
+        def execute(self, sql, params=None):
+            executed.append(sql)
+
+        def fetchone(self):
+            return (current,)
+
+        def close(self):
+            pass
+
+    class _Conn:
+        def cursor(self, *a, **kw):
+            return _Cur()
+
+    monkeypatch.setattr(dal, "get_conn", lambda: _Conn())
+    dal.update_vacancy_status("some-uuid", "archived")
+
+    assert any("SET status" in s for s in executed)
+
+
+def test_AP05_force_allows_a_deliberate_correction(monkeypatch):
+    """An application logged against the wrong role must still be fixable."""
+    import database_supabase as dal
+
+    executed = []
+
+    class _Cur:
+        def execute(self, sql, params=None):
+            executed.append(sql)
+
+        def fetchone(self):
+            return ("applied",)
+
+        def close(self):
+            pass
+
+    class _Conn:
+        def cursor(self, *a, **kw):
+            return _Cur()
+
+    monkeypatch.setattr(dal, "get_conn", lambda: _Conn())
+    dal.update_vacancy_status("some-uuid", "archived", force=True)
+
+    assert any("SET status" in s for s in executed)
+
+
+# ---------------------------------------------------------------------------
+# Layer 3 — the dashboard ships them whatever they scored
+# ---------------------------------------------------------------------------
+
+
+def test_AP06_applications_survive_the_dashboard_score_floor():
+    for status in APPLICATION_STATUSES:
+        assert status in _ACTIVE_STATUSES, (
+            f"'{status}' records an application but does not survive the score "
+            "floor — a low-scored application would vanish from the board"
+        )

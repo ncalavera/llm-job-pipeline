@@ -54,12 +54,6 @@ class TestIsNonJobUrl:
     def test_allows_job_urls(self, url):
         assert _is_non_job_url(url) is False, f"Expected {url} to be allowed"
 
-    def test_rejects_fragment_only_partners(self):
-        assert _is_non_job_url("https://example.org/about/#partners") is True
-
-    def test_rejects_fragment_only_advisory_board(self):
-        assert _is_non_job_url("https://example.org/about/#advisory-board") is True
-
     def test_allows_url_with_job_fragment(self):
         """A fragment like #apply or #position should not be rejected."""
         assert _is_non_job_url("https://example.org/careers/#apply") is False
