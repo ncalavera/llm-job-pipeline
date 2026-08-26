@@ -37,7 +37,7 @@ code 10 (a GATE), does the printed judgment task (scoring / verdicts), then
 answers the gates. Exit codes: 0 done, 10 gate, 20 abort, 30 stage error.
 
 Install guides: `INSTALL-EASY.md` (simple mode, zero signups) and
-`INSTALL.md` (full mode, Supabase + Vercel).
+`INSTALL.md` (full mode, Supabase + a self-hosted dashboard server).
 
 `CONCEPTS.md` at the repo root defines the project's shared domain
 vocabulary (entities, named processes, status concepts) — relevant when

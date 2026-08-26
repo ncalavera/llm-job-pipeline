@@ -64,8 +64,8 @@ Run this from the project root whenever you want the latest version.
    - If the local dashboard (`scripts/dashboard_local.py`) is running, it must be
      restarted to pick up code changes.
    - If full mode is in use and the change touched `public/` or the dashboard,
-     run `/jobs-new` (it regenerates and redeploys) or `vercel --prod` directly to
-     redeploy to Vercel.
+     redeploy the Node server on the VPS (pull the branch, `npm install --omit=dev`,
+     restart the systemd unit — see MIGRATION.md).
 
 ## What this command never does
 

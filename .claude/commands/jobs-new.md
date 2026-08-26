@@ -209,7 +209,7 @@ publish is the run's only dashboard rebuild, so skipping it would leave the
 board stale and hide the bad run. In full mode publish refreshes the live
 dashboard snapshot (browser refresh, no deploy); in simple mode it rewrites the
 local `public/data.js`. Both go through the same driver — no mode branching.
-`vercel --prod` is only for dashboard **code** changes and is never run here.
+Redeploying the dashboard **server** is only for dashboard **code** changes and is never run here.
 
 ---
 

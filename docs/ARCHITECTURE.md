@@ -104,8 +104,8 @@ regenerates the snapshot only when passed `--dashboard` — so withholding it
 would leave the board on stale data and hide the bad run.) In full mode
 publish refreshes the hosted dashboard snapshot (a browser refresh, no
 redeploy); in simple mode it rewrites the local `public/data.js`. Both go
-through the same driver — no mode branching. (`vercel --prod` is only ever for
-dashboard *code* changes.)
+through the same driver — no mode branching. (Dashboard *code* changes are a
+separate concern: redeploy the Node server, see [MIGRATION.md](../MIGRATION.md).)
 
 ## Health & observability
 
@@ -149,8 +149,8 @@ guardrail 2).
 | | Full mode (canonical) | Simple mode (honest demo) |
 | --- | --- | --- |
 | Backend | Postgres (Supabase), `SUPABASE_DB_URL` set | local SQLite file (`data/jobsearch.db`), auto-created |
-| Signups | Supabase + Vercel (free tiers) | none |
-| Dashboard | always-on Vercel URL, any device, Basic-Auth | `localhost` via `dashboard_local.py`, while your terminal is open |
+| Signups | Supabase (free tier); the dashboard is self-hosted | none |
+| Dashboard | always-on self-hosted Node server (`server.js`) on a VPS, any device, Basic-Auth at the reverse proxy | `localhost` via `dashboard_local.py`, while your terminal is open |
 | Telegram digest | yes | no (needs a server) |
 | Multi-device / sync | yes | no |
 | Runbook | [`INSTALL.md`](../INSTALL.md) | [`INSTALL-EASY.md`](../INSTALL-EASY.md) |

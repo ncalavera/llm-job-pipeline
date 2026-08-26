@@ -14,7 +14,7 @@ Steps marked **[human]** need you; everything else an agent can do.
   Ashby, Workable, Workday and more — no scraping subscriptions needed for most)
 - LLM scoring of every vacancy against *your* profile by your coding agent
   (uses the subscription you already have, no API key; see AGENTS.md)
-- A dashboard to triage results (optional, deploys to Vercel)
+- A dashboard to triage results (optional, a Node server you host yourself)
 - A daily Telegram digest with 👍/👎 buttons (optional)
 
 Time: ~15 minutes of human attention, mostly account signups.
@@ -163,15 +163,19 @@ public forks.
 ## 8. Dashboard (optional)
 
 The `public/` folder is a static dashboard (vanilla JS) reading data baked
-into `data.js` plus live statuses from the Vercel API routes.
+into `data.js` plus live statuses from the `/api/*` routes that `server.js`
+serves.
 
 ```bash
-npx vercel deploy   # from the repo root
+npm install --omit=dev
+DATABASE_URL=postgres://user:pass@localhost/jobs npm start
 ```
 
-Set env vars in Vercel: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
-`AUTH_USER`, `AUTH_PASS`. The middleware protects the whole dashboard with
-HTTP Basic Auth — it shows your private job search, keep a password on it.
+`server.js` serves `public/` and every `/api/*` endpoint from one process. It
+binds to `127.0.0.1:3000` by default (`HOST`/`PORT` override), so put a reverse
+proxy in front of it for TLS and a password — it shows your private job search,
+keep a login on it. [MIGRATION.md](MIGRATION.md) has the systemd unit and a
+Caddy site block that does both.
 
 Regenerate dashboard data any time:
 

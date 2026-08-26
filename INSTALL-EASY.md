@@ -1,7 +1,7 @@
 # Install Guide — Easy Mode
 
 The no-account, no-server path. Everything runs on your own machine against a
-local database file. No Supabase, no Vercel, no SQL editor, no cloud signups.
+local database file. No Supabase, no server to host, no SQL editor, no cloud signups.
 
 If you are comfortable with databases and want multi-device sync and a daily
 phone digest, read [INSTALL.md](INSTALL.md) (the hardcore path) instead. You can
@@ -15,13 +15,13 @@ upgrade from easy to hardcore later without losing anything.
   Ashby, Workable, Workday and more).
 - LLM scoring of every vacancy against *your* profile by your coding agent
   subagents (uses your existing Claude subscription — no API key).
-- A dashboard you open on **`localhost`** — no Vercel, no password wall.
+- A dashboard you open on **`localhost`** — no server to host, no password wall.
 
 ## What you give up vs. hardcore (so you choose honestly)
 
 | | Easy (this guide) | Hardcore ([INSTALL.md](INSTALL.md)) |
 |---|---|---|
-| Accounts to create | **none** | Supabase (free), Vercel (free) |
+| Accounts to create | **none** | Supabase (free) + a VPS to host the dashboard |
 | Database | local SQLite file | hosted Postgres (Supabase) |
 | Dashboard | `localhost`, while your terminal is open | always-on URL, any device |
 | Use from your phone | no | yes (the hosted dashboard) |

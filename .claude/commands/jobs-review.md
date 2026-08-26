@@ -451,8 +451,9 @@ python3 scripts/vac.py list --geo uk
 ## Publish (after `apply` / `archive` state changes)
 
 The dashboard reads its data live, so publishing a data change is just a
-regenerate — **no deploy.** `vercel --prod` is only for dashboard code changes,
-and git stays fully manual (never `git add` / `git commit` / `git push`).
+regenerate — **no deploy.** Redeploying the dashboard server is only for
+dashboard code changes, and git stays fully manual (never `git add` /
+`git commit` / `git push`).
 
 1. **Regenerate from the current DB:**
    ```bash
@@ -461,19 +462,18 @@ and git stays fully manual (never `git add` / `git commit` / `git push`).
    - **Full mode** (Supabase): upserts the `dashboard_snapshot` row that
      `/api/vacancies` serves — the deployed dashboard is live, refresh the
      browser, **no deploy.**
-   - **Simple mode** (no Supabase / no `.vercel` link / no `VERCEL_TOKEN`):
+   - **Simple mode** (no Supabase / no `DATABASE_URL` for a hosted server):
      writes `public/data.js` locally, served by the local dashboard server.
      Never deploy. Do NOT run `--report-only` from a git worktree.
 
-2. **Auth assertion (full mode):** `/api/vacancies` fails closed — without
-   `AUTH_USER` / `AUTH_PASS` on the **Vercel project** it returns 503 and serves
-   no PII, so the dashboard won't load until auth is set. Confirm it (project env,
-   not your local shell):
+2. **Auth assertion (full mode):** the dashboard carries PII, so it must sit
+   behind the reverse proxy's Basic Auth — `server.js` binds to `127.0.0.1` and
+   does not authenticate on its own. Confirm the proxy actually challenges:
    ```bash
-   venv=$(vercel env ls production 2>/dev/null)
-   echo "$venv" | grep -q 'AUTH_USER' && echo "$venv" | grep -q 'AUTH_PASS' \
-     && echo "auth OK" || echo "AUTH MISSING in Vercel project — /api/vacancies will 503"
+   curl -s -o /dev/null -w '%{http_code}\n' https://<your-dashboard-host>/api/vacancies
+   # expect 401 without credentials
    ```
+   See [MIGRATION.md](../../MIGRATION.md) for the Caddy site block.
 
 3. **Debounce.** If several `/jobs-review` actions run in one session, only
    regenerate when the data actually changed since the last publish.
@@ -482,7 +482,7 @@ and git stays fully manual (never `git add` / `git commit` / `git push`).
 
 - **NEVER `git add` / `git commit` / `git push`** — git stays fully manual.
 - **Data changes never deploy** — `--report-only` regen makes them live (full
-  mode) or local (simple mode). `vercel --prod` is for dashboard CODE only.
+  mode) or local (simple mode). Redeploying the server is for dashboard CODE only.
 - **Full mode — regenerate only a clean change.** The regen writes the live
   snapshot directly, so a bad/aborted run would corrupt the live dashboard with
   no deploy gate to catch it. If a mode aborted or archived a suspicious amount,

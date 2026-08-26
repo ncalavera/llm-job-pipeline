@@ -19,10 +19,10 @@ posting.
 1. **Simple mode — zero signups.** The database is a local SQLite file that
    creates itself; the dashboard runs on localhost; `/jobs-new` discovers your
    first companies from your profile and `/jobs-new` is your one daily command.
-   No Supabase, no Vercel, ~5 minutes. Runbook: [INSTALL-EASY.md](INSTALL-EASY.md).
+   No Supabase, no server to host, ~5 minutes. Runbook: [INSTALL-EASY.md](INSTALL-EASY.md).
 2. **Full mode — cloud setup.** Hosted Supabase database, password-protected
-   Vercel dashboard you can open from your phone, daily Telegram digest with
-   like/pass buttons. Two free accounts, ~15 minutes. Runbook: [INSTALL.md](INSTALL.md).
+   self-hosted dashboard you can open from your phone, daily Telegram digest with
+   like/pass buttons. A free account plus a VPS, ~15 minutes. Runbook: [INSTALL.md](INSTALL.md).
 
 Fetching, filtering, company review and scoring quality are identical in
 both — the same gates, the same auto-discovered-company rule, the same
@@ -121,7 +121,8 @@ the dial you set to match your plan.
 - **Firecrawl** — optional and off by default. The local fetcher covers most
   ATS for free; Firecrawl ($20+/mo, free tier 500 scrapes) only adds
   enrichment for stubborn JS-heavy pages.
-- **Vercel, GitHub** — free for a personal project.
+- **GitHub** — free for a personal project. The dashboard is a Node process you
+  host yourself; a small VPS is enough.
 
 So the infrastructure is free; the variable cost is the plan usage your chosen
 model spends on the vacancies you score each day.
@@ -287,7 +288,7 @@ there is nothing pending, it prints "Up to date" and exits.
 ## Documentation
 
 - [INSTALL-EASY.md](INSTALL-EASY.md) — simple-mode install (zero signups)
-- [INSTALL.md](INSTALL.md) — full-mode install runbook (Supabase + Vercel)
+- [INSTALL.md](INSTALL.md) — full-mode install runbook (Supabase + self-hosted dashboard)
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module map, pipeline stages, the two backends
 - [docs/job-boards-catalogue.md](docs/job-boards-catalogue.md) — the built-in boards, generated from config
 - [docs/fetch-engines.md](docs/fetch-engines.md) — every fetch engine: what it hits, config keys, failure modes, debug recipes
