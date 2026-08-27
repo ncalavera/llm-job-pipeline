@@ -28,6 +28,10 @@ SHARED_TABLES = (
     "board",
     "company_evidence",
     "application",
+    # Stored research reports (migration 0023). Both dialects ship it, so both
+    # must agree on its columns — the Reports tab reads the same fields
+    # whichever backend is underneath.
+    "report",
 )
 
 

@@ -13,6 +13,13 @@ The set of vacancy statuses that mean active interest: liked itself plus the dec
 ### Applications table
 The Triage tab's second view of the same data: one row per application ever sent, newest first, with a send date, a stage, and how long it has been waiting. The board answers "where is each application"; the table answers "what have I sent, and what is waiting on whom" — questions a card layout cannot answer, because a card has no room for a date and the columns order by score, not time. Both views read one dataset through one dedupe, so they can never disagree about how many applications exist.
 
+### Report
+A research document written for this search, stored in the database and read on the dashboard's Reports tab: sector research, grant write-ups, company dossiers, the research done for one application. Its identity is the slug, derived from the source markdown filename, so re-importing an edited file updates that report instead of forking a second copy. The markdown is stored, never the rendered HTML — the source stays the thing that was written, and the renderer stays free to improve without a re-import.
+*Avoid:* report as a synonym for the generated dashboard.
+
+### Report kind
+Which group a report appears under: research, sector, company, grant, or other. Inferred from the directories the source file sits in — never from its filename, which routinely contains a word like "research" for a document that is about a company. Unmatched is 'other', not a guess: a wrong kind hides a report in the wrong group, and 'other' at least tells the truth.
+
 ### Kind
 What was applied to: job, programme, advising, consulting, grant, or course. Every scraped role is a job; the rest are applications the user sent that are not vacancies, recorded by hand (`vac add`) and stored as ordinary vacancy rows so the funnel counts them with everything else.
 *Avoid:* a separate table for non-job applications.

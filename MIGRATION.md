@@ -177,6 +177,43 @@ The Health tab's aggregate, `Cache-Control: no-store`. Response
   the `learning_log` table is absent the whole block degrades to nulls plus
   `"unavailable": true` instead of failing the endpoint.
 
+### GET /api/reports (new — the Reports tab)
+
+Every stored research report, newest first, without its bodies.
+
+- CORS preamble allows `GET, POST, OPTIONS` on this one path (the list and the
+  upsert share it); `OPTIONS` → 204; any other method → 405; missing DB config
+  → 500 `{"error":"Server misconfigured"}`.
+- 200 → `{"reports": [{slug, title, kind, source_path, created_at,
+  updated_at, excerpt}]}`, ordered by `updated_at` descending.
+- `excerpt` is the first ~200 characters of the report's *prose*: headings,
+  fenced code, horizontal rules, table rows and inline markdown markers are
+  skipped, whitespace is collapsed, and the cut lands on a word boundary. Full
+  bodies never appear here — that is what the detail endpoint is for.
+
+### GET /api/reports/:slug (new)
+
+One report in full.
+
+- 200 → `{"report": {slug, title, kind, body_md, source_path, created_at,
+  updated_at}}`.
+- Unknown slug → 404 `{"error":"Report not found","slug":...}`.
+- A path with a further `/` in it is not this route (the list and a nested path
+  both fall through to the normal 404).
+
+### POST /api/reports (new)
+
+Store or replace one report. Same auth as every other write.
+
+- Body: `{"slug", "title", "body_md", "kind"?, "source_path"?}`. `kind` is one
+  of `research, grant, company, sector, other` and defaults to `other`.
+- Missing `slug`/`title`/`body_md` → 400
+  `{"error":"Missing slug, title or body_md"}`; unknown kind → 400
+  `{"error":"Invalid kind"}`.
+- Upserts on `slug`, so re-importing an edited file updates that report rather
+  than forking a second copy. `created_at` is never touched; `updated_at` moves.
+- 200 → `{"ok":true,"slug":...,"created":<true when the row was new>}`.
+
 ### Static files (was: Vercel `public/` + `vercel.json` headers)
 
 - `public/` served at the site root; `/` → `public/index.html`.

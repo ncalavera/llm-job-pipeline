@@ -111,6 +111,9 @@ def bootstrap_sqlite(monkeypatch, tmp_path):
         # catch. (0019/0020/0021 are absent on purpose: they only widen a
         # CHECK the frozen baseline already carries.)
         "0022_applications_table",
+        # Reports (0023) is a plain CREATE TABLE the frozen baseline does not
+        # carry, so SQLite only gets it from here.
+        "0023_report_table",
     ):
         sql = (REPO_ROOT / "sql" / "migrations" / f"{post_baseline}.sqlite.sql").read_text(
             encoding="utf-8"

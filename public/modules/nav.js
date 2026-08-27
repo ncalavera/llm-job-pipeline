@@ -20,6 +20,9 @@ export const SECTIONS = [
   "companies",
   "triage",
   "boards",
+  // The research behind the search, stored and readable here. Sits with the
+  // content sections above rather than beside Health, which is diagnostics.
+  "reports",
   "health",
   "settings",
 ];
@@ -44,6 +47,7 @@ const MODE_TO_SECTION = {
   companies: "companies",
   pipeline: "triage",
   boards: "boards",
+  reports: "reports",
   health: "health",
   settings: "settings",
   // Detail-overlay screens (route.js).

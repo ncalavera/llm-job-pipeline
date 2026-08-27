@@ -277,6 +277,34 @@
           <button
             type="button"
             class="nav-item"
+            id="navReports"
+            data-section="reports"
+            onclick="switchMode('reports')"
+          >
+            <span class="nav-icon" aria-hidden="true"
+              ><svg width="15" height="15" viewBox="0 0 14 14">
+                <rect
+                  x="2.2"
+                  y="1.8"
+                  width="9.6"
+                  height="10.4"
+                  rx="1"
+                  fill="#2545D3"
+                  opacity=".85"
+                ></rect>
+                <path
+                  d="M4.4 4.6h5.2M4.4 6.8h5.2M4.4 9h3.2"
+                  fill="none"
+                  stroke="#fff"
+                  stroke-width="1"
+                  stroke-linecap="round"
+                ></path></svg
+            ></span>
+            <span class="nav-label" data-i18n="tab_reports">Reports</span>
+          </button>
+          <button
+            type="button"
+            class="nav-item"
             id="navHealth"
             data-section="health"
             onclick="switchMode('health')"
@@ -294,6 +322,7 @@
             ></span>
             <span class="nav-label" data-i18n="tab_health">Health</span>
           </button>
+
         </nav>
 
         <div class="sidebar-footer">
@@ -710,6 +739,14 @@
             <div class="applications-section" id="applicationsTable"></div>
           </div>
           <!-- /pipeline-section -->
+
+          <!-- === REPORTS MODE ===
+           The research behind the search: every report written for it, stored
+           in the database and rendered here from its markdown. Live-only — a
+           research library is not part of the vacancy snapshot, so it is
+           fetched from /api/reports rather than baked into the payload. -->
+          <div class="reports-section" id="reportsSection"></div>
+          <!-- /reports-section -->
 
           <!-- === SETTINGS MODE ===
            Read-only display of the RESOLVED dials baked by the generator

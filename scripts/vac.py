@@ -93,6 +93,27 @@ def build_parser(handlers: dict | None = None) -> argparse.ArgumentParser:
     if "open" in h:
         p_open.set_defaults(func=h["open"])
 
+    p_report = sub.add_parser(
+        "report",
+        help="Store and list research reports (the Reports tab on the dashboard).",
+    )
+    report_sub = p_report.add_subparsers(dest="report_cmd", required=True)
+
+    p_report_add = report_sub.add_parser(
+        "add", help="Store a markdown report (re-run to update it)."
+    )
+    p_report_add.add_argument("path", help="Path to the .md file.")
+    p_report_add.add_argument("--title", help="Override the title. Default: the file's first H1.")
+    p_report_add.add_argument(
+        "--kind",
+        help="research / grant / company / sector / other. Default: guessed from the path.",
+    )
+
+    report_sub.add_parser("list", help="List stored reports, newest first.")
+
+    if "report" in h:
+        p_report.set_defaults(func=h["report"])
+
     p_co = sub.add_parser("companies", help="List companies.")
     p_co.add_argument("--status", help="Filter by status: active / candidate / inactive.")
     p_co.add_argument("--limit", type=int, default=50)
@@ -127,7 +148,7 @@ from database_supabase import VALID_STATUSES  # noqa: E402
 
 # Same rule for the `kind` vocabulary: read it, never retype it. The SQL CHECK
 # on vacancy.kind (migration 0022) is the other half of the contract.
-from statuses import VALID_KINDS  # noqa: E402
+from statuses import VALID_KINDS, VALID_REPORT_KINDS  # noqa: E402
 
 GEO_BUCKETS = {"uk", "germany", "europe", "us", "cis", "other", "unknown"}
 
@@ -487,6 +508,92 @@ def cmd_open(args):
         subprocess.run(["xdg-open", url])
 
 
+def cmd_report(args):
+    """Dispatch `vac report <add|list>`."""
+    import reports as reports_mod
+
+    if not reports_mod.table_ready():
+        print("This database has no `report` table yet — reports need migration 0023.")
+        print("  Run it first: python3 scripts/migrate.py")
+        sys.exit(1)
+
+    if args.report_cmd == "add":
+        return _report_add(args, reports_mod)
+    return _report_list(reports_mod)
+
+
+def _report_add(args, reports_mod):
+    """Store one markdown file as a report.
+
+    The slug comes from the filename, so re-running on an edited file UPDATES
+    that report instead of forking a second copy — the same rule `vac add` uses
+    for an application. --title and --kind override what the file implies; both
+    are guesses (the first H1, the directory) and a guess must be correctable.
+    """
+    path = Path(args.path)
+    if not path.exists():
+        print(f"No such file: {path}")
+        sys.exit(1)
+    if path.suffix.lower() not in (".md", ".markdown"):
+        print(f"{path} is not a markdown file.")
+        sys.exit(1)
+
+    try:
+        report = reports_mod.read_report_file(path)
+    except ValueError as exc:
+        print(str(exc))
+        sys.exit(1)
+
+    if args.title:
+        report["title"] = args.title.strip()
+    if args.kind:
+        if args.kind not in VALID_REPORT_KINDS:
+            print(f"Invalid kind: {args.kind}. Allowed: {', '.join(sorted(VALID_REPORT_KINDS))}")
+            sys.exit(1)
+        report["kind"] = args.kind
+
+    existing = reports_mod.get_report(report["slug"])
+    reports_mod.upsert_report(**report)
+    get_conn().commit()
+
+    verb = "updated" if existing else "stored"
+    words = len(report["body_md"].split())
+    print(f"ok: {verb} \u201c{report['title']}\u201d [{report['kind']}] \u2014 {words} words")
+    print(f"    slug {report['slug']}   from {report['source_path']}")
+
+
+def _report_list(reports_mod):
+    rows = reports_mod.list_reports()
+    if not rows:
+        print("No reports stored yet.")
+        print("  Add one: python3 scripts/vac.py report add path/to/report.md")
+        return
+
+    width = _term_width()
+    slug_w = 28
+    kind_w = 9
+    title_w = max(20, width - slug_w - kind_w - 14 - 6)
+
+    print(
+        _ansi(
+            "1",
+            f"{'Slug':<{slug_w}} {'Kind':<{kind_w}} {'Title':<{title_w}} {'Updated':<12}",
+        )
+    )
+    print("\u2500" * min(width, slug_w + kind_w + title_w + 14))
+    for r in rows:
+        updated = r.get("updated_at")
+        updated_s = str(updated)[:10] if updated else "\u2014"
+        print(
+            f"{(r['slug'] or '')[:slug_w]:<{slug_w}} "
+            f"{(r['kind'] or '')[:kind_w]:<{kind_w}} "
+            f"{(r['title'] or '')[:title_w]:<{title_w}} "
+            f"{updated_s:<12}"
+        )
+    print()
+    print(f"Total: {len(rows)}")
+
+
 def cmd_companies(args):
     from database_supabase import get_conn as gc
 
@@ -541,6 +648,7 @@ def main():
             "mark": cmd_mark,
             "add": cmd_add,
             "open": cmd_open,
+            "report": cmd_report,
             "companies": cmd_companies,
         }
     )

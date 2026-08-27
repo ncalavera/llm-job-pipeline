@@ -84,6 +84,21 @@ VACANCY_KINDS: tuple[str, ...] = (
 #: Membership form of VACANCY_KINDS — what validators check against.
 VALID_KINDS: frozenset[str] = frozenset(VACANCY_KINDS)
 
+#: What kind of reading a stored report is — the one axis the Reports list
+#: groups by. A closed vocabulary: an unrecognised kind would silently create a
+#: group of one, which reads as a bug in the grouping rather than as a typo. The
+#: SQL CHECK on ``report.kind`` (migration 0023) is the other half.
+REPORT_KINDS: tuple[str, ...] = (
+    "research",
+    "grant",
+    "company",
+    "sector",
+    "other",
+)
+
+#: Membership form of REPORT_KINDS — what validators check against.
+VALID_REPORT_KINDS: frozenset[str] = frozenset(REPORT_KINDS)
+
 #: What the filter/dedup stages must never delete: every user decision, plus
 #: 'archived' (already out of view — deleting it would drop the tombstone that
 #: keeps it from being re-fetched).

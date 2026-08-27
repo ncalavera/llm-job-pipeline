@@ -25,16 +25,27 @@ import {
 } from "./nav.js";
 import { parse, build } from "./route.js";
 
-test("there are exactly seven top-nav sections, in order", () => {
+test("there are exactly eight top-nav sections, in order", () => {
   assert.deepEqual(SECTIONS, [
     "today",
     "vacancies",
     "companies",
     "triage",
     "boards",
+    "reports",
     "health",
     "settings",
   ]);
+});
+
+test("Reports sits with the content sections, not with diagnostics", () => {
+  // Placement is the claim: Reports is reading, so it belongs after the other
+  // content sections and before Health, which is where the operational
+  // sections start. A section in the wrong half of the sidebar is a section
+  // nobody looks for.
+  assert.ok(SECTIONS.indexOf("reports") > SECTIONS.indexOf("boards"));
+  assert.ok(SECTIONS.indexOf("reports") < SECTIONS.indexOf("settings"));
+  assert.equal(sectionForMode("reports"), "reports");
 });
 
 test("every leaf mode maps to its owning section", () => {

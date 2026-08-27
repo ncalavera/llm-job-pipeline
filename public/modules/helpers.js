@@ -1094,63 +1094,110 @@ export function inlineFormat(text) {
   return text;
 }
 
-export function mdToHtml(text) {
+/**
+ * A URL-safe id for a heading, so a long report can be linked section by
+ * section. Built from the heading's own words, lowercased, with runs of
+ * anything else collapsed to a single dash.
+ *
+ * The input has already been escHtml'd by mdToHtml, so entities (&amp;, &#39;)
+ * are stripped first — otherwise "R&D" would slug as "r-amp-d".
+ */
+export function headingSlug(text) {
+  return String(text || "")
+    .replace(/&[a-z]+;|&#\d+;/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Markdown to HTML. Input is escaped FIRST, so no source can inject markup —
+ * every feature below builds tags around already-inert text.
+ *
+ * `opts.anchors` gives every heading an `id` and a clickable link to itself.
+ * Off by default and on only for stored reports: the same renderer draws short
+ * job descriptions and scoring reasoning, where a page full of duplicate ids
+ * ("summary", "risks", one per role) would be invalid HTML and the anchor
+ * furniture would be noise.
+ */
+export function mdToHtml(text, opts) {
   if (!text) return "";
+  var anchors = !!(opts && opts.anchors);
+  var seenIds = Object.create(null);
   var html = escHtml(text);
   var lines = html.split("\n");
   var out = [];
   var inList = false;
+  var inOrderedList = false;
   var inTable = false;
+  var inCode = false;
+  var codeLines = [];
+
+  // A heading, with an id and a self-link when anchors are on. Ids are made
+  // unique by suffixing a counter: two sections called "Risks" in one report
+  // would otherwise share an id, and the second would be unreachable.
+  function heading(level, body) {
+    if (!anchors) return "<h" + level + ">" + body + "</h" + level + ">";
+    var base = headingSlug(body) || "section";
+    var id = base;
+    if (seenIds[base]) id = base + "-" + seenIds[base];
+    seenIds[base] = (seenIds[base] || 0) + 1;
+    return (
+      "<h" + level + ' id="' + id + '">' +
+      '<a class="md-anchor" href="#' + id + '" aria-hidden="true">#</a>' +
+      body +
+      "</h" + level + ">"
+    );
+  }
+
+  function closeBlocks() {
+    if (inList) {
+      out.push("</ul>");
+      inList = false;
+    }
+    if (inOrderedList) {
+      out.push("</ol>");
+      inOrderedList = false;
+    }
+    if (inTable) {
+      out.push("</tbody></table>");
+      inTable = false;
+    }
+  }
 
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
 
-    if (/^### (.+)$/.test(line)) {
-      if (inList) {
-        out.push("</ul>");
-        inList = false;
+    // A fenced code block swallows every line until its closing fence, so it
+    // comes first: a report's shell snippet or SQL must not be re-read as
+    // headings, lists and tables.
+    if (/^```/.test(line.trim())) {
+      if (inCode) {
+        out.push("<pre><code>" + codeLines.join("\n") + "</code></pre>");
+        codeLines = [];
+        inCode = false;
+      } else {
+        closeBlocks();
+        inCode = true;
       }
-      if (inTable) {
-        out.push("</tbody></table>");
-        inTable = false;
-      }
-      out.push("<h3>" + RegExp.$1 + "</h3>");
       continue;
     }
-    if (/^## (.+)$/.test(line)) {
-      if (inList) {
-        out.push("</ul>");
-        inList = false;
-      }
-      if (inTable) {
-        out.push("</tbody></table>");
-        inTable = false;
-      }
-      out.push("<h2>" + RegExp.$1 + "</h2>");
+    if (inCode) {
+      codeLines.push(line);
       continue;
     }
-    if (/^# (.+)$/.test(line)) {
-      if (inList) {
-        out.push("</ul>");
-        inList = false;
-      }
-      if (inTable) {
-        out.push("</tbody></table>");
-        inTable = false;
-      }
-      out.push("<h1>" + RegExp.$1 + "</h1>");
+
+    // h1-h6, longest marker first so "### x" is not read as "# ## x".
+    var atx = /^(#{1,6}) (.+)$/.exec(line);
+    if (atx) {
+      closeBlocks();
+      out.push(heading(atx[1].length, inlineFormat(atx[2])));
       continue;
     }
 
     if (/^---+$/.test(line.trim())) {
-      if (inList) {
-        out.push("</ul>");
-        inList = false;
-      }
-      if (inTable) {
-        out.push("</tbody></table>");
-        inTable = false;
-      }
+      closeBlocks();
       out.push("<hr>");
       continue;
     }
@@ -1159,6 +1206,10 @@ export function mdToHtml(text) {
       if (inList) {
         out.push("</ul>");
         inList = false;
+      }
+      if (inOrderedList) {
+        out.push("</ol>");
+        inOrderedList = false;
       }
       var cells = line
         .trim()
@@ -1204,6 +1255,10 @@ export function mdToHtml(text) {
     }
 
     if (/^[\s]*[-*]\s+(.+)$/.test(line)) {
+      if (inOrderedList) {
+        out.push("</ol>");
+        inOrderedList = false;
+      }
       if (!inList) {
         out.push("<ul>");
         inList = true;
@@ -1212,9 +1267,29 @@ export function mdToHtml(text) {
       continue;
     }
 
+    // A numbered list. Reports lean on these — findings, steps, ranked options
+    // — and without this branch every "1." line rendered as its own paragraph,
+    // losing both the numbering and the fact that the lines belong together.
+    if (/^[\s]*\d+[.)]\s+(.+)$/.test(line)) {
+      if (inList) {
+        out.push("</ul>");
+        inList = false;
+      }
+      if (!inOrderedList) {
+        out.push("<ol>");
+        inOrderedList = true;
+      }
+      out.push("<li>" + inlineFormat(RegExp.$1) + "</li>");
+      continue;
+    }
+
     if (inList) {
       out.push("</ul>");
       inList = false;
+    }
+    if (inOrderedList) {
+      out.push("</ol>");
+      inOrderedList = false;
     }
 
     if (/^&gt;\s?(.*)$/.test(line)) {
@@ -1227,7 +1302,13 @@ export function mdToHtml(text) {
     out.push("<p>" + inlineFormat(line) + "</p>");
   }
 
+  // Flush anything the document left open — an unterminated list, table or
+  // code fence is common in a half-written report and must still render.
+  if (inCode && codeLines.length) {
+    out.push("<pre><code>" + codeLines.join("\n") + "</code></pre>");
+  }
   if (inList) out.push("</ul>");
+  if (inOrderedList) out.push("</ol>");
   if (inTable) out.push("</tbody></table>");
   return out.join("\n");
 }

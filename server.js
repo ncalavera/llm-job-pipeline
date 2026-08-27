@@ -963,6 +963,199 @@ async function handleStatic(req, res, pathname) {
 }
 
 // ---------------------------------------------------------------------------
+// /api/reports — contract in MIGRATION.md
+// ---------------------------------------------------------------------------
+
+// What kind of reading a stored report is. Twin of statuses.REPORT_KINDS and
+// the SQL CHECK on report.kind; an unrecognised kind would silently create a
+// group of one in the list, which reads as a broken grouping, not a typo.
+export const REPORT_KINDS = [
+  "research",
+  "grant",
+  "company",
+  "sector",
+  "other",
+];
+
+// How much of a report the list view carries. Enough to tell two reports apart
+// at a glance, small enough that a hundred of them are still one cheap
+// response — the full body is one click away at /api/reports/<slug>.
+export const REPORT_EXCERPT_CHARS = 200;
+
+/**
+ * A plain-text preview of a report's opening prose.
+ *
+ * Not a raw slice of the file. These documents open with their own H1, and the
+ * first thing under it is often a fenced ASCII diagram or a table — a raw slice
+ * of one of those is a row of box-drawing characters, which tells the reader
+ * nothing and looks like a rendering bug. So the scan skips everything that is
+ * not prose (headings at any depth, fenced code, horizontal rules, table rows,
+ * front matter), strips the inline markers that would otherwise show as literal
+ * asterisks and backticks, collapses whitespace, and cuts on a word boundary.
+ */
+export function reportExcerpt(bodyMd, limit = REPORT_EXCERPT_CHARS) {
+  if (!bodyMd) return "";
+  const kept = [];
+  let inCode = false;
+  let seenProse = false;
+
+  for (const raw of String(bodyMd).split("\n")) {
+    const line = raw.trim();
+
+    // A fence toggles; everything between them is a diagram or a snippet, and
+    // neither is a summary of the report.
+    if (line.startsWith("```")) {
+      inCode = !inCode;
+      continue;
+    }
+    if (inCode) continue;
+
+    if (!line) continue;
+    if (line.startsWith("#")) continue; // any heading, not just the title
+    if (/^([-*_])\1{2,}$/.test(line)) continue; // horizontal rule / front matter fence
+    if (line === "---") continue;
+    if (line.startsWith("|")) continue; // a table is not prose either
+
+    kept.push(stripInlineMarkdown(line));
+    seenProse = true;
+    if (kept.join(" ").length > limit + 40) break;
+  }
+  if (!seenProse) return "";
+
+  const flat = kept.join(" ").replace(/\s+/g, " ").trim();
+  if (flat.length <= limit) return flat;
+  const cut = flat.slice(0, limit);
+  const lastSpace = cut.lastIndexOf(" ");
+  return (lastSpace > limit * 0.6 ? cut.slice(0, lastSpace) : cut).trim() + "\u2026";
+}
+
+/** Drop the markers that only mean something once rendered. The excerpt lands
+ *  in a text node, so a literal "**Date:**" there is noise, not emphasis. */
+function stripInlineMarkdown(line) {
+  return line
+    .replace(/^\s*[-*+]\s+/, "") // bullet marker
+    .replace(/^\s*\d+[.)]\s+/, "") // number marker
+    .replace(/^\s*>\s?/, "") // blockquote marker
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1") // link/image -> its label
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/(?<!\w)[*_]([^*_]+)[*_](?!\w)/g, "$1")
+    .trim();
+}
+
+// /api/reports answers GET (list) and POST (upsert) on ONE path, which is the
+// only route here that does. wrappedPreamble hard-codes a single allowed
+// method — bending it to take a list would touch every other endpoint's
+// preamble for one case — so this route carries its own, with the same CORS
+// shape, the same 405, and the same missing-DATABASE_URL 500.
+function reportsPreamble(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+  if (req.method === "OPTIONS") {
+    sendEmpty(res, 204);
+    return true;
+  }
+  if (req.method !== "GET" && req.method !== "POST") {
+    sendJson(res, 405, { error: "Method not allowed" });
+    return true;
+  }
+  if (!process.env.DATABASE_URL) {
+    logError("reports", new Error("missing DATABASE_URL"), reqMeta(req));
+    sendJson(res, 500, { error: "Server misconfigured" });
+    return true;
+  }
+  return false;
+}
+
+async function handleReports(req, res) {
+  if (reportsPreamble(req, res)) return;
+  return req.method === "POST"
+    ? handleReportUpsert(req, res)
+    : handleReportsList(req, res);
+}
+
+async function handleReportsList(req, res) {
+  try {
+    const { rows } = await getPool().query(
+      `SELECT slug, title, kind, body_md, source_path, created_at, updated_at
+         FROM report ORDER BY updated_at DESC`,
+    );
+    const reports = rows.map((r) => ({
+      slug: r.slug,
+      title: r.title,
+      kind: r.kind,
+      source_path: r.source_path || "",
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+      excerpt: reportExcerpt(r.body_md),
+    }));
+    return sendJson(res, 200, { reports });
+  } catch (err) {
+    logError("reports", err, reqMeta(req));
+    return sendJson(res, 500, { error: "Database error" });
+  }
+}
+
+async function handleReportDetail(req, res, slug) {
+  if (wrappedPreamble(req, res, "GET", "report")) return;
+  try {
+    const { rows } = await getPool().query(
+      `SELECT slug, title, kind, body_md, source_path, created_at, updated_at
+         FROM report WHERE slug = $1`,
+      [slug],
+    );
+    if (!rows.length) {
+      return sendJson(res, 404, { error: "Report not found", slug });
+    }
+    return sendJson(res, 200, { report: rows[0] });
+  } catch (err) {
+    logError("report", err, reqMeta(req, { slug }));
+    return sendJson(res, 500, { error: "Database error" });
+  }
+}
+
+async function handleReportUpsert(req, res) {
+  const { slug, title, kind, body_md, source_path } = await readJsonBody(req);
+  if (!slug || !title || !body_md) {
+    return sendJson(res, 400, { error: "Missing slug, title or body_md" });
+  }
+  const reportKind = kind || "other";
+  if (!REPORT_KINDS.includes(reportKind)) {
+    return sendJson(res, 400, { error: "Invalid kind" });
+  }
+
+  try {
+    // Upsert on the slug: re-importing an edited file must land on the same
+    // row, not fork a second copy of the report. created_at is left alone —
+    // the report was first written when it was first written — while
+    // updated_at moves, because it is what the list sorts by.
+    const { rows } = await getPool().query(
+      `INSERT INTO report (slug, title, kind, body_md, source_path)
+            VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (slug) DO UPDATE
+              SET title = EXCLUDED.title,
+                  kind = EXCLUDED.kind,
+                  body_md = EXCLUDED.body_md,
+                  source_path = EXCLUDED.source_path,
+                  updated_at = NOW()
+        RETURNING slug, (xmax = 0) AS inserted`,
+      [slug, title, reportKind, body_md, source_path || null],
+    );
+    return sendJson(res, 200, {
+      ok: true,
+      slug: rows[0].slug,
+      created: rows[0].inserted === true,
+    });
+  } catch (err) {
+    logError("report-upsert", err, reqMeta(req, { slug, kind: reportKind }));
+    return sendJson(res, 500, { error: "Database error" });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -977,7 +1170,22 @@ const API_ROUTES = {
   "/api/board-toggle": handleBoardToggle,
   "/api/health": handleHealth,
   "/api/health-detail": handleHealthDetail,
+  "/api/reports": handleReports,
 };
+
+// One report by slug: /api/reports/<slug>. The only path-parameter route on
+// this server, so it is matched explicitly rather than by adding a pattern
+// router for a single case.
+const REPORT_DETAIL_PREFIX = "/api/reports/";
+
+/** The slug in /api/reports/<slug>, or "" when the path is not that shape.
+ *  A slug with a slash in it is rejected rather than joined back together —
+ *  the CLI only ever produces flat slugs, so a nested path is malformed. */
+export function reportSlugFromPath(pathname) {
+  if (!pathname.startsWith(REPORT_DETAIL_PREFIX)) return "";
+  const rest = decodeURIComponent(pathname.slice(REPORT_DETAIL_PREFIX.length));
+  return rest && !rest.includes("/") ? rest : "";
+}
 
 let _reqSeq = 0;
 
@@ -986,9 +1194,12 @@ export async function handleRequest(req, res) {
   req.id = (++_reqSeq).toString(36);
   const pathname = new URL(req.url, "http://localhost").pathname;
   const route = API_ROUTES[pathname];
+  const reportSlug = route ? "" : reportSlugFromPath(pathname);
   try {
     if (route) {
       await route(req, res);
+    } else if (reportSlug) {
+      await handleReportDetail(req, res, reportSlug);
     } else if (pathname.startsWith("/api/")) {
       // 404 for an endpoint that does not exist — bootstrap.js relies on it
       // for /api/vacancies in simple mode (it means "fall back to data.js").

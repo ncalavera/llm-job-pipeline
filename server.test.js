@@ -22,6 +22,9 @@ import {
   VALID_STATUSES,
   DECISION_STATUSES,
   APPLICATION_STATUSES,
+  REPORT_KINDS,
+  reportExcerpt,
+  reportSlugFromPath,
 } from "./server.js";
 
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
@@ -761,4 +764,280 @@ test("isRecoverableError keeps I/O noise alive and lets real bugs exit", () => {
   );
   assert.equal(isRecoverableError(new TypeError("x is not a function")), false);
   assert.equal(isRecoverableError(undefined), false);
+});
+
+// --- /api/reports ----------------------------------------------------------
+//
+// Research reports written for this search live as markdown files in a private
+// repo, which means the work is only reachable from the laptop it was written
+// on. These endpoints put them behind the dashboard instead. Identity is the
+// slug, so a re-import of an edited file must land on the SAME row — a second
+// copy of a report is worse than no copy, because now two disagree.
+
+const REPORT_ROW = {
+  slug: "ea-funding-2026",
+  title: "EA Funding Landscape 2026",
+  kind: "research",
+  body_md: "# EA Funding Landscape 2026\n\nThree funders matter here.",
+  source_path: "research/sectors/ea-funding-2026.md",
+  created_at: "2026-08-01T09:00:00Z",
+  updated_at: "2026-08-17T09:00:00Z",
+};
+
+test("GET /api/reports lists reports newest first, with an excerpt not a body", () => {
+  // The list must stay one cheap response however long the library gets: a
+  // hundred full reports would be megabytes, and the list shows none of it.
+  return withStubDb([["FROM report ORDER BY updated_at DESC", [REPORT_ROW]]], async () => {
+    const res = await call({ url: "/api/reports" });
+    assert.equal(res.statusCode, 200);
+    const { reports } = JSON.parse(res.body);
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].slug, "ea-funding-2026");
+    assert.equal(reports[0].excerpt, "Three funders matter here.");
+    assert.equal(reports[0].body_md, undefined, "the list leaked a full body");
+  });
+});
+
+test("GET /api/reports/<slug> returns the full report", () => {
+  return withStubDb([["FROM report WHERE slug = $1", [REPORT_ROW]]], async (seen) => {
+    const res = await call({ url: "/api/reports/ea-funding-2026" });
+    assert.equal(res.statusCode, 200);
+    const { report } = JSON.parse(res.body);
+    assert.equal(report.body_md, REPORT_ROW.body_md);
+    assert.deepEqual(seen[0].params, ["ea-funding-2026"]);
+  });
+});
+
+test("GET /api/reports/<slug> answers 404 for a report that is not there", () => {
+  return withStubDb([["FROM report WHERE slug = $1", []]], async () => {
+    const res = await call({ url: "/api/reports/nope" });
+    assert.equal(res.statusCode, 404);
+    assert.deepEqual(JSON.parse(res.body), {
+      error: "Report not found",
+      slug: "nope",
+    });
+  });
+});
+
+test("POST /api/reports upserts on the slug, so a re-import updates one row", () => {
+  return withStubDb(
+    [["INSERT INTO report", [{ slug: "ea-funding-2026", inserted: false }]]],
+    async (seen) => {
+      const res = await call({
+        method: "POST",
+        url: "/api/reports",
+        body: {
+          slug: "ea-funding-2026",
+          title: "EA Funding Landscape 2026",
+          kind: "research",
+          body_md: "# EA Funding Landscape 2026\n\nRevised.",
+          source_path: "research/sectors/ea-funding-2026.md",
+        },
+      });
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(JSON.parse(res.body), {
+        ok: true,
+        slug: "ea-funding-2026",
+        created: false,
+      });
+      assert.match(seen[0].sql, /ON CONFLICT \(slug\) DO UPDATE/);
+      // created_at must NOT be in the update list: the report was first
+      // written when it was first written.
+      const updateClause = seen[0].sql.split("DO UPDATE")[1];
+      assert.ok(!updateClause.includes("created_at"));
+      assert.ok(updateClause.includes("updated_at = NOW()"));
+    },
+  );
+});
+
+test("POST /api/reports reports whether the row was new", () => {
+  return withStubDb(
+    [["INSERT INTO report", [{ slug: "new-one", inserted: true }]]],
+    async () => {
+      const res = await call({
+        method: "POST",
+        url: "/api/reports",
+        body: { slug: "new-one", title: "New", kind: "grant", body_md: "text" },
+      });
+      assert.equal(JSON.parse(res.body).created, true);
+    },
+  );
+});
+
+test("POST /api/reports defaults a missing kind to 'other', never to nothing", () => {
+  return withStubDb(
+    [["INSERT INTO report", [{ slug: "s", inserted: true }]]],
+    async (seen) => {
+      await call({
+        method: "POST",
+        url: "/api/reports",
+        body: { slug: "s", title: "T", body_md: "b" },
+      });
+      assert.equal(seen[0].params[2], "other");
+    },
+  );
+});
+
+test("POST /api/reports refuses an unknown kind and a missing field", () => {
+  return withStubDb([["INSERT INTO report", []]], async () => {
+    const bad = await call({
+      method: "POST",
+      url: "/api/reports",
+      body: { slug: "s", title: "T", body_md: "b", kind: "memo" },
+    });
+    assert.equal(bad.statusCode, 400);
+    assert.deepEqual(JSON.parse(bad.body), { error: "Invalid kind" });
+
+    for (const body of [
+      { title: "T", body_md: "b" },
+      { slug: "s", body_md: "b" },
+      { slug: "s", title: "T" },
+    ]) {
+      const res = await call({ method: "POST", url: "/api/reports", body });
+      assert.equal(res.statusCode, 400);
+      assert.deepEqual(JSON.parse(res.body), {
+        error: "Missing slug, title or body_md",
+      });
+    }
+  });
+});
+
+test("/api/reports allows both methods on one path and refuses the rest", () => {
+  return withStubDb([["FROM report", []]], async () => {
+    const preflight = await call({ method: "OPTIONS", url: "/api/reports" });
+    assert.equal(preflight.statusCode, 204);
+    assert.equal(
+      preflight.headers["Access-Control-Allow-Methods"],
+      "GET, POST, OPTIONS",
+    );
+
+    const wrong = await call({ method: "DELETE", url: "/api/reports" });
+    assert.equal(wrong.statusCode, 405);
+  });
+});
+
+test("REPORT_KINDS mirrors scripts/statuses.py", () => {
+  // Two hand-maintained copies of one vocabulary, plus the SQL CHECK. A kind
+  // accepted on one side and refused on the other is a write that fails only
+  // for some reports.
+  const py = readFileSync(join(ROOT, "scripts/statuses.py"), "utf8");
+  const block = py.match(/^REPORT_KINDS: tuple\[str, \.\.\.\] = \(([\s\S]*?)\n\)/m);
+  assert.ok(block, "REPORT_KINDS not found in scripts/statuses.py");
+  const pyKinds = [...block[1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  assert.deepEqual([...REPORT_KINDS].sort(), pyKinds.sort());
+});
+
+// --- The excerpt -----------------------------------------------------------
+
+test("the excerpt skips the report's own H1 and front matter", () => {
+  // A raw slice would spend its first line repeating the title the card
+  // already shows above it.
+  const excerpt = reportExcerpt(
+    "---\n# EA Funding Landscape 2026\n\nThree funders matter here.",
+  );
+  assert.equal(excerpt, "Three funders matter here.");
+});
+
+test("a long excerpt is cut at a word boundary, with an ellipsis", () => {
+  const body = "# T\n\n" + "word ".repeat(200);
+  const excerpt = reportExcerpt(body, 60);
+  assert.ok(excerpt.length <= 61, `too long: ${excerpt.length}`);
+  assert.ok(excerpt.endsWith("…"));
+  assert.ok(!/wor…$/.test(excerpt), "cut mid-word");
+});
+
+test("a short report needs no ellipsis", () => {
+  assert.equal(reportExcerpt("# T\n\nShort."), "Short.");
+});
+
+test("an empty or heading-only report yields an empty excerpt, not undefined", () => {
+  assert.equal(reportExcerpt(""), "");
+  assert.equal(reportExcerpt(null), "");
+  assert.equal(reportExcerpt("# Only a heading"), "");
+});
+
+test("the excerpt collapses the newlines a markdown file is full of", () => {
+  const excerpt = reportExcerpt("# T\n\nOne line.\nAnother    line.\n\nThird.");
+  assert.equal(excerpt, "One line. Another line. Third.");
+});
+
+// --- Slug routing ----------------------------------------------------------
+
+test("the detail route reads the slug out of the path", () => {
+  assert.equal(reportSlugFromPath("/api/reports/ea-funding-2026"), "ea-funding-2026");
+  assert.equal(reportSlugFromPath("/api/reports/a%20b"), "a b");
+});
+
+test("the detail route ignores paths that are not one report", () => {
+  // /api/reports itself is the list, and a nested path is malformed — the CLI
+  // only ever produces flat slugs. Neither may fall through to the detail
+  // handler and query for a slug that cannot exist.
+  assert.equal(reportSlugFromPath("/api/reports"), "");
+  assert.equal(reportSlugFromPath("/api/reports/"), "");
+  assert.equal(reportSlugFromPath("/api/reports/a/b"), "");
+  assert.equal(reportSlugFromPath("/api/vacancies"), "");
+});
+
+// --- The excerpt must be prose, not a slice of raw file --------------------
+//
+// These reports open with an H1 and often follow it with a fenced ASCII
+// diagram or a table. A raw slice of one of those is a row of box-drawing
+// characters — it tells the reader nothing and looks like a rendering bug.
+
+test("the excerpt skips a fenced diagram and finds the real prose", () => {
+  const body = [
+    "# The Do Good Industry",
+    "",
+    "## Segments",
+    "",
+    "```",
+    "┌───────────────┐",
+    "│  THE ECOSYSTEM │",
+    "└───────────────┘",
+    "```",
+    "",
+    "Where in the ecosystem? Grantmakers versus tech enablers.",
+  ].join("\n");
+  const excerpt = reportExcerpt(body);
+  assert.equal(
+    excerpt,
+    "Where in the ecosystem? Grantmakers versus tech enablers.",
+  );
+  assert.ok(!excerpt.includes("─"));
+  assert.ok(!excerpt.includes("```"));
+});
+
+test("the excerpt skips headings at any depth, not only the title", () => {
+  const excerpt = reportExcerpt("# Title\n\n## Section\n\n### Deeper\n\nReal prose.");
+  assert.equal(excerpt, "Real prose.");
+});
+
+test("the excerpt skips horizontal rules and table rows", () => {
+  const body = "# T\n\n---\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nThe sentence.";
+  assert.equal(reportExcerpt(body), "The sentence.");
+});
+
+test("the excerpt strips inline markers that would show as literal characters", () => {
+  // "**Date:** 2026-07-06" in a text node reads as asterisks, not as emphasis.
+  const excerpt = reportExcerpt(
+    "# T\n\n**Date:** 2026-07-06. See [the notes](https://example.org) and `run.py`.",
+  );
+  assert.equal(
+    excerpt,
+    "Date: 2026-07-06. See the notes and run.py.",
+  );
+  assert.ok(!excerpt.includes("*"));
+  assert.ok(!excerpt.includes("`"));
+  assert.ok(!excerpt.includes("https://"));
+});
+
+test("the excerpt drops list and quote markers but keeps the text", () => {
+  assert.equal(reportExcerpt("# T\n\n- First point\n- Second point"), "First point Second point");
+  assert.equal(reportExcerpt("# T\n\n1. Step one"), "Step one");
+  assert.equal(reportExcerpt("# T\n\n> A quotation."), "A quotation.");
+});
+
+test("a report that is nothing but a diagram yields an empty excerpt", () => {
+  // Empty is honest. A row of box-drawing characters is not.
+  assert.equal(reportExcerpt("# T\n\n```\n┌──┐\n└──┘\n```"), "");
 });
