@@ -4765,6 +4765,11 @@ body::after {
 
 .apps-table {
   width: 100%;
+  /* The nine columns need this much to show every label in full. The shares
+     below are set for the LONGEST label set rather than the shortest: a
+     translated header runs noticeably longer than its English original, and
+     percentages tuned to English alone ran the first header into the second
+     and clipped the waiting time to "15 d…". */
   min-width: 1040px;
   background: var(--sky-sheet);
   border-radius: var(--radius-sheet);
@@ -4791,19 +4796,19 @@ body::after {
    short and never wrap; What and Next step get the room. */
 /* Sent on */
 .apps-table th:nth-child(1) {
-  width: 7%;
+  width: 10%;
 }
 /* Organisation */
 .apps-table th:nth-child(2) {
-  width: 17%;
+  width: 15%;
 }
 /* What */
 .apps-table th:nth-child(3) {
-  width: 20%;
+  width: 17%;
 }
 /* Kind */
 .apps-table th:nth-child(4) {
-  width: 9%;
+  width: 11%;
 }
 /* Stage */
 .apps-table th:nth-child(5) {
@@ -4815,11 +4820,11 @@ body::after {
 }
 /* Waiting */
 .apps-table th:nth-child(7) {
-  width: 6%;
+  width: 8%;
 }
 /* Next step */
 .apps-table th:nth-child(8) {
-  width: 16%;
+  width: 14%;
 }
 /* Link */
 .apps-table th:nth-child(9) {
@@ -5399,5 +5404,123 @@ body::after {
 
   .reports-section {
     max-width: none;
+  }
+}
+
+/* --- The Applications table on a narrow screen ---------------------------
+   Nine columns need 1040px. At 390px the table scrolled sideways and the first
+   screen showed the send date, the organisation and the start of the role —
+   Stage, the answer to the question this table exists to ask, sat off the
+   right edge behind a gesture most readers never try.
+
+   Narrowing the columns instead does not work either: four columns share about
+   246px once the icon rail takes its share, so every value clips to a few
+   characters and an ellipsis — a Stage column present but unreadable, which is
+   no better than a Stage column missing.
+
+   So on a phone the row stops being a row of cells and becomes a small stacked
+   block: organisation, role, then stage and waiting time together on one line.
+   Nothing is truncated and nothing scrolls sideways. The five columns not
+   shown — send date, kind, stage-since, next step, link — are one tap away:
+   the row opens the application, where they all appear in full.
+   ------------------------------------------------------------------------ */
+
+@media (max-width: 700px) {
+  .apps-table-scroll {
+    /* Nothing overflows once the row is a block. */
+    overflow-x: visible;
+  }
+
+  .apps-table {
+    min-width: 0;
+    display: block;
+    table-layout: auto;
+  }
+
+  .apps-table tbody {
+    display: block;
+  }
+
+  /* The header names columns that no longer exist as columns. Each value below
+     carries its own meaning instead: the organisation and role read as
+     themselves, the stage has its dot and its word, and the waiting time
+     carries its own unit word, so nothing is left as a bare number. */
+  .apps-table thead {
+    display: none;
+  }
+
+  .apps-row {
+    display: block;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--sky-hairline);
+  }
+
+  .apps-row:last-child {
+    border-bottom: none;
+  }
+
+  .apps-cell {
+    display: block;
+    width: auto;
+    max-width: none;
+    padding: 0;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    /* The column rule that separated cells side by side would now draw a
+       part-width line between the stacked lines of one row. The row's own
+       bottom border is the separator here. */
+    border-top: none;
+  }
+
+  /* Send on (1), Kind (4), Stage since (6), Next step (8), Link (9). */
+  .apps-table td:nth-child(1),
+  .apps-table td:nth-child(4),
+  .apps-table td:nth-child(6),
+  .apps-table td:nth-child(8),
+  .apps-table td:nth-child(9) {
+    display: none;
+  }
+
+  .apps-cell-org {
+    font-weight: 700;
+    font-size: var(--text-base);
+    line-height: 1.35;
+  }
+
+  .apps-cell-what {
+    color: var(--sky-text-secondary);
+    line-height: 1.35;
+    margin-bottom: 6px;
+  }
+
+  /* Stage and the time spent in it belong on one line: together they are the
+     sentence "this is where it stands, and this is how long it has stood
+     there". */
+  .apps-cell-stage,
+  .apps-cell-waiting {
+    display: inline-block;
+    vertical-align: baseline;
+  }
+
+  .apps-cell-waiting {
+    color: var(--sky-text-tertiary);
+  }
+
+  .apps-cell-waiting::before {
+    content: "·";
+    margin: 0 6px;
+    color: var(--sky-text-disabled);
+  }
+
+  /* A finished application waits on nobody, so its waiting cell is empty — and
+     an empty cell must not leave its separator behind as a dangling dot after
+     "Accepted". */
+  .apps-cell-waiting:empty {
+    display: none;
+  }
+
+  .apps-count-strip {
+    white-space: normal;
   }
 }
