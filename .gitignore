@@ -86,3 +86,6 @@ package-lock.json
 # runtime company filter archives
 companies/
 _archive/
+
+# local scratch — screenshots and throwaway files from a working session
+.scratch/

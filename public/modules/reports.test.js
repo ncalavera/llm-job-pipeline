@@ -85,7 +85,11 @@ test("within a group, the newest report comes first", () => {
 
 test("a report with no updated_at falls back to when it was created", () => {
   const groups = groupReports([
-    report({ slug: "older", updated_at: null, created_at: "2026-07-01T09:00:00Z" }),
+    report({
+      slug: "older",
+      updated_at: null,
+      created_at: "2026-07-01T09:00:00Z",
+    }),
     report({ slug: "newer", updated_at: "2026-08-01T09:00:00Z" }),
   ]);
   assert.deepEqual(
@@ -126,9 +130,15 @@ test("every kind in the order has a plain-word label", () => {
 // ---------------------------------------------------------------------------
 
 test("a report's date carries the year, because reports are read by age", () => {
-  assert.equal(formatReportDate("2026-08-17T09:00:00Z", "en-GB"), "17 Aug 2026");
+  assert.equal(
+    formatReportDate("2026-08-17T09:00:00Z", "en-GB"),
+    "17 Aug 2026",
+  );
   // And the day still comes first under en-US, the app's own locale.
-  assert.equal(formatReportDate("2026-08-17T09:00:00Z", "en-US"), "17 Aug 2026");
+  assert.equal(
+    formatReportDate("2026-08-17T09:00:00Z", "en-US"),
+    "17 Aug 2026",
+  );
 });
 
 test("a missing or unparseable date renders as nothing", () => {
@@ -223,10 +233,71 @@ test("a bulleted list and a numbered list do not merge into one", () => {
 });
 
 test("a table renders with a head and a body, and its separator row is dropped", () => {
-  const html = mdToHtml("| Funder | Budget |\n| --- | --- |\n| Open Phil | $600m |");
+  const html = mdToHtml(
+    "| Funder | Budget |\n| --- | --- |\n| Open Phil | $600m |",
+  );
   assert.ok(html.includes("<th>Funder</th>"));
   assert.ok(html.includes("<td>Open Phil</td>"));
   assert.ok(!html.includes("---"));
+});
+
+// --- Table alignment ------------------------------------------------------
+// Alignment is a property of the COLUMN, not of the cell. A generic renderer
+// cannot be told which column holds money, but it can read the whole column
+// before it decides — which is why the table is buffered and emitted at once.
+
+test("a column of nothing but numbers aligns right, header included", () => {
+  const html = mdToHtml(
+    "| Funder | Grants |\n| --- | --- |\n| EA Funds | 1,673 |\n| Longview | 226 |",
+  );
+  // The label sits over its own figures, so the header moves with the column.
+  assert.ok(html.includes('<th class="md-td-num">Grants</th>'));
+  assert.ok(html.includes('<td class="md-td-num">'));
+  // The text column stays left, header and body alike.
+  assert.ok(html.includes("<th>Funder</th>"));
+  assert.ok(html.includes("<td>EA Funds</td>"));
+});
+
+test("one non-numeric cell keeps its whole column left-aligned", () => {
+  // "not reported" is prose. Aligning the other two rows right would leave the
+  // column ragged and the header floating over a gap.
+  const html = mdToHtml(
+    "| Funder | Grants |\n| --- | --- |\n| EA Funds | 1,673 |\n| Anon | not reported |",
+  );
+  assert.ok(!html.includes('class="md-td-num"'));
+  assert.ok(html.includes("<th>Grants</th>"));
+});
+
+test("an empty cell does not disqualify a numeric column", () => {
+  // A blank is missing data, not prose — the column is still money.
+  const html = mdToHtml(
+    "| Funder | Grants |\n| --- | --- |\n| EA Funds | 1,673 |\n| Anon |  |",
+  );
+  assert.ok(html.includes('<th class="md-td-num">Grants</th>'));
+});
+
+test("a column with no numbers at all never aligns right", () => {
+  const html = mdToHtml("| A | B |\n| --- | --- |\n| one | two |");
+  assert.ok(!html.includes('class="md-td-num"'));
+});
+
+test("two tables in one report are aligned independently", () => {
+  const html = mdToHtml(
+    "| Funder | Grants |\n| --- | --- |\n| EA Funds | 1,673 |\n" +
+      "\ntext between\n\n" +
+      "| Name | Note |\n| --- | --- |\n| EA Funds | steady |",
+  );
+  assert.equal(html.match(/<table>/g).length, 2);
+  // Only the first table has a numeric column; the second must not inherit it.
+  assert.equal(html.match(/md-td-num/g).length, 2); // one th + one td
+});
+
+test("a table closed by the end of the document still renders", () => {
+  const html = mdToHtml(
+    "| Funder | Grants |\n| --- | --- |\n| EA Funds | 1,673 |",
+  );
+  assert.ok(html.includes("</tbody></table>"));
+  assert.ok(html.includes("1,673"));
 });
 
 test("headings h1 through h6 all render at their own level", () => {

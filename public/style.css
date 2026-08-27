@@ -4896,3 +4896,481 @@ body::after {
   text-decoration: underline;
 }
 
+/* ===========================================================================
+   Reports — the research behind the search, read inside the dashboard.
+
+   Built from the dashboard's OWN tokens and components, not a stylesheet of
+   its own: the sky material, the sky text ramp, --cobalt for interaction, the
+   Onest / JetBrains Mono pair the whole app already loads, and the same
+   row-hover and focus-ring language as the Archive and Applications rows. A
+   report has to read as another tab of this product, not as a page that
+   wandered in.
+
+   Deliberately NOT the warm tokens the older .md-content rules use (--coral
+   links, --amber h3): that palette is retired by the house style, and a
+   report is the longest thing anyone reads here — it is where a warm-on-warm
+   ramp costs the most. Every colour below comes from the sky/cobalt layer.
+
+   No coloured strip on top of any card, no pills, no chips, no sticky bar.
+   Category colour is carried by a dot, which is the one place the house style
+   allows it.
+   =========================================================================== */
+
+/* One vivid, distinct accent per report kind — a dot beside the group heading
+   and the row, never a border or a fill behind text. Cobalt/violet/magenta/
+   pine/cyan: five hues that stay apart from each other and from the quality
+   scale's green-ochre-crimson, so a report's kind can never be misread as a
+   score. */
+:root {
+  --kind-research: #2545d3;
+  --kind-sector: #7c3aed;
+  --kind-company: #0e7a55;
+  --kind-grant: #b3126b;
+  --kind-other: #0e6f8a;
+}
+
+.reports-section {
+  /* One measure for the whole tab, so the list and the report it opens have
+     the same left edge and the same width. */
+  max-width: 860px;
+}
+
+/* --- The list ------------------------------------------------------------ */
+
+.reports-count-strip,
+.reports-loading {
+  margin: 0 0 16px;
+  font-size: var(--text-sm);
+  color: var(--sky-text-secondary);
+}
+
+.report-group {
+  margin: 0 0 32px;
+}
+
+/* Plain words, not a chip. The dot carries the kind; the count is labelled by
+   the heading it sits next to. */
+.report-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sky-text-faint);
+}
+
+.report-group-title::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--kind-dot, var(--kind-other));
+}
+
+.report-group--research {
+  --kind-dot: var(--kind-research);
+}
+.report-group--sector {
+  --kind-dot: var(--kind-sector);
+}
+.report-group--company {
+  --kind-dot: var(--kind-company);
+}
+.report-group--grant {
+  --kind-dot: var(--kind-grant);
+}
+.report-group--other {
+  --kind-dot: var(--kind-other);
+}
+
+.report-group-count {
+  font-weight: 600;
+  color: var(--sky-text-tertiary);
+  font-family: "JetBrains Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A light fill and a hairline, like every other row surface in the app. No
+   outline border, no coloured strip. */
+.report-row {
+  display: flex;
+  gap: 16px;
+  align-items: baseline;
+  padding: 12px 16px;
+  border-radius: var(--radius-row);
+  background: var(--sky-sheet);
+  box-shadow: inset 0 0 0 1px var(--sky-hairline);
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.report-row:hover {
+  background: var(--card);
+}
+.report-row:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+}
+
+.report-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.report-row-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--sky-text);
+  margin-bottom: 4px;
+}
+
+/* Two lines of the report's opening prose, clamped rather than cut to one:
+   one line of a research report's first sentence rarely says enough to tell
+   two of them apart. */
+.report-row-excerpt {
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--sky-text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.report-row-date {
+  flex: none;
+  font-family: "JetBrains Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  color: var(--sky-text-tertiary);
+  white-space: nowrap;
+}
+
+/* --- One report ---------------------------------------------------------- */
+
+.report-detail {
+  background: var(--sky-sheet);
+  border-radius: var(--radius-sheet);
+  box-shadow:
+    inset 0 0 0 1px var(--sky-hairline),
+    0 1px 3px rgba(58, 56, 51, 0.05);
+  padding: 24px 32px 40px;
+}
+
+.report-back {
+  border: 0;
+  background: transparent;
+  padding: 8px 0;
+  /* A 44px-tall hit area, per the UI rule, without a visible button box. */
+  min-height: 44px;
+  margin: 0 0 8px;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--cobalt);
+  cursor: pointer;
+}
+.report-back:hover {
+  text-decoration: underline;
+}
+.report-back:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+}
+
+.report-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-xs);
+  color: var(--sky-text-tertiary);
+  margin-bottom: 24px;
+}
+
+.report-detail-meta::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--kind-dot, var(--kind-other));
+}
+
+.report-detail--research {
+  --kind-dot: var(--kind-research);
+}
+.report-detail--sector {
+  --kind-dot: var(--kind-sector);
+}
+.report-detail--company {
+  --kind-dot: var(--kind-company);
+}
+.report-detail--grant {
+  --kind-dot: var(--kind-grant);
+}
+.report-detail--other {
+  --kind-dot: var(--kind-other);
+}
+
+/* --- The report body -----------------------------------------------------
+   A report is the longest thing anyone reads in this product, so the body gets
+   the reading treatment the rest of the app does not need: a wider type size
+   than the UI, a loose line-height, and generous space above each heading.
+
+   `.report-body` also carries `.md-content`, the renderer's generic class. That
+   class still paints the OLD warm palette (coral links, amber uppercase h3) —
+   the token block at the top of this file records why it survives: descriptions
+   and LLM reasoning elsewhere in the app are still rendered by it, and
+   recolouring those is its own design decision. So the rules below OVERRIDE it
+   for reports only. Nothing here touches `.md-content` on its own, and the
+   description/reasoning surfaces are left exactly as they were.
+   ------------------------------------------------------------------------ */
+
+.report-body {
+  font-size: var(--text-base);
+  line-height: 1.75;
+  color: var(--sky-text);
+}
+
+/* Headings: the sky ramp, never the warm one. Size carries the level, and so
+   does space above — a reader scanning for a section finds it by the gap. */
+.report-body h1,
+.report-body h2,
+.report-body h3 {
+  color: var(--sky-text);
+  letter-spacing: -0.01em;
+  /* The self-link `#` hangs in the left margin (see .md-anchor). */
+  position: relative;
+}
+
+.report-body h1 {
+  font-size: 25px;
+  font-weight: 700;
+  margin: 0 0 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--sky-hairline);
+}
+
+.report-body h2 {
+  font-size: 19px;
+  font-weight: 700;
+  margin: 36px 0 12px;
+}
+
+/* Deliberately NOT the uppercase amber label .md-content gives h3. Inside a
+   report an h3 is a real subsection, and a reader who meets it after a long h2
+   section needs to read it as a heading, not as a caption. */
+.report-body h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 28px 0 8px;
+  color: var(--sky-text);
+  text-transform: none;
+  letter-spacing: -0.01em;
+}
+
+.report-body p {
+  margin: 0 0 14px;
+}
+
+.report-body ul,
+.report-body ol {
+  margin: 0 0 14px;
+  padding-left: 22px;
+}
+
+.report-body li {
+  margin-bottom: 6px;
+}
+
+.report-body li::marker {
+  color: var(--sky-text-tertiary);
+}
+
+/* Links are cobalt, the app's one interaction colour — the same blue as the
+   active nav item, so a link in a report reads as the same affordance the rest
+   of the dashboard uses. Underlined on rest, not only on hover: inside a wall
+   of prose, colour alone is not a reliable signal (WCAG 1.4.1 — never carry
+   meaning by colour alone). */
+.report-body a,
+.report-body .md-jump {
+  color: var(--cobalt);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: rgba(37, 69, 211, 0.35);
+}
+
+.report-body a:hover,
+.report-body .md-jump:hover {
+  text-decoration-color: var(--cobalt);
+}
+
+.report-body a:focus-visible,
+.report-body .md-jump:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* The heading self-link, rendered by mdToHtml as a literal "#". Left unstyled
+   it printed a coral hash glued to every heading, which read as markdown that
+   had failed to render. It belongs in the left margin, invisible until the
+   reader is on the heading — the GitHub/MDN convention, and the one place the
+   affordance costs nothing when unused.
+
+   aria-hidden in the markup, so a screen reader never announces the "#";
+   opacity (not display:none) keeps it focusable by keyboard, and :focus-visible
+   brings it back for a keyboard reader who tabs onto it. */
+.report-body .md-anchor {
+  position: absolute;
+  left: -0.85em;
+  top: 0;
+  width: 0.85em;
+  color: var(--sky-text-disabled);
+  text-decoration: none;
+  font-weight: 400;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.report-body h1:hover .md-anchor,
+.report-body h2:hover .md-anchor,
+.report-body h3:hover .md-anchor,
+.report-body .md-anchor:focus-visible {
+  opacity: 1;
+}
+
+.report-body .md-anchor:hover {
+  color: var(--cobalt);
+}
+
+/* On a phone there is no margin to hang the anchor in and no hover to reveal
+   it, so it would sit on top of the first letter of every heading. */
+@media (max-width: 700px) {
+  .report-body .md-anchor {
+    display: none;
+  }
+}
+
+/* Money amounts and grouped numbers, set in the monospace face by
+   wrapNumbers(). Mono digits are all one width, so a column of amounts down a
+   list or a table lines up and can be compared by eye; the body face sets "1"
+   narrower than "8" and the column goes ragged. tabular-nums forces the fixed
+   advance even in fonts that default to proportional figures.
+   (design-styles §4: numbers in mono, tabular-nums, right-aligned.) */
+.report-body .md-num {
+  font-family: "JetBrains Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.92em;
+  letter-spacing: -0.01em;
+}
+
+/* --- Tables --------------------------------------------------------------
+   Hairline rules, no boxed grid: the same surface language as every other row
+   in the app. A wide table scrolls inside its own wrapper rather than pushing
+   the page sideways.
+   ------------------------------------------------------------------------ */
+
+/* The scroll lives on the wrapper, never on the table: overflow on a <table>
+   needs display:block, which throws away the internal table layout and shrinks
+   the table to the width of its longest cell instead of filling the measure. */
+.md-table-wrap {
+  overflow-x: auto;
+  margin: 16px 0 20px;
+}
+
+.report-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.report-body th,
+.report-body td {
+  padding: 9px 14px 9px 0;
+  border: none;
+  border-bottom: 1px solid var(--sky-hairline);
+  text-align: left;
+  vertical-align: top;
+}
+
+.report-body th {
+  background: none;
+  font-weight: 600;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sky-text-faint);
+  border-bottom: 1px solid var(--sky-text-disabled);
+  white-space: nowrap;
+}
+
+.report-body tbody tr:hover {
+  background: var(--sky-row-hover);
+}
+
+/* A cell holding nothing but a number, tagged by isNumericCell(). Right-aligned
+   so the digits stack on the decimal — the one alignment rule that makes a
+   column of money comparable at a glance (Tufte; IBCS). */
+.report-body td.md-td-num {
+  text-align: right;
+  padding-right: 20px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The header above a numeric column moves with it, or the label floats away
+   from the figures it names. */
+.report-body th.md-td-num {
+  text-align: right;
+  padding-right: 20px;
+}
+
+.report-body code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.88em;
+  background: var(--sky-shell);
+  color: var(--sky-text);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.report-body pre {
+  background: var(--sky-shell);
+  border-radius: var(--radius-tile);
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: 0 0 16px;
+}
+
+.report-body pre code {
+  background: none;
+  padding: 0;
+}
+
+.report-body blockquote {
+  border-left: 2px solid var(--cobalt);
+  background: none;
+  padding: 2px 0 2px 16px;
+  margin: 0 0 16px;
+  color: var(--sky-text-secondary);
+  font-style: normal;
+  border-radius: 0;
+}
+
+.report-body hr {
+  border: none;
+  border-top: 1px solid var(--sky-hairline);
+  margin: 28px 0;
+}
+
+.report-body strong {
+  font-weight: 700;
+  color: var(--sky-text);
+}

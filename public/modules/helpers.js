@@ -1091,7 +1091,8 @@ export function isSafeFragment(url) {
 // A money amount or a grouped number: "$23,658", "$1,000", "12,206,029", "226".
 // Bare one- and two-digit numbers are left alone — they are usually prose ("six
 // to twelve months"), and setting those in mono would speckle the paragraph.
-const NUMBER_TOKEN = /(\$\d[\d,]*(?:\.\d+)?|\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b|\b\d{3,}(?:\.\d+)?\b)/g;
+const NUMBER_TOKEN =
+  /(\$\d[\d,]*(?:\.\d+)?|\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b|\b\d{3,}(?:\.\d+)?\b)/g;
 
 /**
  * Set every money amount and grouped number in the monospace face.
@@ -1203,6 +1204,14 @@ export function mdToHtml(text, opts) {
   var inList = false;
   var inOrderedList = false;
   var inTable = false;
+  // A table is buffered, not streamed. Alignment is a property of the COLUMN,
+  // not of the cell: a money column with one "—" in it must not swing that row
+  // back to the left, and the header has to move with the figures it names.
+  // Neither can be decided while the header is being written, because no body
+  // row has been read yet — so the rows are collected and the whole table is
+  // emitted by flushTable() once its extent is known.
+  var tableHead = null;
+  var tableRows = [];
   var inCode = false;
   var codeLines = [];
 
@@ -1216,11 +1225,73 @@ export function mdToHtml(text, opts) {
     if (seenIds[base]) id = base + "-" + seenIds[base];
     seenIds[base] = (seenIds[base] || 0) + 1;
     return (
-      "<h" + level + ' id="' + id + '">' +
-      '<a class="md-anchor" href="#' + id + '" aria-hidden="true">#</a>' +
+      "<h" +
+      level +
+      ' id="' +
+      id +
+      '">' +
+      '<a class="md-anchor" href="#' +
+      id +
+      '" aria-hidden="true">#</a>' +
       body +
-      "</h" + level + ">"
+      "</h" +
+      level +
+      ">"
     );
+  }
+
+  /**
+   * Emit the buffered table.
+   *
+   * A column counts as numeric when it has at least one number in it and no
+   * cell that is anything else — so "1,673 / 293 / 226" aligns right, and a
+   * column of names with a stray year in it does not. Header and body cells
+   * get the same class, so the label sits over its own figures.
+   */
+  function flushTable() {
+    if (!inTable) return;
+    var width = tableHead ? tableHead.length : 0;
+    var numericCol = [];
+    for (var c = 0; c < width; c++) {
+      var sawNumber = false;
+      var allNumeric = true;
+      for (var r = 0; r < tableRows.length; r++) {
+        var cell = tableRows[r][c];
+        if (cell === undefined || cell === "") continue;
+        if (isNumericCell(cell)) sawNumber = true;
+        else allNumeric = false;
+      }
+      numericCol[c] = sawNumber && allNumeric;
+    }
+    var cls = function (c) {
+      return numericCol[c] ? ' class="md-td-num"' : "";
+    };
+    var html = "<table><thead><tr>";
+    for (var h = 0; h < width; h++) {
+      html += "<th" + cls(h) + ">" + inlineFormat(tableHead[h]) + "</th>";
+    }
+    html += "</tr></thead><tbody>";
+    for (var i2 = 0; i2 < tableRows.length; i2++) {
+      html += "<tr>";
+      for (var j = 0; j < tableRows[i2].length; j++) {
+        html +=
+          "<td" +
+          cls(j) +
+          ">" +
+          inlineFormat(tableRows[i2][j], NUMERIC) +
+          "</td>";
+      }
+      html += "</tr>";
+    }
+    // Wrapped, so a table too wide for the column scrolls inside its own box
+    // instead of pushing the whole page sideways. The scroll has to live on a
+    // wrapper: putting overflow on the <table> itself requires display:block,
+    // which drops the internal table layout and collapses the table to the
+    // width of its text rather than filling the measure.
+    out.push('<div class="md-table-wrap">' + html + "</tbody></table></div>");
+    inTable = false;
+    tableHead = null;
+    tableRows = [];
   }
 
   function closeBlocks() {
@@ -1232,10 +1303,7 @@ export function mdToHtml(text, opts) {
       out.push("</ol>");
       inOrderedList = false;
     }
-    if (inTable) {
-      out.push("</tbody></table>");
-      inTable = false;
-    }
+    flushTable();
   }
 
   for (var i = 0; i < lines.length; i++) {
@@ -1298,37 +1366,15 @@ export function mdToHtml(text, opts) {
         continue;
       if (!inTable) {
         inTable = true;
-        out.push(
-          "<table><thead><tr>" +
-            cells
-              .map(function (c) {
-                return "<th>" + inlineFormat(c) + "</th>";
-              })
-              .join("") +
-            "</tr></thead><tbody>",
-        );
+        tableHead = cells;
+        tableRows = [];
       } else {
-        out.push(
-          "<tr>" +
-            cells
-              .map(function (c) {
-                // Numeric columns align right so the digits stack; a generic
-                // renderer cannot know the column's type, but it can see that
-                // this cell is nothing but a number.
-                const cls = isNumericCell(c) ? ' class="md-td-num"' : "";
-                return "<td" + cls + ">" + inlineFormat(c, NUMERIC) + "</td>";
-              })
-              .join("") +
-            "</tr>",
-        );
+        tableRows.push(cells);
       }
       continue;
     }
 
-    if (inTable) {
-      out.push("</tbody></table>");
-      inTable = false;
-    }
+    flushTable();
 
     if (/^[\s]*[-*]\s+(.+)$/.test(line)) {
       if (inOrderedList) {
@@ -1385,7 +1431,7 @@ export function mdToHtml(text, opts) {
   }
   if (inList) out.push("</ul>");
   if (inOrderedList) out.push("</ol>");
-  if (inTable) out.push("</tbody></table>");
+  flushTable();
   return out.join("\n");
 }
 
