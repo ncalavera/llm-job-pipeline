@@ -2,7 +2,8 @@
 
 Worktree: `/Users/nsolovev/Projects/personal/llm-job-pipeline-tracker`
 Branch: `feat/applications-table` (stacked on `migrate/self-hosted-dashboard`)
-Updated: 2026-08-27. Not pushed, not deployed.
+Updated: 2026-08-27. Not pushed. The Reports-tab commits through `426982f`/
+`0498863` are deployed; everything after `6de1346` is not.
 
 ## The Reports tab is deployable
 
@@ -34,39 +35,59 @@ console errors and no horizontal page scroll at 390px or 1280px.
 
 ## Not done
 
-1. **Applications table is English while the shell is Russian.** Headers read
-   `SENT ON`, `ORGANISATION`; the count strip says "7 sent · 3 waiting". The
-   Reports tab has the same gap. Nikita's profile sets the dashboard to RU, so
-   this is visible to him on every visit. No i18n keys exist for either.
-2. **Stage column falls off a 390px screen.** The Applications table scrolls
-   horizontally on a phone and Stage — the answer to the question the table
-   exists to ask — is not in the first viewport.
-3. **The scroll-to-top button floats over body text mid-scroll.** Global shell
+1. **The Health tab is untranslated** — 26 keys referenced by `health.js` and
+   `index.html` (plus `tab_health`) exist in neither language. Also
+   `archive_restore` in archive.js and `triage_source_link` in pipeline.js.
+   These are pre-existing gaps on the deployed branch, outside the two tabs
+   this round covered. `tests/test_i18n_coverage.py` currently scans only
+   `applications.js` and `reports.js`; widening it to every module is the
+   natural follow-up, and would fail until those keys are added.
+2. **The scroll-to-top button floats over body text mid-scroll.** Global shell
    control, same on every tab; a report is just the first surface long enough
-   to make it obvious. Only the end-of-report case is cleared.
-4. **`sql/schema.sql` is inconsistent with itself.** It carries the new
-   `accepted` status but not `applied_at`, `kind`, or the `report` table. A
-   fresh install is fine, because migrations add them on top — but
-   `migrate.py --baseline` against a fresh schema would leave a broken
-   database. Someone should decide what that file is meant to be.
-5. There is no lint configured in this repo (no eslint, no ruff config beyond
+   to make it obvious. Only the end-of-report case is cleared. Left alone by
+   instruction.
+3. **`sql/schema.sql` is far from current** — it is missing six tables
+   (`application`, `board`, `company_evidence`, `learning_log`,
+   `pipeline_run`, `report`) and eight columns, not just this branch's three.
+   It is the documented frozen baseline, so it was deliberately NOT topped up;
+   `--baseline` now verifies the database instead, which is what actually made
+   it safe. Whether that file should become a true current-state dump is still
+   an open decision.
+4. There is no lint configured in this repo (no eslint, no ruff config beyond
    the cache directory).
 
 ## Next steps
 
-1. Decide whether the two new tabs get Russian strings before Nikita uses them.
-2. Reorder or freeze the Applications table columns so Stage survives a phone.
-3. Settle the `schema.sql` question in item 4 above.
+1. Translate the Health tab (26 keys) and widen `test_i18n_coverage.py` to
+   scan every module rather than the two new tabs.
+2. Settle what `sql/schema.sql` is meant to be — frozen baseline, or a
+   current-state dump that `--baseline` can trust on its own.
+
+## A trap worth knowing
+
+`unset SUPABASE_DB_URL` does NOT select SQLite in this repo. `db_backend`
+loads the repo `.env` at import with `setdefault`, so an unset variable is
+immediately refilled from the file and the code targets the FORGE PRODUCTION
+database through the tunnel on 127.0.0.1:15432. To force SQLite, use the
+documented escape hatch:
+
+```bash
+LLM_PIPELINE_DISABLE_DOTENV=1 JOBSEARCH_DB_PATH=/tmp/x.db python3 scripts/migrate.py
+```
+
+Otherwise always set `SUPABASE_DB_URL` explicitly to a throwaway. Check the
+connection banner every script prints — it names the database it actually
+reached.
 
 ## How to run the tests
 
 ```bash
 cd /Users/nsolovev/Projects/personal/llm-job-pipeline-tracker
-npm run test:js     # 529 pass   (note: "npm test" is not a script here)
-python3 -m pytest -q # 1719 pass, 38 skipped   (python3, not python)
+npm run test:js     # 537 pass   (note: "npm test" is not a script here)
+python3 -m pytest -q # 1747 pass, 38 skipped   (python3, not python)
 ```
 
-Both were green at commit `0498863`.
+Both were green at commit `f9194e5`.
 
 ## How to see it locally
 
