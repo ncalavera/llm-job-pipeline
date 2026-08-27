@@ -446,7 +446,18 @@ def _candidate_names_to_score(limit: int) -> list[str]:
 
 
 def _unscored_unseen() -> int:
-    return _scalar("SELECT count(*) FROM vacancy WHERE status = 'unseen' AND llm_score IS NULL")
+    from database_supabase import _vacancy_has_column
+
+    # Rows the filter pass excluded from scoring (migration 0020) are not
+    # "awaiting scoring" — counting them would hold the scoring gate open for
+    # rows the scorer will never be offered. Column-guarded for pre-migration
+    # installs.
+    cond = ""
+    if _vacancy_has_column("scoring_excluded_reason"):
+        cond = " AND scoring_excluded_reason IS NULL"
+    return _scalar(
+        "SELECT count(*) FROM vacancy WHERE status = 'unseen' AND llm_score IS NULL" + cond
+    )
 
 
 def _scored_unseen() -> int:
@@ -1307,10 +1318,20 @@ def _h_filter(state, entry, opts):
     ready = data.get("ready", 0)
     delete_ids = data.get("delete_ids", {}) or {}
     junk = sum(len(v) for v in delete_ids.values())
-    entry["filter"] = {"ready": ready, "junk_flagged": junk}
+    # Exclusion tally (migration 0020) — kept in the run state so the nightly
+    # digest header can show "N excluded" with a per-reason breakdown (R10).
+    excluded = data.get("scoring_excluded", {}) or {}
+    entry["filter"] = {
+        "ready": ready,
+        "junk_flagged": junk,
+        "excluded_count": int(excluded.get("count", 0) or 0),
+        "excluded_reasons": excluded.get("reasons") or {},
+    }
     note = f"{ready} ready to score"
     if junk:
         note += f"; {junk} junk candidate(s) flagged (NOT deleted — review in /jobs-review)"
+    if entry["filter"]["excluded_count"]:
+        note += f"; {entry['filter']['excluded_count']} excluded from scoring (reasons recorded)"
     return "advance", note
 
 

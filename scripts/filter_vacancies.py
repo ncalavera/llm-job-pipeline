@@ -482,7 +482,10 @@ def classify_vacancies(db: dict = None) -> dict:
         "ready": [],
     }
     today = datetime.now(DASHBOARD_TZ).date()
-    all_vacs = load_vacancies(unscored_only=True)
+    # include_scoring_excluded: the filter pass is the ONE decider of "not
+    # scored" — it must re-see rows it excluded on earlier runs so a rule that
+    # no longer matches gets its reason cleared (persist_scoring_exclusions).
+    all_vacs = load_vacancies(unscored_only=True, include_scoring_excluded=True)
     archive_hashes = get_archived_hashes()
 
     for vid, vac in all_vacs.items():
@@ -561,6 +564,169 @@ def classify_vacancies(db: dict = None) -> dict:
         categories["ready"].append((vid, vac))
 
     return categories
+
+
+# ---------------------------------------------------------------------------
+# Scoring-exclusion record (migration 0020) — the reason a new vacancy is not
+# sent to scoring, written on the row so the scorer's loader and the digest
+# read the SAME record. NULL = awaiting scoring (ready / still enriching).
+# ---------------------------------------------------------------------------
+
+#: Categories whose reason is a fact of the whole role group: decided on the
+#: same representative row the scorer uses, written to every member. The
+#: location reason is NOT here — it is a row-level fact, applied to a group
+#: only when EVERY member is geo-excluded (a mixed New-York/Berlin group is
+#: kept and scored).
+_GROUP_REASON_CATEGORIES = frozenset(
+    {
+        "delete_blacklist",
+        "delete_company_title_filter",
+        "delete_junk",
+        "delete_rearchived",
+        "delete_stale_blind",
+    }
+)
+
+# Country display names for the location reason ("US-only location").
+_COUNTRY_DISPLAY = {"united states": "US", "united kingdom": "UK"}
+
+
+def _title_blacklist_phrase(title: str) -> str:
+    """The blacklist phrase that killed this title, for a traceable reason.
+
+    Reads the SAME compiled stems/pattern filters.title_words_blacklisted
+    matches on (single source of the matching semantics), just returning the
+    matched text instead of a bare bool.
+    """
+    t = (title or "").lower()
+    for kw in filters.TITLE_BLACKLIST_STEMS:
+        if kw in t:
+            return kw
+    m = filters._TITLE_BLACKLIST_PATTERN.search(t)
+    return m.group(0) if m else ""
+
+
+def _geo_exclusion_reason(vacs: list[dict]) -> str:
+    """Human-readable location reason for a fully geo-excluded role group."""
+    countries: list[str] = []
+    for vac in vacs:
+        locs = vac.get("locations") or [
+            {"location": vac.get("location") or "", "region": vac.get("region", "")}
+        ]
+        for loc in locs:
+            country = country_for_location(loc)
+            if country and country not in countries:
+                countries.append(country)
+    displays = [_COUNTRY_DISPLAY.get(c, c.title()) for c in countries]
+    if len(displays) == 1:
+        return f"{displays[0]}-only location"
+    if displays:
+        return f"excluded locations only ({', '.join(displays)})"
+    return "excluded location"
+
+
+def _group_exclusion_reason(category: str, rep: dict) -> str | None:
+    """Reason string for a group-level exclusion category, from the rep row."""
+    if category == "delete_blacklist":
+        phrase = _title_blacklist_phrase(rep.get("title", ""))
+        return f"junk title: {phrase}" if phrase else "junk title"
+    if category == "delete_company_title_filter":
+        return (
+            rep.get("_filter_reason")
+            or filters.company_title_filter_reason(rep.get("org", ""), rep.get("title", ""))
+            or "company title filter"
+        )
+    if category == "delete_junk":
+        junk = rep.get("_junk_reason") or filters.is_content_junk(
+            rep.get("full_description", "") or ""
+        )
+        return f"junk content: {(junk or 'junk').replace('_', ' ')}"
+    if category == "delete_rearchived":
+        return "archived before"
+    if category == "delete_stale_blind":
+        return "no description after enrichment"
+    return None
+
+
+def _exclusion_reason_map(categories: dict) -> dict[str, str]:
+    """{vacancy_id: reason} for every row the filter pass excludes from scoring.
+
+    Group-level reasons (blacklist, company title filter, junk, archived
+    before, stale blind) follow the scorer's representative row (longest
+    description) and reach every member of the (org, title) role group. The
+    location reason reaches a group only when every member is geo-excluded.
+    reenrich_blind / reenrich_thin / ready rows get no entry (reason stays
+    NULL — they are awaiting enrichment or scoring, not excluded).
+    """
+    groups: dict[tuple[str, str], list[tuple[str, dict]]] = {}
+    cat_by_id: dict[str, str] = {}
+    for cat, items in categories.items():
+        for vid, vac in items:
+            groups.setdefault((vac.get("org", ""), vac.get("title", "")), []).append((vid, vac))
+            cat_by_id[vid] = cat
+
+    reasons: dict[str, str] = {}
+    for members in groups.values():
+        rep_id, rep = max(
+            members,
+            key=lambda m: len(m[1].get("full_description") or m[1].get("snippet") or ""),
+        )
+        rep_cat = cat_by_id[rep_id]
+        if rep_cat in _GROUP_REASON_CATEGORIES:
+            reason = _group_exclusion_reason(rep_cat, rep)
+        elif all(cat_by_id[vid] == "delete_geo" for vid, _ in members):
+            reason = _geo_exclusion_reason([vac for _, vac in members])
+        else:
+            continue
+        if not reason:
+            continue
+        for vid, _ in members:
+            reasons[vid] = reason
+    return reasons
+
+
+def persist_scoring_exclusions(categories: dict) -> dict:
+    """Write the exclusion record in ONE statement: set the reason on every
+    excluded row and clear it on every no-longer-excluded row.
+
+    Scoped to `(llm_score IS NULL OR llm_score < 0) AND status = 'unseen'`
+    (the -1 sentinel counts as unscored, matching load_vacancies), so scored
+    or user-triaged rows are never touched. Returns
+    {"persisted", "count", "reasons"} for the run summary / run state.
+    """
+    from database_supabase import _vacancy_has_column
+
+    if not _vacancy_has_column("scoring_excluded_reason"):
+        print(
+            "  scoring_excluded_reason column missing (run scripts/migrate.py) — "
+            "exclusion reasons NOT persisted this run",
+            file=sys.stderr,
+            flush=True,
+        )
+        return {"persisted": False, "count": 0, "reasons": {}}
+
+    reason_by_id = _exclusion_reason_map(categories)
+    whens = []
+    params: list = []
+    for vid, reason in reason_by_id.items():
+        whens.append("WHEN id = %s::uuid THEN %s")
+        params.extend([vid, reason])
+    case_sql = "CASE " + " ".join(whens) + " ELSE NULL END" if whens else "NULL"
+
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        f"UPDATE vacancy SET scoring_excluded_reason = {case_sql} "
+        "WHERE (llm_score IS NULL OR llm_score < 0) AND status = 'unseen'",
+        params,
+    )
+    conn.commit()
+    cur.close()
+    return {
+        "persisted": True,
+        "count": len(reason_by_id),
+        "reasons": dict(Counter(reason_by_id.values())),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1357,6 +1523,10 @@ def main():
     categories = classify_vacancies()
     stats = compute_stats(categories)
 
+    # Persist the exclusion record — the one decider of "not scored" (R8):
+    # set the reason on excluded rows, clear rows a rule no longer matches.
+    scoring_excluded = persist_scoring_exclusions(categories)
+
     # --- Structured filter summary (for feedback loop) ---
     print("\n--- Filter Summary ---", file=sys.stderr, flush=True)
     for cat in [
@@ -1385,6 +1555,12 @@ def main():
         rearch_by_company = Counter(v.get("org", "?") for _, v in rearchived)
         print(
             f"  Re-archived by company: {dict(rearch_by_company.most_common(5))}",
+            file=sys.stderr,
+            flush=True,
+        )
+    if scoring_excluded.get("persisted"):
+        print(
+            f"  Excluded from scoring (reason persisted): {scoring_excluded['count']}",
             file=sys.stderr,
             flush=True,
         )
@@ -1417,6 +1593,7 @@ def main():
         "delete_ids": delete_ids,
         "reenrich_ids": reenrich_ids,
         "ready": stats["ready_count"],
+        "scoring_excluded": scoring_excluded,
         "report_path": str(report_path),
     }
     if dedup_result:

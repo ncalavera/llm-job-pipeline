@@ -106,7 +106,7 @@ def test_score_vacancies_entrypoint_applies_default_cap(fresh_install, restore_s
     default_cap = ss.max_per_run()
     captured: dict[str, object] = {}
 
-    def fake_load(*, force, include_passed, include_candidates, limit, offset):
+    def fake_load(*, force, include_passed, include_candidates, limit, offset, unattended=False):
         captured["limit"] = limit
         return [], {}, {"roles_available": 0}
 

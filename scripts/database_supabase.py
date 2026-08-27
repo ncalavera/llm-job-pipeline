@@ -1288,12 +1288,27 @@ def _vacancy_has_column(col: str) -> bool:
     return _table_has_column("vacancy", col)
 
 
+# ``scoring_excluded_reason`` (migration 0020) is migration-only, like
+# scored_by: presence is detected once per process so a pre-migration install
+# degrades to the old "unscored" definition instead of crashing on every load.
+_scoring_excluded_supported_cache: bool | None = None
+
+
+def _scoring_excluded_supported() -> bool:
+    """True once ``vacancy.scoring_excluded_reason`` exists (migration 0020)."""
+    global _scoring_excluded_supported_cache
+    if _scoring_excluded_supported_cache is None:
+        _scoring_excluded_supported_cache = _vacancy_has_column("scoring_excluded_reason")
+    return _scoring_excluded_supported_cache
+
+
 def load_vacancies(
     *,
     company_name=None,
     status=None,
     status_exclude=None,
     unscored_only=False,
+    include_scoring_excluded=False,
     limit=None,
     include_inactive_companies=False,
     include_candidate_companies=False,
@@ -1311,6 +1326,9 @@ def load_vacancies(
     hides a role the company-status filter would have shown.
     status_exclude=[...] → filter out vacancies whose status is in the list
     (e.g. ['passed', 'skipped'] for /score to skip already-decided rows).
+    include_scoring_excluded=True → with unscored_only, ALSO return rows the
+    filter pass excluded from scoring (scoring_excluded_reason set) — used by
+    the filter pass itself so it can re-decide and clear stale reasons.
     light=True → drop full_description from the SELECT (saves ~8 KB/row).
     """
     conn = get_conn()
@@ -1352,6 +1370,12 @@ def load_vacancies(
         # awaiting scoring but never offered to the scorer.
         conditions.append("(v.llm_score IS NULL OR v.llm_score < 0)")
         conditions.append("v.status != 'archived'")
+        # The filter pass is the single decider of "not scored" (migration
+        # 0020): a row it excluded carries the reason and is no longer offered
+        # as unscored anywhere. Column-guarded so a pre-migration install
+        # degrades to the old behaviour instead of crashing.
+        if not include_scoring_excluded and _scoring_excluded_supported():
+            conditions.append("v.scoring_excluded_reason IS NULL")
 
     where = " AND ".join(conditions) if conditions else "TRUE"
 
@@ -1443,6 +1467,10 @@ def load_candidate_vacancies_for_scoring(
         "v.status != 'archived'",
         "(c.alignment_score >= %s OR c.alignment_score IS NULL)",
     ]
+    # Same "unscored" definition as load_vacancies: a row the filter pass
+    # excluded (scoring_excluded_reason set) is never offered for scoring.
+    if _scoring_excluded_supported():
+        conditions.append("v.scoring_excluded_reason IS NULL")
     params: list = [CANDIDATE_ALIGNMENT_FLOOR]
 
     if status_exclude:
