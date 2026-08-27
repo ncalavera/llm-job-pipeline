@@ -367,9 +367,10 @@ def test_duplicate_column_guard_is_scoped_to_known_versions(mig):
     assert _logical_snapshot(mig.db_path) == before_snapshot
 
 
-@pytest.mark.parametrize("version", ["0009", "0011"])
+@pytest.mark.parametrize("version", ["0009", "0011", "0020", "0021"])
 def test_half_migrated_single_add_column_is_idempotent(mig, version, capsys):
-    """0009 (scored_by) / 0011 (board.enabled) are single
+    """0009 (scored_by) / 0011 (board.enabled) / 0020 (scoring_excluded_reason)
+    / 0021 (digest_dropped_at) are single
     ADD COLUMN migrations with no SQLite ``IF NOT EXISTS``. On a HALF-MIGRATED
     DB — the column exists but its ledger row was lost — re-running used to hit
     'duplicate column name', abort, auto-restore, and stay stuck one migration
