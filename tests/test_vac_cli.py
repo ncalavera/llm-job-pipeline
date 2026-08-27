@@ -16,6 +16,12 @@ import types
 
 import pytest
 
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+
+from statuses import APPLICATION_STATUSES  # noqa: E402
+
 
 @pytest.fixture()
 def vac(tmp_path, monkeypatch):
@@ -257,6 +263,140 @@ def test_add_puts_the_company_in_the_approved_set(vm):
     status = cur.fetchone()[0]
     cur.close()
     assert status == "active"
+
+
+def _company_status(env, name):
+    cid = env.dal.resolve_company_id(name)
+    cur = env.dal.get_conn().cursor()
+    cur.execute("SELECT status FROM company WHERE id = %s", (cid,))
+    row = cur.fetchone()
+    cur.close()
+    return row[0] if row else None
+
+
+def _visible_titles(env):
+    """What the board and `vac list` show — the DEFAULT company filter."""
+    rows = env.dal.load_vacancies()
+    return {v["title"] for v in rows.values()}
+
+
+# --- The Successif bug -----------------------------------------------------
+# Found in production: he applied to a company already on file as 'inactive'.
+# ensure_company only sets a status when it CREATES the row, so the company
+# stayed inactive, the company filter hid the vacancy, and the application was
+# invisible on the dashboard and in `vac list` — the funnel undercounting
+# itself with nothing on screen to say a row was missing.
+
+
+def test_add_reactivates_a_company_that_was_set_aside(vm):
+    """Applying is a decision about the company, and it overrides an older one."""
+    cid = vm.dal.ensure_company("Successif", status="active")
+    cur = vm.dal.get_conn().cursor()
+    cur.execute("UPDATE company SET status = 'inactive' WHERE id = %s", (cid,))
+    cur.close()
+    assert _company_status(vm, "Successif") == "inactive"
+
+    vm.mod.cmd_add(_add_args(company="Successif", title="Career advising"))
+
+    assert _company_status(vm, "Successif") == "active"
+
+
+def test_add_to_an_inactive_company_is_visible_on_the_board(vm):
+    """The bug as the user met it: the row existed but nothing showed it."""
+    cid = vm.dal.ensure_company("Successif", status="active")
+    cur = vm.dal.get_conn().cursor()
+    cur.execute("UPDATE company SET status = 'inactive' WHERE id = %s", (cid,))
+    cur.close()
+
+    vm.mod.cmd_add(_add_args(company="Successif", title="Career advising"))
+
+    assert "Career advising" in _visible_titles(vm)
+
+
+def test_an_application_stays_visible_even_if_its_company_goes_inactive(vm):
+    """The second half of the fix, and the one that does not depend on `vac add`.
+
+    A company can be set aside AFTER the application was sent — by a later
+    review, or by the auto-reject pass. The application must not vanish with
+    it, whichever route made the company inactive.
+    """
+    vm.mod.cmd_add(_add_args(company="Successif", title="Career advising"))
+    cid = vm.dal.resolve_company_id("Successif")
+    cur = vm.dal.get_conn().cursor()
+    cur.execute("UPDATE company SET status = 'inactive' WHERE id = %s", (cid,))
+    cur.close()
+
+    assert "Career advising" in _visible_titles(vm)
+
+
+@pytest.mark.parametrize("status", sorted(APPLICATION_STATUSES))
+def test_every_application_status_survives_an_inactive_company(vm, status):
+    """Not just 'applied': every stage of the funnel is a sent application."""
+    vm.mod.cmd_add(_add_args(company="Successif", title="Career advising", status=status))
+    cid = vm.dal.resolve_company_id("Successif")
+    cur = vm.dal.get_conn().cursor()
+    cur.execute("UPDATE company SET status = 'inactive' WHERE id = %s", (cid,))
+    cur.close()
+
+    assert "Career advising" in _visible_titles(vm), f"{status} was hidden"
+
+
+def test_a_non_application_row_is_still_hidden_by_an_inactive_company(vm):
+    """The widening must not become "show everything".
+
+    An unreviewed role at a company he set aside is exactly what the company
+    filter is FOR. Only sent applications are exempt.
+    """
+    cid = vm.dal.ensure_company("Successif", status="active")
+    vm.dal.upsert_vacancy(
+        vm.dal.make_vacancy_id("Successif", "Unrelated open role"),
+        {
+            "company_id": cid,
+            "title": "Unrelated open role",
+            "status": "unseen",
+            "first_seen": "2026-07-01",
+            "last_seen": "2026-07-01",
+        },
+    )
+    cur = vm.dal.get_conn().cursor()
+    cur.execute("UPDATE company SET status = 'inactive' WHERE id = %s", (cid,))
+    cur.close()
+
+    assert "Unrelated open role" not in _visible_titles(vm)
+
+
+def test_reactivating_records_why_the_status_changed(vm):
+    """A silent status flip is discovered months later; this one leaves a reason."""
+    cid = vm.dal.ensure_company("Successif", status="active")
+    cur = vm.dal.get_conn().cursor()
+    cur.execute("UPDATE company SET status = 'inactive' WHERE id = %s", (cid,))
+    cur.close()
+
+    vm.mod.cmd_add(_add_args(company="Successif", title="Career advising"))
+
+    cur = vm.dal.get_conn().cursor()
+    cur.execute("SELECT status_reason FROM company WHERE id = %s", (cid,))
+    reason = cur.fetchone()[0]
+    cur.close()
+    assert reason and "vac add" in reason
+
+
+def test_add_leaves_an_already_active_company_alone(vm):
+    """No pointless write, and no misleading status_reason on a company that
+    never changed."""
+    cid = vm.dal.ensure_company("Rethink Priorities", status="active")
+    cur = vm.dal.get_conn().cursor()
+    cur.execute("UPDATE company SET status_reason = 'approved by review' WHERE id = %s", (cid,))
+    cur.close()
+
+    vm.mod.cmd_add(_add_args(company="Rethink Priorities", title="Operations Generalist"))
+
+    cur = vm.dal.get_conn().cursor()
+    cur.execute("SELECT status, status_reason FROM company WHERE id = %s", (cid,))
+    status, reason = cur.fetchone()
+    cur.close()
+    assert status == "active"
+    assert reason == "approved by review", "an untouched company kept its own reason"
 
 
 def test_add_is_idempotent_on_company_and_title(vm):

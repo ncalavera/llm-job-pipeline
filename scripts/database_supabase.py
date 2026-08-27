@@ -1173,6 +1173,35 @@ def ensure_company(org_name: str, status: str = "candidate"):
     return cid
 
 
+def activate_company(company_id, reason: str) -> bool:
+    """Force a company to 'active'. Returns True if the status actually changed.
+
+    Deliberately NOT folded into ensure_company: that function returns an
+    existing company untouched on purpose, so a board variant merging into a
+    tracked company can never flip its status or its WANT score, and a nightly
+    fetch can never silently re-approve a company that was rejected.
+
+    Applying is the one event that DOES justify overriding it. He decided about
+    that company by sending the application, so leaving it 'inactive' — or
+    'candidate', awaiting a review that has been overtaken — makes the company
+    filter hide his own application from the board and from `vac list`.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT status FROM company WHERE id = %s", (company_id,))
+    row = cur.fetchone()
+    current = row[0] if row else None
+    if current == "active":
+        cur.close()
+        return False
+    cur.execute(
+        "UPDATE company SET status = 'active', status_reason = %s WHERE id = %s",
+        (reason, company_id),
+    )
+    cur.close()
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Vacancy CRUD
 # ---------------------------------------------------------------------------
@@ -1342,6 +1371,23 @@ def load_vacancies(
             company_cond = "c.status != 'inactive'"
         else:
             company_cond = "c.status = 'active'"
+
+        # An application is always visible, whatever its company's status.
+        #
+        # The company-status filter exists to keep UNREVIEWED companies out of
+        # the catalog. An application is the opposite of unreviewed: he decided,
+        # he applied, and the row is now the record of something he is waiting
+        # on. Letting a company's status hide it loses the application from the
+        # board, the Applications table and `vac list` at once — and the funnel
+        # then undercounts itself with no visible sign that a row is missing.
+        #
+        # This can only widen the set, exactly like score_floor_any_company
+        # below: every row the company filter would have shown is still shown.
+        app_placeholders = ", ".join(["%s"] * len(APPLICATION_STATUSES))
+        app_statuses = sorted(APPLICATION_STATUSES)
+        company_cond = f"({company_cond} OR v.status IN ({app_placeholders}))"
+        params.extend(app_statuses)
+
         if score_floor_any_company is not None:
             conditions.append(f"({company_cond} OR v.llm_score > %s)")
             params.append(score_floor_any_company)

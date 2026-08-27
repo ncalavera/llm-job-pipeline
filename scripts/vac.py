@@ -131,6 +131,7 @@ if __name__ == "__main__" and wants_help():
 
 from database_supabase import (
     _vacancy_has_column,
+    activate_company,
     ensure_company,
     get_conn,
     load_vacancies,
@@ -452,7 +453,13 @@ def cmd_add(args):
 
     # Active, not candidate: he applied there, so the company is not awaiting a
     # review — and a candidate company's roles are hidden from the board.
+    #
+    # ensure_company only sets a status when it CREATES the row, so an
+    # organisation already on file as 'inactive' or 'candidate' keeps that
+    # status and the company filter then hides the application that was just
+    # recorded. Activating explicitly is the second half of the same intent.
     company_id = ensure_company(company, status="active")
+    reactivated = activate_company(company_id, "applied via vac add")
 
     data = {
         "company_id": company_id,
@@ -482,6 +489,11 @@ def cmd_add(args):
     when = f" sent {applied_at}" if applied_at else ""
     print(f"ok: {company} — {title[:50]} [{args.kind}] → {args.status}{when}")
     print(f"    id {_short_id(uid)}   (re-run with the same company and title to edit it)")
+    if reactivated:
+        # Said out loud: this changed a company he had previously set aside,
+        # and a silent status flip is the kind of thing that is discovered
+        # months later while wondering why a company came back.
+        print(f"    note: {company} was not active — set to active so this stays visible")
 
 
 def _today() -> str:
