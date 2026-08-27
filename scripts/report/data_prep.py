@@ -28,6 +28,7 @@ _ACTIVE_STATUSES = frozenset(
         "test_task",
         "interview",
         "declined",
+        "accepted",
     }
 )
 from database_supabase import load_vacancies, load_all_enrichment

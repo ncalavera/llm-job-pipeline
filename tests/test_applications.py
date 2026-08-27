@@ -452,7 +452,13 @@ def test_AP01_every_archive_statement_is_scoped_to_unseen():
 
 
 def test_AP02_application_statuses_are_the_expected_set():
-    assert APPLICATION_STATUSES == {"applied", "test_task", "interview", "declined"}
+    assert APPLICATION_STATUSES == {
+        "applied",
+        "test_task",
+        "interview",
+        "declined",
+        "accepted",
+    }
 
 
 @pytest.mark.parametrize("current", sorted(APPLICATION_STATUSES))

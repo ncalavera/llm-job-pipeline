@@ -17,6 +17,13 @@
      (--orange), and "they set me work" must not read as either of them.
      Consumed from JS via TRIAGE_COLUMNS, like --gold and --slate. */
   --raspberry: #d6336c;
+  /* Accepted column (triage board): a deep pine green. Deliberately NOT
+     --emerald — To apply already owns that, and a bright "go" green next to a
+     dark "won" green would read as the same thing twice. Deep enough to hold
+     white text and to sit apart from --q-good on the quality scale.
+     Consumed from JS via TRIAGE_COLUMNS, like --gold, --slate and
+     --raspberry. */
+  --pine: #0e7a55;
   --text: #1a1612;
   --muted: #6b6460;
   /* Restored in U18 review (DHA-402): still consumed from JS, not just CSS —

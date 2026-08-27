@@ -1057,7 +1057,8 @@ export function computeTriageFunnel(entries, opts) {
       at("applied") +
       at("test_task") +
       at("interview") +
-      at("declined"),
+      at("declined") +
+      at("accepted"),
     in_work: at("to_apply") + at("to_research") + at("to_network"),
     applied_total: at("applied"),
     skipped_total: at("skipped"),
@@ -1293,6 +1294,7 @@ export const TOAST_MESSAGES = {
     fallback: "\uD83D\uDCC5 Interview stage",
   },
   declined: { key: "toast_declined", fallback: "\uD83D\uDEAB Declined" },
+  accepted: { key: "toast_accepted", fallback: "\uD83C\uDF89 Accepted" },
 };
 
 // Resolve a status to its toast copy, or null when the status is not one a UI

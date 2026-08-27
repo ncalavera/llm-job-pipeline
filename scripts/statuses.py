@@ -29,6 +29,7 @@ ALL_STATUSES: tuple[str, ...] = (
     "test_task",
     "interview",
     "declined",
+    "accepted",
     "expiring",
     "archived",
 )
@@ -44,6 +45,11 @@ APPLICATION_STATUSES: frozenset[str] = frozenset(
         "test_task",
         "interview",
         "declined",
+        # The other way an application ends: an offer, or a place on a
+        # programme. Kept next to 'declined' rather than folded into it —
+        # "they said yes" and "they said no" are the two answers the funnel
+        # exists to count, and only one of them is a rejection.
+        "accepted",
     }
 )
 

@@ -185,6 +185,8 @@ export const NON_APPLYABLE_STATUSES = new Set([
   "test_task",
   "interview",
   "declined",
+  // An offer already accepted: the application ended, and it ended well.
+  "accepted",
   "skipped",
 ]);
 

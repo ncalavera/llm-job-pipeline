@@ -32,8 +32,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 MIGRATION = REPO_ROOT / "sql" / "migrations" / "0021_status_check_rebuild.sqlite.sql"
 
 _WIDE_CHECK = """'test_task', 'interview',
-                                            'declined', 'expiring',
-                                            'archived'"""
+                                            'declined', 'accepted',
+                                            'expiring', 'archived'"""
 _NARROW_CHECK = "'expiring', 'archived'"
 
 

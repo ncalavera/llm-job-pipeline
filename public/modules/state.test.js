@@ -100,3 +100,34 @@ test("every real triage column has a basket, or it lands in 'unseen'", () => {
     assert.ok(STATUS_PRI[col.key] !== undefined, `column "${col.key}" has no rank`);
   }
 });
+
+// --- 'accepted' column (the other way an application ends) ------------------
+// The board ended at Declined, so an offer had nowhere to land: a win was
+// recorded as "still interviewing", or worse, dragged into Declined because
+// that was the only closed column. The counts the funnel exists to produce —
+// how many applications ended, and how many ended well — were unanswerable.
+
+test("accepted sits right after Interview on the board", () => {
+  const keys = TRIAGE_COLUMNS.map((c) => c.key);
+  assert.equal(keys.indexOf("accepted"), keys.indexOf("interview") + 1);
+});
+
+test("accepted is a real (droppable) column with its own label and accent", () => {
+  const col = TRIAGE_COLUMNS.find((c) => c.key === "accepted");
+  assert.ok(col, "no accepted column");
+  assert.equal(col.label, "Accepted");
+  assert.ok(!col.derived, "accepted is a real DB status, not a derived column");
+  // Its own green: To apply already owns --emerald, and two greens on one board
+  // would read as one meaning.
+  const others = TRIAGE_COLUMNS.filter((c) => c.key !== "accepted").map(
+    (c) => c.color,
+  );
+  assert.ok(!others.includes(col.color), `colour ${col.color} is not unique`);
+});
+
+test("accepted is a win, so it stays in the liked basket", () => {
+  // The opposite of `declined`, which leaves the active basket. Folding a won
+  // offer into "passed" would count it as a rejection everywhere.
+  assert.equal(STATUS_BASKET.accepted, "liked");
+  assert.notEqual(STATUS_BASKET.accepted, STATUS_BASKET.declined);
+});

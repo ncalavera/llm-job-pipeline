@@ -42,6 +42,10 @@ LIKED_BASKET = (
     "applied",
     "test_task",
     "interview",
+    # An offer accepted is the strongest possible "he wanted this" — a verdict
+    # he made and the employer confirmed. It belongs with the liked basket, not
+    # with REJECTED_STATUSES: nobody said no.
+    "accepted",
 )
 #: The employer said no. NOT a user verdict — he wanted this role, someone else
 #: closed it. Kept out of ``DECISION_STATUSES`` so it never reads as "he passed",

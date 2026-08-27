@@ -78,6 +78,7 @@ test("R18: the vocabulary itself carries every board column", () => {
   assert.ok(ALL_STATUSES.includes("test_task"));
   assert.ok(ALL_STATUSES.includes("interview"));
   assert.ok(ALL_STATUSES.includes("declined"));
+  assert.ok(ALL_STATUSES.includes("accepted"));
 });
 
 test("R18: derive.js NON_APPLYABLE_STATUSES rules on every status", () => {
@@ -134,6 +135,8 @@ test("R18: selectTodayRoles routes every status it should", () => {
     passed: "decided against — nothing left to do",
     skipped: "deferred on purpose; Today is for what needs a decision now",
     declined: "the employer's no closed it; no action is owed",
+    accepted:
+      "the employer's yes closed it; the offer landed, so nothing is owed today",
   };
   assertCovers("selectTodayRoles", (s) => placed.has(s), notInToday);
 
@@ -175,6 +178,9 @@ test("R18: companies.js role sort groups every status", () => {
   assert.ok(_ROLE_STATUS_GROUP.applied < _ROLE_STATUS_GROUP.unseen);
   // The employer's no is a closed outcome, with the user's own no.
   assert.equal(_ROLE_STATUS_GROUP.declined, _ROLE_STATUS_GROUP.passed);
+  // The employer's YES is not: a won offer sorts with the active basket, above
+  // untouched roles — the opposite end of the same axis as `declined`.
+  assert.equal(_ROLE_STATUS_GROUP.accepted, _ROLE_STATUS_GROUP.applied);
 });
 
 test("R18: the triage funnel counts every triaged column", () => {

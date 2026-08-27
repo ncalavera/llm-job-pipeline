@@ -83,8 +83,8 @@ CREATE TABLE IF NOT EXISTS vacancy (
                                             'to_apply', 'to_research',
                                             'to_network', 'skipped', 'applied',
                                             'test_task', 'interview',
-                                            'declined', 'expiring',
-                                            'archived')),
+                                            'declined', 'accepted',
+                                            'expiring', 'archived')),
     status_updated_at     TEXT,
 
     llm_score             INTEGER,

@@ -427,6 +427,7 @@ export const VALID_STATUSES = [
   "test_task",
   "interview",
   "declined",
+  "accepted",
   "expiring",
   "archived",
 ];
@@ -684,6 +685,7 @@ export const DECISION_STATUSES = [
   "applied",
   "test_task",
   "interview",
+  "accepted",
   "passed",
 ];
 

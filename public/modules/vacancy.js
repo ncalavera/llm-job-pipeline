@@ -112,6 +112,7 @@ export const _STATUS_CHIP_KEYS = {
   test_task: ["vac_status_test_task", "Test task"],
   interview: ["vac_status_interview", "Interview"],
   declined: ["vac_status_declined", "Declined"],
+  accepted: ["vac_status_accepted", "Accepted"],
   archived: ["vac_status_archived", "Archived"],
 };
 

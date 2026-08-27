@@ -79,12 +79,13 @@ export const STATUS_PRI = {
   applied: 3,
   test_task: 4,
   interview: 5,
-  declined: 6,
-  skipped: 7,
-  liked: 8,
-  expiring: 9,
-  passed: 10,
-  unseen: 11,
+  accepted: 6,
+  declined: 7,
+  skipped: 8,
+  liked: 9,
+  expiring: 10,
+  passed: 11,
+  unseen: 12,
 };
 
 export const STATUS_BASKET = {
@@ -109,6 +110,10 @@ export const STATUS_BASKET = {
   // it leaves the active basket. Unlike 'passed' it records THEIR decision,
   // which is the strongest calibration signal scoring has.
   declined: "passed",
+  // The employer said yes. A closed outcome like `declined`, but the opposite
+  // answer — so it stays in the active (Liked) basket, where every other role
+  // he wanted lives. Folding a win into Passed would count it as a rejection.
+  accepted: "liked",
 };
 
 export const TRIAGE_COLUMNS = [
@@ -150,6 +155,15 @@ export const TRIAGE_COLUMNS = [
     key: "interview",
     label: "Interview",
     color: "var(--orange)",
+  },
+  {
+    // The employer's own yes: an offer, or a place on a programme. Its own
+    // column right after Interview, because an application that ended well and
+    // one still in flight are different facts, and the count of wins is the
+    // one number the funnel never had.
+    key: "accepted",
+    label: "Accepted",
+    color: "var(--pine)",
   },
   {
     // The employer's own no. Kept on the board (not folded into Passed) so an

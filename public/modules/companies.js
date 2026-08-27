@@ -2264,6 +2264,9 @@ export var _ROLE_STATUS_GROUP = {
   test_task: 0,
   interview: 0,
   expiring: 0,
+  // The employer said yes. Group 0 with the rest of the active basket, so a
+  // won offer never sorts below an untouched role on its company's page.
+  accepted: 0,
   unseen: 1,
   passed: 2,
   skipped: 2,

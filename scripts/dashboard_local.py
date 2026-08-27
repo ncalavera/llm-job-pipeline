@@ -46,6 +46,7 @@ VALID_STATUSES = {
     "test_task",
     "interview",
     "declined",
+    "accepted",
     "expiring",
     "archived",
 }

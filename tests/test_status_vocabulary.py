@@ -237,3 +237,64 @@ def test_TT10_the_column_accent_resolves_to_a_defined_token():
         assert re.search(rf"^\s*{re.escape(token)}:\s*#", css, re.M), (
             f"{token} is used by a triage column but never defined in style.css"
         )
+
+
+# ===========================================================================
+# --- 'accepted' — the other way an application ends ---
+#
+# The board ran applied -> test_task -> interview -> declined, so an offer had
+# nowhere to land. A win was either left sitting in Interview (reading as "still
+# waiting") or dragged into Declined, the only closed column — which taught
+# every count and every calibration signal that the search's best outcomes were
+# rejections. 'accepted' gives the yes its own place, opposite 'declined'.
+# ===========================================================================
+
+
+def test_AC01_accepted_is_a_valid_status():
+    assert "accepted" in VALID_STATUSES
+
+
+def test_AC02_every_writer_accepts_it():
+    """Same three doors as test_TT02: the DAL, simple mode, the self-hosted
+    server. A status the board offers and a door refuses is a save that fails."""
+    from dashboard_local import VALID_STATUSES as LOCAL_STATUSES
+
+    assert "accepted" in LOCAL_STATUSES
+
+    source = (_ROOT / "server.js").read_text()
+    assert '"accepted"' in source, "server.js does not accept 'accepted'"
+
+
+def test_AC03_accepted_is_decided():
+    """A won offer must never be reset to 'unseen' by the employer re-listing
+    the role — which they routinely do after filling it."""
+    assert "accepted" in _DECIDED_STATUSES
+
+
+def test_AC04_accepted_records_an_application():
+    """It IS the record of an application, and the best one. No sweeper may
+    archive it away."""
+    assert "accepted" in APPLICATION_STATUSES
+
+
+def test_AC05_accepted_survives_the_dashboard_score_floor():
+    assert "accepted" in _ACTIVE_STATUSES
+
+
+def test_AC06_accepted_is_a_user_verdict_and_a_want():
+    """Unlike 'declined', nobody overrode him: he wanted it and it happened."""
+    assert "accepted" in learning.LIKED_BASKET
+    assert "accepted" in learning.DECISION_STATUSES
+    assert "accepted" in learning.WANTED_STATUSES
+
+
+def test_AC07_accepted_is_not_a_rejection():
+    """The bug this guards: counting a win as a rejection would teach scoring to
+    downrank exactly the roles the search is for."""
+    assert "accepted" not in learning.REJECTED_STATUSES
+
+
+def test_AC08_both_baseline_schemas_allow_it():
+    for rel in ("sql/schema.sql", "sql/schema.sqlite.sql"):
+        source = (_ROOT / rel).read_text()
+        assert "'accepted'" in source, f"{rel} rejects 'accepted'"
