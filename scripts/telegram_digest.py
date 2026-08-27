@@ -9,9 +9,12 @@ Two modes:
           hot_vacancy_score+ plus strong roles at unreviewed companies), tier 2
           mid scores as one-liners, tier 3 every dropped vacancy as one line
           with its drop reason, tier 4 carried-over/rollover lines from the run
-          state. Tiers 1–2 stamp digest_sent_at; tiers 3–4 are gated by the
-          last-digest timestamp in the state file, so a double-fire repeats
-          nothing.
+          state. Tiers 1–3 are claim-first per message part: tier 1–2 rows
+          stamp digest_sent_at and tier 3 rows stamp digest_dropped_at just
+          before the part that renders them is sent (recorded in the state
+          file's pending_claim so even a SIGKILL cannot lose them); a failed
+          part releases only its own claims. Tier 4 is gated by the last-digest
+          timestamp in the state file. So a double-fire repeats nothing.
   poll  — long-poll getUpdates: button taps write vacancy.status
           (liked/passed) to the DB and the keyboard is redrawn with a ✅ mark.
 
@@ -139,18 +142,21 @@ WHERE v.status = 'unseen'
 ORDER BY v.llm_score DESC, v.created_at DESC
 """
 
-# Tier 3: dropped vacancies (migration 0020) first seen since the last digest.
-# Not stamped — idempotence comes from the last-digest timestamp in the state
-# file (first_seen is a date, so a same-morning re-send compares below it).
-# Fetched pre-capped (the message shows at most DROPPED_MAX_LINES); the count
-# query supplies the exact "+N more" tail without transferring unshown rows.
+# Tier 3: dropped vacancies (migration 0020) not shown in a digest yet.
+# Claimed like tiers 1–2: the fetched (capped) rows stamp digest_dropped_at
+# (migration 0021) before their message part is sent, released on failure.
+# Rows beyond the cap stay unstamped and surface next morning. A timestamp
+# cutoff on first_seen cannot do this job — first_seen is a DATE, so rows
+# dropped later the same day would sit below the cutoff forever. And
+# digest_sent_at is not reused: a dropped row whose exclusion is later cleared
+# and scored must still be able to appear in tiers 1–2.
 SELECT_DROPPED_SQL = """
 SELECT v.id, v.title, c.canonical_name AS org, v.locations,
        v.scoring_excluded_reason
 FROM vacancy v
 JOIN company c ON v.company_id = c.id
 WHERE v.scoring_excluded_reason IS NOT NULL
-  AND v.first_seen > %s
+  AND v.digest_dropped_at IS NULL
 ORDER BY v.first_seen DESC, v.title
 LIMIT %s
 """
@@ -160,11 +166,13 @@ SELECT count(*) AS n
 FROM vacancy v
 JOIN company c ON v.company_id = c.id
 WHERE v.scoring_excluded_reason IS NOT NULL
-  AND v.first_seen > %s
+  AND v.digest_dropped_at IS NULL
 """
 
 # Header fallback when there is no fresh run state: counts over everything
-# first seen since the last digest.
+# first seen since the last digest. The dropped column here shares first_seen's
+# date-granularity blind spot, so gather_counts overrides it with the tier-3
+# not-yet-shown total — the header then always matches what tier 3 reports.
 COUNT_SINCE_SQL = """
 SELECT count(*) AS fetched,
        sum(CASE WHEN v.llm_score IS NOT NULL THEN 1 ELSE 0 END) AS scored,
@@ -470,11 +478,15 @@ def _fetch_stats_total_new():
         return 0
 
 
-def gather_counts(conn, run_state, since):
+def gather_counts(conn, run_state, since, dropped_total=None):
     """Header numbers (R10). From the fresh run state when there is one, else
-    from database counts over rows first seen since the last digest."""
+    from database counts over rows first seen since the last digest — except
+    the dropped count, which becomes ``dropped_total`` (rows not shown in a
+    digest yet) so the header matches what tier 3 actually lists."""
     if run_state is None:
         counts = fetch_counts_since(conn, since)
+        if dropped_total is not None:
+            counts["dropped"] = dropped_total
         counts["targets"] = 0
         return counts
     c = run_state.get("counts") or {}
@@ -544,25 +556,28 @@ def build_tail_lines(run_state):
 
 
 def assemble_digest(header_lines, top_rows, mid_rows, dropped_rows, tail_lines, dropped_total=None):
-    """All blocks of the morning message, in tier order (R6). ``dropped_rows``
-    arrives pre-capped by the fetch; ``dropped_total`` (default: its length)
-    drives the "+N more" tail."""
+    """All blocks of the morning message, in tier order (R6). Blocks that
+    render a database row are ``(text, row, tier)`` tuples so the sender can
+    claim, release and keyboard exactly the rows of each message part;
+    text-only blocks stay plain strings. ``dropped_rows`` arrives pre-capped by
+    the fetch; ``dropped_total`` (default: its length) drives the "+N more"
+    tail."""
     if dropped_total is None:
         dropped_total = len(dropped_rows)
     blocks = list(header_lines)
     if top_rows:
         blocks.append("")
         blocks.append(_t("digest_tier_top"))
-        blocks.extend(build_top_line(r, i) for i, r in enumerate(top_rows, 1))
+        blocks.extend((build_top_line(r, i), r, "top") for i, r in enumerate(top_rows, 1))
     if mid_rows:
         blocks.append("")
         blocks.append(_t("digest_tier_mid"))
-        blocks.extend(build_mid_line(r) for r in mid_rows)
+        blocks.extend((build_mid_line(r), r, "mid") for r in mid_rows)
     if dropped_rows:
         blocks.append("")
         blocks.append(_t("digest_tier_dropped"))
         shown = dropped_rows[:DROPPED_MAX_LINES]
-        blocks.extend(build_dropped_line(r) for r in shown)
+        blocks.extend((build_dropped_line(r), r, "dropped") for r in shown)
         if dropped_total > len(shown):
             blocks.append(_t("digest_dropped_more", n=dropped_total - len(shown)))
     if tail_lines:
@@ -574,34 +589,52 @@ def assemble_digest(header_lines, top_rows, mid_rows, dropped_rows, tail_lines, 
     return blocks
 
 
-def split_message(blocks, limit=None):
-    """Pack blocks into messages of at most ``limit`` chars, splitting only at
-    block boundaries so order and lines survive intact (R6)."""
+def split_message_parts(blocks, limit=None):
+    """Pack blocks into message parts of at most ``limit`` chars, splitting
+    only at block boundaries so order and lines survive intact (R6). A block is
+    a plain string or an ``(text, row, tier)`` tuple (assemble_digest); each
+    part comes back as ``{"text": str, "rows": [(row, tier), ...]}`` with the
+    rows rendered inside that part."""
     limit = limit or MESSAGE_MAX_CHARS
-    parts, cur = [], ""
+    parts = []
+    cur_text, cur_rows = "", []
     for block in blocks:
-        if len(block) > limit:
-            block = _truncate(block, limit - 1)
-        candidate = block if not cur else cur + "\n" + block
+        text, row, tier = block if isinstance(block, tuple) else (block, None, None)
+        if len(text) > limit:
+            text = _truncate(text, limit - 1)
+        candidate = text if not cur_text else cur_text + "\n" + text
         if len(candidate) > limit:
-            parts.append(cur)
-            cur = block
+            parts.append({"text": cur_text, "rows": cur_rows})
+            cur_text, cur_rows = text, []
         else:
-            cur = candidate
-    if cur.strip() or not parts:
-        parts.append(cur)
+            cur_text = candidate
+        if row is not None:
+            cur_rows.append((row, tier))
+    if cur_text.strip() or not parts:
+        parts.append({"text": cur_text, "rows": cur_rows})
     return parts
 
 
-def build_digest_keyboard(rows):
-    """One 👍/👎 keyboard row per tier-1 entry, numbered like the entries."""
+def split_message(blocks, limit=None):
+    """The packed part texts only — the historical string-in/string-out view
+    of ``split_message_parts``."""
+    return [p["text"] for p in split_message_parts(blocks, limit)]
+
+
+def build_digest_keyboard(rows, numbers=None):
+    """One 👍/👎 keyboard row per tier-1 entry, numbered like the entries.
+    ``numbers`` carries the global entry numbers when a split leaves only a
+    slice of tier 1 on this part — buttons must show the same numbers as the
+    rendered lines."""
+    if numbers is None:
+        numbers = range(1, len(rows) + 1)
     return {
         "inline_keyboard": [
             [
                 {"text": f"👍 {i}", "callback_data": f"{CALLBACK_PREFIX}:{row['id']}:l"},
                 {"text": f"👎 {i}", "callback_data": f"{CALLBACK_PREFIX}:{row['id']}:p"},
             ]
-            for i, row in enumerate(rows, 1)
+            for i, row in zip(numbers, rows)
         ]
     }
 
@@ -773,12 +806,12 @@ def fetch_mid(conn, min_score, max_score):
         return [dict(r) for r in cur.fetchall()]
 
 
-def fetch_dropped(conn, since):
-    """(rows capped at DROPPED_MAX_LINES, total count) since the last digest."""
+def fetch_dropped(conn):
+    """(rows capped at DROPPED_MAX_LINES, total not-yet-shown count)."""
     with _dict_cursor(conn) as cur:
-        cur.execute(SELECT_DROPPED_SQL, (since, DROPPED_MAX_LINES))
+        cur.execute(SELECT_DROPPED_SQL, (DROPPED_MAX_LINES,))
         rows = [dict(r) for r in cur.fetchall()]
-        cur.execute(COUNT_DROPPED_SQL, (since,))
+        cur.execute(COUNT_DROPPED_SQL)
         total = int(dict(cur.fetchone() or {}).get("n") or 0)
     return rows, total
 
@@ -842,6 +875,14 @@ def mark_alerted_many(conn, vac_ids):
 
 def unmark_alerted_many(conn, vac_ids):
     _stamp_many(conn, "expiring_alerted_at = NULL", vac_ids)
+
+
+def mark_dropped_many(conn, vac_ids):
+    _stamp_many(conn, "digest_dropped_at = now()", vac_ids)
+
+
+def unmark_dropped_many(conn, vac_ids):
+    _stamp_many(conn, "digest_dropped_at = NULL", vac_ids)
 
 
 def set_status(conn, vac_id, status):
@@ -919,6 +960,22 @@ def _since_param(db_url, since_iso):
         return since_iso
 
 
+def release_pending_claim(conn, state_path):
+    """Release the claims a killed run left behind. cmd_send records each
+    part's ids in the state file just before stamping them; a SIGKILL between
+    stamp and send would otherwise lose those rows forever (the in-process
+    release never runs). Worst case — killed after a delivered send but before
+    the state update — the release repeats one part next morning: a duplicate,
+    never a loss."""
+    pending = read_state_file(state_path).get("pending_claim")
+    if not pending:
+        return
+    unmark_sent_many(conn, pending.get("sent") or [])
+    unmark_dropped_many(conn, pending.get("dropped") or [])
+    unmark_alerted_many(conn, pending.get("alerted") or [])
+    update_state_file(state_path, pending_claim=None)
+
+
 def cmd_send(args):
     token, db_url, chat_id = get_config()
     conn = db_connect(db_url)
@@ -928,26 +985,31 @@ def cmd_send(args):
     since = _since_param(db_url, since_iso)
     run_state = load_run_state(last_digest)
 
+    # A previous run may have died between claiming a part and sending it —
+    # release those claims before fetching so the rows join THIS digest.
+    # (Skipped on dry-run, which must not write anywhere.)
+    if not args.dry_run:
+        release_pending_claim(conn, state_path)
+
     # Tier 1: fresh top matches + strong roles at unreviewed companies (KTD5).
     top_rows = fetch_fresh(conn, args.limit, HOT_VACANCY_SCORE)
     top_rows += fetch_candidate_hot(conn)
     mid_floor = args.min_score if args.min_score is not None else MID_MIN_SCORE
     mid_rows = fetch_mid(conn, mid_floor, HOT_VACANCY_SCORE)
-    dropped_rows, dropped_total = fetch_dropped(conn, since)
+    dropped_rows, dropped_total = fetch_dropped(conn)
     # Expiring deadlines fold into one header line instead of loud alerts.
     expiring_rows = fetch_expiring(conn)
 
-    counts = gather_counts(conn, run_state, since)
+    counts = gather_counts(conn, run_state, since, dropped_total)
     header = build_header_lines(counts, len(expiring_rows), run_state)
     tail = build_tail_lines(run_state)
     blocks = assemble_digest(header, top_rows, mid_rows, dropped_rows, tail, dropped_total)
-    parts = split_message(blocks)
-    keyboard = build_digest_keyboard(top_rows) if top_rows else None
+    parts = split_message_parts(blocks)
 
     if args.dry_run:
-        for i, text in enumerate(parts, 1):
+        for i, part in enumerate(parts, 1):
             print(f"--- message {i}/{len(parts)} ---")
-            print(text)
+            print(part["text"])
         print(
             f"\n[dry-run] {len(parts)} message(s): {len(top_rows)} top, {len(mid_rows)} mid, "
             f"{dropped_total} dropped, {len(expiring_rows)} deadline(s) — nothing sent",
@@ -955,31 +1017,60 @@ def cmd_send(args):
         )
         return
 
-    # Claim-first: stamp every tier-1/2 row and deadline before the first send,
-    # so a parallel run never duplicates. A failed send releases every claim —
-    # the next run re-sends the digest whole (failure delays, never loses).
-    claimed = [row["id"] for row in top_rows + mid_rows]
-    alerted = [row["id"] for row in expiring_rows]
-    mark_sent_many(conn, claimed)
-    mark_alerted_many(conn, alerted)
-    try:
-        for i, text in enumerate(parts):
-            payload = {
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            }
-            if i == 0 and keyboard:
-                payload["reply_markup"] = keyboard
+    # Claim-first, one message part at a time: stamp exactly the rows a part
+    # renders just before sending it, with the ids journalled to the state
+    # file first (pending_claim) so even a SIGKILL between stamp and send is
+    # released by the next run. A failed part releases only its own claims —
+    # earlier parts were delivered and stay stamped, later parts were never
+    # claimed (failure delays, never loses). Expiring deadlines ride the
+    # header's part (part 0). Tier-1 numbering is global across parts, and
+    # each part's keyboard carries the numbers of the entries it renders.
+    numbers = {row["id"]: i for i, row in enumerate(top_rows, 1)}
+    for i, part in enumerate(parts):
+        part_top = [row for row, tier in part["rows"] if tier == "top"]
+        claim_sent = [row["id"] for row, tier in part["rows"] if tier in ("top", "mid")]
+        claim_dropped = [row["id"] for row, tier in part["rows"] if tier == "dropped"]
+        claim_alerted = [row["id"] for row in expiring_rows] if i == 0 else []
+        update_state_file(
+            state_path,
+            pending_claim={
+                "sent": claim_sent,
+                "dropped": claim_dropped,
+                "alerted": claim_alerted,
+            },
+        )
+        mark_sent_many(conn, claim_sent)
+        mark_dropped_many(conn, claim_dropped)
+        mark_alerted_many(conn, claim_alerted)
+        payload = {
+            "chat_id": chat_id,
+            "text": part["text"],
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        if part_top:
+            payload["reply_markup"] = build_digest_keyboard(
+                part_top, [numbers[row["id"]] for row in part_top]
+            )
+        try:
             tg_call(token, "sendMessage", payload)
-            time.sleep(0.5)  # respect the rate limit
-    except Exception as e:
-        unmark_sent_many(conn, claimed)
-        unmark_alerted_many(conn, alerted)
-        print(f"ERROR digest send: {e}", file=sys.stderr, flush=True)
-        sys.exit(1)
-    update_state_file(state_path, last_digest_at=datetime.now().isoformat(timespec="seconds"))
+        except Exception as e:
+            unmark_sent_many(conn, claim_sent)
+            unmark_dropped_many(conn, claim_dropped)
+            unmark_alerted_many(conn, claim_alerted)
+            update_state_file(state_path, pending_claim=None)
+            print(
+                f"ERROR digest send (part {i + 1}/{len(parts)}): {e}",
+                file=sys.stderr,
+                flush=True,
+            )
+            sys.exit(1)
+        time.sleep(0.5)  # respect the rate limit
+    update_state_file(
+        state_path,
+        pending_claim=None,
+        last_digest_at=datetime.now().isoformat(timespec="seconds"),
+    )
     print(
         f"Digest sent to chat {chat_id}: {len(parts)} message(s) — {len(top_rows)} top, "
         f"{len(mid_rows)} mid, {dropped_total} dropped, "

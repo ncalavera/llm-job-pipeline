@@ -13,6 +13,10 @@ User=nikita
 WorkingDirectory=/home/nikita/Projects/personal/llm-job-pipeline
 # KEY=value lines: database URL, TELEGRAM_*, FIRECRAWL_API_KEY. Mode 600.
 EnvironmentFile=/home/nikita/jobsearch/.env
+# The digest sender shares ONE state file with the button poller (getUpdates
+# offset, last_digest_at, crash-safe pending_claim). Must match
+# jobsearch-digest-poller.service; the ~ default is outside ReadWritePaths.
+Environment=DIGEST_STATE_FILE=/home/nikita/jobsearch/digest_state.json
 # The Claude token is a credential FILE, never an Environment= value —
 # `systemctl show` must not reveal it (KTD7). The wrapper reads
 # $CREDENTIALS_DIRECTORY/claude-token and passes it only to the Claude child.

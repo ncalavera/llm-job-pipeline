@@ -1,7 +1,8 @@
 """Tests for telegram_digest.py — pure builders plus the tiered send.
 
-The tiered-send tests run against a fresh temp SQLite DB (migration 0020
-applied from the real file) with ``tg_call`` faked — no network, no Postgres.
+The tiered-send tests run against a fresh temp SQLite DB (migrations 0020 and
+0021 applied from the real files) with ``tg_call`` faked — no network, no
+Postgres.
 """
 
 import importlib
@@ -17,12 +18,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 import telegram_digest as td
 
-MIGRATION_0020 = (
-    Path(__file__).resolve().parent.parent
-    / "sql"
-    / "migrations"
-    / "0020_add_vacancy_scoring_excluded_reason.sqlite.sql"
-)
+_MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "sql" / "migrations"
+MIGRATION_0020 = _MIGRATIONS_DIR / "0020_add_vacancy_scoring_excluded_reason.sqlite.sql"
+MIGRATION_0021 = _MIGRATIONS_DIR / "0021_add_vacancy_digest_dropped_at.sqlite.sql"
 
 
 ROW = {
@@ -255,6 +253,7 @@ def denv(tmp_path, monkeypatch):
     conn = db.get_conn()
     cur = conn.cursor()
     cur.execute(MIGRATION_0020.read_text(encoding="utf-8"))
+    cur.execute(MIGRATION_0021.read_text(encoding="utf-8"))
     conn.commit()
     cur.close()
 
@@ -502,13 +501,21 @@ def test_many_dropped_split_preserves_order_and_caps(denv, monkeypatch):
     assert positions == sorted(positions)
 
 
-def test_dropped_cap_renders_more_tail(denv, monkeypatch):
+def test_dropped_cap_renders_more_tail_and_rest_surface_next_morning(denv, monkeypatch):
     monkeypatch.setattr(td, "DROPPED_MAX_LINES", 5)
     for i in range(8):
         _seed(denv.db, "Org X", f"Dropped {i}", reason="US-only location")
     td.cmd_send(_args())
     body = "\n".join(_sent_texts(denv.calls))
     assert "+3 more" in body
+    # Only the shown rows are stamped — the 3 beyond the cap stay unclaimed
+    # and arrive with the next digest instead of vanishing.
+    denv.calls.clear()
+    td.cmd_send(_args())
+    second = "\n".join(_sent_texts(denv.calls))
+    shown_second = [i for i in range(8) if f"Dropped {i}" in second]
+    assert len(shown_second) == 3
+    assert "more" not in second
 
 
 def test_empty_night_sends_header_and_nothing_new(denv):
@@ -519,14 +526,18 @@ def test_empty_night_sends_header_and_nothing_new(denv):
     assert "Quiet night" in texts[0]
 
 
-def test_top_rows_stamped_dropped_rows_not(denv):
+def test_top_rows_stamp_sent_at_dropped_rows_stamp_dropped_at(denv):
     top = _seed(denv.db, "Org A", "Top Role", score=80)
     mid = _seed(denv.db, "Org B", "Mid Role", score=45)
     drop = _seed(denv.db, "Org C", "Dropped Role", reason="US-only location")
     td.cmd_send(_args())
     assert _col(denv.db, top, "digest_sent_at") is not None
     assert _col(denv.db, mid, "digest_sent_at") is not None
+    assert _col(denv.db, drop, "digest_dropped_at") is not None
+    # digest_sent_at stays free on the dropped row: if its exclusion is later
+    # cleared and it gets scored, it must still be able to reach tiers 1–2.
     assert _col(denv.db, drop, "digest_sent_at") is None
+    assert _col(denv.db, top, "digest_dropped_at") is None
 
 
 def test_second_send_same_morning_repeats_nothing(denv):
@@ -582,6 +593,135 @@ def test_dry_run_prints_in_order_and_sends_nothing(denv, capsys):
     assert denv.calls == []
     # Dry run claims nothing.
     cur = denv.db.get_conn().cursor()
-    cur.execute("SELECT count(*) FROM vacancy WHERE digest_sent_at IS NOT NULL")
+    cur.execute(
+        "SELECT count(*) FROM vacancy "
+        "WHERE digest_sent_at IS NOT NULL OR digest_dropped_at IS NOT NULL"
+    )
     assert cur.fetchone()[0] == 0
     cur.close()
+
+
+def test_dropped_later_the_same_day_appears_in_the_next_send(denv):
+    """#9: tier 3 gates on the digest_dropped_at claim, not on a date-granular
+    first_seen cutoff — a row dropped after the morning digest (same calendar
+    day) arrives with the next send instead of vanishing forever."""
+    early = _seed(denv.db, "Org A", "Early Drop", reason="US-only location")
+    td.cmd_send(_args())
+    assert "Early Drop" in "\n".join(_sent_texts(denv.calls))
+    assert _col(denv.db, early, "digest_dropped_at") is not None
+
+    late = _seed(denv.db, "Org B", "Late Drop", reason="junk title: talent pool")
+    denv.calls.clear()
+    td.cmd_send(_args())
+    second = "\n".join(_sent_texts(denv.calls))
+    assert "Late Drop" in second
+    assert "Early Drop" not in second
+    assert _col(denv.db, late, "digest_dropped_at") is not None
+
+
+# ===========================================================================
+# Multi-part sends — per-part keyboards and per-part claims (#20, #21, #19)
+# ===========================================================================
+
+BULKY_SUMMARY = "A long enough summary line to make every tier-1 entry bulky. " * 4
+
+
+def _seed_five_top(db):
+    """Five tier-1 rows whose entries overflow a shrunken message limit."""
+    return [
+        _seed(db, f"Org {i}", f"Top Role {i}", score=90 - i, summary=BULKY_SUMMARY)
+        for i in range(5)
+    ]
+
+
+def _entry_numbers(text):
+    """Global tier-1 entry numbers rendered in one message text."""
+    import re
+
+    return [int(n) for n in re.findall(r"^(\d+)\. <b>", text, re.MULTILINE)]
+
+
+def _keyboard_numbers(payload):
+    kb = payload.get("reply_markup")
+    if not kb:
+        return []
+    return [int(row[0]["text"].split()[-1]) for row in kb["inline_keyboard"]]
+
+
+def test_split_tier1_keyboard_lands_on_the_part_with_its_rows(denv, monkeypatch):
+    """#20: when tier 1 splits across parts, every part carries a keyboard for
+    exactly the entries it renders, and button numbers match the rendered
+    (global) entry numbers."""
+    monkeypatch.setattr(td, "MESSAGE_MAX_CHARS", 600)
+    _seed_five_top(denv.db)
+    td.cmd_send(_args())
+    payloads = [p for m, p in denv.calls if m == "sendMessage"]
+    assert len(payloads) >= 2
+    seen = []
+    for p in payloads:
+        assert _keyboard_numbers(p) == _entry_numbers(p["text"])
+        seen.extend(_entry_numbers(p["text"]))
+    assert seen == [1, 2, 3, 4, 5]
+
+
+def test_failure_on_part_two_releases_only_that_part(denv, monkeypatch):
+    """#21: delivered parts keep their stamps (no re-send), the failed part's
+    claims are released, later parts were never claimed — the next run sends
+    exactly the undelivered rows."""
+    monkeypatch.setattr(td, "MESSAGE_MAX_CHARS", 600)
+    ids = _seed_five_top(denv.db)
+
+    calls = []
+
+    def flaky(token, method, payload, timeout=15, retries=2):
+        calls.append((method, payload))
+        if len(calls) == 2:
+            raise RuntimeError("sendMessage failed: flood control")
+        return {}
+
+    monkeypatch.setattr(td, "tg_call", flaky)
+    with pytest.raises(SystemExit) as exc:
+        td.cmd_send(_args())
+    assert exc.value.code != 0
+
+    part1 = calls[0][1]["text"]
+    delivered = [vid for i, vid in enumerate(ids) if f"Top Role {i}" in part1]
+    assert delivered and len(delivered) < len(ids)
+    for vid in ids:
+        stamped = _col(denv.db, vid, "digest_sent_at") is not None
+        assert stamped == (vid in delivered)
+    # The in-process release also cleared the crash journal.
+    assert not json.loads(denv.state_file.read_text()).get("pending_claim")
+
+    # Next run: the delivered rows stay silent, the rest go out.
+    monkeypatch.setattr(
+        td, "tg_call", lambda t, m, p, timeout=15, retries=2: denv.calls.append((m, p)) or {}
+    )
+    denv.calls.clear()
+    td.cmd_send(_args())
+    body = "\n".join(_sent_texts(denv.calls))
+    for i, vid in enumerate(ids):
+        assert (f"Top Role {i}" in body) == (vid not in delivered)
+        assert _col(denv.db, vid, "digest_sent_at") is not None
+
+
+def test_stale_pending_claim_from_a_killed_run_is_released(denv):
+    """#19: a SIGKILL between claim and send leaves stamps plus the journalled
+    pending_claim; the next send releases those ids first, so the rows appear
+    in its message instead of being lost forever."""
+    top = _seed(denv.db, "Org A", "Crashed Top", score=80)
+    drop = _seed(denv.db, "Org C", "Crashed Drop", reason="US-only location")
+    conn = denv.db.get_conn()
+    td.mark_sent_many(conn, [top])
+    td.mark_dropped_many(conn, [drop])
+    denv.state_file.write_text(
+        json.dumps({"pending_claim": {"sent": [top], "dropped": [drop], "alerted": []}})
+    )
+    td.cmd_send(_args())
+    body = "\n".join(_sent_texts(denv.calls))
+    assert "Crashed Top" in body
+    assert "Crashed Drop" in body
+    # Re-claimed by the successful send; the journal is cleared.
+    assert _col(denv.db, top, "digest_sent_at") is not None
+    assert _col(denv.db, drop, "digest_dropped_at") is not None
+    assert not json.loads(denv.state_file.read_text()).get("pending_claim")
