@@ -200,6 +200,11 @@ def _claude_cmd(action: str, night_dir, cfg: dict, phase: str) -> list[str]:
         "--model",
         _orchestrator_model(),
         "--dangerously-skip-permissions",
+        # No web tools in the night session: posting text is stranger-written,
+        # and a fetch/search tool is the only way a hijacked session could send
+        # anything out. Writes are fenced by .claude/hooks/night-write-fence.py.
+        "--disallowed-tools",
+        "WebFetch,WebSearch",
         "--max-turns",
         str(cfg["max_turns"]),
         "--output-format",
@@ -208,8 +213,12 @@ def _claude_cmd(action: str, night_dir, cfg: dict, phase: str) -> list[str]:
     ]
 
 
-def _claude_env(firecrawl: bool) -> dict:
+def _claude_env(firecrawl: bool, night_dir=None) -> dict:
     env = {k: os.environ[k] for k in _CHILD_ENV_ALLOWLIST if os.environ.get(k)}
+    if night_dir is not None:
+        # Arms .claude/hooks/night-write-fence.py: Write/Edit only under
+        # <night_dir>/score_out/ (and scoring_log.md) for this child.
+        env["NIGHTLY_NIGHT_DIR"] = str(Path(night_dir).resolve())
     if firecrawl and os.environ.get("FIRECRAWL_API_KEY"):
         env["FIRECRAWL_API_KEY"] = os.environ["FIRECRAWL_API_KEY"]
     # Under systemd the token arrives as a credential FILE (LoadCredential=,
@@ -477,7 +486,7 @@ def _run_session(ctx: _Ctx, action: str, phase: str) -> None:
         proc = subprocess.Popen(
             cmd,
             cwd=str(PROJECT_ROOT),
-            env=_claude_env(spec["firecrawl"]),
+            env=_claude_env(spec["firecrawl"], ctx.night_dir),
             stdout=out_fh,
             stderr=err_fh,
         )

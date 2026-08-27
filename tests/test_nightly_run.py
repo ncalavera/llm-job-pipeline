@@ -777,6 +777,7 @@ def test_dry_run_prints_the_dispatch_table_with_masked_commands(nr, capsys):
     for action in ("screen_companies", "score_companies", "score_vacancies"):
         assert action in out
     assert "--dangerously-skip-permissions" in out
+    assert "--disallowed-tools WebFetch,WebSearch" in out
     # The orchestrator model is the configured setting, never a hardcoded name.
     assert f"--model {scoring_settings.scoring_model()}" in out
     # One session line per phase, phase as the prompt's third argument.
