@@ -305,6 +305,36 @@
           <button
             type="button"
             class="nav-item"
+            id="navContacts"
+            data-section="contacts"
+            onclick="switchMode('contacts')"
+          >
+            <span class="nav-icon" aria-hidden="true"
+              ><svg width="15" height="15" viewBox="0 0 14 14">
+                <circle cx="5" cy="4.6" r="2.3" fill="#0E7A55" opacity=".85"></circle>
+                <path
+                  d="M1.4 12c0-2 1.6-3.4 3.6-3.4S8.6 10 8.6 12"
+                  fill="none"
+                  stroke="#0E7A55"
+                  stroke-width="1.3"
+                  stroke-linecap="round"
+                ></path>
+                <circle cx="10.6" cy="5.6" r="1.7" fill="#0E7A55" opacity=".45"></circle>
+                <path
+                  d="M9 12c0-1.6 1.2-2.7 2.8-2.7 0.5 0 1 .1 1.4.3"
+                  fill="none"
+                  stroke="#0E7A55"
+                  stroke-width="1.2"
+                  stroke-linecap="round"
+                  opacity=".45"
+                ></path></svg
+            ></span>
+            <span class="nav-label" data-i18n="tab_contacts">Networking</span>
+            <span class="nav-count" id="navCountContacts"></span>
+          </button>
+          <button
+            type="button"
+            class="nav-item"
             id="navHealth"
             data-section="health"
             onclick="switchMode('health')"
@@ -747,6 +777,13 @@
            fetched from /api/reports rather than baked into the payload. -->
           <div class="reports-section" id="reportsSection"></div>
           <!-- /reports-section -->
+
+          <!-- === NETWORKING MODE ===
+           Everyone worth writing to, with where they stand. Live-only, like
+           Reports: a contact list is not part of the vacancy snapshot, so it
+           is fetched from /api/contacts. -->
+          <div class="contacts-section" id="contactsSection"></div>
+          <!-- /contacts-section -->
 
           <!-- === SETTINGS MODE ===
            Read-only display of the RESOLVED dials baked by the generator

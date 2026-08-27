@@ -5524,3 +5524,502 @@ body::after {
     white-space: normal;
   }
 }
+
+/* ===========================================================================
+   Networking — everyone worth writing to, in one list.
+
+   Same sky material, same row-hover and focus-ring language as the
+   Applications table, because it answers the same shape of question one step
+   earlier. Built from the dashboard's own tokens: no separate palette, no
+   pills, no sticky bars, and colour never carries meaning alone — every status
+   shows its word beside its dot.
+   =========================================================================== */
+
+.contacts-section {
+  display: none;
+}
+.contacts-section.active {
+  display: block;
+  position: relative;
+}
+
+.contacts-count-strip,
+.contacts-loading,
+.contacts-empty {
+  margin: 0 0 12px;
+  font-size: var(--text-sm);
+  color: var(--sky-text-secondary);
+}
+
+/* --- Group filter --------------------------------------------------------
+   Plain words, and the group names as they are stored — these ARE the sweeps
+   ("ea-georgia", "network-2026-07"), and renaming them for display would break
+   the one link between the screen and the file the rows came from. */
+
+.contact-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 14px;
+}
+
+.contact-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* 44px tap target on a phone, from padding rather than a fixed height, so a
+     long group name still grows the button instead of clipping. */
+  min-height: 32px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--sky-sheet);
+  box-shadow: inset 0 0 0 1px var(--sky-hairline);
+  color: var(--sky-text-secondary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.contact-filter:hover {
+  background: var(--sky-row-hover);
+  color: var(--sky-text);
+}
+
+.contact-filter:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+}
+
+.contact-filter--on {
+  background: var(--cobalt-tint);
+  box-shadow: inset 0 0 0 1px var(--cobalt);
+  color: var(--cobalt);
+  font-weight: 600;
+}
+
+.contact-filter-count {
+  font-family: "JetBrains Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  color: var(--sky-text-tertiary);
+}
+
+.contact-filter--on .contact-filter-count {
+  color: var(--cobalt);
+}
+
+/* --- The table ----------------------------------------------------------- */
+
+.contacts-table-scroll {
+  overflow-x: auto;
+}
+
+.contacts-table {
+  width: 100%;
+  /* Eight columns, sized for the longest label set rather than the shortest —
+     the same lesson the Applications table learned when it was translated. */
+  min-width: 1100px;
+  background: var(--sky-sheet);
+  border-radius: var(--radius-sheet);
+  box-shadow:
+    inset 0 0 0 1px var(--sky-hairline),
+    0 1px 3px rgba(58, 56, 51, 0.05);
+  border-collapse: collapse;
+  table-layout: fixed;
+  overflow: hidden;
+}
+
+.contacts-table th {
+  padding: 12px 12px 9px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sky-text-faint);
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* Name */
+.contacts-table th:nth-child(1) {
+  width: 15%;
+}
+/* City */
+.contacts-table th:nth-child(2) {
+  width: 9%;
+}
+/* Role @ Org */
+.contacts-table th:nth-child(3) {
+  width: 16%;
+}
+/* Group */
+.contacts-table th:nth-child(4) {
+  width: 10%;
+}
+/* Why */
+.contacts-table th:nth-child(5) {
+  width: 17%;
+}
+/* Channels */
+.contacts-table th:nth-child(6) {
+  width: 12%;
+}
+/* Status */
+.contacts-table th:nth-child(7) {
+  width: 11%;
+}
+/* Last activity */
+.contacts-table th:nth-child(8) {
+  width: 10%;
+}
+
+.contact-row {
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.contact-row:hover {
+  background: var(--sky-row-hover);
+}
+.contact-row:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: -2px;
+}
+
+.contact-cell {
+  padding: 11px 12px;
+  font-size: var(--text-sm);
+  color: var(--sky-text);
+  border-top: 1px solid var(--sky-hairline);
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contact-name {
+  font-weight: 600;
+  display: block;
+}
+
+/* Their own spelling, under the Latin form rather than instead of it: a
+   message has to be addressed the way they write it, and the list has to stay
+   scannable by someone who does not read that script. */
+.contact-name-local {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--sky-text-tertiary);
+}
+
+.contact-cell-city,
+.contact-cell-group,
+.contact-cell-active {
+  color: var(--sky-text-secondary);
+}
+
+.contact-cell-why {
+  color: var(--sky-text-secondary);
+}
+
+.contact-cell-channels {
+  white-space: normal;
+}
+
+/* A word, never a bare glyph: the house style bans category codes on screen,
+   and a row of unlabelled brand icons is exactly that. */
+.contact-channel {
+  display: inline-block;
+  margin: 0 6px 2px 0;
+  font-size: var(--text-xs);
+  color: var(--cobalt);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(37, 69, 211, 0.3);
+}
+
+.contact-channel:hover {
+  border-bottom-color: var(--cobalt);
+}
+
+/* A handle with no resolvable URL is still information — it says the person is
+   reachable there — so it reads as text rather than as a link that goes
+   nowhere. */
+.contact-channel--plain {
+  color: var(--sky-text-tertiary);
+  border-bottom: 1px dotted var(--sky-text-disabled);
+}
+
+.contact-status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 7px;
+  vertical-align: middle;
+}
+
+/* --- The drawer ----------------------------------------------------------
+   A panel rather than a modal in the middle of the screen: the list stays
+   visible behind it, so moving down a queue does not lose your place. */
+
+.contact-drawer-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(58, 56, 51, 0.28);
+  z-index: 900;
+  animation: contactScrimIn 0.16s ease-out;
+}
+
+@keyframes contactScrimIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.contact-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(440px, 100vw);
+  z-index: 901;
+  overflow-y: auto;
+  padding: 28px 28px 48px;
+  background: var(--sky-sheet);
+  box-shadow: -8px 0 30px rgba(0, 0, 0, 0.12);
+  animation: contactDrawerIn 0.18s ease-out;
+}
+
+@keyframes contactDrawerIn {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.contact-drawer-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 44px;
+  height: 44px;
+  border: none;
+  background: transparent;
+  color: var(--sky-text-tertiary);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--radius-pill);
+}
+
+.contact-drawer-close:hover {
+  background: var(--sky-row-hover);
+  color: var(--sky-text);
+}
+
+.contact-drawer-close:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+}
+
+.contact-drawer-name {
+  margin: 0 44px 4px 0;
+  font-size: 21px;
+  font-weight: 700;
+  color: var(--sky-text);
+  letter-spacing: -0.01em;
+}
+
+.contact-drawer-local {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--sky-text-tertiary);
+  margin-top: 2px;
+}
+
+.contact-drawer-meta {
+  margin: 0 0 20px;
+  font-size: var(--text-sm);
+  color: var(--sky-text-secondary);
+}
+
+.contact-drawer-block {
+  margin: 0 0 20px;
+}
+
+.contact-drawer-block p {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--sky-text);
+}
+
+.contact-drawer-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sky-text-faint);
+}
+
+.contact-status-select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: var(--radius-row);
+  border: none;
+  box-shadow: inset 0 0 0 1px var(--sky-hairline);
+  background: var(--card);
+  color: var(--sky-text);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.contact-status-select:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+}
+
+/* The opener is the expensive thing to reproduce, so it is the one element
+   with a copy button — the point of the drawer is getting that text into the
+   message window without retyping it. */
+.contact-copy {
+  border: none;
+  background: transparent;
+  color: var(--cobalt);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.contact-copy:hover {
+  background: var(--cobalt-tint);
+}
+
+.contact-copy:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+}
+
+.contact-opener-text {
+  padding: 12px 14px;
+  border-radius: var(--radius-row);
+  background: var(--sky-shell);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.contact-drawer-channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.contact-drawer-empty {
+  font-size: var(--text-sm);
+  color: var(--sky-text-tertiary);
+}
+
+/* --- Networking on a narrow screen ---------------------------------------
+   Eight columns cannot be squeezed into a phone any more than nine could, and
+   the lesson from the Applications table applies unchanged: a column present
+   but clipped to three characters is worse than one that is not there. The row
+   becomes a stacked block — who they are, where, why they matter, then where
+   to write and where it stands.
+   ------------------------------------------------------------------------ */
+
+@media (max-width: 700px) {
+  .contacts-table-scroll {
+    overflow-x: visible;
+  }
+
+  .contacts-table {
+    min-width: 0;
+    display: block;
+    table-layout: auto;
+  }
+
+  .contacts-table tbody {
+    display: block;
+  }
+
+  .contacts-table thead {
+    display: none;
+  }
+
+  .contact-row {
+    display: block;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--sky-hairline);
+  }
+
+  .contact-row:last-child {
+    border-bottom: none;
+  }
+
+  .contact-cell {
+    display: block;
+    width: auto;
+    padding: 0;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    border-top: none;
+  }
+
+  /* City (2), Group (4) and Last activity (8): useful in a wide table, noise
+     in a stacked one. All three are in the drawer a tap away. */
+  .contacts-table td:nth-child(2),
+  .contacts-table td:nth-child(4),
+  .contacts-table td:nth-child(8) {
+    display: none;
+  }
+
+  .contact-cell-role {
+    color: var(--sky-text-secondary);
+    margin-bottom: 2px;
+  }
+
+  .contact-cell-why {
+    font-size: var(--text-xs);
+    margin-bottom: 6px;
+  }
+
+  .contact-cell-status,
+  .contact-cell-channels {
+    display: inline-block;
+    vertical-align: baseline;
+  }
+
+  .contact-cell-channels {
+    margin-left: 10px;
+  }
+
+  .contact-drawer {
+    width: 100vw;
+    padding: 24px 18px 48px;
+  }
+
+  .contacts-count-strip {
+    white-space: normal;
+  }
+}

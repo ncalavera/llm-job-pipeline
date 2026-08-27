@@ -71,6 +71,7 @@ import { renderToday, todayAction, openTodayRow } from "./modules/today.js";
 import { initStats, renderStats } from "./modules/stats.js";
 import { initArchive, renderArchive } from "./modules/archive.js";
 import { initReports, renderReports } from "./modules/reports.js";
+import { initContacts, renderContacts } from "./modules/contacts.js";
 import { initBoards, renderBoards, toggleBoard } from "./modules/boards.js";
 import { initHealth, renderHealth } from "./modules/health.js";
 import { initSettings, renderSettings } from "./modules/settings.js";
@@ -353,6 +354,7 @@ on("render", () => {
   if (state.currentMode === "boards") renderBoards();
   if (state.currentMode === "health") renderHealth();
   if (state.currentMode === "reports") renderReports();
+  if (state.currentMode === "contacts") renderContacts();
   if (state.currentProfileSlug) renderProfileForSlug(state.currentProfileSlug);
   if (state.currentVacancyId) renderVacancyDetail(state.currentVacancyId);
 });
@@ -409,6 +411,7 @@ var LEAF_SECTION_ID = {
   archive: "archiveSection",
   boards: "boardsSection",
   reports: "reportsSection",
+  contacts: "contactsSection",
   health: "healthSection",
   settings: "settingsSection",
 };
@@ -422,6 +425,7 @@ var NAV_BTNS = {
   triage: "navTriage",
   boards: "navBoards",
   reports: "navReports",
+  contacts: "navContacts",
   health: "navHealth",
   settings: "navSettings",
 };
@@ -700,6 +704,8 @@ function switchMode(mode) {
     initHealth();
   } else if (mode === "reports") {
     initReports();
+  } else if (mode === "contacts") {
+    initContacts();
   } else if (mode === "settings") {
     initSettings();
   }
