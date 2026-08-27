@@ -66,6 +66,24 @@ DECIDED_STATUSES: frozenset[str] = APPLICATION_STATUSES | frozenset(
     }
 )
 
+#: What was applied to. Every scraped role is a 'job'; the rest are things he
+#: applied to that are not vacancies — a course, an incubation programme, a
+#: career-advising session, a consulting engagement, a grant — and that are
+#: stored as ordinary vacancy rows so the funnel counts them with everything
+#: else. The SQL CHECK on ``vacancy.kind`` (migration 0022) is the other half of
+#: this contract.
+VACANCY_KINDS: tuple[str, ...] = (
+    "job",
+    "programme",
+    "advising",
+    "consulting",
+    "grant",
+    "course",
+)
+
+#: Membership form of VACANCY_KINDS — what validators check against.
+VALID_KINDS: frozenset[str] = frozenset(VACANCY_KINDS)
+
 #: What the filter/dedup stages must never delete: every user decision, plus
 #: 'archived' (already out of view — deleting it would drop the tombstone that
 #: keeps it from being re-fetched).

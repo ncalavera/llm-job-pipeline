@@ -59,6 +59,35 @@ def build_parser(handlers: dict | None = None) -> argparse.ArgumentParser:
     if "mark" in h:
         p_mark.set_defaults(func=h["mark"])
 
+    p_add = sub.add_parser(
+        "add",
+        help="Record an application that never came from a job board "
+        "(a course, career advising, a programme).",
+    )
+    p_add.add_argument("--company", required=True, help="Organisation name.")
+    p_add.add_argument("--title", required=True, help="What you applied to.")
+    p_add.add_argument(
+        "--kind",
+        default="job",
+        help="job / programme / advising / consulting / grant / course. Default: job.",
+    )
+    p_add.add_argument(
+        "--status",
+        default="applied",
+        help="Where it stands: applied, test_task, interview, declined, accepted. "
+        "Default: applied.",
+    )
+    p_add.add_argument("--applied-at", dest="applied_at", help="Date sent, YYYY-MM-DD.")
+    p_add.add_argument(
+        "--status-at",
+        dest="status_at",
+        help="Date the status last changed, YYYY-MM-DD. Defaults to --applied-at.",
+    )
+    p_add.add_argument("--url", default="", help="Link to the posting or the page.")
+    p_add.add_argument("--note", default="", help="What happens next, in one line.")
+    if "add" in h:
+        p_add.set_defaults(func=h["add"])
+
     p_open = sub.add_parser("open", help="Open the vacancy link in the browser.")
     p_open.add_argument("id", help="UUID prefix.")
     if "open" in h:
@@ -80,9 +109,13 @@ if __name__ == "__main__" and wants_help():
     build_parser().parse_args()
 
 from database_supabase import (
+    _vacancy_has_column,
+    ensure_company,
     get_conn,
     load_vacancies,
+    make_vacancy_id,
     update_vacancy_status,
+    upsert_vacancy,
 )
 from geo import geo_bucket
 
@@ -91,6 +124,10 @@ from geo import geo_bucket
 # was rejected here while the database, the API and the board all accepted it.
 # One list, one place — database_supabase.VALID_STATUSES is the source.
 from database_supabase import VALID_STATUSES  # noqa: E402
+
+# Same rule for the `kind` vocabulary: read it, never retype it. The SQL CHECK
+# on vacancy.kind (migration 0022) is the other half of the contract.
+from statuses import VALID_KINDS  # noqa: E402
 
 GEO_BUCKETS = {"uk", "germany", "europe", "us", "cis", "other", "unknown"}
 
@@ -319,6 +356,110 @@ def cmd_mark(args):
     print(f"ok: {v.get('org', '—')} — {v.get('title', '—')[:50]} → {args.status}")
 
 
+#: Manually added rows carry this instead of a job board's name, so the boards
+#: report never counts a hand-entered application as a board's yield.
+MANUAL_SOURCE_BOARD = "manual"
+
+
+def _parse_day(value, label):
+    """A YYYY-MM-DD argument, or exit with a message naming the flag. Refusing
+    an unparseable date is the point: a silently-dropped one would leave the
+    Applications table showing the wrong send date with no way to notice."""
+    if not value:
+        return None
+    from datetime import date as _date
+
+    try:
+        return _date.fromisoformat(value).isoformat()
+    except ValueError:
+        print(f"{label} must be a date like 2026-07-03 — got: {value}")
+        sys.exit(1)
+
+
+def cmd_add(args):
+    """Record an application that never came from a job board.
+
+    Not every application is a job. A course, an incubation programme, a
+    career-advising session, a consulting engagement — he sent those too, and
+    they belong in the same funnel as everything else or the count of "what I
+    sent" is wrong. They land as ordinary vacancy rows, so every existing
+    surface (the board, the Applications table, the company page) shows them
+    with no special case anywhere.
+
+    Re-running with the same company and title UPDATES that row rather than
+    creating a second one — the dedup hash is derived from those two fields, so
+    fixing a typo is a re-run, not a cleanup.
+    """
+    if args.status not in VALID_STATUSES:
+        print(f"Invalid status: {args.status}. Allowed: {', '.join(sorted(VALID_STATUSES))}")
+        sys.exit(1)
+    if args.kind not in VALID_KINDS:
+        print(f"Invalid kind: {args.kind}. Allowed: {', '.join(sorted(VALID_KINDS))}")
+        sys.exit(1)
+
+    company = args.company.strip()
+    title = args.title.strip()
+    if not company or not title:
+        print("--company and --title cannot be blank.")
+        sys.exit(1)
+
+    # `kind` and `applied_at` are what this command exists to record, so a
+    # pre-0022 database gets a clear instruction rather than a row that quietly
+    # loses half of what was typed. (Unlike source_board, which the DAL is happy
+    # to degrade on, these are not provenance extras.)
+    missing = [c for c in ("kind", "applied_at") if not _vacancy_has_column(c)]
+    if missing:
+        print(
+            f"This database has no {' or '.join(missing)} column yet — "
+            "`vac add` needs migration 0022."
+        )
+        print("  Run it first: python3 scripts/migrate.py")
+        sys.exit(1)
+
+    applied_at = _parse_day(args.applied_at, "--applied-at")
+    status_at = _parse_day(args.status_at, "--status-at") or applied_at
+    seen = applied_at or _today()
+
+    # Active, not candidate: he applied there, so the company is not awaiting a
+    # review — and a candidate company's roles are hidden from the board.
+    company_id = ensure_company(company, status="active")
+
+    data = {
+        "company_id": company_id,
+        "title": title,
+        "status": args.status,
+        "first_seen": seen,
+        "last_seen": seen,
+        # Never scored, and never will be: nothing here came from the scorer.
+        # data_prep keeps an application on the dashboard at any score,
+        # including none, precisely so these rows are visible.
+        "llm_score": None,
+        "source_board": MANUAL_SOURCE_BOARD,
+        "kind": args.kind,
+        "locations": [{"url": args.url}] if args.url else [],
+    }
+    if status_at:
+        data["status_updated_at"] = status_at
+    if applied_at:
+        data["applied_at"] = applied_at
+    if args.note:
+        data["triage"] = {"note": args.note}
+
+    dedup_hash = make_vacancy_id(company, title)
+    uid = upsert_vacancy(dedup_hash, data)
+    get_conn().commit()
+
+    when = f" sent {applied_at}" if applied_at else ""
+    print(f"ok: {company} — {title[:50]} [{args.kind}] → {args.status}{when}")
+    print(f"    id {_short_id(uid)}   (re-run with the same company and title to edit it)")
+
+
+def _today() -> str:
+    from datetime import date as _date
+
+    return _date.today().isoformat()
+
+
 def cmd_open(args):
     vacancies = load_vacancies(
         light=False,
@@ -398,6 +539,7 @@ def main():
             "list": cmd_list,
             "show": cmd_show,
             "mark": cmd_mark,
+            "add": cmd_add,
             "open": cmd_open,
             "companies": cmd_companies,
         }

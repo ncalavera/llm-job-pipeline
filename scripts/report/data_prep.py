@@ -13,6 +13,7 @@ from config import (
     resolve_canonical_name,
 )
 from company_registry import PARSING_ARTIFACTS
+from statuses import APPLICATION_STATUSES
 
 #: Statuses that mean "this role is live work" — the user picked it up, or an
 #: application is running, or it closed with the employer's own answer. These
@@ -49,7 +50,16 @@ def keep_on_dashboard(vacancy: dict) -> bool:
     'skipped' are NOT such decisions — they are dead ends, and keeping every one
     of them shipped the whole rejected pile back onto the board. Below the floor
     they are history, not work; the Archive tab still has them.
+
+    An APPLICATION outranks even the presence of a score. The unscored gate below
+    exists to keep roles awaiting scoring out of view — but a row he actually
+    sent is not awaiting anything, and some were never scored at all: a course,
+    a career-advising session, a programme, added by hand through ``vac add``
+    and never seen by the scorer. Dropping those would make the Applications
+    table miss exactly the applications the board could not already show.
     """
+    if vacancy.get("status") in APPLICATION_STATUSES:
+        return True
     score = vacancy.get("llm_score")
     if score is None or score < 0:
         return False
