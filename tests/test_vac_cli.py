@@ -399,6 +399,65 @@ def test_add_leaves_an_already_active_company_alone(vm):
     assert reason == "approved by review", "an untouched company kept its own reason"
 
 
+# --- vac publish ----------------------------------------------------------
+# The dashboard reads a baked snapshot, not the tables, so anything that changes
+# what the snapshot CONTAINS is invisible until it is rewritten. Before this,
+# only a fetch or a scoring run did that — both of which cost time and LLM calls
+# to produce a result neither of them needed.
+
+
+def test_publish_rewrites_the_snapshot_without_fetching_or_scoring(vm, monkeypatch, tmp_path):
+    """The whole point: the last step alone, no network and no scorer."""
+    import report as report_mod
+
+    monkeypatch.setattr(report_mod, "PUBLIC_DIR", tmp_path, raising=False)
+    called = {"n": 0}
+    real = report_mod.generate_dashboard
+
+    def counting():
+        called["n"] += 1
+        return real()
+
+    monkeypatch.setattr(report_mod, "generate_dashboard", counting)
+
+    vm.mod.cmd_add(_add_args())
+    vm.mod.cmd_publish(types.SimpleNamespace())
+
+    assert called["n"] == 1
+
+
+def test_publish_reports_what_the_snapshot_covers(vm, monkeypatch, tmp_path, capsys):
+    """The counts are the confirmation that it read the tables it was meant to."""
+    import report as report_mod
+
+    monkeypatch.setattr(report_mod, "PUBLIC_DIR", tmp_path, raising=False)
+    vm.mod.cmd_add(_add_args())
+    vm.mod.cmd_publish(types.SimpleNamespace())
+
+    out = capsys.readouterr().out
+    assert "snapshot rewritten" in out
+    assert "vacancy" in out
+
+
+def test_publish_survives_a_database_without_the_optional_tables(vm, monkeypatch, tmp_path, capsys):
+    """A database that has not migrated to `contact` yet still publishes.
+
+    The count line is a convenience; failing the publish because one optional
+    table is absent would make the command useless on exactly the databases
+    most likely to need it.
+    """
+    import report as report_mod
+
+    monkeypatch.setattr(report_mod, "PUBLIC_DIR", tmp_path, raising=False)
+    cur = vm.dal.get_conn().cursor()
+    cur.execute("DROP TABLE IF EXISTS contact")
+    cur.close()
+    vm.dal.get_conn().commit()
+
+    vm.mod.cmd_publish(types.SimpleNamespace())
+    assert "snapshot rewritten" in capsys.readouterr().out
+
+
 def test_add_is_idempotent_on_company_and_title(vm):
     """The dedup hash comes from company + title, so fixing a typo is a re-run,
     not a cleanup. A second row would double-count the funnel."""

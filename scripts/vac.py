@@ -179,6 +179,14 @@ def build_parser(handlers: dict | None = None) -> argparse.ArgumentParser:
     if "contact" in h:
         p_contact.set_defaults(func=h["contact"])
 
+    p_publish = sub.add_parser(
+        "publish",
+        help="Rewrite the dashboard snapshot from what is already in the database "
+        "(no fetch, no scoring, no LLM calls).",
+    )
+    if "publish" in h:
+        p_publish.set_defaults(func=h["publish"])
+
     p_co = sub.add_parser("companies", help="List companies.")
     p_co.add_argument("--status", help="Filter by status: active / candidate / inactive.")
     p_co.add_argument("--limit", type=int, default=50)
@@ -866,6 +874,46 @@ def _contact_list(args, contacts_mod):
     print(f"Total: {len(rows)}  \u2014  {summary}")
 
 
+def cmd_publish(args):
+    """Rewrite the dashboard snapshot from what the database already holds.
+
+    The dashboard reads a single baked snapshot, not the tables directly, so
+    anything that changes what the snapshot CONTAINS — a status set from the
+    terminal, a company reactivated, a new translation baked into config.i18n —
+    is invisible until the snapshot is rewritten. Until now the only things that
+    did that were a fetch and a scoring run, both of which cost time and LLM
+    calls to produce a result neither of them needed.
+
+    This does the last step alone: read, assemble, write. No network, no
+    scorer, no fetch.
+
+    It has to run where a Postgres driver exists. On the server there is none
+    (and the app user does not own the tables), so this is a LAPTOP command,
+    over the tunnel — the same place `vac add` and `vac report add` run.
+    """
+    from report import generate_dashboard
+
+    generate_dashboard()
+    get_conn().commit()
+
+    counts = {}
+    cur = get_conn().cursor()
+    for table in ("vacancy", "company", "report", "contact"):
+        try:
+            cur.execute(f"SELECT count(*) FROM {table}")
+            counts[table] = cur.fetchone()[0]
+        except Exception:
+            # An optional table this database has not migrated to yet: the
+            # snapshot is still valid, so say nothing rather than fail.
+            get_conn().rollback()
+    cur.close()
+
+    print("ok: dashboard snapshot rewritten")
+    if counts:
+        print("    " + ", ".join(f"{n} {name}" for name, n in counts.items()))
+    print("    the dashboard shows this on its next load (no restart needed)")
+
+
 def main():
     parser = build_parser(
         {
@@ -875,6 +923,7 @@ def main():
             "add": cmd_add,
             "open": cmd_open,
             "report": cmd_report,
+            "publish": cmd_publish,
             "contact": cmd_contact,
             "companies": cmd_companies,
         }
