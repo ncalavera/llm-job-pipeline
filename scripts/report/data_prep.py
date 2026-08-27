@@ -428,11 +428,49 @@ def _build_group(
         # fit / liked) in boards.js — the same "derive, never bake" path the
         # company rollups and Geo table take (STRATEGY guardrail 9).
         "source_board": v.get("source_board") or "",
+        # --- Applications table (the Triage tab's second view) ---------------
+        # When the application went out. NOT status_updated_at, which moves with
+        # every stage: on a declined row that one holds the date of the
+        # rejection. Empty on rows that predate migration 0022 — the table falls
+        # back to status_updated_at and labels the column honestly.
+        "applied_at": _iso_or_blank(v.get("applied_at")),
+        # What was applied to. Every real vacancy is a 'job'; the other kinds
+        # (course, programme, advising, consulting, grant) are applications he
+        # sent that are stored as ordinary vacancy rows.
+        "kind": v.get("kind") or "job",
+        # The one line of "what happens next", read from the private triage
+        # blob. `next_step` if he wrote one, else the free note. Both are
+        # free text he types, so the browser escapes them before rendering.
+        "next_step": _next_step(v.get("triage")),
         # The application attached to this vacancy (1:1), or None. Card shows a
         # small "applied · <status>" block; the full section is a later ticket.
         # Projected to the display shape — artifact values and notes stay private.
         "application": _project_application((applications_by_vac or {}).get(v.get("id"))),
     }
+
+
+def _iso_or_blank(value) -> str:
+    """A date/datetime (Postgres) or an ISO string (SQLite) as one ISO string,
+    "" when absent. The DAL already normalizes vacancy timestamps, so this is
+    the belt to that braces — a datetime reaching JSON would serialize as a
+    Python repr the browser cannot parse."""
+    if not value:
+        return ""
+    iso = getattr(value, "isoformat", None)
+    return iso() if callable(iso) else str(value)
+
+
+def _next_step(triage) -> str:
+    """The 'what happens next' line for one row: the explicit ``next_step`` the
+    user wrote, else the free-text ``note``. Anything else in the blob is not a
+    next step and must not be shown as one."""
+    if not isinstance(triage, dict):
+        return ""
+    for key in ("next_step", "note"):
+        value = triage.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
 
 
 def _company_hq_map():

@@ -21,6 +21,7 @@ import {
   isRecoverableError,
   VALID_STATUSES,
   DECISION_STATUSES,
+  APPLICATION_STATUSES,
 } from "./server.js";
 
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
@@ -567,10 +568,62 @@ test("/api/save writes every valid status and answers 200", async () => {
   });
 });
 
+test("/api/save stamps applied_at once, and only for an application", () => {
+  // status_updated_at moves with every stage, so on a declined row it holds
+  // the date of the REJECTION. The Applications table's "Sent on" column reads
+  // applied_at instead — which only exists if this write sets it, and is only
+  // right if a later stage never overwrites it.
+  return withStubDb([["UPDATE vacancy", [{ id: "v1" }]]], async (seen) => {
+    for (const status of VALID_STATUSES) {
+      await call({
+        method: "POST",
+        url: "/api/save",
+        body: { id: "v1", status },
+      });
+    }
+    const bySql = Object.fromEntries(
+      VALID_STATUSES.map((s, i) => [s, seen[i].sql]),
+    );
+    for (const status of APPLICATION_STATUSES) {
+      assert.match(
+        bySql[status],
+        /applied_at = COALESCE\(applied_at, \$2::timestamptz\)/,
+        `status ${status} did not stamp applied_at`,
+      );
+    }
+    for (const status of VALID_STATUSES.filter(
+      (s) => !APPLICATION_STATUSES.includes(s),
+    )) {
+      assert.doesNotMatch(
+        bySql[status],
+        /applied_at/,
+        `status ${status} is not an application but touched applied_at`,
+      );
+    }
+  });
+});
+
+test("APPLICATION_STATUSES mirrors scripts/statuses.py", () => {
+  // Two hand-maintained copies of one vocabulary. Read the Python source and
+  // compare, so adding a funnel status on one side fails the build on the
+  // other — a status missing here is a row the table shows with no send date.
+  const py = readFileSync(join(ROOT, "scripts/statuses.py"), "utf8");
+  const block = py.match(
+    /^APPLICATION_STATUSES: frozenset\[str\] = frozenset\(([\s\S]*?)\n\)/m,
+  );
+  assert.ok(block, "APPLICATION_STATUSES not found in scripts/statuses.py");
+  const pyStatuses = [...block[1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  assert.deepEqual([...APPLICATION_STATUSES].sort(), pyStatuses.sort());
+  // Every one of them must also be a status the save door accepts at all.
+  for (const status of APPLICATION_STATUSES) {
+    assert.ok(VALID_STATUSES.includes(status));
+  }
+});
+
 test("VALID_STATUSES carries the whole board vocabulary", () => {
   // An array assertion, not a substring grep: a status mentioned only in a
   // comment used to satisfy the old check while the save still refused it.
-  for (const status of ["test_task", "interview", "declined"]) {
+  for (const status of ["test_task", "interview", "declined", "accepted"]) {
     assert.ok(
       VALID_STATUSES.includes(status),
       `VALID_STATUSES is missing ${status}`,

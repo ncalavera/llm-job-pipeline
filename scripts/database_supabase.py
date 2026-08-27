@@ -1293,6 +1293,19 @@ def _vacancy_has_column(col: str) -> bool:
     return _table_has_column("vacancy", col)
 
 
+#: Migration-only vacancy columns a light read WANTS but must not require.
+#: Same rule as ``scored_by`` above: an install that has not run migrate.py yet
+#: degrades to reading without them instead of failing every read with
+#: "no such column". ``applied_at`` / ``kind`` arrive in migration 0022.
+_OPTIONAL_LIGHT_COLUMNS = ("applied_at", "kind")
+
+
+def _optional_light_columns() -> tuple[str, ...]:
+    """The optional light-read columns this database actually has."""
+    cols = ("scored_by",) if _scored_by_supported() else ()
+    return cols + tuple(c for c in _OPTIONAL_LIGHT_COLUMNS if _vacancy_has_column(c))
+
+
 def load_vacancies(
     *,
     company_name=None,
@@ -1361,7 +1374,7 @@ def load_vacancies(
     where = " AND ".join(conditions) if conditions else "TRUE"
 
     if light:
-        light_cols = _VACANCY_LIGHT_COLUMNS + (("scored_by",) if _scored_by_supported() else ())
+        light_cols = _VACANCY_LIGHT_COLUMNS + _optional_light_columns()
         vacancy_cols = ", ".join(f"v.{c}" for c in light_cols)
     else:
         vacancy_cols = "v.*"
@@ -1406,7 +1419,7 @@ def _row_to_vacancy(row) -> dict:
     for df in ("first_seen", "last_seen", "deadline"):
         if isinstance(vac.get(df), date):
             vac[df] = vac[df].isoformat()
-    for df in ("status_updated_at", "created_at", "updated_at", "llm_scored_at"):
+    for df in ("status_updated_at", "created_at", "updated_at", "llm_scored_at", "applied_at"):
         if isinstance(vac.get(df), datetime):
             vac[df] = vac[df].isoformat()
     return vac
@@ -2442,11 +2455,40 @@ def update_vacancy_status(vacancy_uuid: str, status: str, *, force: bool = False
                 "the board — they are the search statistics. Pass force=True only "
                 "for a deliberate correction."
             )
-    cur.execute(
-        "UPDATE vacancy SET status = %s, status_updated_at = now() WHERE id = %s",
-        (status, vacancy_uuid),
-    )
+    _write_status(cur, vacancy_uuid, status)
     cur.close()
+
+
+#: The UPDATE that moves a vacancy's status, in two shapes: with and without the
+#: applied_at stamp. See _write_status.
+_STATUS_SQL = "UPDATE vacancy SET status = %s, status_updated_at = now() WHERE id = %s"
+_STATUS_SQL_STAMPED = (
+    "UPDATE vacancy SET status = %s, status_updated_at = now(), "
+    "applied_at = COALESCE(applied_at, now()) WHERE id = %s"
+)
+
+
+def _write_status(cur, vacancy_uuid: str, status: str) -> None:
+    """Move one vacancy to ``status``, stamping ``applied_at`` the first time it
+    enters the application funnel.
+
+    ``status_updated_at`` moves with every stage, so it answers "when did this
+    last change", never "when did I send this" — on a declined row it holds the
+    date of the rejection. ``applied_at`` answers the second question, and only
+    the first write may set it: COALESCE keeps the original send date through
+    every later stage, so a role that goes applied -> test_task -> accepted
+    still reports the day it went out.
+
+    The stamp fires for EVERY application status, not only 'applied'. An
+    application reaches the board by whatever route the employer took — a role
+    logged straight to 'interview', a programme recorded as 'accepted' after the
+    fact — and each of those WAS sent. Stamping only on 'applied' would leave
+    exactly those rows with no send date forever.
+
+    Degrades on a pre-0022 schema: without the column, the plain UPDATE runs.
+    """
+    stamp = status in APPLICATION_STATUSES and _vacancy_has_column("applied_at")
+    cur.execute(_STATUS_SQL_STAMPED if stamp else _STATUS_SQL, (status, vacancy_uuid))
 
 
 def batch_update_statuses(updates: dict[str, str]):
@@ -2456,10 +2498,7 @@ def batch_update_statuses(updates: dict[str, str]):
     conn = get_conn()
     cur = conn.cursor()
     for uid, status in updates.items():
-        cur.execute(
-            "UPDATE vacancy SET status = %s, status_updated_at = now() WHERE id = %s",
-            (status, uid),
-        )
+        _write_status(cur, uid, status)
     cur.close()
 
 

@@ -298,6 +298,16 @@ _DATETIME_COLUMNS = frozenset(
         "archived_at",
     }
 )
+
+# NOT here: ``applied_at``. Two different tables own a column by that name —
+# ``application.applied_at`` is a DATE (psycopg2 returns date, and the whole
+# applications surface compares it as a plain "YYYY-MM-DD") while
+# ``vacancy.applied_at`` (migration 0022) is a TIMESTAMPTZ. This set is keyed on
+# column NAME with no table, so listing it would decode the application table's
+# dates into datetimes and break every one of those comparisons. The vacancy
+# column needs no entry: Postgres hands back a datetime that _row_to_vacancy
+# already ISO-formats, and SQLite hands back the ISO string it stored, so both
+# backends leave the DAL with the same string shape.
 _DATE_COLUMNS = frozenset({"first_seen", "last_seen", "deadline"})
 
 

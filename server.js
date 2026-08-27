@@ -432,6 +432,17 @@ export const VALID_STATUSES = [
   "archived",
 ];
 
+// The statuses that mean an application was actually sent. Twin of
+// scripts/statuses.py APPLICATION_STATUSES; a status missing here is a row the
+// Applications table shows with no send date.
+export const APPLICATION_STATUSES = [
+  "applied",
+  "test_task",
+  "interview",
+  "declined",
+  "accepted",
+];
+
 async function handleSave(req, res) {
   if (wrappedPreamble(req, res, "POST", "save")) return;
   const { id, status } = await readJsonBody(req);
@@ -440,12 +451,25 @@ async function handleSave(req, res) {
   if (!VALID_STATUSES.includes(status))
     return sendJson(res, 400, { error: "Invalid status" });
 
+  // status_updated_at moves with every stage, so it can never answer "when did
+  // I send this" — on a declined row it holds the date of the rejection.
+  // applied_at answers that, and only the FIRST write into the funnel may set
+  // it: COALESCE keeps the original send date through every later stage.
+  // Mirrors _write_status in scripts/database_supabase.py.
+  const stampApplied = APPLICATION_STATUSES.includes(status);
+  const sql = stampApplied
+    ? `UPDATE vacancy SET status = $1, status_updated_at = $2,
+              applied_at = COALESCE(applied_at, $2::timestamptz)
+        WHERE id = $3::uuid RETURNING id`
+    : `UPDATE vacancy SET status = $1, status_updated_at = $2
+        WHERE id = $3::uuid RETURNING id`;
+
   try {
-    const result = await getPool().query(
-      `UPDATE vacancy SET status = $1, status_updated_at = $2
-        WHERE id = $3::uuid RETURNING id`,
-      [status, new Date().toISOString(), id],
-    );
+    const result = await getPool().query(sql, [
+      status,
+      new Date().toISOString(),
+      id,
+    ]);
     if (result.rowCount === 0) {
       console.warn(`save: vacancy not found — id=${id} status=${status}`);
       return sendJson(res, 404, { error: "Vacancy not found", id });
