@@ -215,6 +215,13 @@ def _claude_cmd(action: str, night_dir, cfg: dict, phase: str) -> list[str]:
 
 def _claude_env(firecrawl: bool, night_dir=None) -> dict:
     env = {k: os.environ[k] for k in _CHILD_ENV_ALLOWLIST if os.environ.get(k)}
+    # The interpreter the session must use for its per-wave saves. A bare
+    # ``python3`` is the SYSTEM interpreter, which has none of the project
+    # dependencies (psycopg2) — its saves fail and only the wrapper's
+    # end-of-session sweep lands the work, so a session that dies mid-way
+    # loses every finished wave. sys.executable is whatever runs the wrapper
+    # (the venv under systemd), so the session saves with the same one.
+    env["NIGHTLY_PYTHON"] = sys.executable
     if night_dir is not None:
         # Arms .claude/hooks/night-write-fence.py: Write/Edit only under
         # <night_dir>/score_out/ (and scoring_log.md) for this child.

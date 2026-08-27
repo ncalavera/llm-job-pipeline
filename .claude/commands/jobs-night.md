@@ -28,8 +28,12 @@ the interactive habits of `/jobs-new`.
    - `screen_companies` + `screen` → `company_screen_model()`
    - `score_companies` + `score` → `scoring_model()`
    Resolve it ONCE:
-   `python3 -c "import sys;sys.path.insert(0,'scripts');from scoring_settings import <function>;print(<function>())"`
+   `"$NIGHTLY_PYTHON" -c "import sys;sys.path.insert(0,'scripts');from scoring_settings import <function>;print(<function>())"`
    and pass that model to EVERY scoring subagent. Do not hardcode a model name.
+   `$NIGHTLY_PYTHON` is exported by the wrapper and points at the
+   interpreter that runs the pipeline (the venv). Use it for EVERY shell
+   command in this session — a bare `python3` is the system interpreter
+   and has none of the project dependencies.
 3. **Spawn only the `night-scorer` agent type.** One payload file = one
    `night-scorer` subagent. No other agent type, ever. At most **5 subagents
    at a time** (rolling waves). 1 item = 1 subagent — batching over-scores.
@@ -41,11 +45,11 @@ the interactive habits of `/jobs-new`.
    must not lose finished work). Always the `--files` form — a malformed file
    is named and skipped, the rest still save:
    - `score_vacancies` gate:
-     `python3 scripts/score_vacancies.py --save --scored-by "<model>" --files <night_dir>/score_out/<wave files>`
+     `"$NIGHTLY_PYTHON" scripts/score_vacancies.py --save --scored-by "<model>" --files <night_dir>/score_out/<wave files>`
    - `score_companies` gate:
-     `python3 scripts/score_companies.py --save --files <night_dir>/score_out/<wave files>`
+     `"$NIGHTLY_PYTHON" scripts/score_companies.py --save --files <night_dir>/score_out/<wave files>`
    - `screen_companies` gate:
-     `python3 scripts/screen_candidates.py --save --files <night_dir>/score_out/<wave files>`
+     `"$NIGHTLY_PYTHON" scripts/screen_candidates.py --save --files <night_dir>/score_out/<wave files>`
 6. **Log after every wave.** Append one line per wave to
    `<night_dir>/scoring_log.md`: time, gate, items in the wave, saved count,
    failures with their NNN. Findings and anomalies go HERE, not to an issue

@@ -57,3 +57,13 @@ def test_refuses_checkout_secrets_and_night_dir_root(tmp_path):
 
 def test_refuses_when_path_missing(tmp_path):
     assert _run({}, tmp_path).returncode == 2
+
+
+def test_night_session_env_carries_the_venv_interpreter(tmp_path):
+    """The session saves with the wrapper's own interpreter, never a bare python3."""
+    import sys
+    sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+    import nightly_run
+    env = nightly_run._claude_env(False, tmp_path)
+    assert env["NIGHTLY_PYTHON"] == sys.executable
+    assert env["NIGHTLY_NIGHT_DIR"] == str(tmp_path.resolve())
