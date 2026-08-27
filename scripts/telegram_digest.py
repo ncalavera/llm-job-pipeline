@@ -412,11 +412,24 @@ def read_state_file(path):
 
 def update_state_file(path, **fields):
     """Merge ``fields`` into the state file — the poller's offset and the
-    sender's last_digest_at share the file and must not clobber each other."""
+    sender's last_digest_at/pending_claim share the file. The read-merge-write
+    runs under an exclusive flock so the long-running poller and the nightly
+    sender cannot clobber each other's fields (best-effort on platforms
+    without fcntl)."""
     p = Path(path).expanduser()
-    state = read_state_file(p)
-    state.update(fields)
-    p.write_text(json.dumps(state))
+    try:
+        import fcntl
+
+        lock_path = p.with_suffix(p.suffix + ".lock")
+        with open(lock_path, "w") as lock_fh:
+            fcntl.flock(lock_fh, fcntl.LOCK_EX)
+            state = read_state_file(p)
+            state.update(fields)
+            p.write_text(json.dumps(state))
+    except ImportError:
+        state = read_state_file(p)
+        state.update(fields)
+        p.write_text(json.dumps(state))
 
 
 # --- run state (written by run_daily.py / the U4 nightly wrapper) -------------
