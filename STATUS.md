@@ -1,4 +1,4 @@
-# Status — applications table + reports tab
+# Status — applications table, reports tab, networking tab
 
 Worktree: `/Users/nsolovev/Projects/personal/llm-job-pipeline-tracker`
 Branch: `feat/applications-table` (stacked on `migrate/self-hosted-dashboard`)
@@ -32,6 +32,48 @@ console errors and no horizontal page scroll at 390px or 1280px.
    money column back to the left.
 7. Money is set in mono; prose is not. Found by rendering the real report,
    where bullets open as data and finish as a sentence.
+8. Both new tabs are translated (~60 keys, both languages), the Applications
+   table's Stage column survives a 390px screen, and `--baseline` now verifies
+   the database instead of trusting a claim about it.
+9. **Networking tab** — migration 0024 (`contact`), `GET/POST/PATCH
+   /api/contacts`, `vac contact import|add|list`, a table with a group filter
+   and a details drawer carrying the opener and a copy button. 39 real people
+   imported across five lists. i18n in both languages from the start.
+
+## The contact data lives in the PRIVATE repo
+
+`llm-job-pipeline` is public. The importer is here; the people are not, and
+must not be committed here. The three source files live in
+`~/Projects/personal/job-search-2026/profiles/`:
+
+| file | rows | group | status |
+| --- | --- | --- | --- |
+| `ea-network-people-2026-08-27.csv` | 27 | derived: ea-georgia / ea-turkey / ea-russian | planned |
+| `ea-forum-open-contacts-2026-08.csv` | 7 | ea-forum-open | planned (1 contacted) |
+| `network-wave-2026-07.csv` | 5 | network-2026-07 | contacted (1 replied) |
+
+The last two were written by hand from
+`profiles/ea-forum-open-contacts-2026-08.md` and
+`docs/network-drafts-2026-07.md`; each row's `source_path` points back at the
+markdown it was read from. The July file is mostly message drafts rather than a
+people list, so a parser would have been guesswork — five people were lifted
+out of it by hand.
+
+Import them with:
+
+```bash
+cd ~/Projects/personal/llm-job-pipeline
+P=~/Projects/personal/job-search-2026/profiles
+python3 scripts/vac.py contact import $P/ea-network-people-2026-08-27.csv \
+    --group ea-russian --derive-region --source profiles/ea-network-people-2026-08-27.csv
+python3 scripts/vac.py contact import $P/ea-forum-open-contacts-2026-08.csv \
+    --group ea-forum-open --source profiles/ea-forum-open-contacts-2026-08.md
+python3 scripts/vac.py contact import $P/network-wave-2026-07.csv \
+    --group network-2026-07 --source docs/network-drafts-2026-07.md
+```
+
+Re-running any of them updates those rows rather than forking the list, and a
+re-import never overwrites a status changed in the UI.
 
 ## Not done
 
@@ -83,11 +125,11 @@ reached.
 
 ```bash
 cd /Users/nsolovev/Projects/personal/llm-job-pipeline-tracker
-npm run test:js     # 537 pass   (note: "npm test" is not a script here)
-python3 -m pytest -q # 1747 pass, 38 skipped   (python3, not python)
+npm run test:js     # 578 pass   (note: "npm test" is not a script here)
+python3 -m pytest -q # 1831 pass, 38 skipped   (python3, not python)
 ```
 
-Both were green at commit `f9194e5`.
+Both were green at commit `849aafe`.
 
 ## How to see it locally
 
@@ -137,11 +179,12 @@ ssh forge 'chown -R dashboard:dashboard /srv/http/dashboard'   # hand it back
 
 # 2. schema, as the superuser
 ssh forge
-sudo -u postgres psql -d jobsearch -v ON_ERROR_STOP=1 -f /srv/http/dashboard/sql/migrations/00NN_name.postgres.sql
+sudo -u postgres psql -d jobsearch -v ON_ERROR_STOP=1 \
+  -f /srv/http/dashboard/sql/migrations/0024_contact_table.postgres.sql
 
 # 3. record it, and hand any NEW table to the app user
-sudo -u postgres psql -d jobsearch -c "INSERT INTO schema_migrations (version) VALUES ('00NN');"
-sudo -u postgres psql -d jobsearch -c "ALTER TABLE <new_table> OWNER TO jobsearch_app;"
+sudo -u postgres psql -d jobsearch -c "INSERT INTO schema_migrations (version) VALUES ('0024');"
+sudo -u postgres psql -d jobsearch -c "ALTER TABLE contact OWNER TO jobsearch_app;"
 
 # 4. restart (only for server.js / scripts; public/ needs none)
 sudo systemctl restart dashboard
