@@ -18,7 +18,7 @@ import trial_harness as h
 RU_PROFILE = "## OUTPUT_LANGUAGE\n\nRussian\n\n## TARGET_ROLES\n\n- Product Designer, UX Designer\n"
 
 # Load-bearing surfaces that MUST read as Russian (not an accidental English copy).
-_MUST_TRANSLATE = ("summary_done", "banner_title", "digest_header", "tab_today")
+_MUST_TRANSLATE = ("summary_done", "banner_title", "digest_run_header", "tab_today")
 
 
 def test_one_choice_switches_all_surfaces_to_russian(monkeypatch, tmp_path):
@@ -37,7 +37,7 @@ def test_one_choice_switches_all_surfaces_to_russian(monkeypatch, tmp_path):
     assert pl.t("summary_done") == "✓ /jobs-new завершён"
 
     # Telegram digest copy.
-    assert "Дайджест" in pl.t("digest_header")
+    assert "Ночной прогон" in pl.t("digest_run_header")
 
     # Dashboard chrome (baked into data.js from the same table).
     assert i18n.strings("ru")["tab_today"] == "Сегодня"

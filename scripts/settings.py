@@ -337,11 +337,40 @@ def digest() -> dict:
         "hot_vacancy_score": int(_num(sec, "hot_vacancy_score", 55)),
         "deadline_soon_days": int(_num(sec, "deadline_soon_days", 7)),
         "default_limit": volume()["digest_size"],
-        "default_min_score": int(_num(sec, "default_min_score", 40)),
+        "mid_min_score": int(_num(sec, "mid_min_score", 40)),
+        "dropped_max_lines": int(_num(sec, "dropped_max_lines", 25)),
         "summary_fallback_chars": int(_num(sec, "summary_fallback_chars", 600)),
         "summary_max_chars": int(_num(sec, "summary_max_chars", 1500)),
         "message_max_chars": int(_num(sec, "message_max_chars", 4000)),
     }
+
+
+# ---------------------------------------------------------------------------
+# Nightly unattended run
+# ---------------------------------------------------------------------------
+
+_NIGHTLY_DEFAULTS = {
+    "max_items_per_night": 120,
+    "company_gate_minutes": 30,
+    "vacancy_gate_minutes": 120,
+    "run_deadline_minutes": 225,
+    "max_turns": 250,
+}
+
+
+def nightly() -> dict:
+    """[nightly] knobs for scripts/nightly_run.py. Neutral fallbacks; never
+    raises. Minute values stay floats (fractions are legal — tests use them);
+    the item/turn caps are ints. A non-positive value falls back — a night
+    dial must never resolve to "do nothing"."""
+    sec = _section("nightly")
+    out: dict = {}
+    for key, default in _NIGHTLY_DEFAULTS.items():
+        val = _num(sec, key, default)
+        out[key] = val if val > 0 else default
+    out["max_items_per_night"] = int(out["max_items_per_night"])
+    out["max_turns"] = int(out["max_turns"])
+    return out
 
 
 # ---------------------------------------------------------------------------

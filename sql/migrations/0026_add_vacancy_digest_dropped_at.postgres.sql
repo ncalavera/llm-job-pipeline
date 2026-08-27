@@ -1,0 +1,18 @@
+-- 0026_add_vacancy_digest_dropped_at — claim stamp for tier-3 (dropped) lines
+-- of the morning digest.
+--
+-- The digest must show every dropped vacancy exactly once. The old gate
+-- compared first_seen (a DATE — midnight) against the full last-digest
+-- timestamp, so any row dropped later the same day, or on a night whose digest
+-- fired past midnight, sat below the cutoff forever and was never shown.
+-- Instead the digest now claims each shown row by stamping this column just
+-- before its message part is sent (mirroring digest_sent_at for tiers 1–2) and
+-- releases the stamp on a failed send. NULL means "not shown in a digest yet".
+--
+-- Deliberately a separate column from digest_sent_at: a dropped row whose
+-- exclusion is later cleared and scored must still be able to appear in
+-- tiers 1–2, which gate on digest_sent_at.
+--
+-- Guarded with IF NOT EXISTS so replaying the chain against a DB that already
+-- has the column is a clean no-op (matches 0006/0009/0011/0013/0014/0025).
+ALTER TABLE vacancy ADD COLUMN IF NOT EXISTS digest_dropped_at TIMESTAMPTZ;

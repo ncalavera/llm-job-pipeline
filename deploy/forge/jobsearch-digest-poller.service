@@ -1,0 +1,18 @@
+# User unit (~/.config/systemd/user/) — needs `loginctl enable-linger jobsearch`
+# so it runs without a login session. Only ONE poller may run per bot token
+# (Telegram getUpdates allows one consumer; a second fails on 409): stop the
+# old host's poller and copy its DIGEST_STATE_FILE offset here BEFORE enabling.
+[Unit]
+Description=Telegram digest button poller (taps become like/pass verdicts)
+After=network-online.target
+
+[Service]
+WorkingDirectory=/home/jobsearch/Projects/personal/llm-job-pipeline
+EnvironmentFile=/home/jobsearch/jobsearch/.env
+Environment=DIGEST_STATE_FILE=/home/jobsearch/jobsearch/digest_state.json
+ExecStart=/home/jobsearch/Projects/personal/llm-job-pipeline/.venv/bin/python scripts/telegram_digest.py poll --loop
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

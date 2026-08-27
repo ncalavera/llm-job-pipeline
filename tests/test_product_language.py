@@ -141,7 +141,7 @@ def test_unbundled_profile_language_degrades_loudly(tmp_path, monkeypatch, capsy
 def test_t_translates_and_formats(monkeypatch):
     monkeypatch.setenv("PRODUCT_LANGUAGE", "ru")
     assert pl.t("banner_title") == "/jobs-new — объём на сегодня"
-    assert "5" in pl.t("digest_header", n=5)
+    assert "5" in pl.t("digest_deadlines_week", n=5)
 
 
 def test_t_unknown_key_returns_key():

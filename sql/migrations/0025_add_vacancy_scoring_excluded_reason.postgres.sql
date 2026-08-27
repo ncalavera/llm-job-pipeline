@@ -1,0 +1,16 @@
+-- 0025_add_vacancy_scoring_excluded_reason — record WHY a new vacancy is not
+-- sent to scoring.
+--
+-- The unattended nightly run needs one decider of "not scored": the filter
+-- stage (scripts/filter_vacancies.py) classifies every new unseen vacancy and
+-- writes the human-readable exclusion reason here ("US-only location",
+-- "junk title: talent pool", "archived before", ...). The scorer's loader and
+-- the morning digest both read this record, so the reason shown is the reason
+-- that applied. NULL means "not excluded — awaiting scoring" (including rows
+-- still waiting for enrichment). Free-text, no CHECK constraint, mirroring
+-- vacancy.status_reason (0014); status itself stays 'unseen' — excluded rows
+-- are shown, not hidden.
+--
+-- Guarded with IF NOT EXISTS so replaying the chain against a DB that already
+-- has the column is a clean no-op (matches 0006/0009/0011/0013/0014).
+ALTER TABLE vacancy ADD COLUMN IF NOT EXISTS scoring_excluded_reason TEXT;

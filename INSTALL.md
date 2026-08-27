@@ -193,6 +193,19 @@ A daily push of your top unscored vacancies with 👍/👎 inline buttons.
    `liked`/`passed` straight to the database.
 5. Schedule `send` daily via cron.
 
+The message is tiered: top matches with buttons, mid scores as one-liners,
+then every vacancy the filter dropped, one line each with its reason.
+
+## 10. Server schedule (optional)
+
+The whole daily cycle can run unattended every night on a server you control:
+a systemd timer starts `scripts/nightly_run.py`, which runs the driver in
+`--unattended` mode, answers the scoring gates with bounded headless Claude
+Code sessions, and ends with the morning digest. The nightly unattended run
+sends the digest itself; the cron `send` from section 9 is for attended
+installs and is not needed on a server running the nightly schedule. Units,
+layout, secrets handling and the runbook live in `deploy/forge/README.md`.
+
 ## Daily rhythm
 
 Once set up, the loop is:

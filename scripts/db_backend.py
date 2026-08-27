@@ -580,10 +580,10 @@ JOBSEARCH_ALLOW_PROD_WRITE_ENV = "JOBSEARCH_ALLOW_PROD_WRITE"
 # The known write-capable entrypoints of this repo — every scripts/*.py with an
 # ``if __name__ == "__main__"`` block that performs DB writes (enumerated by
 # grepping INSERT/UPDATE/DELETE + the DAL write helpers). Read-only entrypoints
-# (run_card.py, audit_low_scores.py, filter_vacancies.py, golden_set.py, ...)
-# are deliberately absent: the guard only fires on writes, so they never need
-# trusting. Library modules (database_supabase.py, triage.py, applications.py,
-# learning helpers) are also absent — they are never argv[0]; their writes run
+# (run_card.py, audit_low_scores.py, golden_set.py, ...) are deliberately
+# absent: the guard only fires on writes, so they never need trusting. Library
+# modules (database_supabase.py, triage.py, applications.py, learning helpers)
+# are also absent — they are never argv[0]; their writes run
 # inside one of these entrypoint processes (or under pytest / the env flag).
 _PIPELINE_ENTRYPOINTS = frozenset(
     {
@@ -596,6 +596,9 @@ _PIPELINE_ENTRYPOINTS = frozenset(
         "fetch_companies.py",
         "fetch_vacancies.py",
         "filter_companies.py",
+        # Writes since migration 0025: persists vacancy.scoring_excluded_reason
+        # (the one exclusion pass) on every default run.
+        "filter_vacancies.py",
         "find_company_urls.py",
         "learning.py",
         "migrate.py",

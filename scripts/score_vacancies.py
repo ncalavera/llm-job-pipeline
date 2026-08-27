@@ -69,6 +69,12 @@ def build_parser() -> argparse.ArgumentParser:
         "score. Omit to leave scored_by unset.",
     )
     parser.add_argument(
+        "--unattended",
+        action="store_true",
+        help="Nightly-run mode: offer oldest unscored roles first, so a capped "
+        "run drains the backlog instead of forever chasing the newest fetch",
+    )
+    parser.add_argument(
         "--files",
         nargs="+",
         metavar="FILE",
@@ -171,7 +177,13 @@ def _build_user_msg(vacancy: dict) -> str:
 
 
 def _load_and_dedup(
-    *, force=False, include_passed=False, include_candidates=True, limit=None, offset=0
+    *,
+    force=False,
+    include_passed=False,
+    include_candidates=True,
+    limit=None,
+    offset=0,
+    unattended=False,
 ):
     """Load vacancies, dedup by (org, title), filter.
 
@@ -183,8 +195,15 @@ def _load_and_dedup(
     forgotten company's strong role still gets scored. Disable with
     --no-candidates.
 
+    unattended=True (--unattended) orders roles oldest-unscored-first, so the
+    nightly capped run drains the backlog instead of always scoring the newest
+    fetch and re-deferring the same old rows every night.
+
     Note: geography filtering (US/CIS/rest-of-world) lives in the pre-score
-    filter (filter_vacancies.py), not here.
+    filter (filter_vacancies.py), not here — the filter pass records its
+    exclusions on vacancy.scoring_excluded_reason and the loader skips them.
+    The blind/boilerplate gate below is deliberately KEPT alongside that
+    record for one proven night before it is removed.
     """
     from database_supabase import (
         load_vacancies,
@@ -278,6 +297,11 @@ def _load_and_dedup(
         if not force and rep.get("llm_score") is not None and rep.get("llm_score") != -1:
             continue
         roles.append((key, rep, members))
+
+    if unattended:
+        # Oldest-unscored-first: load order is created_at DESC, so a capped run
+        # would otherwise starve the backlog forever.
+        roles.sort(key=lambda r: r[1].get("created_at") or "")
 
     roles = roles[offset:]
     # Count schedulable roles (post-filter, post-offset) BEFORE the cap so the
@@ -401,6 +425,7 @@ def cmd_local(args):
         include_candidates=not args.no_candidates,
         limit=cap,
         offset=args.offset,
+        unattended=getattr(args, "unattended", False),
     )
 
     available = stats.get("roles_available", len(roles))

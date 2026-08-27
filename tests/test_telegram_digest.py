@@ -1,11 +1,26 @@
-"""Tests for the pure functions in telegram_digest.py (no network, no DB)."""
+"""Tests for telegram_digest.py — pure builders plus the tiered send.
 
+The tiered-send tests run against a fresh temp SQLite DB (migrations 0025 and
+0026 applied from the real files) with ``tg_call`` faked — no network, no
+Postgres.
+"""
+
+import importlib
+import json
 import sys
+from datetime import date, datetime
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 import telegram_digest as td
+
+_MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "sql" / "migrations"
+MIGRATION_0020 = _MIGRATIONS_DIR / "0025_add_vacancy_scoring_excluded_reason.sqlite.sql"
+MIGRATION_0021 = _MIGRATIONS_DIR / "0026_add_vacancy_digest_dropped_at.sqlite.sql"
 
 
 ROW = {
@@ -30,22 +45,13 @@ ROW = {
 }
 
 
-def test_build_message_escapes_html_and_has_all_parts():
-    msg = td.build_message(dict(ROW), 1)
-    assert "&lt;&amp; Co&gt;" in msg  # HTML in the title is escaped
-    assert "<b>1. Example Org —" in msg
-    assert "🎯 89/100" in msg
-    assert "💰 £90k" in msg  # compensation pulled from locations
-    assert "London, hybrid" in msg
-    assert 'href="https://example.com/jobs/1?a=1&amp;b=2"' in msg
-    assert "A short vacancy summary." in msg
-
-
-def test_build_message_fits_telegram_limit():
-    row = dict(ROW, llm_summary="x" * 10000)
-    msg = td.build_message(row, 1)
-    assert len(msg) <= td.MESSAGE_MAX_CHARS
-    assert "href=" in msg  # the link survives truncation
+def test_top_line_escapes_html_and_has_all_parts():
+    line = td.build_top_line(dict(ROW), 1)
+    assert "&lt;&amp; Co&gt;" in line  # HTML in the title is escaped
+    assert "1. <b>Example Org</b>" in line
+    assert "🎯 89" in line
+    assert 'href="https://example.com/jobs/1?a=1&amp;b=2"' in line
+    assert "A short vacancy summary." in line
 
 
 def test_summary_fallback_to_description():
@@ -83,7 +89,43 @@ def test_parse_callback_rejects_garbage():
     assert td.parse_callback("v:abc:l:extra") is None
 
 
-# --- U3: expiring-role alert ------------------------------------------------
+def test_digest_keyboard_one_row_per_top_vacancy():
+    rows = [dict(ROW), dict(ROW, id="99999999-2222-3333-4444-555555555555")]
+    kb = td.build_digest_keyboard(rows)
+    assert len(kb["inline_keyboard"]) == 2
+    for i, krow in enumerate(kb["inline_keyboard"], 1):
+        like, pas = krow
+        assert str(i) in like["text"] and "👍" in like["text"]
+        assert str(i) in pas["text"] and "👎" in pas["text"]
+        assert td.parse_callback(like["callback_data"])[1] == "liked"
+        assert td.parse_callback(pas["callback_data"])[1] == "passed"
+        assert len(like["callback_data"].encode()) <= 64
+
+
+def test_rebuild_markup_marks_only_the_tapped_row():
+    rows = [dict(ROW), dict(ROW, id="99999999-2222-3333-4444-555555555555")]
+    kb = td.build_digest_keyboard(rows)
+    marked = td.rebuild_markup(kb, rows[1]["id"], "passed")
+    assert "✅" not in marked["inline_keyboard"][0][0]["text"]
+    assert "✅" not in marked["inline_keyboard"][0][1]["text"]
+    assert "✅" not in marked["inline_keyboard"][1][0]["text"]
+    assert marked["inline_keyboard"][1][1]["text"].startswith("✅")
+    # Flipping the choice moves the mark instead of stacking a second one.
+    flipped = td.rebuild_markup(marked, rows[1]["id"], "liked")
+    assert flipped["inline_keyboard"][1][0]["text"].startswith("✅")
+    assert not flipped["inline_keyboard"][1][1]["text"].startswith("✅")
+
+
+def test_split_message_splits_at_line_boundaries_in_order():
+    blocks = [f"line {i:03d}" for i in range(100)]
+    parts = td.split_message(blocks, limit=200)
+    assert len(parts) > 1
+    for p in parts:
+        assert len(p) <= 200
+    assert "\n".join(parts) == "\n".join(blocks)
+
+
+# --- expiring-role alert (standalone `alert` mode keeps working) -------------
 
 EXPIRING_ROW = dict(
     ROW,
@@ -107,16 +149,16 @@ def test_expiring_message_is_loud_and_complete():
 
 def test_digest_default_language_is_english():
     """With no override + the example (English) profile, copy is English."""
-    msg = td.build_message(dict(ROW), 1)
-    assert "Open vacancy →" in msg
+    line = td.build_top_line(dict(ROW), 1)
+    assert "open →" in line
     assert td.build_keyboard(ROW["id"])["inline_keyboard"][0][0]["text"] == "👍 Liked"
 
 
 def test_digest_switches_to_russian(monkeypatch):
     """PRODUCT_LANGUAGE=ru flips every user-facing string to Russian."""
     monkeypatch.setenv("PRODUCT_LANGUAGE", "ru")
-    msg = td.build_message(dict(ROW), 1)
-    assert "Открыть вакансию →" in msg
+    line = td.build_top_line(dict(ROW), 1)
+    assert "открыть →" in line
 
     expiring = td.build_expiring_message(dict(EXPIRING_ROW))
     assert "Вот-вот пропадёт" in expiring
@@ -170,6 +212,9 @@ def test_expiring_alert_fires_once_per_role():
         def cursor(self, *a, **k):
             return _Cur()
 
+        def commit(self):
+            pass
+
     td.mark_alerted(_Conn(), ROW["id"])
     assert "expiring_alerted_at = now()" in captured["sql"].lower()
     assert captured["params"] == (ROW["id"],)
@@ -178,3 +223,505 @@ def test_expiring_alert_fires_once_per_role():
 def test_send_expiring_alerts_empty_is_noop():
     # No rows → no network call, returns 0.
     assert td.send_expiring_alerts(None, "tok", "chat", []) == 0
+
+
+# ===========================================================================
+# Tiered send (U3) — temp SQLite + faked tg_call
+# ===========================================================================
+
+
+def _args(**over):
+    base = dict(limit=5, min_score=None, dry_run=False)
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+@pytest.fixture()
+def denv(tmp_path, monkeypatch):
+    """Fresh migrated SQLite + telegram env + captured tg_call."""
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
+    monkeypatch.setenv("JOBSEARCH_DB_PATH", str(tmp_path / "digest.db"))
+    for mod in ("database_supabase", "config", "company_registry", "db_conn", "db_backend"):
+        sys.modules.pop(mod, None)
+    import db_backend
+
+    importlib.reload(db_backend)
+    assert db_backend.IS_SQLITE
+    import database_supabase as db
+
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cur.execute(MIGRATION_0020.read_text(encoding="utf-8"))
+    cur.execute(MIGRATION_0021.read_text(encoding="utf-8"))
+    conn.commit()
+    cur.close()
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    state_file = tmp_path / "digest_state.json"
+    run_state = tmp_path / "run_state.json"
+    monkeypatch.setenv("DIGEST_STATE_FILE", str(state_file))
+    monkeypatch.setenv("DIGEST_RUN_STATE_FILE", str(run_state))
+
+    calls = []
+
+    def fake_tg(token, method, payload, timeout=15, retries=2):
+        calls.append((method, payload))
+        return {}
+
+    monkeypatch.setattr(td, "tg_call", fake_tg)
+    monkeypatch.setattr(td.time, "sleep", lambda s: None)
+
+    yield SimpleNamespace(
+        db=db, calls=calls, state_file=state_file, run_state=run_state, tmp=tmp_path
+    )
+    db.close_conn()
+
+
+def _seed(
+    db,
+    org,
+    title,
+    *,
+    company_status="active",
+    status="unseen",
+    score=None,
+    summary="A believable one-line summary of the role.",
+    reason=None,
+    first_seen=None,
+    deadline=None,
+    digest_sent_at=None,
+    url="https://example.test/job",
+):
+    """Insert one vacancy row directly and return its id."""
+    db.ensure_company(org, status=company_status)
+    company_id = db.resolve_company_id(org)
+    dedup = db.make_vacancy_id(db.resolve_canonical_name(org), f"{title}")
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO vacancy (dedup_hash, company_id, title, full_description, llm_summary, "
+        "first_seen, last_seen, locations, status, llm_score, scoring_excluded_reason, "
+        "deadline, digest_sent_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            dedup,
+            company_id,
+            title,
+            "A real job description long enough to pass every content gate. " * 4,
+            summary,
+            (first_seen or date.today()).isoformat(),
+            date.today().isoformat(),
+            json.dumps([{"location": "Berlin, Germany", "url": url}]),
+            status,
+            score,
+            reason,
+            deadline.isoformat() if deadline else None,
+            digest_sent_at,
+        ),
+    )
+    cur.execute("SELECT id FROM vacancy WHERE dedup_hash = ?", (dedup,))
+    vac_id = cur.fetchone()[0]
+    cur.close()
+    conn.commit()
+    return vac_id
+
+
+def _col(db, vac_id, col):
+    cur = db.get_conn().cursor()
+    cur.execute(f"SELECT {col} FROM vacancy WHERE id = ?", (vac_id,))
+    val = cur.fetchone()[0]
+    cur.close()
+    return val
+
+
+def _write_run_state(
+    path,
+    *,
+    updated_at=None,
+    counts=None,
+    no_progress=False,
+    target_ids=None,
+    vac_carried=None,
+    co_carried=None,
+    rolled_over=None,
+    pending_verdicts=None,
+    excluded_count=None,
+):
+    """Fixture mirroring the run_daily.py state shape the digest reads.
+
+    Field contract (U4 must write exactly this):
+      * top-level ``no_progress: true`` when the scoring session exited without
+        saving a single score; the digest then renders the AE7 header line with
+        N = len(stages[vacancy_scoring].target_ids).
+      * optional top-level ``counts`` {"new_vacancies": F, "scored": S}
+        (run_daily._run_counts persisted into the state).
+      * stages[filter].filter.excluded_count → the D in the header.
+      * stages[vacancy_scoring].carried_over / stages[company_scoring].carried_over
+        → the U in the header + the tier-4 carried-over line.
+      * stages[learning_review].rolled_over, stages[verdicts].pending_verdicts
+        → their own tier-4 lines.
+    """
+    vac_stage = {"name": "vacancy_scoring", "status": "done"}
+    if target_ids is not None:
+        vac_stage["target_ids"] = list(target_ids)
+    if vac_carried is not None:
+        vac_stage["carried_over"] = vac_carried
+    co_stage = {"name": "company_scoring", "status": "done"}
+    if co_carried is not None:
+        co_stage["carried_over"] = co_carried
+    lr_stage = {"name": "learning_review", "status": "done"}
+    if rolled_over is not None:
+        lr_stage["rolled_over"] = rolled_over
+    ve_stage = {"name": "verdicts", "status": "done"}
+    if pending_verdicts is not None:
+        ve_stage["pending_verdicts"] = pending_verdicts
+    fi_stage = {"name": "filter", "status": "done"}
+    if excluded_count is not None:
+        fi_stage["filter"] = {"excluded_count": excluded_count, "excluded_reasons": {}}
+    state = {
+        "run_id": "test",
+        "created_at": updated_at or datetime.now().isoformat(timespec="seconds"),
+        "updated_at": updated_at or datetime.now().isoformat(timespec="seconds"),
+        "stages": [lr_stage, fi_stage, co_stage, vac_stage, ve_stage],
+    }
+    if counts is not None:
+        state["counts"] = counts
+    if no_progress:
+        state["no_progress"] = True
+    Path(path).write_text(json.dumps(state), encoding="utf-8")
+
+
+def _sent_texts(calls):
+    return [p["text"] for m, p in calls if m == "sendMessage"]
+
+
+def test_dropped_line_renders_reason_and_link(denv):
+    """AE2: one line — title, company, "dropped: US-only location", a link."""
+    _seed(
+        denv.db,
+        "GiveWell",
+        "Program Manager",
+        reason="US-only location",
+        url="https://example.test/givewell/pm",
+    )
+    td.cmd_send(_args())
+    body = "\n".join(_sent_texts(denv.calls))
+    assert "Program Manager — GiveWell — dropped: US-only location" in body
+    assert 'href="https://example.test/givewell/pm"' in body
+
+
+def test_no_progress_header(denv):
+    """AE7: a normal-exit session that saved nothing never reads as quiet."""
+    _write_run_state(denv.run_state, no_progress=True, target_ids=[f"id{i}" for i in range(8)])
+    td.cmd_send(_args())
+    body = _sent_texts(denv.calls)[0]
+    assert "scored 0 of 8 — the session made no progress" in body
+
+
+def test_tier_order_top_mid_dropped_carried(denv):
+    top = _seed(denv.db, "Org A", "Top Role", score=80)
+    _seed(denv.db, "Org B", "Mid Role", score=45)
+    _seed(denv.db, "Org C", "Dropped Role", reason="US-only location")
+    _write_run_state(denv.run_state, vac_carried=3)
+    td.cmd_send(_args())
+    body = "\n".join(_sent_texts(denv.calls))
+    i_top = body.index("Top Role")
+    i_mid = body.index("Mid Role")
+    i_drop = body.index("Dropped Role")
+    i_carried = body.index("carried over")
+    assert i_top < i_mid < i_drop < i_carried
+    # The top tier carries the like/pass buttons on the first message.
+    first_payload = [p for m, p in denv.calls if m == "sendMessage"][0]
+    cbs = [
+        b["callback_data"]
+        for row in first_payload["reply_markup"]["inline_keyboard"]
+        for b in row
+    ]
+    assert f"v:{top}:l" in cbs and f"v:{top}:p" in cbs
+
+
+def test_header_counts_from_run_state(denv):
+    _write_run_state(
+        denv.run_state,
+        counts={"new_vacancies": 12, "scored": 5},
+        excluded_count=4,
+        vac_carried=3,
+    )
+    td.cmd_send(_args())
+    assert "12 fetched, 5 scored, 4 dropped, 3 not scored yet" in _sent_texts(denv.calls)[0]
+
+
+def test_header_counts_from_db_without_run_state(denv):
+    _seed(denv.db, "Org A", "Top Role", score=80)
+    _seed(denv.db, "Org B", "Mid Role", score=45)
+    _seed(denv.db, "Org C", "Dropped Role", reason="US-only location")
+    _seed(denv.db, "Org D", "Waiting Role")  # no score, no reason
+    td.cmd_send(_args())
+    assert "4 fetched, 2 scored, 1 dropped, 1 not scored yet" in _sent_texts(denv.calls)[0]
+
+
+def test_deadline_header_line_and_candidate_hot_in_tier1(denv):
+    e1 = _seed(denv.db, "Org A", "Expiring One", score=70, status="expiring")
+    e2 = _seed(denv.db, "Org B", "Expiring Two", score=60, status="expiring")
+    hot = _seed(denv.db, "Stranger Co", "Strong Role", score=75, company_status="candidate")
+    td.cmd_send(_args())
+    body = _sent_texts(denv.calls)[0]
+    assert "2 deadlines this week" in body
+    # No separate loud alert messages — the fold replaces them (KTD5)…
+    assert not any("About to disappear" in t for t in _sent_texts(denv.calls))
+    # …but the roles are stamped so the old alert path won't re-fire.
+    assert _col(denv.db, e1, "expiring_alerted_at") is not None
+    assert _col(denv.db, e2, "expiring_alerted_at") is not None
+    # The candidate-hot row joins tier 1 with buttons.
+    assert "Strong Role" in body
+    first_payload = [p for m, p in denv.calls if m == "sendMessage"][0]
+    cbs = [
+        b["callback_data"]
+        for row in first_payload["reply_markup"]["inline_keyboard"]
+        for b in row
+    ]
+    assert f"v:{hot}:l" in cbs
+
+
+def test_many_dropped_split_preserves_order_and_caps(denv, monkeypatch):
+    for i in range(60):
+        _seed(denv.db, "Org X", f"Dropped {i:02d}", reason="US-only location")
+    # Default cap: 25 lines + a "+35 more" tail.
+    td.cmd_send(_args(dry_run=True))
+    monkeypatch.setattr(td, "DROPPED_MAX_LINES", 100)
+    monkeypatch.setattr(td, "MESSAGE_MAX_CHARS", 1500)
+    td.cmd_send(_args())
+    texts = _sent_texts(denv.calls)
+    assert len(texts) >= 2
+    for t in texts:
+        assert len(t) <= 1500
+    joined = "\n".join(texts)
+    positions = [joined.index(f"Dropped {i:02d}") for i in range(60)]
+    assert positions == sorted(positions)
+
+
+def test_dropped_cap_renders_more_tail_and_rest_surface_next_morning(denv, monkeypatch):
+    monkeypatch.setattr(td, "DROPPED_MAX_LINES", 5)
+    for i in range(8):
+        _seed(denv.db, "Org X", f"Dropped {i}", reason="US-only location")
+    td.cmd_send(_args())
+    body = "\n".join(_sent_texts(denv.calls))
+    assert "+3 more" in body
+    # Only the shown rows are stamped — the 3 beyond the cap stay unclaimed
+    # and arrive with the next digest instead of vanishing.
+    denv.calls.clear()
+    td.cmd_send(_args())
+    second = "\n".join(_sent_texts(denv.calls))
+    shown_second = [i for i in range(8) if f"Dropped {i}" in second]
+    assert len(shown_second) == 3
+    assert "more" not in second
+
+
+def test_empty_night_sends_header_and_nothing_new(denv):
+    td.cmd_send(_args())
+    texts = _sent_texts(denv.calls)
+    assert len(texts) == 1
+    assert "0 fetched" in texts[0]
+    assert "Quiet night" in texts[0]
+
+
+def test_top_rows_stamp_sent_at_dropped_rows_stamp_dropped_at(denv):
+    top = _seed(denv.db, "Org A", "Top Role", score=80)
+    mid = _seed(denv.db, "Org B", "Mid Role", score=45)
+    drop = _seed(denv.db, "Org C", "Dropped Role", reason="US-only location")
+    td.cmd_send(_args())
+    assert _col(denv.db, top, "digest_sent_at") is not None
+    assert _col(denv.db, mid, "digest_sent_at") is not None
+    assert _col(denv.db, drop, "digest_dropped_at") is not None
+    # digest_sent_at stays free on the dropped row: if its exclusion is later
+    # cleared and it gets scored, it must still be able to reach tiers 1–2.
+    assert _col(denv.db, drop, "digest_sent_at") is None
+    assert _col(denv.db, top, "digest_dropped_at") is None
+
+
+def test_second_send_same_morning_repeats_nothing(denv):
+    _seed(denv.db, "Org A", "Top Role", score=80)
+    _seed(denv.db, "Org C", "Dropped Role", reason="US-only location")
+    _write_run_state(denv.run_state, vac_carried=2, excluded_count=1)
+    td.cmd_send(_args())
+    first = "\n".join(_sent_texts(denv.calls))
+    assert "Top Role" in first and "Dropped Role" in first and "carried over" in first
+    denv.calls.clear()
+    td.cmd_send(_args())
+    second = _sent_texts(denv.calls)
+    assert len(second) == 1
+    assert "Top Role" not in second[0]
+    assert "Dropped Role" not in second[0]
+    assert "carried over" not in second[0]
+
+
+def test_telegram_error_stops_and_exits_nonzero(denv, monkeypatch):
+    top = _seed(denv.db, "Org A", "Top Role", score=80)
+
+    def boom(token, method, payload, timeout=15, retries=2):
+        raise RuntimeError("sendMessage failed: chat not found")
+
+    monkeypatch.setattr(td, "tg_call", boom)
+    with pytest.raises(SystemExit) as exc:
+        td.cmd_send(_args())
+    assert exc.value.code != 0
+    # The claim was released, so tomorrow's run re-sends it.
+    assert _col(denv.db, top, "digest_sent_at") is None
+
+
+def test_tier_labels_in_russian(denv, monkeypatch):
+    monkeypatch.setenv("PRODUCT_LANGUAGE", "ru")
+    _seed(denv.db, "Org A", "Top Role", score=80)
+    _seed(denv.db, "Org B", "Mid Role", score=45)
+    _seed(denv.db, "Org C", "Dropped Role", reason="US-only location")
+    td.cmd_send(_args())
+    body = "\n".join(_sent_texts(denv.calls))
+    assert "Лучшие совпадения" in body
+    assert "Средние оценки" in body
+    assert "Отсеяно" in body
+    assert "Ночной прогон" in body
+
+
+def test_dry_run_prints_in_order_and_sends_nothing(denv, capsys):
+    _seed(denv.db, "Org A", "Top Role", score=80)
+    _seed(denv.db, "Org C", "Dropped Role", reason="US-only location")
+    td.cmd_send(_args(dry_run=True))
+    out = capsys.readouterr().out
+    assert out.index("Top Role") < out.index("Dropped Role")
+    assert "nothing sent" in out
+    assert denv.calls == []
+    # Dry run claims nothing.
+    cur = denv.db.get_conn().cursor()
+    cur.execute(
+        "SELECT count(*) FROM vacancy "
+        "WHERE digest_sent_at IS NOT NULL OR digest_dropped_at IS NOT NULL"
+    )
+    assert cur.fetchone()[0] == 0
+    cur.close()
+
+
+def test_dropped_later_the_same_day_appears_in_the_next_send(denv):
+    """#9: tier 3 gates on the digest_dropped_at claim, not on a date-granular
+    first_seen cutoff — a row dropped after the morning digest (same calendar
+    day) arrives with the next send instead of vanishing forever."""
+    early = _seed(denv.db, "Org A", "Early Drop", reason="US-only location")
+    td.cmd_send(_args())
+    assert "Early Drop" in "\n".join(_sent_texts(denv.calls))
+    assert _col(denv.db, early, "digest_dropped_at") is not None
+
+    late = _seed(denv.db, "Org B", "Late Drop", reason="junk title: talent pool")
+    denv.calls.clear()
+    td.cmd_send(_args())
+    second = "\n".join(_sent_texts(denv.calls))
+    assert "Late Drop" in second
+    assert "Early Drop" not in second
+    assert _col(denv.db, late, "digest_dropped_at") is not None
+
+
+# ===========================================================================
+# Multi-part sends — per-part keyboards and per-part claims (#20, #21, #19)
+# ===========================================================================
+
+BULKY_SUMMARY = "A long enough summary line to make every tier-1 entry bulky. " * 4
+
+
+def _seed_five_top(db):
+    """Five tier-1 rows whose entries overflow a shrunken message limit."""
+    return [
+        _seed(db, f"Org {i}", f"Top Role {i}", score=90 - i, summary=BULKY_SUMMARY)
+        for i in range(5)
+    ]
+
+
+def _entry_numbers(text):
+    """Global tier-1 entry numbers rendered in one message text."""
+    import re
+
+    return [int(n) for n in re.findall(r"^(\d+)\. <b>", text, re.MULTILINE)]
+
+
+def _keyboard_numbers(payload):
+    kb = payload.get("reply_markup")
+    if not kb:
+        return []
+    return [int(row[0]["text"].split()[-1]) for row in kb["inline_keyboard"]]
+
+
+def test_split_tier1_keyboard_lands_on_the_part_with_its_rows(denv, monkeypatch):
+    """#20: when tier 1 splits across parts, every part carries a keyboard for
+    exactly the entries it renders, and button numbers match the rendered
+    (global) entry numbers."""
+    monkeypatch.setattr(td, "MESSAGE_MAX_CHARS", 600)
+    _seed_five_top(denv.db)
+    td.cmd_send(_args())
+    payloads = [p for m, p in denv.calls if m == "sendMessage"]
+    assert len(payloads) >= 2
+    seen = []
+    for p in payloads:
+        assert _keyboard_numbers(p) == _entry_numbers(p["text"])
+        seen.extend(_entry_numbers(p["text"]))
+    assert seen == [1, 2, 3, 4, 5]
+
+
+def test_failure_on_part_two_releases_only_that_part(denv, monkeypatch):
+    """#21: delivered parts keep their stamps (no re-send), the failed part's
+    claims are released, later parts were never claimed — the next run sends
+    exactly the undelivered rows."""
+    monkeypatch.setattr(td, "MESSAGE_MAX_CHARS", 600)
+    ids = _seed_five_top(denv.db)
+
+    calls = []
+
+    def flaky(token, method, payload, timeout=15, retries=2):
+        calls.append((method, payload))
+        if len(calls) == 2:
+            raise RuntimeError("sendMessage failed: flood control")
+        return {}
+
+    monkeypatch.setattr(td, "tg_call", flaky)
+    with pytest.raises(SystemExit) as exc:
+        td.cmd_send(_args())
+    assert exc.value.code != 0
+
+    part1 = calls[0][1]["text"]
+    delivered = [vid for i, vid in enumerate(ids) if f"Top Role {i}" in part1]
+    assert delivered and len(delivered) < len(ids)
+    for vid in ids:
+        stamped = _col(denv.db, vid, "digest_sent_at") is not None
+        assert stamped == (vid in delivered)
+    # The in-process release also cleared the crash journal.
+    assert not json.loads(denv.state_file.read_text()).get("pending_claim")
+
+    # Next run: the delivered rows stay silent, the rest go out.
+    monkeypatch.setattr(
+        td, "tg_call", lambda t, m, p, timeout=15, retries=2: denv.calls.append((m, p)) or {}
+    )
+    denv.calls.clear()
+    td.cmd_send(_args())
+    body = "\n".join(_sent_texts(denv.calls))
+    for i, vid in enumerate(ids):
+        assert (f"Top Role {i}" in body) == (vid not in delivered)
+        assert _col(denv.db, vid, "digest_sent_at") is not None
+
+
+def test_stale_pending_claim_from_a_killed_run_is_released(denv):
+    """#19: a SIGKILL between claim and send leaves stamps plus the journalled
+    pending_claim; the next send releases those ids first, so the rows appear
+    in its message instead of being lost forever."""
+    top = _seed(denv.db, "Org A", "Crashed Top", score=80)
+    drop = _seed(denv.db, "Org C", "Crashed Drop", reason="US-only location")
+    conn = denv.db.get_conn()
+    td.mark_sent_many(conn, [top])
+    td.mark_dropped_many(conn, [drop])
+    denv.state_file.write_text(
+        json.dumps({"pending_claim": {"sent": [top], "dropped": [drop], "alerted": []}})
+    )
+    td.cmd_send(_args())
+    body = "\n".join(_sent_texts(denv.calls))
+    assert "Crashed Top" in body
+    assert "Crashed Drop" in body
+    # Re-claimed by the successful send; the journal is cleared.
+    assert _col(denv.db, top, "digest_sent_at") is not None
+    assert _col(denv.db, drop, "digest_dropped_at") is not None
+    assert not json.loads(denv.state_file.read_text()).get("pending_claim")

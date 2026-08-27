@@ -113,6 +113,8 @@ STAGE_ORDER = [
     "company_scoring",  # GATE  — WANT-score new candidate companies
     "vacancy_scoring",  # GATE  — per-vacancy subagent scoring (1 vac = 1 agent)
     "verdicts",  # GATE  — show top matches, capture like/pass
+    "digest",  # AUTO  — tiered morning Telegram message (before publish, KTD5:
+    #                     a dashboard refresh failure can never cost the digest)
     "publish",  # AUTO  — publish always; warns loudly when the run was not clean
 ]
 
@@ -131,6 +133,7 @@ STAGE_ABOUT = {
     "company_scoring": "WANT-scoring new candidate companies",
     "vacancy_scoring": "scoring new roles (cheap screen, then strong finalists)",
     "verdicts": "collecting your like / pass verdicts",
+    "digest": "sending the tiered morning digest to Telegram",
     "publish": "publishing the dashboard (warns if the run was not clean)",
 }
 
@@ -164,6 +167,7 @@ class Opts:
     tier: str | None = None
     full_rescore: bool = False
     no_publish: bool = False
+    unattended: bool = False
     extra: dict = field(default_factory=dict)
 
 
@@ -190,6 +194,7 @@ def _new_state(opts: Opts) -> dict:
             "tier": opts.tier,
             "full_rescore": opts.full_rescore,
             "no_publish": opts.no_publish,
+            "unattended": opts.unattended,
         },
         "stages": [{"name": n, "status": "pending"} for n in STAGE_ORDER],
         # Structured non-fatal failures appended by best-effort helpers (R7): a
@@ -254,6 +259,12 @@ def _stage(state: dict, name: str) -> dict:
     for s in state["stages"]:
         if s["name"] == name:
             return s
+    # A checkpoint written before a stage existed (e.g. pre-digest deploys)
+    # lacks its entry; create it lazily so an old run still resumes cleanly.
+    if name in STAGE_ORDER:
+        entry = {"name": name, "status": "pending"}
+        state["stages"].append(entry)
+        return entry
     raise KeyError(name)
 
 
@@ -264,6 +275,7 @@ def _opts_from_state(state: dict) -> Opts:
         tier=o.get("tier"),
         full_rescore=bool(o.get("full_rescore")),
         no_publish=bool(o.get("no_publish")),
+        unattended=bool(o.get("unattended")),
     )
 
 
@@ -281,6 +293,8 @@ def _ignored_resume_flags(args: argparse.Namespace) -> list[str]:
         flags.append("--tier")
     if args.full_rescore:
         flags.append("--full-rescore")
+    if args.unattended:
+        flags.append("--unattended")
     return flags
 
 
@@ -446,7 +460,18 @@ def _candidate_names_to_score(limit: int) -> list[str]:
 
 
 def _unscored_unseen() -> int:
-    return _scalar("SELECT count(*) FROM vacancy WHERE status = 'unseen' AND llm_score IS NULL")
+    from database_supabase import _scoring_excluded_supported
+
+    # Rows the filter pass excluded from scoring (migration 0025) are not
+    # "awaiting scoring" — counting them would hold the scoring gate open for
+    # rows the scorer will never be offered. Column-guarded for pre-migration
+    # installs.
+    cond = ""
+    if _scoring_excluded_supported():
+        cond = " AND scoring_excluded_reason IS NULL"
+    return _scalar(
+        "SELECT count(*) FROM vacancy WHERE status = 'unseen' AND llm_score IS NULL" + cond
+    )
 
 
 def _scored_unseen() -> int:
@@ -769,6 +794,39 @@ def _collect_company_evidence(names: list[str], opts: Opts, state: "dict | None"
 # ---------------------------------------------------------------------------
 
 
+def _unattended_scoring_gate(entry: dict, phase: str, remaining: int) -> bool:
+    """Unattended answer for a scoring gate (KTD2): emit once per phase, re-emit
+    while a resume shows progress, and never stall — the caller advances with
+    "carried over" when the remaining count did not shrink since this phase's
+    last emission. Keyed on the phase (not ``entry["emitted"]``) so the
+    two-pass escalate phase still gets its own emission. Returns True to emit
+    the gate, False to carry the remainder over to the next run."""
+    marks = entry.setdefault("unattended_progress", {})
+    last = marks.get(phase)
+    if last is None or remaining < last:
+        marks[phase] = remaining
+        return True
+    return False
+
+
+def _carry_over(
+    opts: "Opts", entry: dict, phase: str, remaining: int, note: str, finish: bool = False
+):
+    """The unattended no-progress answer for a scoring gate: when
+    ``_unattended_scoring_gate`` declines to re-emit, record the carry-over and
+    advance with ``note``. Returns the ("advance", note) tuple, or None when the
+    gate should (re-)emit — attended run, or progress since the last stop.
+    ``finish`` closes the live progress card (the vacancy phases own one)."""
+    if not opts.unattended or _unattended_scoring_gate(entry, phase, remaining):
+        return None
+    if finish:
+        import run_status
+
+        run_status.finish()
+    entry["carried_over"] = remaining
+    return "advance", note
+
+
 def resolve_scoring_limit(full_rescore: bool) -> tuple[int | None, str | None]:
     """The per-run scoring cap decision (STRATEGY guardrails 3 & 4).
 
@@ -903,6 +961,14 @@ def _read_payload(path: Path) -> list:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return []
+
+
+def _screen_archive_path() -> Path:
+    """The untouched copy of the full SCREEN payload set. VAC_PAYLOAD_PATH is
+    rewritten to the unscored remainder on every resume (the unattended wrapper
+    dispatches the whole file), so the screen-complete totals and the escalate
+    pick read the full set from here instead."""
+    return VAC_PAYLOAD_PATH.with_suffix(".screen.json")
 
 
 def _emit_gate(stage: str, payload: dict) -> None:
@@ -1115,7 +1181,9 @@ def _screen_gate_text(count: int, model: str) -> str:
 # ---------------------------------------------------------------------------
 # Stage handlers. Each returns one of:
 #   ("advance", note) | ("skip", note) | ("gate", payload)
-#   ("error", msg)    | ("abort", msg)
+#   ("error", msg)    | ("abort", msg) | ("error_continue", msg)
+# error_continue marks the stage error but does NOT stop the run — reserved for
+# a stage whose failure must never cost the stages after it (the digest, KTD5).
 # ---------------------------------------------------------------------------
 
 
@@ -1174,6 +1242,15 @@ def _h_onboarding(state, entry, opts):
         return "skip", "companies already present — onboarding not needed"
     if _company_count() > 0:
         return "advance", "starter companies added"
+    if opts.unattended:
+        # An empty company table at night means the WRONG database, not a fresh
+        # clone to onboard: a night run must never seed companies unattended.
+        return (
+            "abort",
+            "company table is empty in an unattended run — onboarding needs a human, "
+            "and an empty table at night usually means the wrong database. Check the "
+            "DB this run points at, then onboard interactively.",
+        )
     return "gate", {"action": "onboard", "instructions": ONBOARDING_TEXT, "payload_path": None}
 
 
@@ -1222,6 +1299,17 @@ def _h_learning_review(state, entry, opts):
 
     if not review.get("has_content"):
         return "advance", "no accumulated verdicts or proposals — nothing to review this run"
+
+    if opts.unattended:
+        # Applying a proposal stays a human decision (R16): leave the rollover
+        # cursor untouched so the same verdicts are offered next attended run,
+        # and record the count for the digest stage.
+        entry["rolled_over"] = review["verdicts_since_last_review"]
+        return (
+            "advance",
+            f"learning review rolled over unattended — {entry['rolled_over']} verdict(s) "
+            "kept pending, nothing applied",
+        )
 
     _write_payload(LEARNING_PAYLOAD_PATH, review)
     return "gate", {
@@ -1307,10 +1395,20 @@ def _h_filter(state, entry, opts):
     ready = data.get("ready", 0)
     delete_ids = data.get("delete_ids", {}) or {}
     junk = sum(len(v) for v in delete_ids.values())
-    entry["filter"] = {"ready": ready, "junk_flagged": junk}
+    # Exclusion tally (migration 0025) — kept in the run state so the nightly
+    # digest header can show "N excluded" with a per-reason breakdown (R10).
+    excluded = data.get("scoring_excluded", {}) or {}
+    entry["filter"] = {
+        "ready": ready,
+        "junk_flagged": junk,
+        "excluded_count": int(excluded.get("count", 0) or 0),
+        "excluded_reasons": excluded.get("reasons") or {},
+    }
     note = f"{ready} ready to score"
     if junk:
         note += f"; {junk} junk candidate(s) flagged (NOT deleted — review in /jobs-review)"
+    if entry["filter"]["excluded_count"]:
+        note += f"; {entry['filter']['excluded_count']} excluded from scoring (reasons recorded)"
     return "advance", note
 
 
@@ -1331,9 +1429,24 @@ def _h_company_scoring(state, entry, opts):
                 "advance",
                 f"company scoring complete ({len(entry.get('target_ids', []))} scored)",
             )
+        carried = _carry_over(
+            opts,
+            entry,
+            "score",
+            len(remaining),
+            f"company scoring carried over — {len(remaining)} company(ies) still "
+            "unscored with no progress since the last stop; they stay candidates "
+            "for the next run",
+        )
+        if carried:
+            return carried
         payloads = [p for p in _read_payload(CO_PAYLOAD_PATH) if str(p.get("id")) in remaining]
+        # The unattended wrapper dispatches the whole file — shrink it to the
+        # still-unscored subset so a resume never re-sends scored companies.
+        _write_payload(CO_PAYLOAD_PATH, payloads)
         return "gate", {
             "action": "score_companies",
+            "phase": "score",
             "count": len(payloads),
             "payload_path": str(CO_PAYLOAD_PATH),
             "instructions": _company_gate_text(payloads),
@@ -1397,6 +1510,7 @@ def _h_company_scoring(state, entry, opts):
             entry["phase"] = "screen"
             return "gate", {
                 "action": "screen_companies",
+                "phase": "screen",
                 "count": screen["pending_count"],
                 "payload_path": screen.get("payload_path") or str(SCREEN_CO_PAYLOAD_PATH),
                 "instructions": _screen_gate_text(screen["pending_count"], company_screen_model()),
@@ -1456,8 +1570,11 @@ def _h_company_scoring(state, entry, opts):
     if ghosts_left:
         notes.append(f"{ghosts_left} candidate(s) still lack a findable website")
     note_suffix = ("; " + "; ".join(notes)) if notes else ""
+    if opts.unattended:  # baseline for the no-progress carry-over on re-entry
+        _unattended_scoring_gate(entry, "score", len(entry["target_ids"]))
     return "gate", {
         "action": "score_companies",
+        "phase": "score",
         "count": len(payloads),
         "payload_path": str(CO_PAYLOAD_PATH),
         "instructions": _company_gate_text(payloads)
@@ -1520,6 +1637,10 @@ def _h_vacancy_scoring(state, entry, opts):
         if warn:
             print(warn, flush=True)
         cmd = _py("score_vacancies.py") + ["--local"]
+        if opts.unattended:
+            # Oldest-unscored-first, so carried-over roles never sink under the
+            # next night's arrivals (see score_vacancies --unattended).
+            cmd.append("--unattended")
         if opts.full_rescore:
             cmd.append("--force")
         if limit is not None:
@@ -1544,6 +1665,7 @@ def _h_vacancy_scoring(state, entry, opts):
             entry["oneshot"] = True  # force-rescore can't use the "llm_score IS NULL" check
             return "gate", {
                 "action": "score_vacancies",
+                "phase": "escalate",  # phase names the model tier: the strong one here
                 "count": len(payloads),
                 "payload_path": str(VAC_PAYLOAD_PATH),
                 "instructions": _vacancy_gate_text(payloads, strong_model, "rescore"),
@@ -1552,8 +1674,15 @@ def _h_vacancy_scoring(state, entry, opts):
         entry["phase"] = "screen"
         if single_pass:
             entry["single_pass"] = True
+        # Full screen set, preserved: resumes shrink VAC_PAYLOAD_PATH to the
+        # unscored remainder, but the screen-complete totals and the escalate
+        # pick must still see every screened payload.
+        _write_payload(_screen_archive_path(), payloads)
+        if opts.unattended:  # baseline for the no-progress carry-over on re-entry
+            _unattended_scoring_gate(entry, "screen", len(entry["target_ids"]))
         return "gate", {
             "action": "score_vacancies",
+            "phase": "screen",
             "count": len(payloads),
             "payload_path": str(VAC_PAYLOAD_PATH),
             "instructions": _vacancy_gate_text(
@@ -1581,8 +1710,24 @@ def _h_vacancy_scoring(state, entry, opts):
         if remaining_ids and not remaining:
             return "error", _corrupt_score_payload_msg(len(remaining_ids), "screen")
         if remaining:
+            carried = _carry_over(
+                opts,
+                entry,
+                "screen",
+                len(remaining_ids),
+                f"scoring carried over — {len(remaining_ids)} role(s) still unscored "
+                "with no progress since the last stop; they lead the next run's "
+                "batch (oldest first)",
+                finish=True,
+            )
+            if carried:
+                return carried
+            # The unattended wrapper dispatches the whole file — shrink it to
+            # the still-unscored subset so a resume never re-sends scored roles.
+            _write_payload(VAC_PAYLOAD_PATH, remaining)
             return "gate", {
                 "action": "score_vacancies",
+                "phase": "screen",
                 "count": len(remaining),
                 "payload_path": str(VAC_PAYLOAD_PATH),
                 "instructions": _vacancy_gate_text(
@@ -1590,7 +1735,10 @@ def _h_vacancy_scoring(state, entry, opts):
                 ),
             }
 
-        screened = len(payloads)
+        # Resumes shrank the payload file to the unscored remainder, so the
+        # totals and the escalate pick read the preserved full screen set.
+        screen_set = _read_payload(_screen_archive_path()) or payloads
+        screened = len(screen_set)
 
         # screen_model == scoring_model -> one pass, no escalate gate.
         if single_pass:
@@ -1620,8 +1768,10 @@ def _h_vacancy_scoring(state, entry, opts):
             print(threshold_warn, flush=True)
         scores = _vacancy_scores(entry.get("target_ids", []))
         scored_by = _vacancy_scored_by(entry.get("target_ids", []))
-        cleared_floor = select_escalation_payloads(payloads, scores, threshold)
-        escalate = select_escalation_payloads(payloads, scores, threshold, scored_by, strong_model)
+        cleared_floor = select_escalation_payloads(screen_set, scores, threshold)
+        escalate = select_escalation_payloads(
+            screen_set, scores, threshold, scored_by, strong_model
+        )
         already_strong = len(cleared_floor) - len(escalate)
         n_esc = len(escalate)
         entry["screen_counts"] = {
@@ -1647,9 +1797,12 @@ def _h_vacancy_scoring(state, entry, opts):
         _write_payload(VAC_PAYLOAD_PATH, escalate)
         entry["escalate_target_ids"] = esc_member_ids
         entry["phase"] = "escalate"
+        if opts.unattended:  # the escalate phase gets its own emission + baseline
+            _unattended_scoring_gate(entry, "escalate", len(esc_member_ids))
         run_status.begin("score", len(escalate))
         return "gate", {
             "action": "score_vacancies",
+            "phase": "escalate",
             "count": len(escalate),
             "payload_path": str(VAC_PAYLOAD_PATH),
             "instructions": _vacancy_gate_text(escalate, strong_model, "escalate", threshold),
@@ -1664,6 +1817,21 @@ def _h_vacancy_scoring(state, entry, opts):
     if remaining_ids and not remaining:
         return "error", _corrupt_score_payload_msg(len(remaining_ids), "escalate")
     if remaining:
+        carried = _carry_over(
+            opts,
+            entry,
+            "escalate",
+            len(remaining_ids),
+            f"escalation carried over — {len(remaining_ids)} finalist(s) still "
+            "unscored with no progress since the last stop; they lead the next "
+            "run's batch",
+            finish=True,
+        )
+        if carried:
+            return carried
+        # The unattended wrapper dispatches the whole file — shrink it to the
+        # still-unscored finalists so a resume never re-sends scored roles.
+        _write_payload(VAC_PAYLOAD_PATH, remaining)
         # Every call that reaches this branch is a RESUME of the escalate gate
         # (the transition above returns its own gate without falling through
         # here) — re-begin so the live progress card reflects what's actually
@@ -1671,6 +1839,7 @@ def _h_vacancy_scoring(state, entry, opts):
         run_status.begin("score", len(remaining))
         return "gate", {
             "action": "score_vacancies",
+            "phase": "escalate",
             "count": len(remaining),
             "payload_path": str(VAC_PAYLOAD_PATH),
             "instructions": _vacancy_gate_text(remaining, strong_model, "escalate", threshold),
@@ -1697,12 +1866,57 @@ def _h_verdicts(state, entry, opts):
     n = _scored_unseen()
     if n == 0:
         return "advance", "no freshly scored matches to review"
+    if opts.unattended:
+        # Verdicts are not part of a night run (R16): like/pass stays on the
+        # phone. Record the count for the digest stage and continue to publish.
+        entry["pending_verdicts"] = n
+        return (
+            "advance",
+            f"{n} scored match(es) await your verdict on the phone — a night run "
+            "never writes one",
+        )
     return "gate", {
         "action": "verdicts",
         "count": n,
         "payload_path": None,
         "instructions": f"{n} freshly scored match(es) await a verdict.\n\n" + VERDICT_TEXT,
     }
+
+
+def _h_digest(state, entry, opts):
+    """Send the tiered morning message (telegram_digest.py send, U3) BEFORE
+    publish, so a dashboard refresh failure can never cost the digest (KTD5).
+
+    Persists the run's counters into the state first — the digest subprocess
+    reads ``counts`` / stage fields from the checkpoint on disk (R10). A failed
+    send marks THIS stage error but the run continues to publish
+    (``error_continue``): the dashboard must still refresh on a broken Telegram
+    morning, and the R12 alerting for a lost message lives in the nightly
+    wrapper, not here."""
+    # Write the counts contract even when the send is skipped: a later manual
+    # `telegram_digest.py send` still reads an honest header from the state.
+    state["counts"] = _run_counts(state)
+    _save_state(state)
+    if opts.no_publish:
+        return "skip", "digest suppressed (--no-publish)"
+    if not opts.unattended:
+        # Frozen desktop behavior: an attended run never sends — it would
+        # double-fire against the user's own scheduled `telegram_digest.py send`.
+        return (
+            "skip",
+            "digest is a night-run stage — attended installs keep the scheduled "
+            "`telegram_digest.py send`",
+        )
+    if not (os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID")):
+        return (
+            "skip",
+            "digest skipped — TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID unset "
+            "(set both to get the morning message)",
+        )
+    rc = _run(_py("telegram_digest.py") + ["send"], opts)
+    if rc != 0:
+        return "error_continue", f"digest send exited with code {rc}"
+    return "advance", "morning digest sent"
 
 
 def _h_publish(state, entry, opts):
@@ -1739,6 +1953,7 @@ HANDLERS = {
     "company_scoring": _h_company_scoring,
     "vacancy_scoring": _h_vacancy_scoring,
     "verdicts": _h_verdicts,
+    "digest": _h_digest,
     "publish": _h_publish,
 }
 
@@ -1746,6 +1961,12 @@ HANDLERS = {
 # ---------------------------------------------------------------------------
 # The driver loop
 # ---------------------------------------------------------------------------
+
+# Gates an unattended run may still emit: the nightly wrapper answers them by
+# scoring with a headless session and resuming. Every OTHER gate must be
+# answered inside its handler; one that reaches drive() anyway has no
+# unattended answer and aborts instead of waiting for a human (R15).
+UNATTENDED_EMITTABLE_GATES = {"screen_companies", "score_companies", "score_vacancies"}
 
 
 def _safe_int(value) -> int | None:
@@ -1873,15 +2094,48 @@ def drive(state: dict, opts: Opts, observe: bool = False) -> int:
             continue
 
         if kind == "gate":
+            if opts.unattended and info.get("action") not in UNATTENDED_EMITTABLE_GATES:
+                entry["status"] = "aborted"
+                entry["note"] = (
+                    f"gate '{info.get('action')}' has no unattended answer — aborting "
+                    "instead of waiting for a human (R15)"
+                )
+                _save_state(state)
+                if observe:
+                    _record_history(state, opts)
+                print(f"\n✗ {entry['note']}", file=sys.stderr, flush=True)
+                return EXIT_ABORT
             entry["status"] = "blocked_gate"
             entry["emitted"] = True
             entry["gate"] = info
-            state["gate"] = {"stage": name, "action": info.get("action")}
+            # ``phase`` tells the nightly wrapper which model tier answers a
+            # scoring gate ("screen"/"escalate" for vacancies, "screen"/"score"
+            # for companies); None on every other gate.
+            state["gate"] = {"stage": name, "action": info.get("action"), "phase": info.get("phase")}
             _save_state(state)
             if observe:
                 _record_history(state, opts)
             _emit_gate(name, info)
             return EXIT_GATE
+
+        if kind == "error_continue":
+            # The stage failed but must never cost what comes after it (the
+            # digest before publish, KTD5): record the error, keep going. The
+            # publish gate reads the error status and flags the run not clean.
+            entry["status"] = "error"
+            entry["note"] = info
+            entry["finished_at"] = _now()
+            state["cursor"] = idx + 1
+            state["gate"] = None
+            _save_state(state)
+            if observe:
+                _record_history(state, opts)
+            print(
+                f"\n✗ Stage '{name}' failed: {info} — continuing to the next stage",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
 
         if kind == "error":
             entry["status"] = "error"
@@ -2012,6 +2266,18 @@ def _print_summary(state: dict, opts: Opts) -> None:
     print("  • " + t("summary_verdicts", scored_unseen=scored_unseen, liked=liked))
     print("  • " + t("summary_publish", note=publish_note))
     print("  • " + t("summary_review_hint"))
+    # Unattended rollovers — the digest stage reads these from the run state.
+    carried = []
+    for name in ("company_scoring", "vacancy_scoring"):
+        n = _stage(state, name).get("carried_over")
+        if n:
+            what = "company(ies)" if name == "company_scoring" else "role(s)"
+            carried.append(f"{n} {what}")
+    if carried:
+        print("  • carried over to the next run (no progress): " + ", ".join(carried))
+    rolled = _stage(state, "learning_review").get("rolled_over")
+    if rolled:
+        print(f"  • learning review rolled over: {rolled} verdict(s) kept pending")
     # Report card (R5): every run ends with the per-stage verdict table, so "did
     # it work?" is answerable without reading logs. Warnings (R7) list underneath.
     print("  " + "-" * 66)
@@ -2210,6 +2476,16 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run every stage but never publish (safe for a git worktree / dry run).",
     )
+    p.add_argument(
+        "--unattended",
+        action="store_true",
+        help=(
+            "Answer every gate without a human (nightly runs): onboarding aborts, the "
+            "learning review rolls over unapplied, verdicts stay pending for the phone, "
+            "and a scoring gate with no progress since its last stop carries its roles "
+            "over to the next run instead of waiting."
+        ),
+    )
     return p
 
 
@@ -2243,6 +2519,7 @@ def main(argv: list[str] | None = None) -> int:
                 tier=args.tier,
                 full_rescore=args.full_rescore,
                 no_publish=args.no_publish,
+                unattended=args.unattended,
             )
             state = _new_state(opts)
             fresh_run = True
@@ -2285,6 +2562,7 @@ def main(argv: list[str] | None = None) -> int:
                 tier=args.tier,
                 full_rescore=args.full_rescore,
                 no_publish=args.no_publish,
+                unattended=args.unattended,
             )
             state = _new_state(opts)
             fresh_run = True

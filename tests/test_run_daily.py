@@ -49,6 +49,7 @@ def test_stage_order_is_the_documented_sequence(rd):
         "company_scoring",
         "vacancy_scoring",
         "verdicts",
+        "digest",
         "publish",
     ]
 
@@ -1386,3 +1387,641 @@ def test_fetch_source_counters_no_ttl_tag_when_boards_ran(rd):
         "boards": {"total": 2, "fetched": 2, "ttl_skipped": 0, "yielded": 1},
     }
     assert rd._fetch_source_counters(stats) == "career sites 3/3 · boards 1/2"
+
+
+# ---------------------------------------------------------------------------
+# 10. Unattended mode (KTD2) — every gate has an answer; a night run never
+#     waits for a human and never stalls twice at a phase with no progress.
+# ---------------------------------------------------------------------------
+
+
+def test_unattended_flag_is_frozen_in_the_checkpoint(rd):
+    args = rd._parser().parse_args(["--new", "--unattended"])
+    assert args.unattended is True
+    state = rd._new_state(rd.Opts(unattended=True))
+    assert state["options"]["unattended"] is True
+    assert rd._opts_from_state(state).unattended is True
+    # Default off, and an old checkpoint without the key reads as off.
+    assert rd._new_state(rd.Opts())["options"]["unattended"] is False
+    assert rd._opts_from_state({"options": {}}).unattended is False
+
+
+def test_unattended_is_flagged_as_ignored_on_resume(rd):
+    args = rd._parser().parse_args(["--resume", "--unattended"])
+    assert "--unattended" in rd._ignored_resume_flags(args)
+
+
+def test_resume_with_unattended_warns_and_keeps_checkpoint_value(rd, capsys):
+    """--resume --unattended after a --new WITHOUT the flag: the repeated flag is
+    warned as ignored and the checkpoint's value (off) wins."""
+    state = rd._new_state(rd.Opts())  # created without --unattended
+    rd._save_state(state)
+    rd.HANDLERS = {name: (lambda state, entry, opts: ("advance", "ok")) for name in rd.STAGE_ORDER}
+
+    code = rd.main(["--resume", "--unattended"])
+    assert code == rd.EXIT_DONE
+    out = capsys.readouterr().out
+    assert "--unattended" in out and "IGNORED" in out
+    assert rd._load_state()["options"]["unattended"] is False
+
+
+def test_unattended_onboarding_aborts_instead_of_gating(rd, monkeypatch):
+    """An empty company table at night means the wrong database — abort, never
+    wait for a human to onboard (R15)."""
+    monkeypatch.setattr(rd, "_company_count", lambda: 0)
+    opts = rd.Opts(unattended=True)
+    state = rd._new_state(opts)
+    state["first_run"] = True
+    kind, msg = rd._h_onboarding(state, rd._stage(state, "onboarding"), opts)
+    assert kind == "abort"
+    assert "wrong database" in msg.lower()
+
+
+def test_unattended_onboarding_abort_is_exit_20_with_reason_in_state(rd, monkeypatch):
+    monkeypatch.setattr(rd, "_company_count", lambda: 0)
+
+    def preflight(state, entry, opts):
+        state["first_run"] = True
+        return ("advance", "empty table")
+
+    rd.HANDLERS = dict(rd.HANDLERS)
+    rd.HANDLERS["validate_profile"] = lambda s, e, o: ("advance", "ok")
+    rd.HANDLERS["preflight"] = preflight
+
+    opts = rd.Opts(unattended=True)
+    state = rd._new_state(opts)
+    assert rd.drive(state, opts) == rd.EXIT_ABORT
+    assert rd.EXIT_ABORT == 20
+    entry = rd._stage(state, "onboarding")
+    assert entry["status"] == "aborted"
+    assert "wrong database" in entry["note"].lower()
+
+
+def test_unattended_drive_aborts_on_a_gate_with_no_answer(rd):
+    """R15: a gate that reaches drive() with no unattended answer aborts with
+    the reason in state instead of waiting forever."""
+
+    def advancer(s, e, o):
+        return ("advance", "ok")
+
+    def rogue_gate(s, e, o):
+        return ("gate", {"action": "verdicts", "instructions": "x", "payload_path": None})
+
+    rd.HANDLERS = {name: advancer for name in rd.STAGE_ORDER}
+    rd.HANDLERS["verdicts"] = rogue_gate
+    opts = rd.Opts(unattended=True)
+    state = rd._new_state(opts)
+    assert rd.drive(state, opts) == rd.EXIT_ABORT
+    entry = rd._stage(state, "verdicts")
+    assert entry["status"] == "aborted"
+    assert "no unattended answer" in entry["note"]
+
+
+def test_attended_drive_still_gates_on_the_same_payload(rd):
+    """Unattended off (default): the identical gate still stops the run."""
+
+    def advancer(s, e, o):
+        return ("advance", "ok")
+
+    def rogue_gate(s, e, o):
+        return ("gate", {"action": "verdicts", "instructions": "x", "payload_path": None})
+
+    rd.HANDLERS = {name: advancer for name in rd.STAGE_ORDER}
+    rd.HANDLERS["verdicts"] = rogue_gate
+    state = rd._new_state(rd.Opts())
+    assert rd.drive(state, rd.Opts()) == rd.EXIT_GATE
+
+
+def test_unattended_learning_review_rolls_over_without_applying(rd, monkeypatch):
+    """AE8: pending proposals advance unapplied; the rollover cursor is never
+    touched, so the same verdicts are still pending next run."""
+    _stub_learning(monkeypatch, has_content=True)
+    seeded = []
+    monkeypatch.setattr(sys.modules["learning"], "mark_reviewed", lambda **kw: seeded.append(kw))
+
+    opts = rd.Opts(unattended=True)
+    state = _live_state(rd)
+    entry = rd._stage(state, "learning_review")
+    kind, note = rd._h_learning_review(state, entry, opts)
+
+    assert kind == "advance"
+    assert entry["rolled_over"] == 4  # recorded for the digest stage
+    assert seeded == []  # cursor untouched -> proposals roll over, nothing applied
+    assert "roll" in note.lower()
+
+
+def test_unattended_verdicts_advance_and_record_the_count(rd, monkeypatch):
+    monkeypatch.setattr(rd, "_scored_unseen", lambda: 5)
+    opts = rd.Opts(unattended=True)
+    state = rd._new_state(opts)
+    entry = rd._stage(state, "verdicts")
+    kind, note = rd._h_verdicts(state, entry, opts)
+    assert kind == "advance"
+    assert entry["pending_verdicts"] == 5
+    assert "5" in note
+
+
+def test_attended_verdicts_still_gate(rd, monkeypatch):
+    monkeypatch.setattr(rd, "_scored_unseen", lambda: 5)
+    state = rd._new_state(rd.Opts())
+    kind, info = rd._h_verdicts(state, rd._stage(state, "verdicts"), rd.Opts())
+    assert kind == "gate"
+    assert info["action"] == "verdicts" and info["count"] == 5
+
+
+def test_unattended_scorer_command_carries_the_unattended_flag(rd, monkeypatch, tmp_path):
+    """The scorer loads oldest-unscored-first in unattended mode (U1), so
+    carried-over roles never sink under the next night's arrivals."""
+    import subprocess
+
+    _stub_two_pass(rd, monkeypatch, tmp_path)
+    seen = {}
+
+    def cap(cmd, opts):
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, "[]", "")
+
+    monkeypatch.setattr(rd, "_run_capture", cap)
+
+    opts = rd.Opts(unattended=True)
+    state = rd._new_state(opts)
+    rd._h_vacancy_scoring(state, rd._stage(state, "vacancy_scoring"), opts)
+    assert "--unattended" in seen["cmd"]
+
+    state = rd._new_state(rd.Opts())
+    rd._h_vacancy_scoring(state, rd._stage(state, "vacancy_scoring"), rd.Opts())
+    assert "--unattended" not in seen["cmd"]
+
+
+def test_unattended_vacancy_scoring_carries_over_after_no_progress(rd, monkeypatch, tmp_path):
+    """AE1: 30 roles, the headless session dies after 12 — a resume with
+    progress re-emits the gate; a resume with NO progress advances with
+    carried_over = 18 and the run reaches publish."""
+    import json as _json
+    import subprocess
+
+    _stub_two_pass(rd, monkeypatch, tmp_path, strong="opus", screen="opus")  # single pass
+    payloads = [_payload(f"v{i}") for i in range(30)]
+    monkeypatch.setattr(
+        rd,
+        "_run_capture",
+        lambda cmd, opts: subprocess.CompletedProcess(cmd, 0, _json.dumps(payloads), ""),
+    )
+    monkeypatch.setattr(rd, "_scored_unseen", lambda: 12)
+    monkeypatch.setattr(rd, "_run", lambda cmd, opts: 0)  # publish refresh
+
+    def advancer(s, e, o):
+        return ("advance", "ok")
+
+    handlers = {name: advancer for name in rd.STAGE_ORDER}
+    handlers["vacancy_scoring"] = rd._h_vacancy_scoring
+    handlers["verdicts"] = rd._h_verdicts
+    handlers["publish"] = rd._h_publish
+    rd.HANDLERS = handlers
+
+    opts = rd.Opts(unattended=True)
+    state = rd._new_state(opts)
+
+    # Night pass 1: the scoring gate emits for the headless session.
+    assert rd.drive(state, opts) == rd.EXIT_GATE
+    entry = rd._stage(state, "vacancy_scoring")
+    assert entry["single_pass"] is True  # Opus both models -> one gate only
+
+    # 12 saved -> progress -> the gate emits again for another attempt.
+    remaining18 = {f"v{i}" for i in range(12, 30)}
+    monkeypatch.setattr(rd, "_unscored_vacancy_ids", lambda ids: set(remaining18))
+    assert rd.drive(state, opts) == rd.EXIT_GATE
+
+    # Nothing new saved -> no progress -> carry over and finish the run.
+    assert rd.drive(state, opts) == rd.EXIT_DONE
+    assert entry["carried_over"] == 18
+    assert entry["status"] == "done"
+    assert rd._stage(state, "verdicts")["pending_verdicts"] == 12
+    assert rd._stage(state, "publish")["status"] == "done"
+    assert state["finished"] is True
+
+
+def test_unattended_two_pass_escalate_gate_still_emits_once(rd, monkeypatch, tmp_path):
+    """Two-model profile: keying on phase + progress (not entry['emitted'])
+    keeps the escalate phase alive — after the cheap screen saves every score,
+    the resume emits the escalate gate once before any advance."""
+    import json as _json
+    import subprocess
+
+    _stub_two_pass(rd, monkeypatch, tmp_path, strong="sonnet", screen="haiku", floor=40)
+    payloads = [_payload("v1"), _payload("v2")]
+    monkeypatch.setattr(
+        rd,
+        "_run_capture",
+        lambda cmd, opts: subprocess.CompletedProcess(cmd, 0, _json.dumps(payloads), ""),
+    )
+    monkeypatch.setattr(rd, "_reset_escalation_scores", lambda ids: None)
+    monkeypatch.setattr(rd, "_vacancy_scored_by", lambda ids: {})
+
+    opts = rd.Opts(unattended=True)
+    state = rd._new_state(opts)
+    entry = rd._stage(state, "vacancy_scoring")
+
+    kind, info = rd._h_vacancy_scoring(state, entry, opts)
+    assert kind == "gate"
+    assert "SCREEN pass" in info["instructions"]
+    entry["emitted"] = True
+
+    # Cheap scores all saved -> the escalate gate must still emit (once).
+    monkeypatch.setattr(rd, "_unscored_vacancy_ids", lambda ids: set())
+    monkeypatch.setattr(rd, "_vacancy_scores", lambda ids: {"v1": 80, "v2": 30})
+    kind, info = rd._h_vacancy_scoring(state, entry, opts)
+    assert kind == "gate"
+    assert "ESCALATION pass" in info["instructions"]
+    assert entry["phase"] == "escalate"
+
+    # Finalist scored -> advance with the two-pass report.
+    kind, info = rd._h_vacancy_scoring(state, entry, opts)
+    assert kind == "advance"
+    assert "escalated 1" in info
+
+
+def test_unattended_escalate_carries_over_when_stuck(rd, monkeypatch, tmp_path):
+    """An escalate resume with no progress carries the finalists over instead of
+    stalling the night."""
+    import json as _json
+    import subprocess
+
+    _stub_two_pass(rd, monkeypatch, tmp_path, strong="sonnet", screen="haiku", floor=40)
+    payloads = [_payload("v1"), _payload("v2")]
+    monkeypatch.setattr(
+        rd,
+        "_run_capture",
+        lambda cmd, opts: subprocess.CompletedProcess(cmd, 0, _json.dumps(payloads), ""),
+    )
+    monkeypatch.setattr(rd, "_reset_escalation_scores", lambda ids: None)
+    monkeypatch.setattr(rd, "_vacancy_scored_by", lambda ids: {})
+
+    opts = rd.Opts(unattended=True)
+    state = rd._new_state(opts)
+    entry = rd._stage(state, "vacancy_scoring")
+    rd._h_vacancy_scoring(state, entry, opts)  # emit screen
+    entry["emitted"] = True
+
+    monkeypatch.setattr(rd, "_unscored_vacancy_ids", lambda ids: set())
+    monkeypatch.setattr(rd, "_vacancy_scores", lambda ids: {"v1": 80, "v2": 30})
+    kind, _ = rd._h_vacancy_scoring(state, entry, opts)  # emit escalate (1 finalist)
+    assert kind == "gate"
+
+    # The session died: the finalist is still unscored -> no progress -> carry.
+    monkeypatch.setattr(rd, "_unscored_vacancy_ids", lambda ids: {"v1"})
+    kind, note = rd._h_vacancy_scoring(state, entry, opts)
+    assert kind == "advance"
+    assert entry["carried_over"] == 1
+    assert "carried over" in note
+
+
+def test_attended_scoring_gate_still_re_emits_without_progress(rd, monkeypatch, tmp_path):
+    """Unattended off: a resume with nothing new saved re-emits the gate (the
+    human is re-prompted), exactly as before."""
+    import json as _json
+    import subprocess
+
+    _stub_two_pass(rd, monkeypatch, tmp_path, strong="opus", screen="opus")
+    payloads = [_payload("v1"), _payload("v2")]
+    monkeypatch.setattr(
+        rd,
+        "_run_capture",
+        lambda cmd, opts: subprocess.CompletedProcess(cmd, 0, _json.dumps(payloads), ""),
+    )
+    state = rd._new_state(rd.Opts())
+    entry = rd._stage(state, "vacancy_scoring")
+    rd._h_vacancy_scoring(state, entry, rd.Opts())
+    entry["emitted"] = True
+
+    monkeypatch.setattr(rd, "_unscored_vacancy_ids", lambda ids: {"v1", "v2"})
+    for _ in range(2):  # no progress twice -> still a gate every time
+        kind, info = rd._h_vacancy_scoring(state, entry, rd.Opts())
+        assert kind == "gate"
+
+
+def test_screen_and_escalate_resumes_shrink_the_payload_file(rd, monkeypatch, tmp_path):
+    """#7: the unattended wrapper dispatches the WHOLE payload file, so every
+    scoring-gate re-emission must rewrite it to the still-unscored subset —
+    while the screen-complete totals and the escalate pick still see the full
+    screen set (preserved archive). The gates also carry the phase contract
+    the wrapper needs to pick a model tier."""
+    import json as _json
+    import subprocess
+
+    _stub_two_pass(rd, monkeypatch, tmp_path)
+    payloads = [_payload("v1"), _payload("v2"), _payload("v3")]
+    monkeypatch.setattr(
+        rd,
+        "_run_capture",
+        lambda cmd, opts: subprocess.CompletedProcess(cmd, 0, _json.dumps(payloads), ""),
+    )
+    monkeypatch.setattr(rd, "_reset_escalation_scores", lambda ids: None)
+    monkeypatch.setattr(rd, "_vacancy_scored_by", lambda ids: {})
+
+    state = rd._new_state(rd.Opts())
+    entry = rd._stage(state, "vacancy_scoring")
+    kind, info = rd._h_vacancy_scoring(state, entry, rd.Opts())
+    assert kind == "gate" and info["phase"] == "screen"
+    entry["emitted"] = True
+
+    # Screen resume with one role left: the file shrinks to that role.
+    monkeypatch.setattr(rd, "_unscored_vacancy_ids", lambda ids: {"v3"})
+    kind, info = rd._h_vacancy_scoring(state, entry, rd.Opts())
+    assert kind == "gate" and info["phase"] == "screen"
+    on_disk = _json.loads(rd.VAC_PAYLOAD_PATH.read_text(encoding="utf-8"))
+    assert [p["id"] for p in on_disk] == ["v3"]
+
+    # Screen complete: totals and the escalate pick use the FULL screen set,
+    # not the shrunken file — v1 (scored before the shrink) still escalates.
+    monkeypatch.setattr(rd, "_unscored_vacancy_ids", lambda ids: set())
+    monkeypatch.setattr(rd, "_vacancy_scores", lambda ids: {"v1": 80, "v2": 30, "v3": 45})
+    kind, info = rd._h_vacancy_scoring(state, entry, rd.Opts())
+    assert kind == "gate" and info["phase"] == "escalate"
+    assert entry["screen_counts"]["screened"] == 3
+    assert entry["screen_counts"]["escalated"] == 2
+
+    # Escalate resume with one finalist left: the file shrinks again.
+    monkeypatch.setattr(rd, "_unscored_vacancy_ids", lambda ids: {"v1"})
+    kind, info = rd._h_vacancy_scoring(state, entry, rd.Opts())
+    assert kind == "gate" and info["phase"] == "escalate"
+    on_disk = _json.loads(rd.VAC_PAYLOAD_PATH.read_text(encoding="utf-8"))
+    assert [p["id"] for p in on_disk] == ["v1"]
+
+
+def test_company_score_resume_shrinks_the_payload_file(rd, monkeypatch, tmp_path):
+    """#7 for the company gate: a re-emission rewrites the payload file to the
+    still-unscored companies, and the completion total still counts the stage's
+    target_ids (it survives the rewrite)."""
+    import json as _json
+
+    monkeypatch.setattr(rd, "CO_PAYLOAD_PATH", tmp_path / "co_payload.json")
+    rd.CO_PAYLOAD_PATH.write_text(_json.dumps([{"id": "a"}, {"id": "b"}]), encoding="utf-8")
+    monkeypatch.setattr(rd, "_unscored_company_ids", lambda ids: {"b"})
+
+    state = rd._new_state(rd.Opts())
+    entry = rd._stage(state, "company_scoring")
+    entry["emitted"] = True
+    entry["phase"] = "screened"
+    entry["target_ids"] = ["a", "b"]
+
+    kind, info = rd._h_company_scoring(state, entry, rd.Opts())
+    assert kind == "gate" and info["count"] == 1
+    assert info["phase"] == "score"
+    on_disk = _json.loads(rd.CO_PAYLOAD_PATH.read_text(encoding="utf-8"))
+    assert [p["id"] for p in on_disk] == ["b"]
+
+    monkeypatch.setattr(rd, "_unscored_company_ids", lambda ids: set())
+    kind, note = rd._h_company_scoring(state, entry, rd.Opts())
+    assert kind == "advance"
+    assert "2 scored" in note  # target_ids total, not the shrunken file
+
+
+def test_company_screen_gate_carries_the_phase_field(rd, monkeypatch, tmp_path):
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "k")
+    monkeypatch.setattr(rd, "_prefilter_junk_companies", lambda opts, state: None)
+    monkeypatch.setattr(
+        rd,
+        "_screen_candidates",
+        lambda opts: {
+            "total": 1,
+            "screened": 0,
+            "llm_ran": False,
+            "drops": 0,
+            "dup_drops": 0,
+            "llm_drops": 0,
+            "pending_count": 1,
+            "payload_path": str(tmp_path / "screen_payload.json"),
+        },
+    )
+    state = rd._new_state(rd.Opts())
+    kind, info = rd._h_company_scoring(state, rd._stage(state, "company_scoring"), rd.Opts())
+    assert kind == "gate" and info["action"] == "screen_companies"
+    assert info["phase"] == "screen"
+
+
+def test_drive_copies_the_gate_phase_into_state(rd):
+    def advancer(s, e, o):
+        return ("advance", "ok")
+
+    def gating(s, e, o):
+        return (
+            "gate",
+            {
+                "action": "score_vacancies",
+                "phase": "screen",
+                "instructions": "x",
+                "payload_path": None,
+            },
+        )
+
+    rd.HANDLERS = {name: advancer for name in rd.STAGE_ORDER}
+    rd.HANDLERS["vacancy_scoring"] = gating
+    state = rd._new_state(rd.Opts())
+    assert rd.drive(state, rd.Opts()) == rd.EXIT_GATE
+    assert state["gate"] == {
+        "stage": "vacancy_scoring",
+        "action": "score_vacancies",
+        "phase": "screen",
+    }
+
+
+def test_unattended_company_scoring_carries_over_without_progress(rd, monkeypatch, tmp_path):
+    import json as _json
+
+    monkeypatch.setattr(rd, "CO_PAYLOAD_PATH", tmp_path / "co_payload.json")
+    rd.CO_PAYLOAD_PATH.write_text(_json.dumps([{"id": "a"}, {"id": "b"}]), encoding="utf-8")
+    monkeypatch.setattr(rd, "_unscored_company_ids", lambda ids: {"a", "b"})
+
+    opts = rd.Opts(unattended=True)
+    state = rd._new_state(opts)
+    entry = rd._stage(state, "company_scoring")
+    entry["emitted"] = True
+    entry["phase"] = "screened"
+    entry["target_ids"] = ["a", "b"]
+
+    # First unattended visit at this gate: no baseline yet -> emit.
+    kind, info = rd._h_company_scoring(state, entry, opts)
+    assert kind == "gate"
+    assert info["action"] == "score_companies"
+
+    # Re-entry with no progress -> carry over, run continues.
+    kind, note = rd._h_company_scoring(state, entry, opts)
+    assert kind == "advance"
+    assert entry["carried_over"] == 2
+    assert "carried over" in note
+
+
+def test_unattended_company_scoring_re_emits_on_progress(rd, monkeypatch, tmp_path):
+    import json as _json
+
+    monkeypatch.setattr(rd, "CO_PAYLOAD_PATH", tmp_path / "co_payload.json")
+    rd.CO_PAYLOAD_PATH.write_text(_json.dumps([{"id": "a"}, {"id": "b"}]), encoding="utf-8")
+    monkeypatch.setattr(rd, "_unscored_company_ids", lambda ids: {"a", "b"})
+
+    opts = rd.Opts(unattended=True)
+    state = rd._new_state(opts)
+    entry = rd._stage(state, "company_scoring")
+    entry["emitted"] = True
+    entry["phase"] = "screened"
+    entry["target_ids"] = ["a", "b"]
+
+    kind, _ = rd._h_company_scoring(state, entry, opts)  # baseline 2
+    assert kind == "gate"
+
+    monkeypatch.setattr(rd, "_unscored_company_ids", lambda ids: {"b"})
+    kind, info = rd._h_company_scoring(state, entry, opts)  # 1 < 2 -> progress
+    assert kind == "gate"
+    assert info["count"] == 1
+
+    kind, note = rd._h_company_scoring(state, entry, opts)  # stuck at 1 -> carry
+    assert kind == "advance"
+    assert entry["carried_over"] == 1
+
+
+def test_unattended_company_scoring_without_firecrawl_still_skips(rd, monkeypatch):
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+    monkeypatch.setattr(rd, "_candidates_to_score", lambda: 2)
+    opts = rd.Opts(unattended=True)
+    state = rd._new_state(opts)
+    kind, note = rd._h_company_scoring(state, rd._stage(state, "company_scoring"), opts)
+    assert kind == "skip"
+    assert "FIRECRAWL_API_KEY" in note
+
+
+def test_summary_prints_carried_over_and_rolled_over_counts(rd, capsys):
+    state = rd._new_state(rd.Opts())
+    rd._stage(state, "vacancy_scoring")["carried_over"] = 18
+    rd._stage(state, "learning_review")["rolled_over"] = 4
+    rd._print_summary(state, rd.Opts())
+    out = capsys.readouterr().out
+    assert "carried over" in out and "18" in out
+    assert "rolled over" in out and "4" in out
+
+
+def test_summary_stays_silent_without_rollovers(rd, capsys):
+    rd._print_summary(rd._new_state(rd.Opts()), rd.Opts())
+    out = capsys.readouterr().out
+    assert "carried over" not in out
+    assert "rolled over" not in out
+
+
+# ---------------------------------------------------------------------------
+# U4: the digest stage — AUTO, between verdicts and publish (KTD5)
+# ---------------------------------------------------------------------------
+
+
+def test_digest_sits_between_verdicts_and_publish(rd):
+    order = rd.STAGE_ORDER
+    assert order.index("verdicts") + 1 == order.index("digest")
+    assert order.index("digest") + 1 == order.index("publish")
+
+
+def test_digest_skipped_without_telegram_env(rd, monkeypatch):
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    opts = rd.Opts(unattended=True)
+    state = rd._new_state(opts)
+    kind, note = rd._h_digest(state, rd._stage(state, "digest"), opts)
+    assert kind == "skip"
+    assert "TELEGRAM" in note
+
+
+def test_digest_attended_run_never_sends(rd, monkeypatch):
+    """Frozen desktop behavior: even with TELEGRAM_* set, an attended run skips
+    the send (the user's own scheduled `telegram_digest.py send` covers it) —
+    but still persists the counts contract for that later manual send."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "c")
+    ran = []
+    monkeypatch.setattr(rd, "_run", lambda cmd, opts: ran.append(cmd) or 0)
+    state = rd._new_state(rd.Opts())
+    kind, note = rd._h_digest(state, rd._stage(state, "digest"), rd.Opts())
+    assert kind == "skip"
+    assert "night-run" in note
+    assert ran == []  # telegram_digest.py send never invoked
+    assert rd._load_state()["counts"] == state["counts"]  # counts still persisted
+
+
+def test_digest_skipped_on_no_publish(rd, monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "c")
+    state = rd._new_state(rd.Opts(no_publish=True))
+    kind, note = rd._h_digest(state, rd._stage(state, "digest"), rd.Opts(no_publish=True))
+    assert kind == "skip"
+    assert "no-publish" in note
+
+
+def test_digest_writes_counts_and_sends(rd, monkeypatch):
+    """The stage persists the counts contract the U3 digest reads, then runs
+    telegram_digest.py send as a subprocess."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "c")
+    rd.FETCH_STATS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    rd.FETCH_STATS_PATH.write_text('{"total_new": 7}', encoding="utf-8")
+    ran = {}
+
+    def fake_run(cmd, opts):
+        ran["cmd"] = cmd
+        return 0
+
+    monkeypatch.setattr(rd, "_run", fake_run)
+    opts = rd.Opts(unattended=True)
+    state = rd._new_state(opts)
+    rd._stage(state, "vacancy_scoring")["screen_counts"] = {"screened": 3}
+    kind, note = rd._h_digest(state, rd._stage(state, "digest"), opts)
+    assert kind == "advance"
+    assert "digest" in note
+    assert any("telegram_digest.py" in str(c) for c in ran["cmd"])
+    assert "send" in ran["cmd"]
+    assert state["counts"] == {"new_vacancies": 7, "scored": 3}
+    # The counts reached the checkpoint on disk BEFORE the send subprocess read it.
+    on_disk = rd._load_state()
+    assert on_disk["counts"] == {"new_vacancies": 7, "scored": 3}
+
+
+def test_digest_failure_marks_error_but_run_still_publishes(rd, monkeypatch):
+    """KTD5: a digest crash can never cost the rest of the run — the stage is
+    marked error, the run continues to publish and finishes."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "c")
+    seen = []
+
+    def advancer(name):
+        def h(state, entry, opts):
+            seen.append(name)
+            return ("advance", "ok")
+
+        return h
+
+    rd.HANDLERS = {name: advancer(name) for name in rd.STAGE_ORDER}
+    monkeypatch.setattr(rd, "_run", lambda cmd, opts: 1)  # digest send exits 1
+    rd.HANDLERS["digest"] = rd._h_digest
+    opts = rd.Opts(unattended=True)  # the send only happens on a night run
+    state = rd._new_state(opts)
+    code = rd.drive(state, opts)
+    assert code == rd.EXIT_DONE
+    assert seen[-1] == "publish"  # publish still ran after the digest error
+    assert rd._stage(state, "digest")["status"] == "error"
+    assert rd._stage(state, "publish")["status"] == "done"
+    assert state["finished"] is True
+
+
+def test_digest_error_dirties_the_publish_gate(rd):
+    state = rd._new_state(rd.Opts())
+    rd._stage(state, "digest")["status"] = "error"
+    clean, reasons = rd.check_publish_gate(state, fetch_stats={})
+    assert clean is False
+    assert any("digest" in r for r in reasons)
+
+
+def test_pre_digest_checkpoint_still_resumes(rd):
+    """A checkpoint written before the digest stage existed lacks its stage
+    entry — _stage() creates it lazily instead of raising KeyError."""
+    state = rd._new_state(rd.Opts())
+    state["stages"] = [s for s in state["stages"] if s["name"] != "digest"]
+    entry = rd._stage(state, "digest")
+    assert entry["status"] == "pending"
+    assert any(s["name"] == "digest" for s in state["stages"])
+    with pytest.raises(KeyError):
+        rd._stage(state, "never_a_stage")
