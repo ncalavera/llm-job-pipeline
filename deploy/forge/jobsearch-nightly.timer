@@ -1,0 +1,10 @@
+[Unit]
+Description=Start the nightly job-pipeline run at 22:00 UTC (02:00 Tbilisi)
+
+[Timer]
+OnCalendar=*-*-* 22:00:00 UTC
+# A night the server was down runs at the next boot instead of being lost.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

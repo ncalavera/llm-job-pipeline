@@ -192,6 +192,17 @@ def _claude_env(firecrawl: bool) -> dict:
     env = {k: os.environ[k] for k in _CHILD_ENV_ALLOWLIST if os.environ.get(k)}
     if firecrawl and os.environ.get("FIRECRAWL_API_KEY"):
         env["FIRECRAWL_API_KEY"] = os.environ["FIRECRAWL_API_KEY"]
+    # Under systemd the token arrives as a credential FILE (LoadCredential=,
+    # KTD7 — `systemctl show` would reveal an Environment= value). It is read
+    # here and exported only into the Claude child, never into our own env.
+    cred_dir = os.environ.get("CREDENTIALS_DIRECTORY")
+    if cred_dir and "CLAUDE_CODE_OAUTH_TOKEN" not in env:
+        try:
+            token = (Path(cred_dir) / "claude-token").read_text(encoding="utf-8").strip()
+            if token:
+                env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+        except OSError:
+            pass
     return env
 
 

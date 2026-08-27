@@ -370,6 +370,22 @@ def test_claude_env_is_scrubbed_of_telegram_and_firecrawl_on_vacancy_gate(nr, mo
     assert "PATH" in env and "HOME" in env
 
 
+def test_claude_env_reads_the_token_from_the_systemd_credentials_dir(nr, monkeypatch, tmp_path):
+    cred_dir = tmp_path / "creds"
+    cred_dir.mkdir()
+    (cred_dir / "claude-token").write_text("sk-night-token\n", encoding="utf-8")
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(cred_dir))
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    nr.set_steps(
+        [{"exit": 10, "action": "score_vacancies", "payload": _vac_payload(1)}, {"exit": 0}]
+    )
+    assert nr.mod.run_night() == 0
+    env = json.loads((nr.night_dir() / "claude_env-score_vacancies.json").read_text())
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-night-token"
+    # The token stays out of the wrapper's own environment (KTD7).
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in os.environ
+
+
 def test_ae8_learning_gate_is_left_to_the_driver_and_scoring_still_runs(nr):
     nr.set_steps(
         [
