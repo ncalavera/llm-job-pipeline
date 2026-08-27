@@ -103,3 +103,63 @@ VALID_REPORT_KINDS: frozenset[str] = frozenset(REPORT_KINDS)
 #: 'archived' (already out of view — deleting it would drop the tombstone that
 #: keeps it from being re-fetched).
 PROTECTED_STATUSES: frozenset[str] = DECIDED_STATUSES | frozenset({"archived"})
+
+#: Where a networking contact stands. Ordered as the funnel runs, so the UI can
+#: lay the counts out in this order without a second list to keep in step.
+#: Closed, because this vocabulary IS the funnel: a typo would drop someone out
+#: of every count silently. The SQL CHECK on ``contact.status`` (migration 0024)
+#: is the other half of the contract, and the dashboard's copy is the third.
+CONTACT_STATUSES: tuple[str, ...] = (
+    "planned",
+    "contacted",
+    "replied",
+    "met",
+    "declined",
+    "stale",
+)
+
+#: Membership form of CONTACT_STATUSES — what validators check against.
+VALID_CONTACT_STATUSES: frozenset[str] = frozenset(CONTACT_STATUSES)
+
+#: Contacts who have not been written to yet — the queue the tab exists to
+#: work through.
+CONTACT_PENDING_STATUSES: frozenset[str] = frozenset({"planned"})
+
+#: Sent, and the answer has not come. These are the rows that go stale if
+#: nothing happens, which is the one thing a networking list gets wrong.
+CONTACT_WAITING_STATUSES: frozenset[str] = frozenset({"contacted"})
+
+#: The conversation happened. Counted together because "they wrote back" and
+#: "we spoke" are both the outcome the list is for.
+CONTACT_ENGAGED_STATUSES: frozenset[str] = frozenset({"replied", "met"})
+
+#: Which list a contact came from. Deliberately NOT a SQL CHECK: the groups are
+#: working sets that come and go with each sweep, and a constraint would turn
+#: "I made a new list today" into a migration. This tuple is what the UI offers
+#: as filter buttons; an unknown group still stores and still shows.
+CONTACT_GROUPS: tuple[str, ...] = (
+    "ea-russian",
+    "ea-georgia",
+    "ea-turkey",
+    "ea-forum-open",
+    "network-2026-07",
+    "yandex-referees",
+    "other",
+)
+
+#: The channels a contact can be reached on, in the order the UI shows them:
+#: EA-native first, then the general networks, then the direct ones.
+CONTACT_CHANNELS: tuple[str, ...] = (
+    "ea_forum",
+    "linkedin",
+    "telegram",
+    "x",
+    "github",
+    "site",
+    "email",
+    "calendly",
+)
+
+#: Membership form of CONTACT_CHANNELS — what the importer filters against, so
+#: an unknown CSV column can never become a channel nothing knows how to render.
+VALID_CONTACT_CHANNELS: frozenset[str] = frozenset(CONTACT_CHANNELS)
