@@ -19,6 +19,7 @@ import {
   safeUrl,
   renderLocationChips,
   mdToHtml,
+  pluralForm,
   qualityBand,
   qualityClass,
   tierClass,
@@ -461,4 +462,41 @@ test("resolveVacancyCompany never matches on org/name text alone (the bug it rep
   const companies = [{ company_id: "1", name: "Acme", slug: "acme-old" }];
   const g = { org: "Acme", company_id: "2" };
   assert.equal(resolveVacancyCompany(g, companies), null);
+});
+
+
+// ---------------------------------------------------------------------------
+// pluralForm — the last digit decides, not the size of the number.
+// ---------------------------------------------------------------------------
+
+test("pluralForm picks the singular form for 1 and for anything ending in 1", () => {
+  for (const n of [1, 21, 31, 101, 1001]) {
+    assert.equal(pluralForm(n), "one", `${n} should take the "one" form`);
+  }
+});
+
+test("pluralForm picks the small-plural form for 2-4 and their echoes", () => {
+  for (const n of [2, 3, 4, 22, 33, 44, 104]) {
+    assert.equal(pluralForm(n), "few", `${n} should take the "few" form`);
+  }
+});
+
+test("pluralForm picks the big-plural form for 5-20 and for zero", () => {
+  for (const n of [0, 5, 9, 10, 20, 25, 100]) {
+    assert.equal(pluralForm(n), "many", `${n} should take the "many" form`);
+  }
+});
+
+test("pluralForm treats the 11-14 teens as the big plural, not as their last digit", () => {
+  // The exception that a naive last-digit rule gets wrong: 11 ends in 1 but is
+  // not singular, and 12-14 end in 2-4 but are not the small plural.
+  for (const n of [11, 12, 13, 14, 111, 112, 113, 114]) {
+    assert.equal(pluralForm(n), "many", `${n} should take the "many" form`);
+  }
+});
+
+test("pluralForm never throws on junk", () => {
+  for (const n of [null, undefined, NaN, "x", 1.5, -1]) {
+    assert.ok(["one", "few", "many"].includes(pluralForm(n)));
+  }
 });

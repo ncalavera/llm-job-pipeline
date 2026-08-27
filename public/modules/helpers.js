@@ -46,6 +46,32 @@ export function safeUrl(url) {
 }
 
 // ---------------------------------------------------------------------------
+// Plurals
+// ---------------------------------------------------------------------------
+
+/**
+ * Which plural form a count takes: "one", "few" or "many".
+ *
+ * English needs two forms and could pick them with `n === 1`. Several Slavic
+ * languages need three, and the boundary is not the size of the number but its
+ * last digit: one form for 1, 21, 31; a second for 2-4, 22-24; a third for
+ * 5-20 and for anything ending in 0. A two-form rule gets the majority of
+ * on-screen counts wrong in those languages.
+ *
+ * Callers translate `<base>_one` / `_few` / `_many`. English simply gives the
+ * same word to "few" and "many", so it costs nothing there.
+ */
+export function pluralForm(n) {
+  const abs = Math.abs(Number(n) || 0);
+  if (!Number.isInteger(abs)) return "many";
+  const mod10 = abs % 10;
+  const mod100 = abs % 100;
+  if (mod10 === 1 && mod100 !== 11) return "one";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "few";
+  return "many";
+}
+
+// ---------------------------------------------------------------------------
 // Time formatting
 // ---------------------------------------------------------------------------
 
