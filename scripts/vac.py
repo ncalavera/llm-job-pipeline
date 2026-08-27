@@ -16,6 +16,12 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+# Imported up here, above build_parser, because the parser itself needs the
+# channel list to generate one flag per channel — and `vac --help` builds the
+# parser BEFORE the heavy imports below, to print usage without touching the
+# database or the profile. statuses.py is pure constants, so it costs nothing.
+from statuses import CONTACT_CHANNELS  # noqa: E402
+
 
 def build_parser(handlers: dict | None = None) -> argparse.ArgumentParser:
     """Construct the CLI parser. Defined before the heavy project imports so
@@ -114,6 +120,65 @@ def build_parser(handlers: dict | None = None) -> argparse.ArgumentParser:
     if "report" in h:
         p_report.set_defaults(func=h["report"])
 
+    p_contact = sub.add_parser(
+        "contact",
+        help="People to reach out to (the Networking tab on the dashboard).",
+    )
+    contact_sub = p_contact.add_subparsers(dest="contact_cmd", required=True)
+
+    p_contact_import = contact_sub.add_parser(
+        "import", help="Import a sweep CSV of people (re-run to update them)."
+    )
+    p_contact_import.add_argument("path", help="Path to the .csv file.")
+    p_contact_import.add_argument(
+        "--group",
+        default="other",
+        help="Which list these people came from, e.g. ea-georgia. Used when the "
+        "CSV has no group column. Default: other.",
+    )
+    p_contact_import.add_argument(
+        "--source",
+        help="What to record as the source of these rows. Default: the CSV path.",
+    )
+    p_contact_import.add_argument(
+        "--derive-region",
+        dest="derive_region",
+        action="store_true",
+        help="Read the regional list off each person's city and org "
+        "(ea-georgia / ea-turkey), falling back to --group.",
+    )
+
+    p_contact_add = contact_sub.add_parser("add", help="Add or edit one person.")
+    p_contact_add.add_argument("--name", required=True, help="Their name.")
+    p_contact_add.add_argument("--group", default="other", help="Which list they belong to.")
+    p_contact_add.add_argument("--name-local", dest="name_local", help="Name as they write it.")
+    p_contact_add.add_argument("--city", help="Where they are.")
+    p_contact_add.add_argument("--org", help="Where they work.")
+    p_contact_add.add_argument("--role", help="What they do there.")
+    p_contact_add.add_argument("--why", dest="why_matters", help="Why this person, in one line.")
+    p_contact_add.add_argument(
+        "--status",
+        default="planned",
+        help="planned / contacted / replied / met / declined / stale. Default: planned.",
+    )
+    p_contact_add.add_argument("--last-active", dest="last_active", help="Their last activity.")
+    p_contact_add.add_argument("--opener", help="The first line to send them.")
+    p_contact_add.add_argument("--notes", help="Anything else worth keeping.")
+    p_contact_add.add_argument("--source", dest="source_path", help="Where this came from.")
+    for channel in CONTACT_CHANNELS:
+        p_contact_add.add_argument(
+            f"--{channel.replace('_', '-')}",
+            dest=f"ch_{channel}",
+            help=f"Their {channel.replace('_', ' ')}.",
+        )
+
+    p_contact_list = contact_sub.add_parser("list", help="List people, newest activity first.")
+    p_contact_list.add_argument("--status", help="Filter: planned / contacted / replied / …")
+    p_contact_list.add_argument("--group", help="Filter by list, e.g. ea-georgia.")
+
+    if "contact" in h:
+        p_contact.set_defaults(func=h["contact"])
+
     p_co = sub.add_parser("companies", help="List companies.")
     p_co.add_argument("--status", help="Filter by status: active / candidate / inactive.")
     p_co.add_argument("--limit", type=int, default=50)
@@ -149,7 +214,12 @@ from database_supabase import VALID_STATUSES  # noqa: E402
 
 # Same rule for the `kind` vocabulary: read it, never retype it. The SQL CHECK
 # on vacancy.kind (migration 0022) is the other half of the contract.
-from statuses import VALID_KINDS, VALID_REPORT_KINDS  # noqa: E402
+from statuses import (  # noqa: E402
+    CONTACT_STATUSES,
+    VALID_CONTACT_STATUSES,
+    VALID_KINDS,
+    VALID_REPORT_KINDS,
+)
 
 GEO_BUCKETS = {"uk", "germany", "europe", "us", "cis", "other", "unknown"}
 
@@ -661,6 +731,141 @@ def cmd_companies(args):
     print(f"Total: {len(rows)}")
 
 
+def cmd_contact(args):
+    """Dispatch `vac contact <import|add|list>`."""
+    import contacts as contacts_mod
+
+    if not contacts_mod.table_ready():
+        print("This database has no `contact` table yet — networking needs migration 0024.")
+        print("  Run it first: python3 scripts/migrate.py")
+        sys.exit(1)
+
+    if args.contact_cmd == "import":
+        return _contact_import(args, contacts_mod)
+    if args.contact_cmd == "add":
+        return _contact_add(args, contacts_mod)
+    return _contact_list(args, contacts_mod)
+
+
+def _contact_import(args, contacts_mod):
+    """Import a sweep CSV of people.
+
+    Keyed on (name, group), so re-running on a corrected file UPDATES those
+    people rather than forking a second copy of the list — the same rule
+    `vac add` and `vac report add` use.
+    """
+    path = Path(args.path)
+    if not path.exists():
+        print(f"No such file: {path}")
+        sys.exit(1)
+
+    try:
+        result = contacts_mod.import_csv(
+            path,
+            group=args.group,
+            source_path=args.source,
+            derive_region=args.derive_region,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        print(str(exc))
+        sys.exit(1)
+
+    get_conn().commit()
+
+    group = contacts_mod.normalise_group(args.group)
+    parts = [f"{result['added']} added", f"{result['updated']} updated"]
+    if result["skipped"]:
+        # Named rather than silent: a skipped row is usually a blank line, but
+        # it can be a row whose name column was empty by mistake.
+        parts.append(f"{result['skipped']} skipped (no name)")
+    print(f"ok: {path.name} -> [{group}] " + ", ".join(parts))
+
+
+def _contact_add(args, contacts_mod):
+    """Add or edit one person by hand."""
+    if args.status not in VALID_CONTACT_STATUSES:
+        print(
+            f"Invalid status: {args.status}. "
+            f"Allowed: {', '.join(sorted(VALID_CONTACT_STATUSES))}"
+        )
+        sys.exit(1)
+
+    name = (args.name or "").strip()
+    if not name:
+        print("--name cannot be blank.")
+        sys.exit(1)
+
+    channels = {}
+    for channel in CONTACT_CHANNELS:
+        value = getattr(args, f"ch_{channel}", None)
+        if value and value.strip():
+            channels[channel] = value.strip()
+
+    contact = {
+        "name": name,
+        "name_local": args.name_local or "",
+        "city": args.city or "",
+        "org": args.org or "",
+        "role": args.role or "",
+        "why_matters": args.why_matters or "",
+        "channels": channels,
+        "group": args.group,
+        "status": args.status,
+        "last_active": args.last_active or "",
+        "opener": args.opener or "",
+        "notes": args.notes or "",
+        "source_path": args.source_path or "",
+    }
+
+    before = {(c["name"], c["group"]) for c in contacts_mod.list_contacts()}
+    group = contacts_mod.normalise_group(args.group)
+    contacts_mod.upsert_contact(contact)
+    get_conn().commit()
+
+    verb = "updated" if (name, group) in before else "stored"
+    where = f" at {args.org}" if args.org else ""
+    reach = ", ".join(sorted(channels)) if channels else "no channel on file"
+    print(f"ok: {verb} {name}{where} [{group}] -> {args.status}")
+    print(f"    {reach}   (re-run with the same name and group to edit)")
+
+
+def _contact_list(args, contacts_mod):
+    rows = contacts_mod.list_contacts(status=args.status, group=args.group)
+    if not rows:
+        which = " matching that filter" if (args.status or args.group) else ""
+        print(f"No contacts{which}.")
+        print("  Import a list: python3 scripts/vac.py contact import path/to/people.csv")
+        return
+
+    width = _term_width()
+    name_w = 24
+    status_w = 10
+    group_w = 16
+    org_w = max(16, width - name_w - status_w - group_w - 6)
+
+    print(
+        _ansi(
+            "1",
+            f"{'Name':<{name_w}} {'Org':<{org_w}} {'Group':<{group_w}} {'Status':<{status_w}}",
+        )
+    )
+    print("\u2500" * min(width, name_w + org_w + group_w + status_w + 3))
+    for c in rows:
+        print(
+            f"{(c['name'] or '')[:name_w]:<{name_w}} "
+            f"{(c['org'] or '\u2014')[:org_w]:<{org_w}} "
+            f"{(c['group'] or '')[:group_w]:<{group_w}} "
+            f"{(c['status'] or ''):<{status_w}}"
+        )
+
+    counts = contacts_mod.count_by_status(rows)
+    # Every status, including the zeroes: this list is a queue, and "0 replied"
+    # is the number that says a sweep has not paid off yet.
+    summary = " \u00b7 ".join(f"{counts[s]} {s}" for s in CONTACT_STATUSES)
+    print()
+    print(f"Total: {len(rows)}  \u2014  {summary}")
+
+
 def main():
     parser = build_parser(
         {
@@ -670,6 +875,7 @@ def main():
             "add": cmd_add,
             "open": cmd_open,
             "report": cmd_report,
+            "contact": cmd_contact,
             "companies": cmd_companies,
         }
     )
