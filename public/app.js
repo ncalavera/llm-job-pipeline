@@ -61,6 +61,12 @@ import {
   renderProfileForSlug,
 } from "./modules/companies.js";
 import { renderPipeline } from "./modules/pipeline.js";
+import {
+  renderApplicationsTable,
+  buildTriageToggle,
+  readTriageView,
+  writeTriageView,
+} from "./modules/applications.js";
 import { renderToday, todayAction, openTodayRow } from "./modules/today.js";
 import { initStats, renderStats } from "./modules/stats.js";
 import { initArchive, renderArchive } from "./modules/archive.js";
@@ -290,6 +296,49 @@ on("statusChanged", ({ status }) => {
   scheduleRender();
 });
 
+// The Triage tab has two views of one dataset. This is the only place that
+// decides which one is on screen: the toggle writes the choice, this reads it,
+// and each view renders into its own container while the other stays empty.
+// Keeping the dispatch here (not inside either view) means neither module has
+// to know the other exists — pipeline.js cannot even be imported under the
+// test runner.
+function renderTriageSection() {
+  const store = typeof localStorage === "undefined" ? null : localStorage;
+  const view = readTriageView(store);
+
+  const toggleEl = document.getElementById("triageViewToggle");
+  if (toggleEl) {
+    toggleEl.innerHTML = buildTriageToggle(view, T);
+    toggleEl.querySelectorAll("[data-triage-view]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        writeTriageView(store, btn.getAttribute("data-triage-view"));
+        renderTriageSection();
+      });
+    });
+  }
+
+  const boardEl = document.getElementById("pipelineBoard");
+  const tableEl = document.getElementById("applicationsTable");
+  // The funnel strip belongs to the board — pipeline.js fills it. Left visible
+  // in the table view it paints as an empty sheet-coloured bar above the
+  // table's own count strip, which reads as a broken element.
+  const funnelEl = document.getElementById("triageFunnel");
+  if (funnelEl) funnelEl.hidden = view !== "board";
+  if (boardEl) boardEl.hidden = view !== "board";
+  if (tableEl) tableEl.hidden = view !== "table";
+
+  if (view === "table") {
+    // Blank the board's DOM as well as hiding it: its SortableJS instances hold
+    // listeners on those nodes, and leaving a hidden board mounted keeps them
+    // alive across every re-render of the table.
+    if (boardEl) boardEl.innerHTML = "";
+    renderApplicationsTable();
+  } else {
+    if (tableEl) tableEl.innerHTML = "";
+    renderPipeline();
+  }
+}
+
 on("render", () => {
   updateBasketCounts();
   updateNavCounts();
@@ -297,7 +346,7 @@ on("render", () => {
   renderCatalog();
   if (state.currentMode === "today") renderToday();
   if (state.currentMode === "companies") renderCompanies();
-  if (state.currentMode === "pipeline") renderPipeline();
+  if (state.currentMode === "pipeline") renderTriageSection();
   if (state.currentMode === "stats") renderStats();
   if (state.currentMode === "settings") renderSettings();
   if (state.currentMode === "boards") renderBoards();
@@ -636,7 +685,7 @@ function switchMode(mode) {
   } else if (mode === "companies") {
     initCompanies();
   } else if (mode === "pipeline") {
-    renderPipeline();
+    renderTriageSection();
   } else if (mode === "stats") {
     initStats();
   } else if (mode === "archive") {

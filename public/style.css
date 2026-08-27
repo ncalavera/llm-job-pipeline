@@ -4684,3 +4684,206 @@ body::after {
     padding-bottom: 4px;
   }
 }
+
+/* ===========================================================================
+   Applications table — the Triage tab's second view.
+
+   Same sky material and the same row-hover / focus-ring language as the
+   Companies table (.company-table) and the Archive list, so the two Triage
+   views read as one tab rather than two products. Nine columns is wider than
+   a phone, so the table scrolls horizontally inside its OWN container
+   (.apps-table-scroll) and the page body never does.
+   =========================================================================== */
+
+/* The Board|Table switch swaps which view is mounted by setting `hidden` on
+   the other one. The HTML `hidden` attribute is only a UA rule of
+   `display: none`, and .triage-funnel / .pipeline-board both set an explicit
+   display of their own — which wins on specificity, so the "hidden" board
+   stayed on screen as an empty sheet-coloured bar above the table. This is
+   the override that makes hidden mean hidden here. */
+#pipelineSection > [hidden] {
+  display: none !important;
+}
+
+.triage-view-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  margin: 0 0 14px;
+  background: var(--sky-sheet);
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 0 0 1px var(--sky-hairline);
+}
+
+.triage-view-btn {
+  padding: 6px 16px;
+  min-height: 32px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--sky-text-secondary);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.triage-view-btn:hover {
+  color: var(--sky-text);
+}
+.triage-view-btn.is-active {
+  background: var(--card);
+  color: var(--cobalt);
+  box-shadow: 0 1px 3px rgba(58, 56, 51, 0.12);
+}
+.triage-view-btn:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+}
+
+/* The count strip: one plain-word line, no tiles. Every number is followed by
+   the word for what it counts, so nothing on it needs a legend. */
+.apps-count-strip {
+  margin: 0 0 10px;
+  font-size: var(--text-sm);
+  color: var(--sky-text-secondary);
+}
+
+.apps-table-scroll {
+  overflow-x: auto;
+}
+
+.apps-table {
+  width: 100%;
+  min-width: 1040px;
+  background: var(--sky-sheet);
+  border-radius: var(--radius-sheet);
+  box-shadow:
+    inset 0 0 0 1px var(--sky-hairline),
+    0 1px 3px rgba(58, 56, 51, 0.05);
+  border-collapse: collapse;
+  table-layout: fixed;
+  overflow: hidden;
+}
+
+.apps-table th {
+  padding: 12px 12px 9px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sky-text-faint);
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* Fixed layout, so the widths are the design. Dates and the waiting count are
+   short and never wrap; What and Next step get the room. */
+/* Sent on */
+.apps-table th:nth-child(1) {
+  width: 7%;
+}
+/* Organisation */
+.apps-table th:nth-child(2) {
+  width: 17%;
+}
+/* What */
+.apps-table th:nth-child(3) {
+  width: 20%;
+}
+/* Kind */
+.apps-table th:nth-child(4) {
+  width: 9%;
+}
+/* Stage */
+.apps-table th:nth-child(5) {
+  width: 10%;
+}
+/* Stage since */
+.apps-table th:nth-child(6) {
+  width: 8%;
+}
+/* Waiting */
+.apps-table th:nth-child(7) {
+  width: 6%;
+}
+/* Next step */
+.apps-table th:nth-child(8) {
+  width: 16%;
+}
+/* Link */
+.apps-table th:nth-child(9) {
+  width: 7%;
+}
+
+.apps-row {
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.apps-row:hover {
+  background: var(--sky-row-hover);
+}
+.apps-row:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: -2px;
+}
+
+.apps-cell {
+  padding: 11px 12px;
+  font-size: var(--text-sm);
+  color: var(--sky-text);
+  border-top: 1px solid var(--sky-hairline);
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.apps-cell-org,
+.apps-cell-what {
+  font-weight: 600;
+}
+.apps-cell-what {
+  color: var(--sky-text);
+}
+
+.apps-cell-date,
+.apps-cell-kind,
+.apps-cell-waiting,
+.apps-cell-next {
+  color: var(--sky-text-secondary);
+}
+
+.apps-cell-waiting {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A send date the database never recorded, standing in as the date the stage
+   last changed. Marked so an estimate never passes for a record; the cell's
+   title says which it is. */
+.apps-cell-date--fallback {
+  color: var(--sky-text-tertiary);
+  font-style: italic;
+}
+
+/* Same dot, same token, as the board column this status belongs to — the
+   colour is read from TRIAGE_COLUMNS, not re-declared here. */
+.apps-stage-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 7px;
+  border-radius: 50%;
+  vertical-align: baseline;
+}
+
+.apps-cell-link a {
+  color: var(--cobalt);
+  text-decoration: none;
+  font-weight: 600;
+}
+.apps-cell-link a:hover {
+  text-decoration: underline;
+}

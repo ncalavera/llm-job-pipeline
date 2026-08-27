@@ -700,8 +700,14 @@
            section duplicated this with 0 real data and was deleted). -->
           <div class="pipeline-section" id="pipelineSection">
             <div class="triage-funnel" id="triageFunnel"></div>
+            <!-- Board | Table. Two views of the same data: the board answers
+                 "where is each application", the table answers "what have I
+                 sent, and what is waiting on whom". The choice is remembered
+                 (applications.js, localStorage). -->
+            <div id="triageViewToggle"></div>
             <div class="triage-board-controls" id="triageBoardControls"></div>
             <div class="pipeline-board" id="pipelineBoard"></div>
+            <div class="applications-section" id="applicationsTable"></div>
           </div>
           <!-- /pipeline-section -->
 
