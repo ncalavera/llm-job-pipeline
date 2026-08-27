@@ -1,16 +1,19 @@
 ---
-description: Headless nightly scoring session. Invoked by scripts/nightly_run.py as `/jobs-night <gate> <night_dir>` — one session per scoring gate. Reads payload files from <night_dir>/score_in/, fans them out to night-scorer subagents (file-in/file-out), saves after every wave of five, then resumes the driver exactly once. Never asks a question; never writes a verdict.
+description: Headless nightly scoring session. Invoked by scripts/nightly_run.py as `/jobs-night <gate> <night_dir> <phase>` — one session per scoring gate. Reads payload files from <night_dir>/score_in/, fans them out to night-scorer subagents (file-in/file-out), saves after every wave of five, then stops. The wrapper resumes the driver; the session never runs it. Never asks a question; never writes a verdict.
 ---
 
 # /jobs-night — one scoring gate, unattended
 
-Arguments: `$ARGUMENTS` = `<gate> <night_dir>` where `<gate>` is one of
-`screen_companies | score_companies | score_vacancies` and `<night_dir>` is
-this night's private directory (`vacancies/nightly/<date>/`).
+Arguments: `$ARGUMENTS` = `<gate> <night_dir> <phase>` where `<gate>` is one of
+`screen_companies | score_companies | score_vacancies`, `<night_dir>` is
+this night's private directory (`vacancies/nightly/<date>/`), and `<phase>`
+names the pass inside the gate (`screen | escalate` for `score_vacancies`,
+`screen` for `screen_companies`, `score` for `score_companies`).
 
 This is the NIGHT variant of the `/jobs-new` gate protocol. The pipeline
 orchestration already ran in `scripts/run_daily.py --unattended`; your only job
-is the judgment for ONE gate, then one `--resume`. Everything below overrides
+is the judgment for ONE gate. The wrapper that launched you resumes the driver
+after you stop — you never run the driver yourself. Everything below overrides
 the interactive habits of `/jobs-new`.
 
 ## Overrides — read first, they are absolute
@@ -18,8 +21,14 @@ the interactive habits of `/jobs-new`.
 1. **Never ask a question.** There is no human. If something is ambiguous,
    take the safe direction (skip the item, record it failed in the log) and
    keep going.
-2. **Subagent model comes from settings.** Resolve it ONCE:
-   `python3 -c "import sys;sys.path.insert(0,'scripts');from scoring_settings import scoring_model;print(scoring_model())"`
+2. **Subagent model comes from settings, per gate and phase.** Pick the
+   settings function for THIS session's `<gate>` + `<phase>`:
+   - `score_vacancies` + `screen` → `screen_model()` (the cheap first pass)
+   - `score_vacancies` + `escalate` → `scoring_model()` (the strong re-score)
+   - `screen_companies` + `screen` → `company_screen_model()`
+   - `score_companies` + `score` → `scoring_model()`
+   Resolve it ONCE:
+   `python3 -c "import sys;sys.path.insert(0,'scripts');from scoring_settings import <function>;print(<function>())"`
    and pass that model to EVERY scoring subagent. Do not hardcode a model name.
 3. **Spawn only the `night-scorer` agent type.** One payload file = one
    `night-scorer` subagent. No other agent type, ever. At most **5 subagents
@@ -41,15 +50,14 @@ the interactive habits of `/jobs-new`.
    `<night_dir>/scoring_log.md`: time, gate, items in the wave, saved count,
    failures with their NNN. Findings and anomalies go HERE, not to an issue
    tracker.
-7. **Resume exactly once, at the very end.** Only after every score_in item is
-   saved or recorded failed in the log:
-   `python3 scripts/run_daily.py --resume --unattended`
-   Then STOP when the driver exits with anything but 10. If it exits 10 again,
-   do NOT start a new scoring round yourself — end the session; the wrapper
-   owns the loop.
+7. **Never resume the driver.** The wrapper owns the driver loop: it runs
+   `--resume` itself after your session ends. When every score_in item is
+   saved or recorded failed in the log, finish the End-of-session step below
+   and STOP.
 
 ## Forbidden — these end the session as a failure if you do them
 
+- `scripts/run_daily.py` (any invocation — the wrapper owns the driver loop).
 - Any vacancy status write (`vac.py mark`, verdict SQL, `update_vacancy_status`).
 - `learning.py apply` (a learning proposal needs the human's yes).
 - `gh issue create` (write findings to `<night_dir>/scoring_log.md` instead).
@@ -114,5 +122,5 @@ company stays kept — the safe direction.
 
 ## End of session
 
-After the single `--resume --unattended` (override 7), append a final
-`scoring_log.md` line: items total, saved, failed, driver exit code. Then stop.
+After the last wave is saved and logged, append a final `scoring_log.md`
+line: items total, saved, failed. Then stop — the wrapper resumes the driver.

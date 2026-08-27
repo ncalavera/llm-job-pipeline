@@ -71,24 +71,30 @@ ALERT_MSG_CHARS = 200  # R12: masked message excerpt length in an alert
 # vacancies/; ``save_script`` is the idempotent save entrypoint the defensive
 # sweep re-runs over score_out/ after the session (the session already saves
 # per wave; the sweep only catches work written but unsaved by a dead session).
+# ``phases`` lists the phase values the driver can emit for the gate — the
+# session gets the live one as its third argument and picks the subagent model
+# tier for it (--dry-run prints one session line per phase).
 GATES = {
     "screen_companies": {
         "payload": "screen_companies_payload.json",
         "save_script": "screen_candidates.py",
         "limit_key": "company_gate_minutes",
         "firecrawl": True,
+        "phases": ("screen",),
     },
     "score_companies": {
         "payload": "score_companies_payload.json",
         "save_script": "score_companies.py",
         "limit_key": "company_gate_minutes",
         "firecrawl": True,
+        "phases": ("score",),
     },
     "score_vacancies": {
         "payload": "score_vacancies_payload.json",
         "save_script": "score_vacancies.py",
         "limit_key": "vacancy_gate_minutes",
         "firecrawl": False,
+        "phases": ("screen", "escalate"),
     },
 }
 
@@ -120,6 +126,8 @@ _LOGIN_FAILURE_RE = re.compile(
 )
 
 # SIGTERM handler hooks (module globals so the handler sees the live run).
+# _CHILD holds whichever subprocess runs right now — a driver or a Claude
+# session, never both — so the handler can terminate it.
 _CURRENT: "_Ctx | None" = None
 _CHILD: "subprocess.Popen | None" = None
 
@@ -172,13 +180,25 @@ def _driver_cmd() -> list[str]:
     return [sys.executable, str(SCRIPTS_DIR / "run_daily.py")]
 
 
-def _claude_cmd(action: str, night_dir, cfg: dict) -> list[str]:
+def _orchestrator_model() -> str:
+    """Model tier for the night session's orchestrator — the same setting that
+    picks the strong scoring model (the model tier is a setting, never a
+    hardcoded name). Fallback only when the settings module itself is broken."""
+    try:
+        from scoring_settings import scoring_model
+
+        return scoring_model()
+    except Exception:
+        return "opus"
+
+
+def _claude_cmd(action: str, night_dir, cfg: dict, phase: str) -> list[str]:
     base = shlex.split(os.environ.get("NIGHTLY_CLAUDE_BIN") or "claude")
     return base + [
         "-p",
-        f"/jobs-night {action} {night_dir}",
+        f"/jobs-night {action} {night_dir} {phase}",
         "--model",
-        "opus",
+        _orchestrator_model(),
         "--dangerously-skip-permissions",
         "--max-turns",
         str(cfg["max_turns"]),
@@ -255,12 +275,16 @@ class _Ctx:
 
 
 def _run_driver(ctx: _Ctx, flags: list[str]) -> int:
+    global _CHILD
     cmd = _driver_cmd() + flags
     ctx.log(f"driver {' '.join(flags)}")
     with open(ctx.night_dir / "driver.log", "ab") as fh:
-        rc = subprocess.run(
-            cmd, cwd=str(PROJECT_ROOT), stdout=fh, stderr=subprocess.STDOUT
-        ).returncode
+        proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT), stdout=fh, stderr=subprocess.STDOUT)
+        _CHILD = proc
+        try:
+            rc = proc.wait()
+        finally:
+            _CHILD = None
     ctx.log(f"driver exited {rc}")
     return rc
 
@@ -318,6 +342,26 @@ def _write_no_progress() -> None:
     tmp = _state_path().with_suffix(".json.tmp")
     tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(_state_path())
+
+
+def _split_results(out_files: list[Path]) -> tuple[list[Path], list[Path]]:
+    """Split score_out files into (ok, failed). A night-scorer that cannot
+    score writes a valid JSON file with a ``"failed"`` field and no score — the
+    save script saves nothing for it, so it must not count as progress. A
+    malformed file counts as failed too."""
+    ok: list[Path] = []
+    failed: list[Path] = []
+    for f in out_files:
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            failed.append(f)
+            continue
+        if isinstance(data, dict) and "failed" not in data:
+            ok.append(f)
+        else:
+            failed.append(f)
+    return ok, failed
 
 
 def _read_payload_list(path: Path) -> list:
@@ -384,10 +428,13 @@ def _sweep_save(ctx: _Ctx, action: str, out_files: list[Path]) -> None:
         ctx.log(f"save sweep failed: {type(exc).__name__}: {exc}")
 
 
-def _run_session(ctx: _Ctx, action: str) -> None:
+def _run_session(ctx: _Ctx, action: str, phase: str) -> None:
     """One headless Claude session for one gate: split the payload into
     score_in/, run the bounded session, sweep score_out/ into the DB, classify
-    the outcome (no-progress / shortfall / timeout / early exit)."""
+    the outcome (no-progress / shortfall / timeout / early exit). The session
+    never resumes the driver — the gate loop owns the one resume per gate; a
+    session that resumes anyway is misbehavior the loop tolerates (the extra
+    resume just re-emits the same gate with the remaining subset)."""
     global _CHILD
     spec = GATES[action]
     payload = _read_payload_list(VACANCIES_DIR / spec["payload"])
@@ -415,8 +462,10 @@ def _run_session(ctx: _Ctx, action: str) -> None:
         (ctx.deadline - datetime.now()).total_seconds(),
     )
     budget = max(budget, 1.0)
-    cmd = _claude_cmd(action, ctx.night_dir, ctx.cfg)
-    ctx.log(f"claude session for {action}: {len(items)} item(s), budget {int(budget)}s")
+    cmd = _claude_cmd(action, ctx.night_dir, ctx.cfg, phase)
+    ctx.log(
+        f"claude session for {action} ({phase}): {len(items)} item(s), budget {int(budget)}s"
+    )
     ctx.log("claude cmd: " + " ".join(cmd))
 
     out_path = ctx.night_dir / f"claude-{action}.jsonl"
@@ -451,7 +500,11 @@ def _run_session(ctx: _Ctx, action: str) -> None:
     if out_files:
         _sweep_save(ctx, action, out_files)
 
-    n_in, n_out = len(items), len(out_files)
+    # Only ok results count as progress: a "failed"-field file saves nothing.
+    ok_files, failed_files = _split_results(out_files)
+    n_in, n_out = len(items), len(ok_files)
+    if failed_files:
+        ctx.log(f"{action}: {len(failed_files)} result file(s) failed or malformed")
     if timed_out:
         ctx.log(
             f"{action}: session killed at its {int(budget)}s limit — {n_out}/{n_in} "
@@ -465,7 +518,10 @@ def _run_session(ctx: _Ctx, action: str) -> None:
             ctx.alert(action, f"Claude exited early, see transcript — {tail}")
         ctx.log(f"{action}: session exited {rc} after {elapsed}s")
     elif n_out == 0:
-        _write_no_progress()
+        # The digest's "no progress" header line is about vacancy scoring only;
+        # a stalled company gate keeps its alert + carry-over without it.
+        if action == "score_vacancies":
+            _write_no_progress()
         ctx.log(f"{action}: no-progress — clean exit, nothing saved; carried over")
         ctx.alert(
             action,
@@ -485,7 +541,8 @@ def _gate_loop(ctx: _Ctx) -> None:
     trips = 0
     while rc == EXIT_GATE:
         state = _load_state()
-        action = ((state or {}).get("gate") or {}).get("action")
+        gate = (state or {}).get("gate") or {}
+        action = gate.get("action")
         trips += 1
         if trips > GATE_CAP:
             ctx.alert(
@@ -498,7 +555,7 @@ def _gate_loop(ctx: _Ctx) -> None:
         if action not in GATES:
             ctx.log(f"gate '{action}' needs no Claude session — the driver answers it")
         elif datetime.now() < ctx.deadline:
-            _run_session(ctx, action)
+            _run_session(ctx, action, gate.get("phase") or "score")
         elif not ctx.deadline_noted:
             ctx.deadline_noted = True
             ctx.log("run deadline reached — scoring skipped, carried over")
@@ -509,6 +566,13 @@ def _gate_loop(ctx: _Ctx) -> None:
         rc = _run_driver(ctx, ["--resume"])
 
     if rc == EXIT_DONE:
+        # The digest stage fails soft inside the driver (error_continue keeps
+        # the run alive through publish) — surface that error here, or the
+        # night ends silent with no morning message and no alert.
+        for s in (_load_state() or {}).get("stages", []) or []:
+            if s.get("name") == "digest" and s.get("status") == "error":
+                ctx.alert("digest", s.get("note") or "digest stage errored")
+                break
         ctx.log("driver finished — the digest and publish ran as driver stages")
         return
     stage, note = _failed_stage_from_state(_load_state())
@@ -539,34 +603,45 @@ def _handle_sigterm(signum, frame):
 
 def run_night() -> int:
     global _CURRENT
-    import settings
-
-    cfg = settings.nightly()
-
-    # A parked MANUAL run is the user's evening work — never discard it (KTD1).
-    state = _load_state()
-    if state and not state.get("finished") and not (state.get("options") or {}).get("unattended"):
-        ok = _send(
-            "🌙 Night run skipped — a manual run is parked at a gate. Finish it "
-            "(--resume) or discard it (--new); the next night will run normally."
-        )
-        return 0 if ok else 1
-
-    # One night at a time. The driver replaces its state file on every save, so
-    # the lock lives on its own dedicated file (KTD1).
-    lock_path = VACANCIES_DIR / "nightly.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_fh = open(lock_path, "w")
+    # Startup (settings, lock, night dir) runs before the ctx exists, so a
+    # crash here has no ctx.alert — it still must send the one R12 message.
     try:
-        fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        lock_fh.close()
-        ok = _send("🌙 Night run skipped — another nightly run still holds the lock.")
-        return 0 if ok else 1
+        import settings
 
-    night = _make_night_dir()
-    deadline = datetime.now() + timedelta(minutes=float(cfg["run_deadline_minutes"]))
-    ctx = _Ctx(cfg, night, deadline)
+        cfg = settings.nightly()
+
+        # A parked MANUAL run is the user's evening work — never discard it (KTD1).
+        state = _load_state()
+        if (
+            state
+            and not state.get("finished")
+            and not (state.get("options") or {}).get("unattended")
+        ):
+            ok = _send(
+                "🌙 Night run skipped — a manual run is parked at a gate. Finish it "
+                "(--resume) or discard it (--new); the next night will run normally."
+            )
+            return 0 if ok else 1
+
+        # One night at a time. The driver replaces its state file on every save, so
+        # the lock lives on its own dedicated file (KTD1).
+        lock_path = VACANCIES_DIR / "nightly.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_fh = open(lock_path, "w")
+        try:
+            fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            lock_fh.close()
+            ok = _send("🌙 Night run skipped — another nightly run still holds the lock.")
+            return 0 if ok else 1
+
+        night = _make_night_dir()
+        deadline = datetime.now() + timedelta(minutes=float(cfg["run_deadline_minutes"]))
+        ctx = _Ctx(cfg, night, deadline)
+    except Exception as exc:
+        msg = mask_secrets(f"{type(exc).__name__}: {exc}").strip()[:ALERT_MSG_CHARS]
+        ok = _send(f"🌙 Night run failed at wrapper startup: {msg}")
+        return 0 if ok else 1
     _CURRENT = ctx
     prev_handler = signal.signal(signal.SIGTERM, _handle_sigterm)
     try:
@@ -606,12 +681,13 @@ def _print_dry_run() -> None:
     )
     for action, spec in GATES.items():
         minutes = cfg[spec["limit_key"]]
-        session = " ".join(_claude_cmd(action, night, cfg))
         save = " ".join(_save_cmd(action, [f"{night}/score_out/NNN.json ..."]))
         env_keys = list(_claude_env(spec["firecrawl"]))
         print(f"  {action}:")
         print(f"    payload: vacancies/{spec['payload']} → {night}/score_in/NNN.json")
-        print(f"    session: {mask_secrets(session)}  [limit {minutes:g} min]")
+        for phase in spec["phases"]:
+            session = " ".join(_claude_cmd(action, night, cfg, phase))
+            print(f"    session ({phase}): {mask_secrets(session)}  [limit {minutes:g} min]")
         print(f"    save:    {mask_secrets(save)}")
         print(f"    env:     {', '.join(env_keys) or '(empty)'} — TELEGRAM_* never passed")
     print("  every other gate: the driver's own unattended answer (no session)")

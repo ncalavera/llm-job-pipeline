@@ -26,6 +26,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# Fidelity: like the real driver, each gate step writes its payload file anew
+# (run_daily.py rewrites the payload to the remaining subset on re-emission)
+# and stamps the gate's phase into the checkpoint's gate dict.
 FAKE_DRIVER = textwrap.dedent(
     """\
     #!/usr/bin/env python3
@@ -60,13 +63,15 @@ FAKE_DRIVER = textwrap.dedent(
                 "screen_companies": "screen_companies_payload.json"}
     if code == 10:
         action = step["action"]
-        state["gate"] = {"stage": action, "action": action}
+        state["gate"] = {"stage": action, "action": action, "phase": step.get("phase")}
         if step.get("payload") is not None and action in PAYLOADS:
             with open(os.path.join(vac, PAYLOADS[action]), "w") as fh:
                 json.dump(step["payload"], fh)
     elif code == 0:
         state["finished"] = True
         state["gate"] = None
+        if step.get("stages"):
+            state["stages"] = step["stages"]
     elif code in (20, 30):
         state["stages"] = [{"name": step.get("stage", "?"),
                             "status": "aborted" if code == 20 else "error",
@@ -87,9 +92,11 @@ FAKE_CLAUDE = textwrap.dedent(
     mode = open(%(mode_file)r).read().strip()
     args = sys.argv[1:]
     prompt = args[args.index("-p") + 1]
-    _, action, night = prompt.split()
+    _, action, night, phase = prompt.split()
     with open(os.path.join(night, "claude_env-" + action + ".json"), "w") as fh:
         json.dump(dict(os.environ), fh)
+    with open(os.path.join(night, "claude_args-" + action + ".json"), "w") as fh:
+        json.dump(args, fh)
     in_dir = os.path.join(night, "score_in")
     out_dir = os.path.join(night, "score_out")
     ins = sorted(os.listdir(in_dir))
@@ -130,6 +137,9 @@ FAKE_CLAUDE = textwrap.dedent(
     elif mode == "malformed_one":
         write(ins[0], json.dumps(result(ins[0])))
         write(ins[1], "{{{ this is not json")
+    elif mode == "all_failed":
+        for n in ins:
+            write(n, json.dumps({"failed": "page unreachable, no evidence"}))
     elif mode == "resume_mid":
         for n in ins[: max(1, len(ins) // 2)]:
             write(n, json.dumps(result(n)))
@@ -290,6 +300,33 @@ def test_ae7_no_progress_alerts_and_still_reaches_digest(nr):
     assert len(nr.driver_calls()) == 2  # --new, then the finishing --resume
 
 
+def test_all_failed_result_files_count_as_no_progress(nr):
+    # A night-scorer that cannot score writes {"failed": ...} — the save script
+    # saves nothing for it, so a session of only such files made no progress.
+    nr.set_steps(
+        [{"exit": 10, "action": "score_vacancies", "payload": _vac_payload(2)}, {"exit": 0}]
+    )
+    nr.set_mode("all_failed")
+    assert nr.mod.run_night() == 0
+    state = json.loads((nr.vac / "run_state.json").read_text(encoding="utf-8"))
+    assert state["no_progress"] is True
+    assert any("no progress" in t for t in nr.texts())
+    assert "2 result file(s) failed or malformed" in nr.wrapper_log()
+
+
+def test_company_gate_stall_alerts_but_sets_no_flag(nr):
+    # The digest's no-progress header line is about vacancy scoring only — a
+    # stalled company gate keeps its alert + carry-over without the flag.
+    nr.set_steps(
+        [{"exit": 10, "action": "screen_companies", "payload": _co_payload(2)}, {"exit": 0}]
+    )
+    nr.set_mode("nothing")
+    assert nr.mod.run_night() == 0
+    state = json.loads((nr.vac / "run_state.json").read_text(encoding="utf-8"))
+    assert "no_progress" not in state
+    assert any("no progress" in t for t in nr.texts())
+
+
 def test_hanging_session_is_killed_and_the_run_continues(nr, monkeypatch, tmp_path):
     toml = tmp_path / "defaults.toml"
     toml.write_text("[nightly]\nvacancy_gate_minutes = 0.02\n", encoding="utf-8")
@@ -322,6 +359,10 @@ def test_fast_other_exit_alerts_see_transcript(nr):
 
 
 def test_claude_resuming_mid_batch_reports_the_shortfall(nr):
+    # MISBEHAVIOR tolerance: the session must never resume the driver (the
+    # wrapper owns the loop, and jobs-night.md forbids run_daily.py), but a
+    # session that does anyway must not derail the night — the wrapper's own
+    # follow-up resume just lands on the re-emitted gate and carries on.
     nr.set_steps(
         [
             {"exit": 10, "action": "score_vacancies", "payload": _vac_payload(4)},
@@ -356,6 +397,30 @@ def test_both_company_gates_use_their_own_save_command(nr, monkeypatch):
     # FIRECRAWL_API_KEY reaches the COMPANY gates' sessions (KTD3).
     env = json.loads((nr.night_dir() / "claude_env-screen_companies.json").read_text())
     assert env.get("FIRECRAWL_API_KEY") == "fc-secret-key"
+
+
+def test_gate_phase_reaches_the_session_prompt(nr):
+    # The session picks its subagent model tier by phase (jobs-night.md
+    # override 2), so the wrapper must pass the gate's live phase through.
+    nr.set_steps(
+        [
+            {
+                "exit": 10,
+                "action": "score_vacancies",
+                "phase": "escalate",
+                "payload": _vac_payload(1),
+            },
+            {"exit": 10, "action": "score_companies", "payload": _co_payload(1)},
+            {"exit": 0},
+        ]
+    )
+    assert nr.mod.run_night() == 0
+    args = json.loads((nr.night_dir() / "claude_args-score_vacancies.json").read_text())
+    prompt = args[args.index("-p") + 1]
+    assert prompt.split() == ["/jobs-night", "score_vacancies", str(nr.night_dir()), "escalate"]
+    # A gate without a phase (older checkpoint, non-two-pass gate) gets "score".
+    args = json.loads((nr.night_dir() / "claude_args-score_companies.json").read_text())
+    assert args[args.index("-p") + 1].split()[-1] == "score"
 
 
 def test_claude_env_is_scrubbed_of_telegram_and_firecrawl_on_vacancy_gate(nr, monkeypatch):
@@ -457,6 +522,25 @@ def test_driver_crash_before_state_says_unknown_stage_with_exception_class(nr):
     assert "RuntimeError" in texts[0]  # the driver.log tail names the class
 
 
+def test_digest_stage_error_alerts_even_though_the_run_finished(nr):
+    # The digest fails SOFT inside the driver (error_continue keeps publish
+    # alive) — the wrapper must still surface it, or the night ends silent.
+    nr.set_steps(
+        [
+            {"exit": 10, "action": "score_vacancies", "payload": _vac_payload(1)},
+            {
+                "exit": 0,
+                "stages": [
+                    {"name": "digest", "status": "error", "note": "digest send exited with code 1"}
+                ],
+            },
+        ]
+    )
+    assert nr.mod.run_night() == 0  # the run itself still counts as done
+    texts = nr.texts()
+    assert any("digest" in t and "exited with code 1" in t for t in texts)
+
+
 def test_failed_alert_send_exits_nonzero(nr):
     nr.set_steps(
         [{"exit": 20, "stage": "fetch", "note": "fetch exited with code 2: connection refused"}]
@@ -528,6 +612,55 @@ def test_sigterm_sends_the_alert_and_exits(nr):
         nr.mod._CURRENT = None
     assert exc.value.code == 0  # the alert went out, so the exit is clean
     assert any("SIGTERM" in t for t in nr.texts())
+
+
+def test_sigterm_terminates_whichever_child_is_running(nr):
+    # _CHILD tracks the live subprocess — a driver or a Claude session — so a
+    # systemd stop kills it instead of leaving it to run past the unit.
+    import settings
+
+    night = nr.night_dir()
+    night.mkdir(parents=True, exist_ok=True)
+    ctx = nr.mod._Ctx(settings.nightly(), night, datetime.now() + timedelta(hours=1))
+    child = SimpleNamespace(calls=[])
+    child.terminate = lambda: child.calls.append("terminate")
+    nr.mod._CURRENT = ctx
+    nr.mod._CHILD = child
+    try:
+        with pytest.raises(SystemExit) as exc:
+            nr.mod._handle_sigterm(signal.SIGTERM, None)
+    finally:
+        nr.mod._CURRENT = None
+        nr.mod._CHILD = None
+    assert exc.value.code == 0
+    assert child.calls == ["terminate"]
+
+
+def test_wrapper_startup_crash_sends_the_alert_and_exits_zero(nr, monkeypatch):
+    # A crash before the gate loop (settings, lock, night dir) has no ctx —
+    # the module-level alert still goes out, and the exit stays zero because
+    # the only wrapper failure is a lost alert.
+    def boom():
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(nr.mod, "_make_night_dir", boom)
+    assert nr.mod.run_night() == 0
+    texts = nr.texts()
+    assert any("wrapper startup" in t and "OSError" in t for t in texts)
+    assert nr.driver_calls() == []  # nothing ran
+
+
+def test_wrapper_startup_crash_with_dead_telegram_exits_nonzero(nr, monkeypatch):
+    def boom():
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(nr.mod, "_make_night_dir", boom)
+
+    def dead(token, method, payload, timeout=15, retries=2):
+        raise RuntimeError("chat not found")
+
+    nr.mod.tg_call = dead
+    assert nr.mod.run_night() == 1
 
 
 # ---------------------------------------------------------------------------
@@ -621,23 +754,35 @@ def test_prompt_file_names_only_the_night_scorer_agent():
     assert "night-scorer" in text
     assert "general-purpose" not in text
     for forbidden in (
+        "scripts/run_daily.py` (any invocation",  # the wrapper is the only resumer
         "learning.py apply",
         "gh issue create",
         "--full-rescore",
         "--archive",
     ):
         assert forbidden in text  # each is named in the forbidden list
+    assert "--resume --unattended" not in text  # the session never runs the driver
+    # Override 2 maps every gate+phase to its settings function.
+    for fn in ("screen_model()", "scoring_model()", "company_screen_model()"):
+        assert fn in text
     agent = (PROJECT_ROOT / ".claude" / "agents" / "night-scorer.md").read_text(encoding="utf-8")
     assert "tools: Read, Write" in agent
 
 
 def test_dry_run_prints_the_dispatch_table_with_masked_commands(nr, capsys):
+    import scoring_settings
+
     assert nr.mod.main(["--dry-run"]) == 0
     out = capsys.readouterr().out
     for action in ("screen_companies", "score_companies", "score_vacancies"):
         assert action in out
     assert "--dangerously-skip-permissions" in out
-    assert "opus" in out
+    # The orchestrator model is the configured setting, never a hardcoded name.
+    assert f"--model {scoring_settings.scoring_model()}" in out
+    # One session line per phase, phase as the prompt's third argument.
+    for phase in ("screen", "escalate", "score"):
+        assert f"session ({phase}):" in out
+    assert "score_vacancies vacancies/nightly/<date> escalate" in out
     assert "TELEGRAM_* never passed" in out
     assert "tok-123456-secret" not in out  # the token value never prints
     assert nr.driver_calls() == []  # dry run launches nothing
