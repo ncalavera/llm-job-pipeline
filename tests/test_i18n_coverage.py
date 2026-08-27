@@ -58,9 +58,12 @@ def _frontend_keys() -> dict[str, set[str]]:
     return found
 
 
-# The two tabs this test was written for. Kept as an explicit list so the guard
-# cannot be satisfied by deleting a module from the scan.
-NEW_TAB_SOURCES = ("applications.js", "reports.js")
+# The tabs this test covers. Kept as an explicit list so the guard cannot be
+# satisfied by deleting a module from the scan. The Health tab is deliberately
+# absent: it has ~26 keys that exist in neither language, predating this test,
+# and adding it here would fail the suite for a gap it did not create. Add it
+# to this tuple in the same change that translates it.
+NEW_TAB_SOURCES = ("applications.js", "reports.js", "contacts.js")
 
 
 @pytest.mark.parametrize("source", NEW_TAB_SOURCES)
@@ -100,6 +103,18 @@ def test_no_language_invents_keys_english_does_not_have():
 # --- The concatenated key families ----------------------------------------
 # These are built at runtime, so the scan above cannot see them. Enumerate the
 # vocabulary each one closes over and prove every member resolves.
+
+CONTACT_STATUSES = ("planned", "contacted", "replied", "met", "declined", "stale")
+CONTACT_CHANNELS = (
+    "ea_forum",
+    "linkedin",
+    "telegram",
+    "x",
+    "github",
+    "site",
+    "email",
+    "calendly",
+)
 
 VACANCY_KINDS = ("job", "programme", "advising", "consulting", "grant", "course")
 REPORT_KINDS = ("research", "sector", "company", "grant", "other")
@@ -155,3 +170,42 @@ def test_the_two_new_tabs_are_actually_translated_into_russian():
     ]
     untranslated = [k for k in sample if ru[k] == en[k]]
     assert not untranslated, f"still English in the Russian table: {untranslated}"
+
+
+@pytest.mark.parametrize("status", CONTACT_STATUSES)
+def test_every_contact_status_has_a_label(status):
+    assert f"contact_status_{status}" in _english_keys()
+
+
+@pytest.mark.parametrize("channel", CONTACT_CHANNELS)
+def test_every_contact_channel_has_a_word(channel):
+    """A word, never a bare glyph — the house style bans category codes."""
+    assert f"contact_channel_{channel}" in _english_keys()
+
+
+@pytest.mark.parametrize("form", PLURAL_FORMS)
+def test_the_contact_count_has_all_three_plural_forms(form):
+    assert f"contacts_count_{form}" in _english_keys()
+
+
+def test_the_networking_tab_is_translated_into_russian():
+    ru = i18n.STRINGS["ru"]
+    en = i18n.STRINGS["en"]
+    sample = [
+        "tab_contacts",
+        "contacts_col_name",
+        "contacts_col_status",
+        "contacts_opener",
+        "contact_status_planned",
+        "contact_status_replied",
+    ]
+    untranslated = [k for k in sample if ru[k] == en[k]]
+    assert not untranslated, f"still English in the Russian table: {untranslated}"
+
+
+def test_the_contact_status_vocabulary_matches_the_python_one():
+    """The i18n keys, statuses.py and the SQL CHECK are three copies of one
+    list. A status with no label would render as its raw key."""
+    from statuses import CONTACT_STATUSES as PY_STATUSES
+
+    assert set(PY_STATUSES) == set(CONTACT_STATUSES)
