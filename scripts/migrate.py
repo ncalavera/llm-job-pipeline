@@ -449,21 +449,104 @@ def cmd_status() -> int:
     return 0
 
 
+# What a migration CREATES, read out of its own SQL. Used to check that a
+# migration about to be marked "already applied" really was.
+_CREATE_TABLE_RE = re.compile(r"CREATE TABLE (?:IF NOT EXISTS )?(\w+)", re.IGNORECASE)
+_ADD_COLUMN_RE = re.compile(
+    r"ALTER TABLE (\w+)\s+ADD COLUMN (?:IF NOT EXISTS )?(\w+)", re.IGNORECASE
+)
+
+
+def _objects_a_migration_creates(path):
+    """``(tables, columns)`` the migration at ``path`` would add.
+
+    Deliberately shallow: tables it creates and columns it adds, nothing more.
+    A CHECK constraint widened or an index added is invisible here, so this
+    UNDER-reports rather than over-reports — it can miss a partially-applied
+    migration, but it never accuses a correctly-applied one.
+    """
+    if path is None:
+        return set(), set()
+    sql = path.read_text(encoding="utf-8")
+    # A rebuild migration creates a scratch table and renames it; the scratch
+    # name never survives, so checking for it would always fail.
+    renamed = set(re.findall(r"ALTER TABLE (\w+) RENAME TO", sql, re.IGNORECASE))
+    tables = {t for t in _CREATE_TABLE_RE.findall(sql) if t not in renamed}
+    columns = {(t, c) for (t, c) in _ADD_COLUMN_RE.findall(sql)}
+    return tables, columns
+
+
+def _existing_shape(db):
+    """``(tables, columns)`` the connected database actually has."""
+    if IS_SQLITE:
+        cur = db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = {r[0] for r in cur.fetchall()}
+        columns = set()
+        for t in tables:
+            for row in db.conn.execute(f"PRAGMA table_info({t})"):
+                columns.add((t, row[1]))
+        return tables, columns
+    with db.conn.cursor() as cur:
+        cur.execute(
+            "SELECT table_name, column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public'"
+        )
+        rows = cur.fetchall()
+    tables = {r[0] for r in rows}
+    return tables, {(r[0], r[1]) for r in rows}
+
+
 def cmd_baseline() -> int:
     """Record every not-yet-applied migration as applied WITHOUT running it.
 
     For adopting a database that is already at or beyond the current schema
     (e.g. one created before the migration system existed). After this, only
     genuinely new migrations will run.
+
+    Baselining is a CLAIM about the database — "it already has all of this".
+    Taken on trust, it is destructive in a quiet way: run against a database
+    built from the frozen baseline schema alone, it records every migration as
+    applied and then reports "0 pending" over a schema still missing whole
+    tables and columns, with each skipped migration now unreachable. So the
+    claim is verified before it is written, and a mismatch aborts the command
+    rather than being recorded.
     """
     db = _open()
     try:
         applied = db.applied()
-        to_mark = [(v, lbl) for (v, lbl, _p) in _discover() if v not in applied]
+        to_mark = [(v, lbl, p) for (v, lbl, p) in _discover() if v not in applied]
         if not to_mark:
             print("Already baselined — every migration is recorded.")
             return 0
-        for version, label in to_mark:
+
+        have_tables, have_columns = _existing_shape(db)
+        problems = []
+        for version, label, path in to_mark:
+            want_tables, want_columns = _objects_a_migration_creates(path)
+            missing_t = sorted(want_tables - have_tables)
+            missing_c = sorted(
+                f"{t}.{c}" for (t, c) in want_columns if (t, c) not in have_columns
+            )
+            if missing_t or missing_c:
+                problems.append((version, label, missing_t + missing_c))
+
+        if problems:
+            print(
+                "ABORTED — these migrations are NOT already applied, so recording\n"
+                "them as applied would skip them forever:\n",
+                file=sys.stderr,
+            )
+            for version, label, missing in problems:
+                print(f"    {version} {label}: missing {', '.join(missing)}", file=sys.stderr)
+            print(
+                "\nThis database is not up to date, so --baseline is the wrong command.\n"
+                "Run `python3 scripts/migrate.py` to APPLY them instead.\n"
+                "Nothing was recorded.",
+                file=sys.stderr,
+            )
+            return 1
+
+        for version, label, _p in to_mark:
             db.run(version, None)  # record only, run no SQL
             print(f"  = {version} {label}: marked applied (baseline, not run)")
         print(f"\nBaselined — {len(to_mark)} migration(s) recorded without running.")

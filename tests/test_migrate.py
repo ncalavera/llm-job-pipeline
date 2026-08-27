@@ -508,18 +508,80 @@ def test_drop_schema_is_blocked(mig):
 
 
 def test_baseline_records_without_running(mig):
-    """--baseline marks pending migrations applied WITHOUT executing their SQL,
-    so a column a migration *would* add is absent but the version is recorded."""
+    """--baseline records a migration's version WITHOUT executing its SQL.
+
+    The database must already carry what the migration would have created —
+    that is what "adopt an already-current database" means — so this applies
+    the change out-of-band first, then baselines. The version is recorded and
+    no SQL is re-run.
+    """
     assert mig.m.cmd_migrate(allow_destructive=False, do_backup=False) == 0
     (mig.migrations_dir / "0001_add_thing.sql").write_text(
         "ALTER TABLE company ADD COLUMN thing INTEGER;\n", encoding="utf-8"
     )
+    # The column already exists — as it would on a database that predates the
+    # ledger and is genuinely up to date.
+    conn = sqlite3.connect(str(mig.db_path))
+    conn.execute("ALTER TABLE company ADD COLUMN thing INTEGER")
+    conn.commit()
+    conn.close()
+
     rc = mig.m.cmd_baseline()
     assert rc == 0
     assert "0001" in _applied_versions(mig.db_path)
-    assert "thing" not in _columns(mig.db_path, "company")  # recorded, not run
-    # A subsequent normal run sees nothing pending.
+    # A subsequent normal run sees nothing pending — the SQL never ran twice.
     assert mig.m.cmd_migrate(allow_destructive=False, do_backup=False) == 0
+
+
+def test_baseline_refuses_when_the_database_is_not_actually_current(mig):
+    """Baselining is a claim about the database, and a false claim is silent.
+
+    Recording a migration that has NOT been applied skips it forever: the
+    version is in the ledger, so no later run will ever apply it, and --status
+    reports "0 pending" over a schema missing whatever it would have created.
+    The claim is checked instead of trusted.
+    """
+    assert mig.m.cmd_migrate(allow_destructive=False, do_backup=False) == 0
+    (mig.migrations_dir / "0001_add_thing.sql").write_text(
+        "ALTER TABLE company ADD COLUMN thing INTEGER;\n", encoding="utf-8"
+    )
+    # Note: no out-of-band ALTER — company.thing does not exist.
+    rc = mig.m.cmd_baseline()
+    assert rc == 1, "baseline must refuse a database that is not up to date"
+    assert "0001" not in _applied_versions(mig.db_path), "nothing may be recorded"
+    # The escape route still works: applying it for real succeeds.
+    assert mig.m.cmd_migrate(allow_destructive=False, do_backup=False) == 0
+    assert "thing" in _columns(mig.db_path, "company")
+
+
+def test_baseline_refuses_a_missing_table_not_just_a_missing_column(mig):
+    """A migration that creates a whole table is checked the same way."""
+    assert mig.m.cmd_migrate(allow_destructive=False, do_backup=False) == 0
+    (mig.migrations_dir / "0001_add_widget.sql").write_text(
+        "CREATE TABLE IF NOT EXISTS widget (id TEXT PRIMARY KEY);\n", encoding="utf-8"
+    )
+    assert mig.m.cmd_baseline() == 1
+    assert "0001" not in _applied_versions(mig.db_path)
+
+
+def test_baseline_ignores_a_rebuild_migrations_scratch_table(mig):
+    """A table created only to be renamed must not be looked for afterwards.
+
+    The SQLite CHECK-widening pattern builds a scratch table, copies into it,
+    drops the original and renames. The scratch name never survives, so a
+    naive check for every CREATE TABLE would refuse a correctly-applied
+    rebuild forever.
+    """
+    assert mig.m.cmd_migrate(allow_destructive=False, do_backup=False) == 0
+    (mig.migrations_dir / "0001_rebuild.sql").write_text(
+        "CREATE TABLE company_rebuild (id TEXT PRIMARY KEY);\n"
+        "DROP TABLE company_rebuild;\n"
+        "ALTER TABLE company_rebuild RENAME TO company;\n",
+        encoding="utf-8",
+    )
+    # The scratch table is absent (as it must be), yet nothing is missing.
+    assert mig.m.cmd_baseline() == 0
+    assert "0001" in _applied_versions(mig.db_path)
 
 
 # ---------------------------------------------------------------------------
