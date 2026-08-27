@@ -186,7 +186,31 @@ test("waiting counts whole days since the stage last changed", () => {
     group({ status_updated_at: new Date(NOW - 9 * DAY).toISOString() }),
   ]);
   assert.equal(rows[0].waitingDays, 9);
-  assert.equal(formatWaiting(rows[0].waitingDays), "9 d");
+  // The unit is a word, not the letter "d" — every number on screen is
+  // labelled in words.
+  assert.equal(formatWaiting(rows[0].waitingDays), "9 days");
+});
+
+test("the waiting unit is singular for one day", () => {
+  assert.equal(formatWaiting(1), "1 day");
+});
+
+test("the waiting unit takes the translation for the count's plural form", () => {
+  // A three-form language: 1 -> one, 22 -> few, 5 -> many. The cell asks for
+  // the form the count actually takes, not for "singular or not".
+  const t = (key, fallback) => ({
+    apps_waiting_day_one: "<one>",
+    apps_waiting_day_few: "<few>",
+    apps_waiting_day_many: "<many>",
+  })[key] || fallback;
+  assert.equal(formatWaiting(1, t), "1 <one>");
+  assert.equal(formatWaiting(22, t), "22 <few>");
+  assert.equal(formatWaiting(5, t), "5 <many>");
+  assert.equal(formatWaiting(11, t), "11 <many>");
+});
+
+test("no waiting time renders as nothing at all", () => {
+  assert.equal(formatWaiting(null), "");
 });
 
 test("a closed application waits on nobody", () => {

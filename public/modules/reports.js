@@ -19,8 +19,8 @@
 // =============================================================================
 
 import { API_BASE } from "./state.js";
-import { escHtml, jsAttr, mdToHtml } from "./helpers.js";
-import { T } from "./i18n.js";
+import { escHtml, jsAttr, mdToHtml, pluralForm } from "./helpers.js";
+import { T, dateLocale } from "./i18n.js";
 
 // The kinds, in the order the list shows them: most specific reading first,
 // "other" last because it is the bucket, not a category. Twin of
@@ -147,11 +147,15 @@ export function buildReportsList(reports, opts) {
   }
 
   const total = (reports || []).length;
+  // Some languages take three plural forms, chosen by the count's last digit,
+  // so `total === 1` is not enough to pick the right word.
+  const countWord = translate(
+    "reports_count_" + pluralForm(total),
+    total === 1 ? "report" : "reports",
+  );
   const count =
     '<div class="reports-count-strip">' +
-    escHtml(
-      total + " " + translate(total === 1 ? "reports_one" : "reports_many", total === 1 ? "report" : "reports"),
-    ) +
+    escHtml(total + " " + countWord) +
     "</div>";
 
   const blocks = groups
@@ -177,7 +181,10 @@ export function buildReportDetail(report, opts) {
   const translate = options.t || ((k, fb) => fb);
   const locale = options.locale || "en-GB";
   const meta = [
-    REPORT_KIND_LABELS[report.kind] || report.kind,
+    translate(
+      "reports_kind_" + report.kind,
+      REPORT_KIND_LABELS[report.kind] || report.kind,
+    ),
     formatReportDate(report.updated_at, locale),
     report.source_path || "",
   ].filter(Boolean);
@@ -254,7 +261,7 @@ function render() {
   if (_openSlug && _reports) {
     const open = _reports.find((r) => r.slug === _openSlug);
     if (open && open.body_md) {
-      el.innerHTML = buildReportDetail(open, { t: T, locale: "en-GB" });
+      el.innerHTML = buildReportDetail(open, { t: T, locale: dateLocale() });
       return;
     }
     el.innerHTML =
@@ -278,7 +285,7 @@ function render() {
       "</div>";
     return;
   }
-  el.innerHTML = buildReportsList(_reports, { t: T, locale: "en-GB" });
+  el.innerHTML = buildReportsList(_reports, { t: T, locale: dateLocale() });
 }
 
 /** Open one report. The list carries only an excerpt, so the body is fetched

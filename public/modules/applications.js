@@ -32,6 +32,7 @@ import {
   jsAttr,
   safeUrl,
   dedupeTriageEntries,
+  pluralForm,
 } from "./helpers.js";
 import { T, dateLocale } from "./i18n.js";
 
@@ -140,9 +141,20 @@ export function daysSince(since, now) {
   return Math.max(0, Math.floor((ref - then) / MS_PER_DAY));
 }
 
-/** The waiting cell: "9 d", or "" when nothing is waiting. */
-export function formatWaiting(days) {
-  return days == null ? "" : days + " d";
+/**
+ * The waiting cell: "9 days", or "" when nothing is waiting.
+ *
+ * The unit is a word, not the letter "d". A bare "9 d" is a code the reader has
+ * to decode, and the house style asks for every number on screen to be labelled
+ * in words. Languages with three plural forms need the form chosen by the
+ * count's last digit rather than by `n === 1`, which is what pluralForm does.
+ */
+export function formatWaiting(days, t) {
+  if (days == null) return "";
+  const translate = t || ((k, fb) => fb);
+  const form = pluralForm(days);
+  const fallback = days === 1 ? "day" : "days";
+  return days + " " + translate("apps_waiting_day_" + form, fallback);
 }
 
 // ---------------------------------------------------------------------------
@@ -309,7 +321,12 @@ export function buildApplicationRow(row, opts) {
   const translate = options.t || ((k, fb) => fb);
   const locale = options.locale || "en-GB";
   const col = columnFor(row.status);
-  const stageLabel = col ? col.label : row.status;
+  // The stage name is translated through the SAME keys as the vacancy page's
+  // status chip (vac_status_*), so one status has one name everywhere in the
+  // product. TRIAGE_COLUMNS supplies the English fallback and the colour.
+  const stageLabel = col
+    ? translate("vac_status_" + row.status, col.label)
+    : row.status;
   const stageColor = col ? col.color : "var(--muted)";
   const idAttr = jsAttr(row.id);
 
@@ -339,8 +356,7 @@ export function buildApplicationRow(row, opts) {
   // A long organisation, role or next step is clipped by the fixed column
   // width. The full text stays one hover away rather than being lost — the
   // same recovery the Browse rows give a truncated location.
-  const full = (value) =>
-    value ? ' title="' + escHtml(value) + '"' : "";
+  const full = (value) => (value ? ' title="' + escHtml(value) + '"' : "");
 
   return (
     '<tr class="apps-row" data-id="' +
@@ -362,7 +378,9 @@ export function buildApplicationRow(row, opts) {
     escHtml(row.title) +
     "</td>" +
     '<td class="apps-cell apps-cell-kind">' +
-    escHtml(KIND_LABELS[row.kind] || row.kind) +
+    escHtml(
+      translate("apps_kind_" + row.kind, KIND_LABELS[row.kind] || row.kind),
+    ) +
     "</td>" +
     '<td class="apps-cell apps-cell-stage">' +
     '<span class="apps-stage-dot" style="background:' +
@@ -374,7 +392,7 @@ export function buildApplicationRow(row, opts) {
     escHtml(formatDayMonth(row.stageSince, locale) || "—") +
     "</td>" +
     '<td class="apps-cell apps-cell-waiting">' +
-    escHtml(formatWaiting(row.waitingDays)) +
+    escHtml(formatWaiting(row.waitingDays, translate)) +
     "</td>" +
     '<td class="apps-cell apps-cell-next"' +
     full(row.nextStep) +
@@ -402,7 +420,9 @@ export function buildApplicationsTable(rows, opts) {
     ["apps_col_link", "Link"],
   ];
   const head = headers
-    .map(([key, fallback]) => "<th>" + escHtml(translate(key, fallback)) + "</th>")
+    .map(
+      ([key, fallback]) => "<th>" + escHtml(translate(key, fallback)) + "</th>",
+    )
     .join("");
 
   return (
