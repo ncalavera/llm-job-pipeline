@@ -123,30 +123,51 @@ Per `~/.claude/skills/levelsio/SKILL.md`: the repo lives on the server, there
 is no CI, and the dashboard is `dashboard.service` on 127.0.0.1:3001 with its
 code at `/srv/http/dashboard`.
 
+**`scripts/migrate.py` does NOT run on forge.** The box has no psycopg2, and
+`jobsearch_app` does not own the tables, so the runner cannot connect and could
+not ALTER them if it did. Migrations go in by hand as the `postgres` superuser,
+and the three steps below are one unit — a migration applied without its ledger
+row will be offered again on the next run, and a table created by `postgres`
+without the ownership hand-off is unwritable by the app.
+
 ```bash
-ssh forge-n
-cd /srv/http/dashboard
-git pull
-python3 scripts/migrate.py          # applies 0022 + 0023
-sudo systemctl restart dashboard    # only for server.js; public/ needs none
+# 1. code
+rsync -a --delete <local>/ root@forge:/srv/http/dashboard/     # as root
+ssh forge 'chown -R dashboard:dashboard /srv/http/dashboard'   # hand it back
+
+# 2. schema, as the superuser
+ssh forge
+sudo -u postgres psql -d jobsearch -v ON_ERROR_STOP=1 -f /srv/http/dashboard/sql/migrations/00NN_name.postgres.sql
+
+# 3. record it, and hand any NEW table to the app user
+sudo -u postgres psql -d jobsearch -c "INSERT INTO schema_migrations (version) VALUES ('00NN');"
+sudo -u postgres psql -d jobsearch -c "ALTER TABLE <new_table> OWNER TO jobsearch_app;"
+
+# 4. restart (only for server.js / scripts; public/ needs none)
+sudo systemctl restart dashboard
 ```
 
-No `--allow-destructive` in production. This was tested, not assumed: on a
-database pending only 0022 and 0023, plain `migrate.py` applies both and takes
-its own backup first. The Postgres 0022 routes its CHECK swap through
-`EXECUTE`'d dynamic SQL specifically so the destructive gate does not trip.
-Re-running is a no-op ("Up to date").
+Check the result with `python3 scripts/migrate.py --status` FROM THE LAPTOP
+over the tunnel — that is the one place the runner can reach the database. It
+should report `0 pending`. If it reports the migration as pending, step 3 was
+missed; if `--baseline` looks like the fix, it is not — it now refuses a
+database that is not actually current, and the right move is to apply what is
+missing.
 
-Loading reports afterwards, from the laptop over the tunnel:
+Loading reports and applications afterwards, from the laptop over the tunnel:
 
 ```bash
 cd ~/Projects/personal/llm-job-pipeline
 python3 scripts/vac.py report add <path/to/report.md>   # --kind and --title optional
 python3 scripts/vac.py report list
+python3 scripts/vac.py add --company "…" --title "…" --kind grant --status applied
 ```
 
 `report add` keys on the slug, so re-importing an edited file updates the
-stored report rather than forking a second copy.
+stored report rather than forking a second copy. `vac add` keys on company +
+title, so re-running it edits the application rather than adding a second one —
+and it now sets the company active, because an application must not be hidden
+by a company status set before he applied.
 
 ## Screenshots
 
