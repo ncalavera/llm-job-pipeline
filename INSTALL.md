@@ -201,8 +201,10 @@ then every vacancy the filter dropped, one line each with its reason.
 The whole daily cycle can run unattended every night on a server you control:
 a systemd timer starts `scripts/nightly_run.py`, which runs the driver in
 `--unattended` mode, answers the scoring gates with bounded headless Claude
-Code sessions, and ends with the morning digest. Units, layout, secrets
-handling and the runbook live in `deploy/forge/README.md`.
+Code sessions, and ends with the morning digest. The nightly unattended run
+sends the digest itself; the cron `send` from section 9 is for attended
+installs and is not needed on a server running the nightly schedule. Units,
+layout, secrets handling and the runbook live in `deploy/forge/README.md`.
 
 ## Daily rhythm
 

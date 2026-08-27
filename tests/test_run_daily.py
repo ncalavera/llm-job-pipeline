@@ -1700,6 +1700,132 @@ def test_attended_scoring_gate_still_re_emits_without_progress(rd, monkeypatch, 
         assert kind == "gate"
 
 
+def test_screen_and_escalate_resumes_shrink_the_payload_file(rd, monkeypatch, tmp_path):
+    """#7: the unattended wrapper dispatches the WHOLE payload file, so every
+    scoring-gate re-emission must rewrite it to the still-unscored subset —
+    while the screen-complete totals and the escalate pick still see the full
+    screen set (preserved archive). The gates also carry the phase contract
+    the wrapper needs to pick a model tier."""
+    import json as _json
+    import subprocess
+
+    _stub_two_pass(rd, monkeypatch, tmp_path)
+    payloads = [_payload("v1"), _payload("v2"), _payload("v3")]
+    monkeypatch.setattr(
+        rd,
+        "_run_capture",
+        lambda cmd, opts: subprocess.CompletedProcess(cmd, 0, _json.dumps(payloads), ""),
+    )
+    monkeypatch.setattr(rd, "_reset_escalation_scores", lambda ids: None)
+    monkeypatch.setattr(rd, "_vacancy_scored_by", lambda ids: {})
+
+    state = rd._new_state(rd.Opts())
+    entry = rd._stage(state, "vacancy_scoring")
+    kind, info = rd._h_vacancy_scoring(state, entry, rd.Opts())
+    assert kind == "gate" and info["phase"] == "screen"
+    entry["emitted"] = True
+
+    # Screen resume with one role left: the file shrinks to that role.
+    monkeypatch.setattr(rd, "_unscored_vacancy_ids", lambda ids: {"v3"})
+    kind, info = rd._h_vacancy_scoring(state, entry, rd.Opts())
+    assert kind == "gate" and info["phase"] == "screen"
+    on_disk = _json.loads(rd.VAC_PAYLOAD_PATH.read_text(encoding="utf-8"))
+    assert [p["id"] for p in on_disk] == ["v3"]
+
+    # Screen complete: totals and the escalate pick use the FULL screen set,
+    # not the shrunken file — v1 (scored before the shrink) still escalates.
+    monkeypatch.setattr(rd, "_unscored_vacancy_ids", lambda ids: set())
+    monkeypatch.setattr(rd, "_vacancy_scores", lambda ids: {"v1": 80, "v2": 30, "v3": 45})
+    kind, info = rd._h_vacancy_scoring(state, entry, rd.Opts())
+    assert kind == "gate" and info["phase"] == "escalate"
+    assert entry["screen_counts"]["screened"] == 3
+    assert entry["screen_counts"]["escalated"] == 2
+
+    # Escalate resume with one finalist left: the file shrinks again.
+    monkeypatch.setattr(rd, "_unscored_vacancy_ids", lambda ids: {"v1"})
+    kind, info = rd._h_vacancy_scoring(state, entry, rd.Opts())
+    assert kind == "gate" and info["phase"] == "escalate"
+    on_disk = _json.loads(rd.VAC_PAYLOAD_PATH.read_text(encoding="utf-8"))
+    assert [p["id"] for p in on_disk] == ["v1"]
+
+
+def test_company_score_resume_shrinks_the_payload_file(rd, monkeypatch, tmp_path):
+    """#7 for the company gate: a re-emission rewrites the payload file to the
+    still-unscored companies, and the completion total still counts the stage's
+    target_ids (it survives the rewrite)."""
+    import json as _json
+
+    monkeypatch.setattr(rd, "CO_PAYLOAD_PATH", tmp_path / "co_payload.json")
+    rd.CO_PAYLOAD_PATH.write_text(_json.dumps([{"id": "a"}, {"id": "b"}]), encoding="utf-8")
+    monkeypatch.setattr(rd, "_unscored_company_ids", lambda ids: {"b"})
+
+    state = rd._new_state(rd.Opts())
+    entry = rd._stage(state, "company_scoring")
+    entry["emitted"] = True
+    entry["phase"] = "screened"
+    entry["target_ids"] = ["a", "b"]
+
+    kind, info = rd._h_company_scoring(state, entry, rd.Opts())
+    assert kind == "gate" and info["count"] == 1
+    assert info["phase"] == "score"
+    on_disk = _json.loads(rd.CO_PAYLOAD_PATH.read_text(encoding="utf-8"))
+    assert [p["id"] for p in on_disk] == ["b"]
+
+    monkeypatch.setattr(rd, "_unscored_company_ids", lambda ids: set())
+    kind, note = rd._h_company_scoring(state, entry, rd.Opts())
+    assert kind == "advance"
+    assert "2 scored" in note  # target_ids total, not the shrunken file
+
+
+def test_company_screen_gate_carries_the_phase_field(rd, monkeypatch, tmp_path):
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "k")
+    monkeypatch.setattr(rd, "_prefilter_junk_companies", lambda opts, state: None)
+    monkeypatch.setattr(
+        rd,
+        "_screen_candidates",
+        lambda opts: {
+            "total": 1,
+            "screened": 0,
+            "llm_ran": False,
+            "drops": 0,
+            "dup_drops": 0,
+            "llm_drops": 0,
+            "pending_count": 1,
+            "payload_path": str(tmp_path / "screen_payload.json"),
+        },
+    )
+    state = rd._new_state(rd.Opts())
+    kind, info = rd._h_company_scoring(state, rd._stage(state, "company_scoring"), rd.Opts())
+    assert kind == "gate" and info["action"] == "screen_companies"
+    assert info["phase"] == "screen"
+
+
+def test_drive_copies_the_gate_phase_into_state(rd):
+    def advancer(s, e, o):
+        return ("advance", "ok")
+
+    def gating(s, e, o):
+        return (
+            "gate",
+            {
+                "action": "score_vacancies",
+                "phase": "screen",
+                "instructions": "x",
+                "payload_path": None,
+            },
+        )
+
+    rd.HANDLERS = {name: advancer for name in rd.STAGE_ORDER}
+    rd.HANDLERS["vacancy_scoring"] = gating
+    state = rd._new_state(rd.Opts())
+    assert rd.drive(state, rd.Opts()) == rd.EXIT_GATE
+    assert state["gate"] == {
+        "stage": "vacancy_scoring",
+        "action": "score_vacancies",
+        "phase": "screen",
+    }
+
+
 def test_unattended_company_scoring_carries_over_without_progress(rd, monkeypatch, tmp_path):
     import json as _json
 
@@ -1794,10 +1920,27 @@ def test_digest_sits_between_verdicts_and_publish(rd):
 def test_digest_skipped_without_telegram_env(rd, monkeypatch):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    opts = rd.Opts(unattended=True)
+    state = rd._new_state(opts)
+    kind, note = rd._h_digest(state, rd._stage(state, "digest"), opts)
+    assert kind == "skip"
+    assert "TELEGRAM" in note
+
+
+def test_digest_attended_run_never_sends(rd, monkeypatch):
+    """Frozen desktop behavior: even with TELEGRAM_* set, an attended run skips
+    the send (the user's own scheduled `telegram_digest.py send` covers it) —
+    but still persists the counts contract for that later manual send."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "c")
+    ran = []
+    monkeypatch.setattr(rd, "_run", lambda cmd, opts: ran.append(cmd) or 0)
     state = rd._new_state(rd.Opts())
     kind, note = rd._h_digest(state, rd._stage(state, "digest"), rd.Opts())
     assert kind == "skip"
-    assert "TELEGRAM" in note
+    assert "night-run" in note
+    assert ran == []  # telegram_digest.py send never invoked
+    assert rd._load_state()["counts"] == state["counts"]  # counts still persisted
 
 
 def test_digest_skipped_on_no_publish(rd, monkeypatch):
@@ -1823,9 +1966,10 @@ def test_digest_writes_counts_and_sends(rd, monkeypatch):
         return 0
 
     monkeypatch.setattr(rd, "_run", fake_run)
-    state = rd._new_state(rd.Opts())
+    opts = rd.Opts(unattended=True)
+    state = rd._new_state(opts)
     rd._stage(state, "vacancy_scoring")["screen_counts"] = {"screened": 3}
-    kind, note = rd._h_digest(state, rd._stage(state, "digest"), rd.Opts())
+    kind, note = rd._h_digest(state, rd._stage(state, "digest"), opts)
     assert kind == "advance"
     assert "digest" in note
     assert any("telegram_digest.py" in str(c) for c in ran["cmd"])
@@ -1853,8 +1997,9 @@ def test_digest_failure_marks_error_but_run_still_publishes(rd, monkeypatch):
     rd.HANDLERS = {name: advancer(name) for name in rd.STAGE_ORDER}
     monkeypatch.setattr(rd, "_run", lambda cmd, opts: 1)  # digest send exits 1
     rd.HANDLERS["digest"] = rd._h_digest
-    state = rd._new_state(rd.Opts())
-    code = rd.drive(state, rd.Opts())
+    opts = rd.Opts(unattended=True)  # the send only happens on a night run
+    state = rd._new_state(opts)
+    code = rd.drive(state, opts)
     assert code == rd.EXIT_DONE
     assert seen[-1] == "publish"  # publish still ran after the digest error
     assert rd._stage(state, "digest")["status"] == "error"

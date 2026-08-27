@@ -809,6 +809,24 @@ def _unattended_scoring_gate(entry: dict, phase: str, remaining: int) -> bool:
     return False
 
 
+def _carry_over(
+    opts: "Opts", entry: dict, phase: str, remaining: int, note: str, finish: bool = False
+):
+    """The unattended no-progress answer for a scoring gate: when
+    ``_unattended_scoring_gate`` declines to re-emit, record the carry-over and
+    advance with ``note``. Returns the ("advance", note) tuple, or None when the
+    gate should (re-)emit — attended run, or progress since the last stop.
+    ``finish`` closes the live progress card (the vacancy phases own one)."""
+    if not opts.unattended or _unattended_scoring_gate(entry, phase, remaining):
+        return None
+    if finish:
+        import run_status
+
+        run_status.finish()
+    entry["carried_over"] = remaining
+    return "advance", note
+
+
 def resolve_scoring_limit(full_rescore: bool) -> tuple[int | None, str | None]:
     """The per-run scoring cap decision (STRATEGY guardrails 3 & 4).
 
@@ -943,6 +961,14 @@ def _read_payload(path: Path) -> list:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return []
+
+
+def _screen_archive_path() -> Path:
+    """The untouched copy of the full SCREEN payload set. VAC_PAYLOAD_PATH is
+    rewritten to the unscored remainder on every resume (the unattended wrapper
+    dispatches the whole file), so the screen-complete totals and the escalate
+    pick read the full set from here instead."""
+    return VAC_PAYLOAD_PATH.with_suffix(".screen.json")
 
 
 def _emit_gate(stage: str, payload: dict) -> None:
@@ -1403,17 +1429,24 @@ def _h_company_scoring(state, entry, opts):
                 "advance",
                 f"company scoring complete ({len(entry.get('target_ids', []))} scored)",
             )
-        if opts.unattended and not _unattended_scoring_gate(entry, "score", len(remaining)):
-            entry["carried_over"] = len(remaining)
-            return (
-                "advance",
-                f"company scoring carried over — {len(remaining)} company(ies) still "
-                "unscored with no progress since the last stop; they stay candidates "
-                "for the next run",
-            )
+        carried = _carry_over(
+            opts,
+            entry,
+            "score",
+            len(remaining),
+            f"company scoring carried over — {len(remaining)} company(ies) still "
+            "unscored with no progress since the last stop; they stay candidates "
+            "for the next run",
+        )
+        if carried:
+            return carried
         payloads = [p for p in _read_payload(CO_PAYLOAD_PATH) if str(p.get("id")) in remaining]
+        # The unattended wrapper dispatches the whole file — shrink it to the
+        # still-unscored subset so a resume never re-sends scored companies.
+        _write_payload(CO_PAYLOAD_PATH, payloads)
         return "gate", {
             "action": "score_companies",
+            "phase": "score",
             "count": len(payloads),
             "payload_path": str(CO_PAYLOAD_PATH),
             "instructions": _company_gate_text(payloads),
@@ -1477,6 +1510,7 @@ def _h_company_scoring(state, entry, opts):
             entry["phase"] = "screen"
             return "gate", {
                 "action": "screen_companies",
+                "phase": "screen",
                 "count": screen["pending_count"],
                 "payload_path": screen.get("payload_path") or str(SCREEN_CO_PAYLOAD_PATH),
                 "instructions": _screen_gate_text(screen["pending_count"], company_screen_model()),
@@ -1540,6 +1574,7 @@ def _h_company_scoring(state, entry, opts):
         _unattended_scoring_gate(entry, "score", len(entry["target_ids"]))
     return "gate", {
         "action": "score_companies",
+        "phase": "score",
         "count": len(payloads),
         "payload_path": str(CO_PAYLOAD_PATH),
         "instructions": _company_gate_text(payloads)
@@ -1630,6 +1665,7 @@ def _h_vacancy_scoring(state, entry, opts):
             entry["oneshot"] = True  # force-rescore can't use the "llm_score IS NULL" check
             return "gate", {
                 "action": "score_vacancies",
+                "phase": "escalate",  # phase names the model tier: the strong one here
                 "count": len(payloads),
                 "payload_path": str(VAC_PAYLOAD_PATH),
                 "instructions": _vacancy_gate_text(payloads, strong_model, "rescore"),
@@ -1638,10 +1674,15 @@ def _h_vacancy_scoring(state, entry, opts):
         entry["phase"] = "screen"
         if single_pass:
             entry["single_pass"] = True
+        # Full screen set, preserved: resumes shrink VAC_PAYLOAD_PATH to the
+        # unscored remainder, but the screen-complete totals and the escalate
+        # pick must still see every screened payload.
+        _write_payload(_screen_archive_path(), payloads)
         if opts.unattended:  # baseline for the no-progress carry-over on re-entry
             _unattended_scoring_gate(entry, "screen", len(entry["target_ids"]))
         return "gate", {
             "action": "score_vacancies",
+            "phase": "screen",
             "count": len(payloads),
             "payload_path": str(VAC_PAYLOAD_PATH),
             "instructions": _vacancy_gate_text(
@@ -1669,19 +1710,24 @@ def _h_vacancy_scoring(state, entry, opts):
         if remaining_ids and not remaining:
             return "error", _corrupt_score_payload_msg(len(remaining_ids), "screen")
         if remaining:
-            if opts.unattended and not _unattended_scoring_gate(
-                entry, "screen", len(remaining_ids)
-            ):
-                run_status.finish()
-                entry["carried_over"] = len(remaining_ids)
-                return (
-                    "advance",
-                    f"scoring carried over — {len(remaining_ids)} role(s) still unscored "
-                    "with no progress since the last stop; they lead the next run's "
-                    "batch (oldest first)",
-                )
+            carried = _carry_over(
+                opts,
+                entry,
+                "screen",
+                len(remaining_ids),
+                f"scoring carried over — {len(remaining_ids)} role(s) still unscored "
+                "with no progress since the last stop; they lead the next run's "
+                "batch (oldest first)",
+                finish=True,
+            )
+            if carried:
+                return carried
+            # The unattended wrapper dispatches the whole file — shrink it to
+            # the still-unscored subset so a resume never re-sends scored roles.
+            _write_payload(VAC_PAYLOAD_PATH, remaining)
             return "gate", {
                 "action": "score_vacancies",
+                "phase": "screen",
                 "count": len(remaining),
                 "payload_path": str(VAC_PAYLOAD_PATH),
                 "instructions": _vacancy_gate_text(
@@ -1689,7 +1735,10 @@ def _h_vacancy_scoring(state, entry, opts):
                 ),
             }
 
-        screened = len(payloads)
+        # Resumes shrank the payload file to the unscored remainder, so the
+        # totals and the escalate pick read the preserved full screen set.
+        screen_set = _read_payload(_screen_archive_path()) or payloads
+        screened = len(screen_set)
 
         # screen_model == scoring_model -> one pass, no escalate gate.
         if single_pass:
@@ -1719,8 +1768,10 @@ def _h_vacancy_scoring(state, entry, opts):
             print(threshold_warn, flush=True)
         scores = _vacancy_scores(entry.get("target_ids", []))
         scored_by = _vacancy_scored_by(entry.get("target_ids", []))
-        cleared_floor = select_escalation_payloads(payloads, scores, threshold)
-        escalate = select_escalation_payloads(payloads, scores, threshold, scored_by, strong_model)
+        cleared_floor = select_escalation_payloads(screen_set, scores, threshold)
+        escalate = select_escalation_payloads(
+            screen_set, scores, threshold, scored_by, strong_model
+        )
         already_strong = len(cleared_floor) - len(escalate)
         n_esc = len(escalate)
         entry["screen_counts"] = {
@@ -1751,6 +1802,7 @@ def _h_vacancy_scoring(state, entry, opts):
         run_status.begin("score", len(escalate))
         return "gate", {
             "action": "score_vacancies",
+            "phase": "escalate",
             "count": len(escalate),
             "payload_path": str(VAC_PAYLOAD_PATH),
             "instructions": _vacancy_gate_text(escalate, strong_model, "escalate", threshold),
@@ -1765,17 +1817,21 @@ def _h_vacancy_scoring(state, entry, opts):
     if remaining_ids and not remaining:
         return "error", _corrupt_score_payload_msg(len(remaining_ids), "escalate")
     if remaining:
-        if opts.unattended and not _unattended_scoring_gate(
-            entry, "escalate", len(remaining_ids)
-        ):
-            run_status.finish()
-            entry["carried_over"] = len(remaining_ids)
-            return (
-                "advance",
-                f"escalation carried over — {len(remaining_ids)} finalist(s) still "
-                "unscored with no progress since the last stop; they lead the next "
-                "run's batch",
-            )
+        carried = _carry_over(
+            opts,
+            entry,
+            "escalate",
+            len(remaining_ids),
+            f"escalation carried over — {len(remaining_ids)} finalist(s) still "
+            "unscored with no progress since the last stop; they lead the next "
+            "run's batch",
+            finish=True,
+        )
+        if carried:
+            return carried
+        # The unattended wrapper dispatches the whole file — shrink it to the
+        # still-unscored finalists so a resume never re-sends scored roles.
+        _write_payload(VAC_PAYLOAD_PATH, remaining)
         # Every call that reaches this branch is a RESUME of the escalate gate
         # (the transition above returns its own gate without falling through
         # here) — re-begin so the live progress card reflects what's actually
@@ -1783,6 +1839,7 @@ def _h_vacancy_scoring(state, entry, opts):
         run_status.begin("score", len(remaining))
         return "gate", {
             "action": "score_vacancies",
+            "phase": "escalate",
             "count": len(remaining),
             "payload_path": str(VAC_PAYLOAD_PATH),
             "instructions": _vacancy_gate_text(remaining, strong_model, "escalate", threshold),
@@ -1842,6 +1899,14 @@ def _h_digest(state, entry, opts):
     _save_state(state)
     if opts.no_publish:
         return "skip", "digest suppressed (--no-publish)"
+    if not opts.unattended:
+        # Frozen desktop behavior: an attended run never sends — it would
+        # double-fire against the user's own scheduled `telegram_digest.py send`.
+        return (
+            "skip",
+            "digest is a night-run stage — attended installs keep the scheduled "
+            "`telegram_digest.py send`",
+        )
     if not (os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID")):
         return (
             "skip",
@@ -2043,7 +2108,10 @@ def drive(state: dict, opts: Opts, observe: bool = False) -> int:
             entry["status"] = "blocked_gate"
             entry["emitted"] = True
             entry["gate"] = info
-            state["gate"] = {"stage": name, "action": info.get("action")}
+            # ``phase`` tells the nightly wrapper which model tier answers a
+            # scoring gate ("screen"/"escalate" for vacancies, "screen"/"score"
+            # for companies); None on every other gate.
+            state["gate"] = {"stage": name, "action": info.get("action"), "phase": info.get("phase")}
             _save_state(state)
             if observe:
                 _record_history(state, opts)
