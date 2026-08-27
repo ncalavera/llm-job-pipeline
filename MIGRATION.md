@@ -87,10 +87,13 @@ Persist a vacancy triage status.
   method → 405; missing DB config → 500 `{"error":"Server misconfigured"}`.
 - Body: `{"id": <vacancy uuid>, "status": <one of unseen, liked, passed,
   to_apply, to_research, to_network, skipped, applied, test_task, interview,
-  declined, expiring, archived>}`.
+  declined, accepted, expiring, archived>}`.
 - Missing field → 400 `{"error":"Missing id or status"}`; unknown status →
   400 `{"error":"Invalid status"}`.
-- Updates `vacancy.status` + `status_updated_at`. Update-only: unknown id →
+- Updates `vacancy.status` + `status_updated_at`. When the new status is an
+  application (applied, test_task, interview, declined, accepted) it also sets
+  `applied_at` — but only if it is still NULL, so the first send date survives
+  every later stage. Update-only: unknown id →
   404 `{"error":"Vacancy not found","id":...}`.
 - 200 → `{"ok":true,"ts":<ISO timestamp>}`. DB error → 500
   `{"error":"Database error"}`.

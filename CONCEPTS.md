@@ -8,7 +8,17 @@ Shared domain vocabulary for this project — entities, named processes, and sta
 The review flow where the user turns liked vacancies into decisions — apply, research, network, or skip. Runs on the dashboard's Triage board (and a thin terminal equivalent); each decision is recorded as a stored vacancy status.
 
 ### Liked basket
-The set of vacancy statuses that mean active interest: liked itself plus the decision statuses that follow it (to apply, to research, to network, applied). Distinct from the passed basket (declined or skipped) and from unseen (never reviewed). Basket membership, not the individual status, decides which side of the dashboard a vacancy appears on.
+The set of vacancy statuses that mean active interest: liked itself plus the decision statuses that follow it (to apply, to research, to network, applied, test task, interview, accepted). Distinct from the passed basket (declined or skipped) and from unseen (never reviewed). Basket membership, not the individual status, decides which side of the dashboard a vacancy appears on. Accepted sits here rather than in the passed basket: it is a closed outcome like declined, but the opposite answer, and counting a win as a rejection would teach scoring to downrank exactly the roles the search is for.
+
+### Applications table
+The Triage tab's second view of the same data: one row per application ever sent, newest first, with a send date, a stage, and how long it has been waiting. The board answers "where is each application"; the table answers "what have I sent, and what is waiting on whom" — questions a card layout cannot answer, because a card has no room for a date and the columns order by score, not time. Both views read one dataset through one dedupe, so they can never disagree about how many applications exist.
+
+### Kind
+What was applied to: job, programme, advising, consulting, grant, or course. Every scraped role is a job; the rest are applications the user sent that are not vacancies, recorded by hand (`vac add`) and stored as ordinary vacancy rows so the funnel counts them with everything else.
+*Avoid:* a separate table for non-job applications.
+
+### Send date
+When an application actually went out (`vacancy.applied_at`), written once when a row first enters the application funnel and never overwritten. Distinct from `status_updated_at`, which moves with every stage — on a declined row that one holds the date of the rejection, so it can never stand in for a send date without lying. Where no send date was recorded, the display falls back to the stage date and marks the cell as an estimate.
 
 ### Expired (derived state)
 A display-only triage classification: a liked-basket vacancy that is no longer actual, because its deadline has passed or its source stopped confirming it. Computed at render time from the vacancy's own fields and never written to the database — the underlying status survives, nothing can be dragged into the state, and the classification reverses itself if the role reappears at the source.
