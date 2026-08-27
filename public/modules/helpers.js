@@ -1072,7 +1072,75 @@ export function computeTriageFunnel(entries, opts) {
 // Minimal markdown renderer
 // ---------------------------------------------------------------------------
 
-export function inlineFormat(text) {
+// A link to a heading inside the SAME document — "[Career advising](#career-
+// advising)", which is how every report writes its own contents list. safeUrl
+// only passes http(s)/mailto, so these were dropped to plain text and the whole
+// contents list of a long report stopped being clickable.
+//
+// A fragment is inert by construction: it cannot navigate off the page and
+// carries no scheme to smuggle. The pattern is still restricted to the
+// characters headingSlug can produce, so nothing else gets through, and the
+// link opens IN PLACE — target="_blank" on a same-page anchor would open a
+// second copy of the dashboard.
+const SAFE_FRAGMENT = /^#[A-Za-z0-9][A-Za-z0-9_-]*$/;
+
+export function isSafeFragment(url) {
+  return SAFE_FRAGMENT.test(String(url || ""));
+}
+
+// A money amount or a grouped number: "$23,658", "$1,000", "12,206,029", "226".
+// Bare one- and two-digit numbers are left alone — they are usually prose ("six
+// to twelve months"), and setting those in mono would speckle the paragraph.
+const NUMBER_TOKEN = /(\$\d[\d,]*(?:\.\d+)?|\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b|\b\d{3,}(?:\.\d+)?\b)/g;
+
+/**
+ * Set every money amount and grouped number in the monospace face.
+ *
+ * A report like the EAIF grant list is 226 bullets of "**Name** — $6,430 —
+ * 2026 Q1 — …". In the body face those amounts are different widths per digit,
+ * so the eye cannot compare them down the column; in mono with tabular figures
+ * they line up and the list becomes scannable. (design-styles §4: numbers in
+ * mono, tabular-nums.)
+ *
+ * Operates only on text OUTSIDE tags, so it can never rewrite an href, a class
+ * name, or an id — the input at this point already contains the <a> elements
+ * the link rule produced.
+ */
+// A cell holding nothing but a number: money, a percentage, a count, a range,
+// or an em-dash placeholder. Anything with words in it is prose and stays left.
+const NUMERIC_CELL = /^[$€£]?[\d,. %+\u2013\u2014-]+$/;
+
+//: Passed to inlineFormat where the reader scans rather than reads.
+const NUMERIC = { numbers: true };
+
+export function isNumericCell(text) {
+  const value = String(text == null ? "" : text).trim();
+  if (!value) return false;
+  return /\d/.test(value) && NUMERIC_CELL.test(value);
+}
+
+export function wrapNumbers(html) {
+  return String(html == null ? "" : html)
+    .split(/(<[^>]*>)/)
+    .map((part) =>
+      part.startsWith("<")
+        ? part
+        : part.replace(NUMBER_TOKEN, '<span class="md-num">$1</span>'),
+    )
+    .join("");
+}
+
+/**
+ * Inline markdown to HTML: bold, italic, code, links.
+ *
+ * `opts.numbers` additionally sets money amounts and grouped numbers in the
+ * monospace face. It is ON for list items and table cells — the places a
+ * reader SCANS, where mono digits of equal width line up down the column — and
+ * OFF for paragraphs and headings, where a sentence like "in 2022 it made 293
+ * grants totaling $12,206,029" would come out speckled with three different
+ * typefaces and read worse, not better.
+ */
+export function inlineFormat(text, opts) {
   text = text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   text = text.replace(/__(.+?)__/g, "<strong>$1</strong>");
   text = text.replace(/(?<!\w)\*([^\*]+?)\*(?!\w)/g, "<em>$1</em>");
@@ -1082,6 +1150,10 @@ export function inlineFormat(text) {
     // `text` was already escHtml'd by mdToHtml before inlineFormat runs, so
     // `url` here is HTML-escaped, not raw — safeUrl still works (the scheme
     // itself has no HTML-special chars) but it must not be escHtml'd again.
+    if (isSafeFragment(url)) {
+      // Same-page jump (a report's own contents list): stays in this tab.
+      return '<a class="md-jump" href="' + url + '">' + label + "</a>";
+    }
     const href = safeUrl(url);
     return href
       ? '<a href="' +
@@ -1091,7 +1163,7 @@ export function inlineFormat(text) {
           "</a>"
       : label;
   });
-  return text;
+  return opts && opts.numbers ? wrapNumbers(text) : text;
 }
 
 /**
@@ -1240,7 +1312,11 @@ export function mdToHtml(text, opts) {
           "<tr>" +
             cells
               .map(function (c) {
-                return "<td>" + inlineFormat(c) + "</td>";
+                // Numeric columns align right so the digits stack; a generic
+                // renderer cannot know the column's type, but it can see that
+                // this cell is nothing but a number.
+                const cls = isNumericCell(c) ? ' class="md-td-num"' : "";
+                return "<td" + cls + ">" + inlineFormat(c, NUMERIC) + "</td>";
               })
               .join("") +
             "</tr>",
@@ -1263,7 +1339,7 @@ export function mdToHtml(text, opts) {
         out.push("<ul>");
         inList = true;
       }
-      out.push("<li>" + inlineFormat(RegExp.$1) + "</li>");
+      out.push("<li>" + inlineFormat(RegExp.$1, NUMERIC) + "</li>");
       continue;
     }
 
@@ -1279,7 +1355,7 @@ export function mdToHtml(text, opts) {
         out.push("<ol>");
         inOrderedList = true;
       }
-      out.push("<li>" + inlineFormat(RegExp.$1) + "</li>");
+      out.push("<li>" + inlineFormat(RegExp.$1, NUMERIC) + "</li>");
       continue;
     }
 
