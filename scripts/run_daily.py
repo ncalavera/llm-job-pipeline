@@ -113,6 +113,8 @@ STAGE_ORDER = [
     "company_scoring",  # GATE  — WANT-score new candidate companies
     "vacancy_scoring",  # GATE  — per-vacancy subagent scoring (1 vac = 1 agent)
     "verdicts",  # GATE  — show top matches, capture like/pass
+    "digest",  # AUTO  — tiered morning Telegram message (before publish, KTD5:
+    #                     a dashboard refresh failure can never cost the digest)
     "publish",  # AUTO  — publish always; warns loudly when the run was not clean
 ]
 
@@ -131,6 +133,7 @@ STAGE_ABOUT = {
     "company_scoring": "WANT-scoring new candidate companies",
     "vacancy_scoring": "scoring new roles (cheap screen, then strong finalists)",
     "verdicts": "collecting your like / pass verdicts",
+    "digest": "sending the tiered morning digest to Telegram",
     "publish": "publishing the dashboard (warns if the run was not clean)",
 }
 
@@ -256,6 +259,12 @@ def _stage(state: dict, name: str) -> dict:
     for s in state["stages"]:
         if s["name"] == name:
             return s
+    # A checkpoint written before a stage existed (e.g. pre-digest deploys)
+    # lacks its entry; create it lazily so an old run still resumes cleanly.
+    if name in STAGE_ORDER:
+        entry = {"name": name, "status": "pending"}
+        state["stages"].append(entry)
+        return entry
     raise KeyError(name)
 
 
@@ -1146,7 +1155,9 @@ def _screen_gate_text(count: int, model: str) -> str:
 # ---------------------------------------------------------------------------
 # Stage handlers. Each returns one of:
 #   ("advance", note) | ("skip", note) | ("gate", payload)
-#   ("error", msg)    | ("abort", msg)
+#   ("error", msg)    | ("abort", msg) | ("error_continue", msg)
+# error_continue marks the stage error but does NOT stop the run — reserved for
+# a stage whose failure must never cost the stages after it (the digest, KTD5).
 # ---------------------------------------------------------------------------
 
 
@@ -1815,6 +1826,34 @@ def _h_verdicts(state, entry, opts):
     }
 
 
+def _h_digest(state, entry, opts):
+    """Send the tiered morning message (telegram_digest.py send, U3) BEFORE
+    publish, so a dashboard refresh failure can never cost the digest (KTD5).
+
+    Persists the run's counters into the state first — the digest subprocess
+    reads ``counts`` / stage fields from the checkpoint on disk (R10). A failed
+    send marks THIS stage error but the run continues to publish
+    (``error_continue``): the dashboard must still refresh on a broken Telegram
+    morning, and the R12 alerting for a lost message lives in the nightly
+    wrapper, not here."""
+    # Write the counts contract even when the send is skipped: a later manual
+    # `telegram_digest.py send` still reads an honest header from the state.
+    state["counts"] = _run_counts(state)
+    _save_state(state)
+    if opts.no_publish:
+        return "skip", "digest suppressed (--no-publish)"
+    if not (os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID")):
+        return (
+            "skip",
+            "digest skipped — TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID unset "
+            "(set both to get the morning message)",
+        )
+    rc = _run(_py("telegram_digest.py") + ["send"], opts)
+    if rc != 0:
+        return "error_continue", f"digest send exited with code {rc}"
+    return "advance", "morning digest sent"
+
+
 def _h_publish(state, entry, opts):
     # Warn-only: the gate detects a dirty run but never withholds the refresh.
     # Skipping here never protected anything — score --save already regenerated
@@ -1849,6 +1888,7 @@ HANDLERS = {
     "company_scoring": _h_company_scoring,
     "vacancy_scoring": _h_vacancy_scoring,
     "verdicts": _h_verdicts,
+    "digest": _h_digest,
     "publish": _h_publish,
 }
 
@@ -2009,6 +2049,25 @@ def drive(state: dict, opts: Opts, observe: bool = False) -> int:
                 _record_history(state, opts)
             _emit_gate(name, info)
             return EXIT_GATE
+
+        if kind == "error_continue":
+            # The stage failed but must never cost what comes after it (the
+            # digest before publish, KTD5): record the error, keep going. The
+            # publish gate reads the error status and flags the run not clean.
+            entry["status"] = "error"
+            entry["note"] = info
+            entry["finished_at"] = _now()
+            state["cursor"] = idx + 1
+            state["gate"] = None
+            _save_state(state)
+            if observe:
+                _record_history(state, opts)
+            print(
+                f"\n✗ Stage '{name}' failed: {info} — continuing to the next stage",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
 
         if kind == "error":
             entry["status"] = "error"

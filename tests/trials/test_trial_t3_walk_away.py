@@ -35,6 +35,7 @@ def test_stage_order_and_handlers_are_owned_by_the_driver(monkeypatch, tmp_path)
         "company_scoring",
         "vacancy_scoring",
         "verdicts",
+        "digest",
         "publish",
     ]
     # Every stage is executable; no orphan stage the operator must drive by hand.

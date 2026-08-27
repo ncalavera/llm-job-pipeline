@@ -49,6 +49,7 @@ def test_stage_order_is_the_documented_sequence(rd):
         "company_scoring",
         "vacancy_scoring",
         "verdicts",
+        "digest",
         "publish",
     ]
 
@@ -1777,3 +1778,105 @@ def test_summary_stays_silent_without_rollovers(rd, capsys):
     out = capsys.readouterr().out
     assert "carried over" not in out
     assert "rolled over" not in out
+
+
+# ---------------------------------------------------------------------------
+# U4: the digest stage — AUTO, between verdicts and publish (KTD5)
+# ---------------------------------------------------------------------------
+
+
+def test_digest_sits_between_verdicts_and_publish(rd):
+    order = rd.STAGE_ORDER
+    assert order.index("verdicts") + 1 == order.index("digest")
+    assert order.index("digest") + 1 == order.index("publish")
+
+
+def test_digest_skipped_without_telegram_env(rd, monkeypatch):
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    state = rd._new_state(rd.Opts())
+    kind, note = rd._h_digest(state, rd._stage(state, "digest"), rd.Opts())
+    assert kind == "skip"
+    assert "TELEGRAM" in note
+
+
+def test_digest_skipped_on_no_publish(rd, monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "c")
+    state = rd._new_state(rd.Opts(no_publish=True))
+    kind, note = rd._h_digest(state, rd._stage(state, "digest"), rd.Opts(no_publish=True))
+    assert kind == "skip"
+    assert "no-publish" in note
+
+
+def test_digest_writes_counts_and_sends(rd, monkeypatch):
+    """The stage persists the counts contract the U3 digest reads, then runs
+    telegram_digest.py send as a subprocess."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "c")
+    rd.FETCH_STATS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    rd.FETCH_STATS_PATH.write_text('{"total_new": 7}', encoding="utf-8")
+    ran = {}
+
+    def fake_run(cmd, opts):
+        ran["cmd"] = cmd
+        return 0
+
+    monkeypatch.setattr(rd, "_run", fake_run)
+    state = rd._new_state(rd.Opts())
+    rd._stage(state, "vacancy_scoring")["screen_counts"] = {"screened": 3}
+    kind, note = rd._h_digest(state, rd._stage(state, "digest"), rd.Opts())
+    assert kind == "advance"
+    assert "digest" in note
+    assert any("telegram_digest.py" in str(c) for c in ran["cmd"])
+    assert "send" in ran["cmd"]
+    assert state["counts"] == {"new_vacancies": 7, "scored": 3}
+    # The counts reached the checkpoint on disk BEFORE the send subprocess read it.
+    on_disk = rd._load_state()
+    assert on_disk["counts"] == {"new_vacancies": 7, "scored": 3}
+
+
+def test_digest_failure_marks_error_but_run_still_publishes(rd, monkeypatch):
+    """KTD5: a digest crash can never cost the rest of the run — the stage is
+    marked error, the run continues to publish and finishes."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "c")
+    seen = []
+
+    def advancer(name):
+        def h(state, entry, opts):
+            seen.append(name)
+            return ("advance", "ok")
+
+        return h
+
+    rd.HANDLERS = {name: advancer(name) for name in rd.STAGE_ORDER}
+    monkeypatch.setattr(rd, "_run", lambda cmd, opts: 1)  # digest send exits 1
+    rd.HANDLERS["digest"] = rd._h_digest
+    state = rd._new_state(rd.Opts())
+    code = rd.drive(state, rd.Opts())
+    assert code == rd.EXIT_DONE
+    assert seen[-1] == "publish"  # publish still ran after the digest error
+    assert rd._stage(state, "digest")["status"] == "error"
+    assert rd._stage(state, "publish")["status"] == "done"
+    assert state["finished"] is True
+
+
+def test_digest_error_dirties_the_publish_gate(rd):
+    state = rd._new_state(rd.Opts())
+    rd._stage(state, "digest")["status"] = "error"
+    clean, reasons = rd.check_publish_gate(state, fetch_stats={})
+    assert clean is False
+    assert any("digest" in r for r in reasons)
+
+
+def test_pre_digest_checkpoint_still_resumes(rd):
+    """A checkpoint written before the digest stage existed lacks its stage
+    entry — _stage() creates it lazily instead of raising KeyError."""
+    state = rd._new_state(rd.Opts())
+    state["stages"] = [s for s in state["stages"] if s["name"] != "digest"]
+    entry = rd._stage(state, "digest")
+    assert entry["status"] == "pending"
+    assert any(s["name"] == "digest" for s in state["stages"])
+    with pytest.raises(KeyError):
+        rd._stage(state, "never_a_stage")

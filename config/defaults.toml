@@ -622,6 +622,23 @@ location_hint_cities = [
 ]
 
 # ===========================================================================
+# Nightly unattended run — knobs for scripts/nightly_run.py (the systemd-timer
+# wrapper). Scoring the wrapper cannot finish inside these bounds simply
+# carries over to the next night; nothing is ever lost, only delayed.
+# ===========================================================================
+[nightly]
+# Hard cap on scoring items dispatched to Claude sessions per night (cost fuse).
+max_items_per_night = 120
+# Per-session time limits, minutes (also bounded by the whole-run deadline).
+company_gate_minutes = 30
+vacancy_gate_minutes = 120
+# The whole night from wrapper start: past this, scoring is skipped and the
+# run goes straight to the digest (3 h 45 min fits a 03:00 timer before 07:00).
+run_deadline_minutes = 225
+# --max-turns for each headless Claude session (runaway-loop fuse).
+max_turns = 250
+
+# ===========================================================================
 # Telegram digest — defaults for the optional daily digest. Env vars still win
 # (DIGEST_HOT_SCORE, DIGEST_DEADLINE_SOON_DAYS, DIGEST_LIMIT, DIGEST_MIN_SCORE).
 # ===========================================================================
