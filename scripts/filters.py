@@ -86,14 +86,19 @@ def build_title_blacklist_pattern(words) -> re.Pattern:
 _TITLE_BLACKLIST_PATTERN = build_title_blacklist_pattern(TITLE_BLACKLIST_WORDS)
 
 
+def title_blacklist_match(title: str) -> str | None:
+    """The substring stem or whole-word blacklist term the title hits, else None."""
+    t = (title or "").lower()
+    for kw in TITLE_BLACKLIST_STEMS:
+        if kw in t:
+            return kw
+    m = _TITLE_BLACKLIST_PATTERN.search(t)
+    return m.group(0) if m else None
+
+
 def title_words_blacklisted(title: str) -> bool:
     """True when the title hits a substring stem or a whole-word blacklist term."""
-    t = title.lower()
-    if any(kw in t for kw in TITLE_BLACKLIST_STEMS):
-        return True
-    if _TITLE_BLACKLIST_PATTERN.search(t):
-        return True
-    return False
+    return title_blacklist_match(title) is not None
 
 
 # ---------------------------------------------------------------------------

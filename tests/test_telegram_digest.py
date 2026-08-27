@@ -7,7 +7,7 @@ applied from the real file) with ``tg_call`` faked — no network, no Postgres.
 import importlib
 import json
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 

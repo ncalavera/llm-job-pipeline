@@ -35,7 +35,6 @@ import os
 import sys
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -55,7 +54,6 @@ except Exception:
         "hot_vacancy_score": 55,
         "deadline_soon_days": 7,
         "default_limit": 5,
-        "default_min_score": 40,
         "mid_min_score": 40,
         "dropped_max_lines": 25,
         "summary_fallback_chars": 600,
@@ -144,6 +142,8 @@ ORDER BY v.llm_score DESC, v.created_at DESC
 # Tier 3: dropped vacancies (migration 0020) first seen since the last digest.
 # Not stamped — idempotence comes from the last-digest timestamp in the state
 # file (first_seen is a date, so a same-morning re-send compares below it).
+# Fetched pre-capped (the message shows at most DROPPED_MAX_LINES); the count
+# query supplies the exact "+N more" tail without transferring unshown rows.
 SELECT_DROPPED_SQL = """
 SELECT v.id, v.title, c.canonical_name AS org, v.locations,
        v.scoring_excluded_reason
@@ -152,6 +152,15 @@ JOIN company c ON v.company_id = c.id
 WHERE v.scoring_excluded_reason IS NOT NULL
   AND v.first_seen > %s
 ORDER BY v.first_seen DESC, v.title
+LIMIT %s
+"""
+
+COUNT_DROPPED_SQL = """
+SELECT count(*) AS n
+FROM vacancy v
+JOIN company c ON v.company_id = c.id
+WHERE v.scoring_excluded_reason IS NOT NULL
+  AND v.first_seen > %s
 """
 
 # Header fallback when there is no fresh run state: counts over everything
@@ -344,11 +353,15 @@ def _link_suffix(row):
     return f' — <a href="{html.escape(url, quote=True)}">{_t("digest_open_short")}</a>'
 
 
+def _org_title(row):
+    """HTML-escaped (org, title) pair every line builder starts from."""
+    return html.escape(row.get("org") or ""), html.escape(row.get("title") or "")
+
+
 def build_top_line(row, index):
     """Tier-1 entry: numbered bold line (+ a short summary line) with a link.
     The number matches the entry's 👍/👎 keyboard row."""
-    org = html.escape(row.get("org") or "")
-    title = html.escape(row.get("title") or "")
+    org, title = _org_title(row)
     bits = [f"{index}. <b>{org}</b> — {title}"]
     if row.get("llm_score") is not None:
         bits.append(f"🎯 {row['llm_score']}")
@@ -364,8 +377,7 @@ def build_top_line(row, index):
 
 def build_mid_line(row):
     """Tier-2 entry: one line — title, company, score, link (R7)."""
-    org = html.escape(row.get("org") or "")
-    title = html.escape(row.get("title") or "")
+    org, title = _org_title(row)
     line = f"• {org} — {title}"
     if row.get("llm_score") is not None:
         line += f" · {row['llm_score']}"
@@ -374,8 +386,7 @@ def build_mid_line(row):
 
 def build_dropped_line(row):
     """Tier-3 entry: one line — title, company, the drop reason, link (AE2)."""
-    org = html.escape(row.get("org") or "")
-    title = html.escape(row.get("title") or "")
+    org, title = _org_title(row)
     reason = html.escape(row.get("scoring_excluded_reason") or "")
     return f"• {title} — {org} — {_t('digest_dropped_prefix')} {reason}" + _link_suffix(row)
 
@@ -532,8 +543,12 @@ def build_tail_lines(run_state):
     return lines
 
 
-def assemble_digest(header_lines, top_rows, mid_rows, dropped_rows, tail_lines):
-    """All blocks of the morning message, in tier order (R6)."""
+def assemble_digest(header_lines, top_rows, mid_rows, dropped_rows, tail_lines, dropped_total=None):
+    """All blocks of the morning message, in tier order (R6). ``dropped_rows``
+    arrives pre-capped by the fetch; ``dropped_total`` (default: its length)
+    drives the "+N more" tail."""
+    if dropped_total is None:
+        dropped_total = len(dropped_rows)
     blocks = list(header_lines)
     if top_rows:
         blocks.append("")
@@ -548,8 +563,8 @@ def assemble_digest(header_lines, top_rows, mid_rows, dropped_rows, tail_lines):
         blocks.append(_t("digest_tier_dropped"))
         shown = dropped_rows[:DROPPED_MAX_LINES]
         blocks.extend(build_dropped_line(r) for r in shown)
-        if len(dropped_rows) > len(shown):
-            blocks.append(_t("digest_dropped_more", n=len(dropped_rows) - len(shown)))
+        if dropped_total > len(shown):
+            blocks.append(_t("digest_dropped_more", n=dropped_total - len(shown)))
     if tail_lines:
         blocks.append("")
         blocks.extend(tail_lines)
@@ -628,8 +643,7 @@ def _deadline_or_last_seen_line(row):
 
 def build_expiring_message(row):
     """Loud single-role alert for a protected role about to disappear."""
-    org = html.escape(row.get("org") or "")
-    title = html.escape(row.get("title") or "")
+    org, title = _org_title(row)
     lines = [
         _t("digest_expiring_header"),
         f"<b>{org} — {title}</b>",
@@ -726,7 +740,6 @@ def db_connect(db_url):
 
         return db_backend.get_conn()
     import psycopg2
-    import psycopg2.extras
 
     conn = psycopg2.connect(db_url)
     conn.autocommit = True
@@ -761,9 +774,13 @@ def fetch_mid(conn, min_score, max_score):
 
 
 def fetch_dropped(conn, since):
+    """(rows capped at DROPPED_MAX_LINES, total count) since the last digest."""
     with _dict_cursor(conn) as cur:
-        cur.execute(SELECT_DROPPED_SQL, (since,))
-        return [dict(r) for r in cur.fetchall()]
+        cur.execute(SELECT_DROPPED_SQL, (since, DROPPED_MAX_LINES))
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.execute(COUNT_DROPPED_SQL, (since,))
+        total = int(dict(cur.fetchone() or {}).get("n") or 0)
+    return rows, total
 
 
 def fetch_counts_since(conn, since):
@@ -801,16 +818,30 @@ def unmark_alerted(conn, vac_id):
     conn.commit()
 
 
-def mark_sent(conn, vac_id):
+def _stamp_many(conn, set_clause, ids):
+    """One UPDATE for a whole claim/release batch (no per-row round trips)."""
+    if not ids:
+        return
+    ph = ", ".join(["%s"] * len(ids))
     with conn.cursor() as cur:
-        cur.execute("UPDATE vacancy SET digest_sent_at = now() WHERE id = %s", (vac_id,))
+        cur.execute(f"UPDATE vacancy SET {set_clause} WHERE id IN ({ph})", list(ids))
     conn.commit()
 
 
-def unmark_sent(conn, vac_id):
-    with conn.cursor() as cur:
-        cur.execute("UPDATE vacancy SET digest_sent_at = NULL WHERE id = %s", (vac_id,))
-    conn.commit()
+def mark_sent_many(conn, vac_ids):
+    _stamp_many(conn, "digest_sent_at = now()", vac_ids)
+
+
+def unmark_sent_many(conn, vac_ids):
+    _stamp_many(conn, "digest_sent_at = NULL", vac_ids)
+
+
+def mark_alerted_many(conn, vac_ids):
+    _stamp_many(conn, "expiring_alerted_at = now()", vac_ids)
+
+
+def unmark_alerted_many(conn, vac_ids):
+    _stamp_many(conn, "expiring_alerted_at = NULL", vac_ids)
 
 
 def set_status(conn, vac_id, status):
@@ -902,14 +933,14 @@ def cmd_send(args):
     top_rows += fetch_candidate_hot(conn)
     mid_floor = args.min_score if args.min_score is not None else MID_MIN_SCORE
     mid_rows = fetch_mid(conn, mid_floor, HOT_VACANCY_SCORE)
-    dropped_rows = fetch_dropped(conn, since)
+    dropped_rows, dropped_total = fetch_dropped(conn, since)
     # Expiring deadlines fold into one header line instead of loud alerts.
     expiring_rows = fetch_expiring(conn)
 
     counts = gather_counts(conn, run_state, since)
     header = build_header_lines(counts, len(expiring_rows), run_state)
     tail = build_tail_lines(run_state)
-    blocks = assemble_digest(header, top_rows, mid_rows, dropped_rows, tail)
+    blocks = assemble_digest(header, top_rows, mid_rows, dropped_rows, tail, dropped_total)
     parts = split_message(blocks)
     keyboard = build_digest_keyboard(top_rows) if top_rows else None
 
@@ -919,7 +950,7 @@ def cmd_send(args):
             print(text)
         print(
             f"\n[dry-run] {len(parts)} message(s): {len(top_rows)} top, {len(mid_rows)} mid, "
-            f"{len(dropped_rows)} dropped, {len(expiring_rows)} deadline(s) — nothing sent",
+            f"{dropped_total} dropped, {len(expiring_rows)} deadline(s) — nothing sent",
             flush=True,
         )
         return
@@ -928,10 +959,9 @@ def cmd_send(args):
     # so a parallel run never duplicates. A failed send releases every claim —
     # the next run re-sends the digest whole (failure delays, never loses).
     claimed = [row["id"] for row in top_rows + mid_rows]
-    for vac_id in claimed:
-        mark_sent(conn, vac_id)
-    for row in expiring_rows:
-        mark_alerted(conn, row["id"])
+    alerted = [row["id"] for row in expiring_rows]
+    mark_sent_many(conn, claimed)
+    mark_alerted_many(conn, alerted)
     try:
         for i, text in enumerate(parts):
             payload = {
@@ -945,16 +975,14 @@ def cmd_send(args):
             tg_call(token, "sendMessage", payload)
             time.sleep(0.5)  # respect the rate limit
     except Exception as e:
-        for vac_id in claimed:
-            unmark_sent(conn, vac_id)
-        for row in expiring_rows:
-            unmark_alerted(conn, row["id"])
+        unmark_sent_many(conn, claimed)
+        unmark_alerted_many(conn, alerted)
         print(f"ERROR digest send: {e}", file=sys.stderr, flush=True)
         sys.exit(1)
     update_state_file(state_path, last_digest_at=datetime.now().isoformat(timespec="seconds"))
     print(
         f"Digest sent to chat {chat_id}: {len(parts)} message(s) — {len(top_rows)} top, "
-        f"{len(mid_rows)} mid, {len(dropped_rows)} dropped, "
+        f"{len(mid_rows)} mid, {dropped_total} dropped, "
         f"{len(expiring_rows)} deadline(s).",
         flush=True,
     )

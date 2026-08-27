@@ -592,18 +592,8 @@ _COUNTRY_DISPLAY = {"united states": "US", "united kingdom": "UK"}
 
 
 def _title_blacklist_phrase(title: str) -> str:
-    """The blacklist phrase that killed this title, for a traceable reason.
-
-    Reads the SAME compiled stems/pattern filters.title_words_blacklisted
-    matches on (single source of the matching semantics), just returning the
-    matched text instead of a bare bool.
-    """
-    t = (title or "").lower()
-    for kw in filters.TITLE_BLACKLIST_STEMS:
-        if kw in t:
-            return kw
-    m = filters._TITLE_BLACKLIST_PATTERN.search(t)
-    return m.group(0) if m else ""
+    """The blacklist phrase that killed this title, for a traceable reason."""
+    return filters.title_blacklist_match(title) or ""
 
 
 def _geo_exclusion_reason(vacs: list[dict]) -> str:
@@ -694,9 +684,9 @@ def persist_scoring_exclusions(categories: dict) -> dict:
     or user-triaged rows are never touched. Returns
     {"persisted", "count", "reasons"} for the run summary / run state.
     """
-    from database_supabase import _vacancy_has_column
+    from database_supabase import _scoring_excluded_supported
 
-    if not _vacancy_has_column("scoring_excluded_reason"):
+    if not _scoring_excluded_supported():
         print(
             "  scoring_excluded_reason column missing (run scripts/migrate.py) — "
             "exclusion reasons NOT persisted this run",

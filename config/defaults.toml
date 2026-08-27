@@ -647,7 +647,6 @@ hot_vacancy_score = 55
 deadline_soon_days = 7
 # NB: the digest's default size lives in [volume] digest_size (the single volume
 # window) — settings.digest() reads it from there, not from a key here.
-default_min_score = 40
 # Tiered morning message: scores in [mid_min_score, hot_vacancy_score) render as
 # one-line "mid" entries; hot_vacancy_score and above get buttons in tier 1.
 mid_min_score = 40

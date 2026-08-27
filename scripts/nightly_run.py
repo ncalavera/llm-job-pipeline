@@ -265,29 +265,35 @@ def _run_driver(ctx: _Ctx, flags: list[str]) -> int:
     return rc
 
 
-def _driver_tail(ctx: _Ctx) -> str:
-    """Last non-empty line of driver.log — a crash before any checkpoint write
-    still names its exception class here."""
+def _last_nonempty_line(path: Path) -> str | None:
+    """Last non-empty line of a possibly MB-scale log: read only the final 8KB
+    (driver.log spans a whole night; the stream-json transcripts are huge)."""
     try:
-        text = (ctx.night_dir / "driver.log").read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        return "no driver output captured"
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - 8192))
+            text = fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
     for line in reversed(text.splitlines()):
         if line.strip():
             return line.strip()
-    return "no driver output captured"
+    return None
+
+
+def _driver_tail(ctx: _Ctx) -> str:
+    """Last non-empty line of driver.log — a crash before any checkpoint write
+    still names its exception class here."""
+    return _last_nonempty_line(ctx.night_dir / "driver.log") or "no driver output captured"
 
 
 def _transcript_tail(out_path: Path, err_path: Path) -> str:
     """Last error-ish line of a dead session's transcript (stderr first)."""
     for path in (err_path, out_path):
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            continue
-        for line in reversed(text.splitlines()):
-            if line.strip():
-                return line.strip()
+        line = _last_nonempty_line(path)
+        if line:
+            return line
     return "empty transcript"
 
 
@@ -350,19 +356,25 @@ def _prune_old_nights(ctx: _Ctx) -> None:
             ctx.log(f"pruned night directory {child.name} (seven-day retention, R17)")
 
 
+def _save_cmd(action: str, files: list[str]) -> list[str]:
+    """The idempotent save command for a gate — one builder for the real sweep
+    and --dry-run, so the printed command can never drift from the real one."""
+    spec = GATES[action]
+    return (
+        [sys.executable, str(SCRIPTS_DIR / spec["save_script"]), "--save"]
+        + _save_extra(action)
+        + ["--files"]
+        + files
+    )
+
+
 def _sweep_save(ctx: _Ctx, action: str, out_files: list[Path]) -> None:
     """Defensive re-save of every score_out file. The session saves per wave;
     this sweep only catches results written by a session that died before its
     own --save. Saves are idempotent, and --files names and skips a malformed
     file so the rest still land (BUG-5). Best-effort: a sweep failure is
     logged, never fatal — the driver re-prompts for whatever is missing."""
-    spec = GATES[action]
-    cmd = (
-        [sys.executable, str(SCRIPTS_DIR / spec["save_script"]), "--save"]
-        + _save_extra(action)
-        + ["--files"]
-        + [str(f) for f in out_files]
-    )
+    cmd = _save_cmd(action, [str(f) for f in out_files])
     ctx.log("save sweep: " + " ".join(cmd))
     try:
         res = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True)
@@ -483,19 +495,17 @@ def _gate_loop(ctx: _Ctx) -> None:
             )
             return
         ctx.log(f"gate trip {trips}/{GATE_CAP}: {action}")
-        if action in GATES:
-            if datetime.now() >= ctx.deadline:
-                if not ctx.deadline_noted:
-                    ctx.deadline_noted = True
-                    ctx.log("run deadline reached — scoring skipped, carried over")
-                    ctx.send(
-                        "🌙 Night run: the run deadline was reached — scoring skipped; "
-                        "unscored roles carry over to the next night. The digest still goes out."
-                    )
-            else:
-                _run_session(ctx, action)
-        else:
+        if action not in GATES:
             ctx.log(f"gate '{action}' needs no Claude session — the driver answers it")
+        elif datetime.now() < ctx.deadline:
+            _run_session(ctx, action)
+        elif not ctx.deadline_noted:
+            ctx.deadline_noted = True
+            ctx.log("run deadline reached — scoring skipped, carried over")
+            ctx.send(
+                "🌙 Night run: the run deadline was reached — scoring skipped; "
+                "unscored roles carry over to the next night. The digest still goes out."
+            )
         rc = _run_driver(ctx, ["--resume"])
 
     if rc == EXIT_DONE:
@@ -597,14 +607,8 @@ def _print_dry_run() -> None:
     for action, spec in GATES.items():
         minutes = cfg[spec["limit_key"]]
         session = " ".join(_claude_cmd(action, night, cfg))
-        save = " ".join(
-            [sys.executable, str(SCRIPTS_DIR / spec["save_script"]), "--save"]
-            + _save_extra(action)
-            + ["--files", f"{night}/score_out/NNN.json ..."]
-        )
-        env_keys = [k for k in _CHILD_ENV_ALLOWLIST if os.environ.get(k)]
-        if spec["firecrawl"] and os.environ.get("FIRECRAWL_API_KEY"):
-            env_keys.append("FIRECRAWL_API_KEY")
+        save = " ".join(_save_cmd(action, [f"{night}/score_out/NNN.json ..."]))
+        env_keys = list(_claude_env(spec["firecrawl"]))
         print(f"  {action}:")
         print(f"    payload: vacancies/{spec['payload']} → {night}/score_in/NNN.json")
         print(f"    session: {mask_secrets(session)}  [limit {minutes:g} min]")

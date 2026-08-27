@@ -460,14 +460,14 @@ def _candidate_names_to_score(limit: int) -> list[str]:
 
 
 def _unscored_unseen() -> int:
-    from database_supabase import _vacancy_has_column
+    from database_supabase import _scoring_excluded_supported
 
     # Rows the filter pass excluded from scoring (migration 0020) are not
     # "awaiting scoring" — counting them would hold the scoring gate open for
     # rows the scorer will never be offered. Column-guarded for pre-migration
     # installs.
     cond = ""
-    if _vacancy_has_column("scoring_excluded_reason"):
+    if _scoring_excluded_supported():
         cond = " AND scoring_excluded_reason IS NULL"
     return _scalar(
         "SELECT count(*) FROM vacancy WHERE status = 'unseen' AND llm_score IS NULL" + cond
@@ -801,7 +801,7 @@ def _unattended_scoring_gate(entry: dict, phase: str, remaining: int) -> bool:
     last emission. Keyed on the phase (not ``entry["emitted"]``) so the
     two-pass escalate phase still gets its own emission. Returns True to emit
     the gate, False to carry the remainder over to the next run."""
-    marks = entry.setdefault("unattended_emitted", {})
+    marks = entry.setdefault("unattended_progress", {})
     last = marks.get(phase)
     if last is None or remaining < last:
         marks[phase] = remaining
