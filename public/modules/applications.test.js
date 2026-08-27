@@ -484,3 +484,43 @@ test("an empty cell gets no empty tooltip", () => {
   const html = buildApplicationRow(rows[0], { locale: "en-GB" });
   assert.ok(!html.includes('title=""'));
 });
+
+// --- The stage timestamp the table rests on --------------------------------
+//
+// "Stage since" and "Waiting" both read status_updated_at. data_prep did not
+// ship it, so both columns were empty for every row on the live dashboard
+// while every test here passed — the fixtures set the field by hand. These
+// tests pin the reading side; tests/test_vacancy_applied_at.py pins the
+// shipping side.
+
+test("a live stage timestamp beats the baked one", () => {
+  // After a drag on the board, /api/statuses has a fresher timestamp than the
+  // snapshot the page loaded with.
+  const rows = select([group({ status_updated_at: "2026-08-01T09:00:00Z" })], {
+    getStageSince: () => "2026-08-25T09:00:00Z",
+  });
+  assert.equal(rows[0].stageSince, "2026-08-25T09:00:00Z");
+});
+
+test("with no live timestamp the baked one is still used", () => {
+  const rows = select([group({ status_updated_at: "2026-08-01T09:00:00Z" })], {
+    getStageSince: () => "",
+  });
+  assert.equal(rows[0].stageSince, "2026-08-01T09:00:00Z");
+});
+
+test("a row with no stage timestamp at all shows no wait, not a wrong one", () => {
+  // The failure mode this guards: a missing date read as epoch zero, giving
+  // "20693 d" in the Waiting column.
+  const rows = select([
+    group({ status_updated_at: null, applied_at: "2026-08-17T09:00:00Z" }),
+  ]);
+  assert.equal(rows[0].waitingDays, null);
+  assert.equal(formatWaiting(rows[0].waitingDays), "");
+});
+
+test("a date stored at UTC midnight renders as the day that was typed", () => {
+  // `vac add --applied-at 2026-08-10` stores 2026-08-10T00:00:00+00:00. The
+  // formatter pins to UTC, so this must read "10 Aug" and not "9 Aug".
+  assert.equal(formatDayMonth("2026-08-10T00:00:00+00:00", "en-GB"), "10 Aug");
+});

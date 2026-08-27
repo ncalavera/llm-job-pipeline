@@ -204,3 +204,51 @@ def test_next_step_falls_back_to_the_free_note():
     assert _next_step({"some_other_field": "not a next step"}) == ""
     assert _next_step({}) == ""
     assert _next_step(None) == ""
+
+
+# ---------------------------------------------------------------------------
+# Two bugs that every fixture-built test passed straight over
+# ---------------------------------------------------------------------------
+
+
+def test_the_group_payload_carries_the_stage_timestamp():
+    """The Applications table's "Stage since" and "Waiting" columns both rest
+    on status_updated_at, and data_prep did not ship it. Both rendered empty
+    for EVERY row on the live dashboard while every test built its own fixture
+    groups with the field already present."""
+    from report import data_prep
+
+    entry = data_prep._build_group(
+        {
+            "id": "v1",
+            "org": "Northwind Aid Trust",
+            "title": "Programme Manager",
+            "locations": [],
+            "llm_score": 70,
+            "applied_at": "2026-08-17T09:00:00+00:00",
+            "status_updated_at": "2026-08-25T09:00:00+00:00",
+        },
+        {},
+        {},
+    )
+    assert entry["status_updated_at"] == "2026-08-25T09:00:00+00:00"
+
+
+def test_a_hand_typed_date_is_stored_as_the_day_that_was_typed():
+    """A bare "2026-08-10" written into a TIMESTAMPTZ is midnight in the
+    SERVER's timezone. On a +04 box that is 2026-08-09T20:00Z, and the
+    dashboard — which pins dates to UTC so a timestamp never shifts a day
+    between viewers — renders it as "9 Aug". Off by one, silently, on every
+    hand-entered application."""
+    import sys
+
+    sys.path.insert(0, "scripts")
+    import vac
+
+    stamped = vac._parse_day("2026-08-10", "--applied-at")
+    assert stamped.startswith("2026-08-10")
+    assert stamped.endswith("+00:00"), "no explicit UTC offset — the day can shift"
+
+    from datetime import datetime
+
+    assert datetime.fromisoformat(stamped).utcoffset().total_seconds() == 0

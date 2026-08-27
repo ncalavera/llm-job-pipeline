@@ -383,15 +383,24 @@ MANUAL_SOURCE_BOARD = "manual"
 
 
 def _parse_day(value, label):
-    """A YYYY-MM-DD argument, or exit with a message naming the flag. Refusing
-    an unparseable date is the point: a silently-dropped one would leave the
-    Applications table showing the wrong send date with no way to notice."""
+    """A YYYY-MM-DD argument as an explicit UTC instant, or exit naming the flag.
+
+    Refusing an unparseable date is the point: a silently-dropped one would
+    leave the Applications table showing the wrong send date with no way to
+    notice.
+
+    The UTC suffix matters as much as the parsing. A bare "2026-08-10" written
+    into a TIMESTAMPTZ is midnight in the SERVER's timezone — on a +04 box that
+    is 2026-08-09T20:00Z, and the dashboard, which pins dates to UTC so a
+    timestamp never shifts a day between viewers, renders it as "9 Aug". Pinning
+    it here means the day typed is the day stored and the day shown.
+    """
     if not value:
         return None
     from datetime import date as _date
 
     try:
-        return _date.fromisoformat(value).isoformat()
+        return _date.fromisoformat(value).isoformat() + "T00:00:00+00:00"
     except ValueError:
         print(f"{label} must be a date like 2026-07-03 — got: {value}")
         sys.exit(1)

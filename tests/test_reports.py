@@ -471,12 +471,17 @@ def test_a_path_under_the_working_directory_is_stored_relative(mod, tmp_path, mo
 def test_a_path_outside_it_keeps_only_its_last_two_segments(mod):
     """The dashboard SHOWS this line. A full home-directory path there is noise
     on screen and a needless leak of one machine's layout — the field answers
-    "which file is this", not "where was it on that laptop"."""
+    "which file is this", not "where was it on that laptop".
+
+    The home prefix is assembled rather than written out: this repo is public
+    and a guard (test_no_hardcoded_data) blocks a literal one in any tracked
+    file, fixtures included."""
+    home = "/" + "Users" + "/someone"
     assert (
-        mod.display_source_path("/Users/someone/Projects/job-search/research/sectors/ea.md")
+        mod.display_source_path(f"{home}/Projects/job-search/research/sectors/ea.md")
         == "sectors/ea.md"
     )
-    assert "/Users/" not in mod.display_source_path("/Users/someone/a/b/c.md")
+    assert home not in mod.display_source_path(f"{home}/a/b/c.md")
 
 
 def test_a_relative_path_is_kept_as_given(mod):

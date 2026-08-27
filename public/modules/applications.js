@@ -20,6 +20,7 @@
 // =============================================================================
 
 import {
+  state,
   groups,
   triageReviews,
   TRIAGE_COLUMNS,
@@ -177,6 +178,10 @@ function reviewFor(g, reviewByVid) {
 export function selectApplicationRows(allGroups, opts) {
   const options = opts || {};
   const getStatus = options.getStatus || ((g) => g.status);
+  // The live stage timestamp, once /api/statuses has merged one in — after a
+  // drag on the board it is fresher than the baked snapshot's copy.
+  const getStageSince =
+    options.getStageSince || ((g) => g.status_updated_at || "");
   const now = options.now == null ? Date.now() : options.now;
   const reviewByVid = {};
   for (const r of options.reviews || []) reviewByVid[r.vacancy_id] = r;
@@ -199,7 +204,7 @@ export function selectApplicationRows(allGroups, opts) {
     // fallback and a lie of a different size on every row — it moves with each
     // stage — so rows using it are marked, and the cell says so on hover.
     const sentOn = entry.applied_at || "";
-    const stageSince = entry.status_updated_at || "";
+    const stageSince = getStageSince(entry) || entry.status_updated_at || "";
     const closed = CLOSED_STATUSES.has(entry._status);
     rows.push({
       id: entry.id,
@@ -425,6 +430,10 @@ export function renderApplicationsTable() {
 
   const rows = selectApplicationRows(groups, {
     getStatus: getGroupStatus,
+    getStageSince: (g) => {
+      const live = state.dbData[g.id];
+      return (live && live.status_changed_at) || g.status_updated_at || "";
+    },
     reviews: triageReviews || [],
     statusPri: STATUS_PRI,
   });

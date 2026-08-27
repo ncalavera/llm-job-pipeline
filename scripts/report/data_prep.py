@@ -444,6 +444,11 @@ def _build_group(
         # rejection. Empty on rows that predate migration 0022 — the table falls
         # back to status_updated_at and labels the column honestly.
         "applied_at": _iso_or_blank(v.get("applied_at")),
+        # When the row last changed stage. Two columns rest on it — "Stage
+        # since" and the waiting-days count — and it was NOT shipped before,
+        # so both rendered empty for every row on the live dashboard while
+        # every fixture-built test passed.
+        "status_updated_at": _iso_or_blank(v.get("status_updated_at")),
         # What was applied to. Every real vacancy is a 'job'; the other kinds
         # (course, programme, advising, consulting, grant) are applications he
         # sent that are stored as ordinary vacancy rows.
