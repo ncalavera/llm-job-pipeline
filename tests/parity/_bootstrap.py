@@ -103,6 +103,14 @@ def bootstrap_sqlite(monkeypatch, tmp_path):
         "0016_company_coverage",
         "0017_screen_column_board_hidden",
         "0018_field_mece_cleanup",
+        # 0022 rebuilds `vacancy` to widen its status CHECK for 'accepted' and
+        # to carry `applied_at` / `kind`. Those two columns are NOT in the
+        # frozen baseline, so leaving 0022 out of this list makes the SQLite
+        # side of test_shared_table_columns_match_between_backends short two
+        # columns that Postgres has — the exact drift that test exists to
+        # catch. (0019/0020/0021 are absent on purpose: they only widen a
+        # CHECK the frozen baseline already carries.)
+        "0022_applications_table",
     ):
         sql = (REPO_ROOT / "sql" / "migrations" / f"{post_baseline}.sqlite.sql").read_text(
             encoding="utf-8"

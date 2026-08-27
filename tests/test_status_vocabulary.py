@@ -298,3 +298,37 @@ def test_AC08_both_baseline_schemas_allow_it():
     for rel in ("sql/schema.sql", "sql/schema.sqlite.sql"):
         source = (_ROOT / rel).read_text()
         assert "'accepted'" in source, f"{rel} rejects 'accepted'"
+
+
+def test_AC09_a_migration_widens_the_live_constraint():
+    """The baseline is frozen for new installs only — an existing Postgres keeps
+    the old CHECK until a migration replaces it, and an existing SQLite needs a
+    table rebuild because SQLite cannot ALTER a CHECK at all."""
+    pg = _ROOT / "sql" / "migrations" / "0022_applications_table.postgres.sql"
+    source = pg.read_text()
+    assert "vacancy_status_check" in source
+    assert "''accepted''" in source
+    # Re-runnable: guarded so a database that already allows it is a no-op.
+    assert "IF NOT EXISTS" in source
+
+    sqlite = _ROOT / "sql" / "migrations" / "0022_applications_table.sqlite.sql"
+    sqlite_source = sqlite.read_text()
+    assert "'accepted'" in sqlite_source
+    # The rebuild's DROP must carry the waiver, or an unattended /jobs-update
+    # aborts on the destructive-keyword gate.
+    assert sqlite_source.startswith("-- migrate:allow-destructive ")
+
+
+def test_AC10_the_accepted_column_accent_resolves_to_a_defined_token():
+    """Same contract as test_TT10: a TRIAGE_COLUMNS colour that style.css never
+    defines renders as no colour at all."""
+    import re
+
+    state_js = (_ROOT / "public" / "modules" / "state.js").read_text()
+    columns = state_js[state_js.index("export const TRIAGE_COLUMNS") :]
+    columns = columns[: columns.index("\n];")]
+    tokens = set(re.findall(r"var\((--[a-z0-9-]+)\)", columns))
+    assert "--pine" in tokens, "the Accepted column lost its accent"
+    # And it must not reuse To apply's green — two greens read as one meaning.
+    assert "--emerald" in tokens
+    assert "var(--pine)" in columns and "var(--emerald)" in columns

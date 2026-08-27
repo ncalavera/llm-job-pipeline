@@ -97,7 +97,7 @@ def test_legacy_sqlite_db_rejects_test_task_before_migrating(legacy_db):
         _set_status(legacy_db, "test_task")
 
 
-@pytest.mark.parametrize("status", ["test_task", "interview", "declined"])
+@pytest.mark.parametrize("status", ["test_task", "interview", "declined", "accepted"])
 def test_legacy_sqlite_db_accepts_the_funnel_statuses_after_migrating(
     legacy_db, monkeypatch, status
 ):
@@ -177,3 +177,56 @@ def test_gate_waives_the_declared_migration_and_still_blocks_it_undeclared(tmp_p
     )
     assert waived == []
     assert len(blocked) == 1, "a rebuild that declares nothing must still abort the run"
+
+
+# ---------------------------------------------------------------------------
+# 0022 — the Applications table's two new columns arrive with the same rebuild
+# ---------------------------------------------------------------------------
+
+
+def test_applied_at_and_kind_exist_after_migrating(legacy_db):
+    """0022 widens the CHECK for 'accepted' AND carries `applied_at` / `kind`
+    across in the same rebuild. A rebuild that dropped either would strand the
+    Applications table with no send date and no way to tell a job from a course
+    — and, because SQLite copies rows by name, would do it silently."""
+    import db_backend
+
+    importlib.reload(db_backend)
+    import migrate
+
+    importlib.reload(migrate)
+    assert migrate.cmd_migrate(allow_destructive=False, do_backup=False) == 0
+
+    conn = sqlite3.connect(str(legacy_db))
+    try:
+        cols = {r[1]: r for r in conn.execute("PRAGMA table_info(vacancy)")}
+        assert "applied_at" in cols, "the rebuild dropped applied_at"
+        assert "kind" in cols, "the rebuild dropped kind"
+        # Every pre-existing row is a job — the default, not NULL, or the NOT
+        # NULL column would reject the copied rows.
+        assert conn.execute("SELECT kind FROM vacancy WHERE id = 'v1'").fetchone() == ("job",)
+        assert conn.execute("SELECT applied_at FROM vacancy WHERE id = 'v1'").fetchone() == (None,)
+    finally:
+        conn.close()
+
+
+def test_kind_check_rejects_an_unknown_kind(legacy_db):
+    """`kind` is a closed vocabulary: a typo must fail loudly at the write, not
+    show up as a blank column in the table view."""
+    import db_backend
+
+    importlib.reload(db_backend)
+    import migrate
+
+    importlib.reload(migrate)
+    assert migrate.cmd_migrate(allow_destructive=False, do_backup=False) == 0
+
+    conn = sqlite3.connect(str(legacy_db))
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE vacancy SET kind = 'internship' WHERE id = 'v1'")
+        conn.rollback()
+        conn.execute("UPDATE vacancy SET kind = 'advising' WHERE id = 'v1'")
+        conn.commit()
+    finally:
+        conn.close()
