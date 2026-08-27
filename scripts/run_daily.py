@@ -164,6 +164,7 @@ class Opts:
     tier: str | None = None
     full_rescore: bool = False
     no_publish: bool = False
+    unattended: bool = False
     extra: dict = field(default_factory=dict)
 
 
@@ -190,6 +191,7 @@ def _new_state(opts: Opts) -> dict:
             "tier": opts.tier,
             "full_rescore": opts.full_rescore,
             "no_publish": opts.no_publish,
+            "unattended": opts.unattended,
         },
         "stages": [{"name": n, "status": "pending"} for n in STAGE_ORDER],
         # Structured non-fatal failures appended by best-effort helpers (R7): a
@@ -264,6 +266,7 @@ def _opts_from_state(state: dict) -> Opts:
         tier=o.get("tier"),
         full_rescore=bool(o.get("full_rescore")),
         no_publish=bool(o.get("no_publish")),
+        unattended=bool(o.get("unattended")),
     )
 
 
@@ -281,6 +284,8 @@ def _ignored_resume_flags(args: argparse.Namespace) -> list[str]:
         flags.append("--tier")
     if args.full_rescore:
         flags.append("--full-rescore")
+    if args.unattended:
+        flags.append("--unattended")
     return flags
 
 
@@ -780,6 +785,21 @@ def _collect_company_evidence(names: list[str], opts: Opts, state: "dict | None"
 # ---------------------------------------------------------------------------
 
 
+def _unattended_scoring_gate(entry: dict, phase: str, remaining: int) -> bool:
+    """Unattended answer for a scoring gate (KTD2): emit once per phase, re-emit
+    while a resume shows progress, and never stall — the caller advances with
+    "carried over" when the remaining count did not shrink since this phase's
+    last emission. Keyed on the phase (not ``entry["emitted"]``) so the
+    two-pass escalate phase still gets its own emission. Returns True to emit
+    the gate, False to carry the remainder over to the next run."""
+    marks = entry.setdefault("unattended_emitted", {})
+    last = marks.get(phase)
+    if last is None or remaining < last:
+        marks[phase] = remaining
+        return True
+    return False
+
+
 def resolve_scoring_limit(full_rescore: bool) -> tuple[int | None, str | None]:
     """The per-run scoring cap decision (STRATEGY guardrails 3 & 4).
 
@@ -1185,6 +1205,15 @@ def _h_onboarding(state, entry, opts):
         return "skip", "companies already present — onboarding not needed"
     if _company_count() > 0:
         return "advance", "starter companies added"
+    if opts.unattended:
+        # An empty company table at night means the WRONG database, not a fresh
+        # clone to onboard: a night run must never seed companies unattended.
+        return (
+            "abort",
+            "company table is empty in an unattended run — onboarding needs a human, "
+            "and an empty table at night usually means the wrong database. Check the "
+            "DB this run points at, then onboard interactively.",
+        )
     return "gate", {"action": "onboard", "instructions": ONBOARDING_TEXT, "payload_path": None}
 
 
@@ -1233,6 +1262,17 @@ def _h_learning_review(state, entry, opts):
 
     if not review.get("has_content"):
         return "advance", "no accumulated verdicts or proposals — nothing to review this run"
+
+    if opts.unattended:
+        # Applying a proposal stays a human decision (R16): leave the rollover
+        # cursor untouched so the same verdicts are offered next attended run,
+        # and record the count for the digest stage.
+        entry["rolled_over"] = review["verdicts_since_last_review"]
+        return (
+            "advance",
+            f"learning review rolled over unattended — {entry['rolled_over']} verdict(s) "
+            "kept pending, nothing applied",
+        )
 
     _write_payload(LEARNING_PAYLOAD_PATH, review)
     return "gate", {
@@ -1351,6 +1391,14 @@ def _h_company_scoring(state, entry, opts):
             return (
                 "advance",
                 f"company scoring complete ({len(entry.get('target_ids', []))} scored)",
+            )
+        if opts.unattended and not _unattended_scoring_gate(entry, "score", len(remaining)):
+            entry["carried_over"] = len(remaining)
+            return (
+                "advance",
+                f"company scoring carried over — {len(remaining)} company(ies) still "
+                "unscored with no progress since the last stop; they stay candidates "
+                "for the next run",
             )
         payloads = [p for p in _read_payload(CO_PAYLOAD_PATH) if str(p.get("id")) in remaining]
         return "gate", {
@@ -1477,6 +1525,8 @@ def _h_company_scoring(state, entry, opts):
     if ghosts_left:
         notes.append(f"{ghosts_left} candidate(s) still lack a findable website")
     note_suffix = ("; " + "; ".join(notes)) if notes else ""
+    if opts.unattended:  # baseline for the no-progress carry-over on re-entry
+        _unattended_scoring_gate(entry, "score", len(entry["target_ids"]))
     return "gate", {
         "action": "score_companies",
         "count": len(payloads),
@@ -1541,6 +1591,10 @@ def _h_vacancy_scoring(state, entry, opts):
         if warn:
             print(warn, flush=True)
         cmd = _py("score_vacancies.py") + ["--local"]
+        if opts.unattended:
+            # Oldest-unscored-first, so carried-over roles never sink under the
+            # next night's arrivals (see score_vacancies --unattended).
+            cmd.append("--unattended")
         if opts.full_rescore:
             cmd.append("--force")
         if limit is not None:
@@ -1573,6 +1627,8 @@ def _h_vacancy_scoring(state, entry, opts):
         entry["phase"] = "screen"
         if single_pass:
             entry["single_pass"] = True
+        if opts.unattended:  # baseline for the no-progress carry-over on re-entry
+            _unattended_scoring_gate(entry, "screen", len(entry["target_ids"]))
         return "gate", {
             "action": "score_vacancies",
             "count": len(payloads),
@@ -1602,6 +1658,17 @@ def _h_vacancy_scoring(state, entry, opts):
         if remaining_ids and not remaining:
             return "error", _corrupt_score_payload_msg(len(remaining_ids), "screen")
         if remaining:
+            if opts.unattended and not _unattended_scoring_gate(
+                entry, "screen", len(remaining_ids)
+            ):
+                run_status.finish()
+                entry["carried_over"] = len(remaining_ids)
+                return (
+                    "advance",
+                    f"scoring carried over — {len(remaining_ids)} role(s) still unscored "
+                    "with no progress since the last stop; they lead the next run's "
+                    "batch (oldest first)",
+                )
             return "gate", {
                 "action": "score_vacancies",
                 "count": len(remaining),
@@ -1668,6 +1735,8 @@ def _h_vacancy_scoring(state, entry, opts):
         _write_payload(VAC_PAYLOAD_PATH, escalate)
         entry["escalate_target_ids"] = esc_member_ids
         entry["phase"] = "escalate"
+        if opts.unattended:  # the escalate phase gets its own emission + baseline
+            _unattended_scoring_gate(entry, "escalate", len(esc_member_ids))
         run_status.begin("score", len(escalate))
         return "gate", {
             "action": "score_vacancies",
@@ -1685,6 +1754,17 @@ def _h_vacancy_scoring(state, entry, opts):
     if remaining_ids and not remaining:
         return "error", _corrupt_score_payload_msg(len(remaining_ids), "escalate")
     if remaining:
+        if opts.unattended and not _unattended_scoring_gate(
+            entry, "escalate", len(remaining_ids)
+        ):
+            run_status.finish()
+            entry["carried_over"] = len(remaining_ids)
+            return (
+                "advance",
+                f"escalation carried over — {len(remaining_ids)} finalist(s) still "
+                "unscored with no progress since the last stop; they lead the next "
+                "run's batch",
+            )
         # Every call that reaches this branch is a RESUME of the escalate gate
         # (the transition above returns its own gate without falling through
         # here) — re-begin so the live progress card reflects what's actually
@@ -1718,6 +1798,15 @@ def _h_verdicts(state, entry, opts):
     n = _scored_unseen()
     if n == 0:
         return "advance", "no freshly scored matches to review"
+    if opts.unattended:
+        # Verdicts are not part of a night run (R16): like/pass stays on the
+        # phone. Record the count for the digest stage and continue to publish.
+        entry["pending_verdicts"] = n
+        return (
+            "advance",
+            f"{n} scored match(es) await your verdict on the phone — a night run "
+            "never writes one",
+        )
     return "gate", {
         "action": "verdicts",
         "count": n,
@@ -1767,6 +1856,12 @@ HANDLERS = {
 # ---------------------------------------------------------------------------
 # The driver loop
 # ---------------------------------------------------------------------------
+
+# Gates an unattended run may still emit: the nightly wrapper answers them by
+# scoring with a headless session and resuming. Every OTHER gate must be
+# answered inside its handler; one that reaches drive() anyway has no
+# unattended answer and aborts instead of waiting for a human (R15).
+UNATTENDED_EMITTABLE_GATES = {"screen_companies", "score_companies", "score_vacancies"}
 
 
 def _safe_int(value) -> int | None:
@@ -1894,6 +1989,17 @@ def drive(state: dict, opts: Opts, observe: bool = False) -> int:
             continue
 
         if kind == "gate":
+            if opts.unattended and info.get("action") not in UNATTENDED_EMITTABLE_GATES:
+                entry["status"] = "aborted"
+                entry["note"] = (
+                    f"gate '{info.get('action')}' has no unattended answer — aborting "
+                    "instead of waiting for a human (R15)"
+                )
+                _save_state(state)
+                if observe:
+                    _record_history(state, opts)
+                print(f"\n✗ {entry['note']}", file=sys.stderr, flush=True)
+                return EXIT_ABORT
             entry["status"] = "blocked_gate"
             entry["emitted"] = True
             entry["gate"] = info
@@ -2033,6 +2139,18 @@ def _print_summary(state: dict, opts: Opts) -> None:
     print("  • " + t("summary_verdicts", scored_unseen=scored_unseen, liked=liked))
     print("  • " + t("summary_publish", note=publish_note))
     print("  • " + t("summary_review_hint"))
+    # Unattended rollovers — the digest stage reads these from the run state.
+    carried = []
+    for name in ("company_scoring", "vacancy_scoring"):
+        n = _stage(state, name).get("carried_over")
+        if n:
+            what = "company(ies)" if name == "company_scoring" else "role(s)"
+            carried.append(f"{n} {what}")
+    if carried:
+        print("  • carried over to the next run (no progress): " + ", ".join(carried))
+    rolled = _stage(state, "learning_review").get("rolled_over")
+    if rolled:
+        print(f"  • learning review rolled over: {rolled} verdict(s) kept pending")
     # Report card (R5): every run ends with the per-stage verdict table, so "did
     # it work?" is answerable without reading logs. Warnings (R7) list underneath.
     print("  " + "-" * 66)
@@ -2231,6 +2349,16 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run every stage but never publish (safe for a git worktree / dry run).",
     )
+    p.add_argument(
+        "--unattended",
+        action="store_true",
+        help=(
+            "Answer every gate without a human (nightly runs): onboarding aborts, the "
+            "learning review rolls over unapplied, verdicts stay pending for the phone, "
+            "and a scoring gate with no progress since its last stop carries its roles "
+            "over to the next run instead of waiting."
+        ),
+    )
     return p
 
 
@@ -2264,6 +2392,7 @@ def main(argv: list[str] | None = None) -> int:
                 tier=args.tier,
                 full_rescore=args.full_rescore,
                 no_publish=args.no_publish,
+                unattended=args.unattended,
             )
             state = _new_state(opts)
             fresh_run = True
@@ -2306,6 +2435,7 @@ def main(argv: list[str] | None = None) -> int:
                 tier=args.tier,
                 full_rescore=args.full_rescore,
                 no_publish=args.no_publish,
+                unattended=args.unattended,
             )
             state = _new_state(opts)
             fresh_run = True
