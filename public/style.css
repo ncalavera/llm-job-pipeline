@@ -3926,6 +3926,14 @@ body::after {
   margin-bottom: 4px;
 }
 
+/* No score at all — a hand-added application (a course, a grant, a
+   programme) the scorer never saw. Neutral, like every other surface's
+   "no score" cell; never the red a weak score gets. */
+.pipe-card-score--none,
+.pipe-grp-role-score--none {
+  color: var(--sky-text-faint);
+}
+
 .pipe-card-deadline {
   font-size: 11px;
   color: var(--amber);

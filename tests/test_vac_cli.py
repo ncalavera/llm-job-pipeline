@@ -367,3 +367,79 @@ def test_parser_exposes_add_subcommand(vac):
     assert ns.kind == "advising"
     assert ns.applied_at == "2026-07-03"
     assert ns.status_at == "2026-07-06"
+
+
+# ---------------------------------------------------------------------------
+# A row with no score is still fully operable
+# ---------------------------------------------------------------------------
+#
+# Three rows already live in the production database with source_board='manual'
+# and llm_score NULL (HIP Impact Accelerator, and the Coefficient Giving and
+# EA Infrastructure Fund grants). Nothing in the status path may require a
+# score: an application he already sent must be movable between stages whether
+# or not a model ever looked at it.
+
+
+def test_mark_moves_an_unscored_row_through_the_whole_funnel(vm):
+    """No stage of `vac mark` reads llm_score. The regression this guards would
+    be silent — a row that simply refuses to move, on the only rows that can
+    never be scored."""
+    vm.mod.cmd_add(_add_args(title="HIP Impact Accelerator", kind="programme", status="applied"))
+    v = _find(vm, "HIP Impact Accelerator")
+    assert v["llm_score"] is None
+
+    vid = None
+    for uid, row in vm.dal.load_vacancies(include_candidate_companies=True).items():
+        if row["title"] == "HIP Impact Accelerator":
+            vid = uid
+    assert vid
+
+    for status in ("test_task", "interview", "accepted", "declined"):
+        vm.mod.cmd_mark(types.SimpleNamespace(id=vid, status=status))
+        assert vm.dal.get_vacancy_statuses()[vid] == status
+    # Still unscored after all that — marking must never invent a number.
+    assert _find(vm, "HIP Impact Accelerator")["llm_score"] is None
+
+
+def test_listing_an_unscored_row_prints_a_dash_not_none(vm, capsys):
+    """`vac list` renders the score column itself. 'None' or a traceback there
+    is the whole command broken for these rows."""
+    vm.mod.cmd_add(_add_args(title="EA Infrastructure Fund grant", kind="grant"))
+    capsys.readouterr()  # drop cmd_add's own confirmation line
+    vm.mod.cmd_list(
+        types.SimpleNamespace(
+            status=None,
+            min_score=None,
+            tier=None,
+            org=None,
+            limit=None,
+            sort="score",
+            include_candidates=True,
+            geo=None,
+        )
+    )
+    out = capsys.readouterr().out
+    assert "EA Infrastructure Fund grant" in out
+    assert "None" not in out
+    assert "nan" not in out.lower()
+
+
+def test_min_score_filter_excludes_rather_than_crashes_on_an_unscored_row(vm, capsys):
+    """`--min-score` compares against a number that may not exist. Excluding is
+    correct (an unscored row cannot clear a floor); raising is not."""
+    vm.mod.cmd_add(_add_args(title="Coefficient Giving grant", kind="grant"))
+    capsys.readouterr()  # drop cmd_add's own confirmation line
+    vm.mod.cmd_list(
+        types.SimpleNamespace(
+            status=None,
+            min_score=40,
+            tier=None,
+            org=None,
+            limit=None,
+            sort="score",
+            include_candidates=True,
+            geo=None,
+        )
+    )
+    out = capsys.readouterr().out
+    assert "Coefficient Giving grant" not in out

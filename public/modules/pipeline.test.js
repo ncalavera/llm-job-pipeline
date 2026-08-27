@@ -22,7 +22,8 @@ globalThis.window = {
 };
 globalThis.location = { protocol: "file:", origin: "" };
 
-const { buildTriageCard, buildTriageGroupCard } = await import("./pipeline.js");
+const { buildTriageCard, buildTriageGroupCard, triageScoreHtml } =
+  await import("./pipeline.js");
 
 // A non-compact column so the review-meta block renders (compact cards omit it).
 const COL = { key: "to_apply", label: "To apply", color: "#000" };
@@ -199,4 +200,74 @@ test("buildTriageGroupCard: Liked (compact) column shows no location or source l
   const html = buildTriageGroupCard(roles, LIKED_COL, []);
   assert.doesNotMatch(html, /pipe-card-loc/);
   assert.doesNotMatch(html, /pipe-card-source-link/);
+});
+
+// --- A role with no score at all -------------------------------------------
+//
+// Applications added by hand (`vac add` — a course, a grant, a programme) are
+// never seen by the scorer. The card used to render `score != null ? … : ""`,
+// so those rows showed a silent hole where every other card carries a number,
+// and the reader could not tell "never scored" from "the number failed to
+// load". Three separate ways to get this wrong: a blank, a red zero, and NaN.
+
+test("an unscored role shows an em dash, not a blank", () => {
+  const g = group();
+  g.llm_score = null;
+  const html = buildTriageCard(g, COL, null);
+  assert.ok(html.includes("pipe-card-score"), "no score badge at all");
+  assert.ok(html.includes("—"));
+  assert.ok(html.includes("pipe-card-score--none"));
+});
+
+test("an unscored role is never painted as a weak (red) score", () => {
+  // qualityBand(null) answers "weak" — null is not >= 70 and not >= 50 — so
+  // any unguarded path paints "never scored" the same red as "scored 12".
+  const html = triageScoreHtml(null, "pipe-card-score");
+  assert.ok(!html.includes("q-weak"));
+  assert.ok(!html.includes("q-moderate"));
+  assert.ok(!html.includes("q-good"));
+});
+
+test("no score ever renders as NaN, null, or undefined", () => {
+  for (const score of [null, undefined, NaN, "", -1]) {
+    const html = triageScoreHtml(score, "pipe-card-score");
+    assert.ok(!/NaN|null|undefined/.test(html), `score ${String(score)} → ${html}`);
+    assert.ok(html.includes("—"), `score ${String(score)} lost its em dash`);
+  }
+});
+
+test("a negative score is the awaiting-scoring sentinel, not a real zero", () => {
+  // The pipeline writes -1 for "queued for scoring". Rendering it as the
+  // number -1 in a red badge would read as the worst role on the board.
+  const html = triageScoreHtml(-1, "pipe-card-score");
+  assert.ok(!html.includes("-1"));
+  assert.ok(html.includes("—"));
+});
+
+test("a real score still renders as its number in its quality colour", () => {
+  const html = triageScoreHtml(72, "pipe-card-score");
+  assert.ok(html.includes(">72<"));
+  assert.ok(html.includes("q-good"));
+  assert.ok(!html.includes("--none"));
+});
+
+test("zero is a real score, not a missing one", () => {
+  // The boundary that a truthiness check gets wrong: `score || "—"` turns a
+  // genuine 0 into an em dash.
+  const html = triageScoreHtml(0, "pipe-card-score");
+  assert.ok(html.includes(">0<"));
+  assert.ok(!html.includes("—"));
+});
+
+test("an unscored role in a grouped company card also shows the em dash", () => {
+  const a = group();
+  a.llm_score = null;
+  const b = group();
+  b.id = "v2";
+  b.title = "Another Role";
+  b.llm_score = 80;
+  const html = buildTriageGroupCard([a, b], COL);
+  assert.ok(html.includes("pipe-grp-role-score--none"));
+  assert.ok(html.includes("—"));
+  assert.ok(html.includes(">80<"));
 });

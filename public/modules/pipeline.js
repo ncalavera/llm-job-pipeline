@@ -175,6 +175,28 @@ function renderTriageControls(controlsEl, metrics) {
 // (SortableJS, see renderPipeline). This keeps the columns narrow enough that
 // ~6 fit at 1440px instead of ~4.
 
+// The score badge for one role, including the case the board never had: no
+// score at all. Applications added by hand (`vac add` — a course, a grant, a
+// programme) are never seen by the scorer, and the old `score != null ? … : ""`
+// rendered them as a card with a silent hole where every other card carries a
+// number. An em dash in the neutral colour every other surface already uses for
+// this (the Browse row, the vacancy page, the company page, the command
+// palette) says "never scored" instead of leaving the reader to guess whether
+// the number failed to load.
+//
+// A negative score is the pipeline's own "awaiting scoring" sentinel, so it
+// reads the same way — and never as a red zero, which is what qualityClass
+// would paint it.
+export function triageScoreHtml(score, cls) {
+  const scored = typeof score === "number" && !Number.isNaN(score) && score >= 0;
+  const klass = scored ? qualityClass(score) : cls + "--none";
+  const text = scored ? String(score) : "\u2014";
+  const title = scored ? "" : ' title="never scored"';
+  return (
+    '<span class="' + cls + " " + klass + '"' + title + ">" + text + "</span>"
+  );
+}
+
 // City (or Remote) + compensation, one line, expanded columns only. Reads the
 // first location entry's raw `city`/`work_mode` fields directly rather than
 // the pre-formatted `location` string — that string bakes in an "HQ: ..."
@@ -324,13 +346,7 @@ export function buildTriageCard(g, col, review, companies) {
     '<div class="pipe-card-title">' +
     titleHtml +
     "</div>" +
-    (g.llm_score != null
-      ? '<span class="pipe-card-score ' +
-        qualityClass(g.llm_score) +
-        '">' +
-        g.llm_score +
-        "</span>"
-      : "") +
+    triageScoreHtml(g.llm_score, "pipe-card-score") +
     (isCompact ? "" : buildTriageLocationLine(g)) +
     buildTriageMetaRow(g, !isCompact) +
     meta +
@@ -369,13 +385,7 @@ export function buildTriageGroupCard(entries, col, companies) {
         '<li class="pipe-grp-role">' +
         '<div class="pipe-grp-role-head">' +
         titleHtml +
-        (g.llm_score != null
-          ? '<span class="pipe-grp-role-score ' +
-            qualityClass(g.llm_score) +
-            '">' +
-            g.llm_score +
-            "</span>"
-          : "") +
+        triageScoreHtml(g.llm_score, "pipe-grp-role-score") +
         "</div>" +
         (isCompact ? "" : buildTriageLocationLine(g)) +
         buildTriageMetaRow(g, !isCompact) +
