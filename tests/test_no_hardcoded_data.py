@@ -39,6 +39,7 @@ TESTS = REPO / "tests"
 CONFIG = REPO / "config"
 DOCS_INDEX = REPO / "docs" / "index.html"
 CLAUDE = REPO / ".claude"
+DEPLOY = REPO / "deploy"
 
 # This guard file itself names the forbidden tokens (to assert on them), so it
 # is always excluded from the scans below.
@@ -654,6 +655,12 @@ def _owner_trace_files() -> list[Path]:
     # Public dashboard HTML.
     if DOCS_INDEX.exists():
         files.append(DOCS_INDEX)
+    # The deploy/ tree (systemd units, install docs) — must ship owner-agnostic,
+    # same as every other shipped surface this guard polices.
+    if DEPLOY.exists():
+        for p in DEPLOY.rglob("*"):
+            if p.is_file() and not _is_skipped(p):
+                files.append(p)
     # Root onboarding docs.
     for name in ROOT_DOCS:
         p = REPO / name
@@ -703,7 +710,16 @@ _ABS_HOME_PATH = re.compile(r"/(?:Users|home)/[A-Za-z0-9._-]+/")
 
 
 def test_no_absolute_personal_paths():
-    hits = _scan(_owner_trace_files(), _ABS_HOME_PATH)
+    """deploy/ is excluded here: systemd unit directives (WorkingDirectory=,
+    EnvironmentFile=, LoadCredential=, ReadWritePaths=) take no config-key or
+    $VAR indirection, so the units structurally need a literal absolute path.
+    They ship with a documented generic placeholder (`jobsearch`), not the
+    maintainer's real user — the README's install step seds it to the real
+    Linux user. A real name leaking there is still caught by
+    test_no_owner_infra_or_branding_traces (private check), which also scans
+    deploy/ via _owner_trace_files()."""
+    files = [p for p in _owner_trace_files() if DEPLOY not in p.parents]
+    hits = _scan(files, _ABS_HOME_PATH)
     assert not hits, (
         "An absolute personal filesystem path (/Users/<name>/ or /home/<name>/) "
         "is baked into a public file — the private artifact zone / case bank must "

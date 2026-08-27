@@ -1,6 +1,6 @@
 [Unit]
 Description=Nightly job-pipeline run (fetch, score headlessly, send the morning digest)
-Documentation=file:///home/nikita/Projects/personal/llm-job-pipeline/deploy/forge/README.md
+Documentation=file:///home/jobsearch/Projects/personal/llm-job-pipeline/deploy/forge/README.md
 # The nightly DB backup runs at 03:35 UTC; TimeoutStartSec below ends the run
 # before it, and the wrapper's own deadline ([nightly] run_deadline_minutes)
 # ends scoring earlier still.
@@ -9,19 +9,19 @@ After=network-online.target postgresql.service
 
 [Service]
 Type=oneshot
-User=nikita
-WorkingDirectory=/home/nikita/Projects/personal/llm-job-pipeline
+User=jobsearch
+WorkingDirectory=/home/jobsearch/Projects/personal/llm-job-pipeline
 # KEY=value lines: database URL, TELEGRAM_*, FIRECRAWL_API_KEY. Mode 600.
-EnvironmentFile=/home/nikita/jobsearch/.env
+EnvironmentFile=/home/jobsearch/jobsearch/.env
 # The digest sender shares ONE state file with the button poller (getUpdates
 # offset, last_digest_at, crash-safe pending_claim). Must match
 # jobsearch-digest-poller.service; the ~ default is outside ReadWritePaths.
-Environment=DIGEST_STATE_FILE=/home/nikita/jobsearch/digest_state.json
+Environment=DIGEST_STATE_FILE=/home/jobsearch/jobsearch/digest_state.json
 # The Claude token is a credential FILE, never an Environment= value —
 # `systemctl show` must not reveal it (KTD7). The wrapper reads
 # $CREDENTIALS_DIRECTORY/claude-token and passes it only to the Claude child.
-LoadCredential=claude-token:/home/nikita/jobsearch/claude-token
-ExecStart=/home/nikita/Projects/personal/llm-job-pipeline/.venv/bin/python scripts/nightly_run.py
+LoadCredential=claude-token:/home/jobsearch/jobsearch/claude-token
+ExecStart=/home/jobsearch/Projects/personal/llm-job-pipeline/.venv/bin/python scripts/nightly_run.py
 # Hard ceiling for the whole night; on expiry systemd sends SIGTERM and the
 # wrapper's trap sends the failure alert before dying.
 TimeoutStartSec=4h
@@ -29,10 +29,10 @@ TimeoutStartSec=4h
 # writable. Claude Code writes session logs and settings under ~/.claude and
 # ~/.claude.json on every start.
 ProtectSystem=strict
-ReadWritePaths=/home/nikita/Projects/personal/llm-job-pipeline
-ReadWritePaths=/home/nikita/jobsearch
-ReadWritePaths=/home/nikita/.claude
-ReadWritePaths=/home/nikita/.claude.json
+ReadWritePaths=/home/jobsearch/Projects/personal/llm-job-pipeline
+ReadWritePaths=/home/jobsearch/jobsearch
+ReadWritePaths=/home/jobsearch/.claude
+ReadWritePaths=/home/jobsearch/.claude.json
 NoNewPrivileges=yes
 PrivateTmp=yes
 # The wrapper logs one-line summaries only; transcripts stay in the private

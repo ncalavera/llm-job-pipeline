@@ -4,22 +4,29 @@ The pipeline runs unattended every night on a server the user controls
 (STRATEGY.md guardrail 5). This directory holds the systemd units; everything
 secret is placed on the server by hand and never enters git or any sync.
 
-Layout on the server (user `nikita`):
+The unit files ship with a placeholder Linux user, `jobsearch`. Before
+copying them, run the `sed` command in step 1 of Install below to swap in
+your actual Linux user — do this first, since every path in this doc uses
+the placeholder.
+
+Layout on the server (user `jobsearch` — replace with your own):
 
 | Path | What | Mode |
 |---|---|---|
-| `/home/nikita/Projects/personal/llm-job-pipeline` | checkout (HTTPS clone, no stored credential) + `.venv` | — |
-| `/home/nikita/jobsearch/.env` | `SUPABASE_DB_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `FIRECRAWL_API_KEY` | 600 |
-| `/home/nikita/jobsearch/claude-token` | long-lived token from `claude setup-token` | 600 |
+| `/home/jobsearch/Projects/personal/llm-job-pipeline` | checkout (HTTPS clone, no stored credential) + `.venv` | — |
+| `/home/jobsearch/jobsearch/.env` | `SUPABASE_DB_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `FIRECRAWL_API_KEY` | 600 |
+| `/home/jobsearch/jobsearch/claude-token` | long-lived token from `claude setup-token` | 600 |
 | `config/user_profile.md` in the checkout | copied from the laptop (gitignored) | 600 |
 | `vacancies/nightly/<date>/` | night logs and transcripts, pruned after 7 days | 700 |
 | `~/.claude` | Claude Code state; session logs live under `projects/` | 700 |
 
 ## Install
 
-1. Clone the repo over HTTPS as `nikita`, create the venv, install
-   `requirements.txt`.
-2. Create `/home/nikita/jobsearch/` with `.env` and `claude-token` (mode 600).
+1. Clone the repo over HTTPS as your dedicated Linux user, create the venv,
+   install `requirements.txt`. Then replace the `jobsearch` placeholder in
+   the unit files with that user's actual name:
+   `sed -i "s|/home/jobsearch|/home/$USER|g; s|^User=jobsearch|User=$USER|" deploy/forge/*.service deploy/forge/*.timer`.
+2. Create `/home/$USER/jobsearch/` with `.env` and `claude-token` (mode 600).
    The token comes from `claude setup-token` run on any logged-in machine.
 3. Copy `config/user_profile.md` from the laptop into the checkout.
 4. Apply migrations: `.venv/bin/python scripts/migrate.py`.
@@ -40,7 +47,7 @@ The `claude setup-token` token is long-lived but not eternal, and a leaked or
 expired token shows up as the "login failure" alert in the morning message.
 
 1. Run `claude setup-token` on the laptop; copy the printed token.
-2. Replace the contents of `/home/nikita/jobsearch/claude-token` (mode 600).
+2. Replace the contents of `/home/$USER/jobsearch/claude-token` (mode 600).
 3. Record the creation date below — rotate before a year passes.
 
 | Token | Created |
