@@ -1159,6 +1159,204 @@ async function handleReportUpsert(req, res) {
 // Router
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// /api/contacts — the Networking tab
+//
+// GET   lists every contact, newest activity first.
+// POST  upserts one contact on (name, group) — the importer's identity rule.
+// PATCH moves one contact to a new status and stamps when it moved.
+//
+// Three methods on one path rather than a second endpoint for the status
+// change: the row IS the resource, and a PATCH that carries {id, status} says
+// what it does more plainly than a /api/contact-status would.
+// ---------------------------------------------------------------------------
+
+// Twin of statuses.py CONTACT_STATUSES and the SQL CHECK on contact.status.
+// A status missing here is one the dashboard can never set.
+export const CONTACT_STATUSES = [
+  "planned",
+  "contacted",
+  "replied",
+  "met",
+  "declined",
+  "stale",
+];
+
+// Twin of statuses.py CONTACT_CHANNELS. Anything outside this set is dropped
+// on write, so an unknown key can never reach the UI as a channel it has no
+// way to render.
+export const CONTACT_CHANNELS = [
+  "ea_forum",
+  "linkedin",
+  "telegram",
+  "x",
+  "github",
+  "site",
+  "email",
+  "calendly",
+];
+
+/** Keep only the channels the UI knows how to draw, dropping empty values. */
+export function cleanChannels(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const key of CONTACT_CHANNELS) {
+    const value = raw[key];
+    if (typeof value === "string" && value.trim()) out[key] = value.trim();
+  }
+  return out;
+}
+
+/** A group as stored: lowercase, spaces and underscores to hyphens. Twin of
+ *  contacts.normalise_group, so the API and the importer agree on identity. */
+export function normaliseGroup(value) {
+  const text = String(value == null ? "" : value)
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return text || "other";
+}
+
+function contactsPreamble(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+  if (req.method === "OPTIONS") {
+    sendEmpty(res, 204);
+    return true;
+  }
+  if (!["GET", "POST", "PATCH"].includes(req.method)) {
+    sendJson(res, 405, { error: "Method not allowed" });
+    return true;
+  }
+  if (!process.env.DATABASE_URL) {
+    logError("contacts", new Error("missing DATABASE_URL"), reqMeta(req));
+    sendJson(res, 500, { error: "Server misconfigured" });
+    return true;
+  }
+  return false;
+}
+
+async function handleContacts(req, res) {
+  if (contactsPreamble(req, res)) return;
+  if (req.method === "POST") return handleContactUpsert(req, res);
+  if (req.method === "PATCH") return handleContactStatus(req, res);
+  return handleContactsList(req, res);
+}
+
+async function handleContactsList(req, res) {
+  try {
+    const { rows } = await getPool().query(
+      `SELECT id, name, name_local, city, org, role, why_matters, channels,
+              "group", status, status_at, last_active, opener, notes,
+              source_path, created_at, updated_at
+         FROM contact
+        ORDER BY status_at DESC NULLS LAST, name ASC`,
+    );
+    const contacts = rows.map((r) => ({
+      id: String(r.id),
+      name: r.name,
+      name_local: r.name_local || "",
+      city: r.city || "",
+      org: r.org || "",
+      role: r.role || "",
+      why_matters: r.why_matters || "",
+      channels: cleanChannels(r.channels),
+      group: r.group,
+      status: r.status,
+      status_at: r.status_at,
+      last_active: r.last_active || "",
+      opener: r.opener || "",
+      notes: r.notes || "",
+      source_path: r.source_path || "",
+      updated_at: r.updated_at,
+    }));
+    return sendJson(res, 200, { contacts });
+  } catch (err) {
+    logError("contacts", err, reqMeta(req));
+    return sendJson(res, 500, { error: "Database error" });
+  }
+}
+
+async function handleContactUpsert(req, res) {
+  const body = await readJsonBody(req);
+  const name = String(body.name || "").trim();
+  if (!name) return sendJson(res, 400, { error: "Missing name" });
+
+  const group = normaliseGroup(body.group);
+  const status = body.status || "planned";
+  if (!CONTACT_STATUSES.includes(status)) {
+    return sendJson(res, 400, { error: "Invalid status" });
+  }
+
+  try {
+    const { rows } = await getPool().query(
+      `INSERT INTO contact (name, name_local, city, org, role, why_matters,
+                            channels, "group", status, last_active, opener,
+                            notes, source_path)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       ON CONFLICT (name, "group") DO UPDATE SET
+         name_local = EXCLUDED.name_local,
+         city = EXCLUDED.city,
+         org = EXCLUDED.org,
+         role = EXCLUDED.role,
+         why_matters = EXCLUDED.why_matters,
+         channels = EXCLUDED.channels,
+         status = EXCLUDED.status,
+         last_active = EXCLUDED.last_active,
+         opener = EXCLUDED.opener,
+         notes = EXCLUDED.notes,
+         source_path = EXCLUDED.source_path,
+         updated_at = now()
+       RETURNING id`,
+      [
+        name,
+        body.name_local || "",
+        body.city || "",
+        body.org || "",
+        body.role || "",
+        body.why_matters || "",
+        JSON.stringify(cleanChannels(body.channels)),
+        group,
+        status,
+        body.last_active || "",
+        body.opener || "",
+        body.notes || "",
+        body.source_path || "",
+      ],
+    );
+    return sendJson(res, 200, { ok: true, id: String(rows[0].id) });
+  } catch (err) {
+    logError("contacts", err, reqMeta(req, { name, group }));
+    return sendJson(res, 500, { error: "Database error" });
+  }
+}
+
+async function handleContactStatus(req, res) {
+  const body = await readJsonBody(req);
+  const id = String(body.id || "").trim();
+  const status = String(body.status || "").trim();
+  if (!id) return sendJson(res, 400, { error: "Missing id" });
+  if (!CONTACT_STATUSES.includes(status)) {
+    return sendJson(res, 400, { error: "Invalid status" });
+  }
+
+  try {
+    const { rowCount } = await getPool().query(
+      "UPDATE contact SET status = $1, status_at = now(), updated_at = now() WHERE id = $2",
+      [status, id],
+    );
+    if (!rowCount) return sendJson(res, 404, { error: "Contact not found", id });
+    return sendJson(res, 200, { ok: true, id, status });
+  } catch (err) {
+    logError("contacts", err, reqMeta(req, { id, status }));
+    return sendJson(res, 500, { error: "Database error" });
+  }
+}
+
 const API_ROUTES = {
   "/api/vacancies": handleVacancies,
   "/api/companies": handleCompanies,
@@ -1171,6 +1369,7 @@ const API_ROUTES = {
   "/api/health": handleHealth,
   "/api/health-detail": handleHealthDetail,
   "/api/reports": handleReports,
+  "/api/contacts": handleContacts,
 };
 
 // One report by slug: /api/reports/<slug>. The only path-parameter route on
