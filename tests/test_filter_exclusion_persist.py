@@ -279,6 +279,41 @@ def test_group_level_reason_reaches_every_member(env):
     assert _reason(db, vid_b) == "junk title: talent pool"
 
 
+def test_mixed_category_group_decides_each_member_on_its_own(env):
+    """A junk sibling gets its reason; the ready sibling stays scoreable —
+    even when the junk row is the group's representative (longest desc)."""
+    db, fv = env
+    vid_junk = _seed(
+        db,
+        "SplitOrg",
+        "Program Manager",
+        dedup_hash="split-junk",
+        desc="404 not found — this page is gone. " * 10,
+    )
+    vid_ready = _seed(db, "SplitOrg", "Program Manager", dedup_hash="split-ready")
+
+    _run_pass(fv)
+
+    assert _reason(db, vid_junk) == "junk content: error page"
+    assert _reason(db, vid_ready) is None
+    assert vid_ready in db.load_vacancies(unscored_only=True)
+
+
+def test_excluded_sibling_of_a_ready_representative_keeps_its_reason(env):
+    """When the representative is ready, an individually excluded sibling is
+    still reasoned from its own row (not cleared by the ELSE NULL)."""
+    db, fv = env
+    vid_ready = _seed(db, "RepReadyOrg", "Program Manager", dedup_hash="rep-ready")
+    vid_junk = _seed(
+        db, "RepReadyOrg", "Program Manager", dedup_hash="rep-junk", desc="404 not found"
+    )
+
+    _run_pass(fv)
+
+    assert _reason(db, vid_ready) is None
+    assert _reason(db, vid_junk) == "junk content: error page"
+
+
 # ---------------------------------------------------------------------------
 # The -1 sentinel, clearing, and rows the pass must never touch
 # ---------------------------------------------------------------------------
@@ -312,6 +347,26 @@ def test_stale_reason_is_cleared_in_the_same_statement(env):
 
     assert _reason(db, vid) is None
     assert vid in db.load_vacancies(unscored_only=True)
+
+
+def test_row_at_demoted_company_keeps_its_reason(env):
+    """The clear reaches only rows the pass re-decided: a reasoned row whose
+    company left 'active' (invisible to classify_vacancies) is NOT cleared,
+    while a stale reason at an active company still is."""
+    db, fv = env
+    vid_cand = _seed(db, "DemotedOrg", "Talent Pool — General Application", reason="junk title: talent pool")
+    vid_active = _seed(db, "CleanOrg", "Backend Engineer", reason="stale reason")
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE company SET status = 'candidate' WHERE canonical_name = ?", ("DemotedOrg",))
+    conn.commit()
+    cur.close()
+
+    _run_pass(fv)
+
+    assert _reason(db, vid_cand) == "junk title: talent pool"
+    assert _reason(db, vid_active) is None
+    assert vid_cand not in db.load_candidate_vacancies_for_scoring()
 
 
 def test_scored_and_non_unseen_rows_are_never_touched(env):

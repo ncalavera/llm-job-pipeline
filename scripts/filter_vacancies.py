@@ -641,12 +641,15 @@ def _group_exclusion_reason(category: str, rep: dict) -> str | None:
 def _exclusion_reason_map(categories: dict) -> dict[str, str]:
     """{vacancy_id: reason} for every row the filter pass excludes from scoring.
 
-    Group-level reasons (blacklist, company title filter, junk, archived
-    before, stale blind) follow the scorer's representative row (longest
-    description) and reach every member of the (org, title) role group. The
-    location reason reaches a group only when every member is geo-excluded.
-    reenrich_blind / reenrich_thin / ready rows get no entry (reason stays
-    NULL — they are awaiting enrichment or scoring, not excluded).
+    Each member of an (org, title) role group is decided by its OWN category:
+    a member in a group-reason category (blacklist, company title filter,
+    junk, archived before, stale blind) gets a reason — derived from the
+    scorer's representative row (longest description) when the representative
+    shares that category, so the whole group carries one consistent reason,
+    and from the member itself otherwise. The location reason reaches a group
+    only when every member is geo-excluded. reenrich_blind / reenrich_thin /
+    ready rows get no entry (reason stays NULL — they are awaiting enrichment
+    or scoring, not excluded).
     """
     groups: dict[tuple[str, str], list[tuple[str, dict]]] = {}
     cat_by_id: dict[str, str] = {}
@@ -662,16 +665,19 @@ def _exclusion_reason_map(categories: dict) -> dict[str, str]:
             key=lambda m: len(m[1].get("full_description") or m[1].get("snippet") or ""),
         )
         rep_cat = cat_by_id[rep_id]
-        if rep_cat in _GROUP_REASON_CATEGORIES:
-            reason = _group_exclusion_reason(rep_cat, rep)
-        elif all(cat_by_id[vid] == "delete_geo" for vid, _ in members):
-            reason = _geo_exclusion_reason([vac for _, vac in members])
-        else:
-            continue
-        if not reason:
-            continue
-        for vid, _ in members:
-            reasons[vid] = reason
+        geo_reason = None
+        if all(cat_by_id[vid] == "delete_geo" for vid, _ in members):
+            geo_reason = _geo_exclusion_reason([vac for _, vac in members])
+        for vid, vac in members:
+            cat = cat_by_id[vid]
+            if cat in _GROUP_REASON_CATEGORIES:
+                reason = _group_exclusion_reason(cat, rep if cat == rep_cat else vac)
+            elif cat == "delete_geo":
+                reason = geo_reason
+            else:
+                continue
+            if reason:
+                reasons[vid] = reason
     return reasons
 
 
@@ -680,8 +686,10 @@ def persist_scoring_exclusions(categories: dict) -> dict:
     excluded row and clear it on every no-longer-excluded row.
 
     Scoped to `(llm_score IS NULL OR llm_score < 0) AND status = 'unseen'`
-    (the -1 sentinel counts as unscored, matching load_vacancies), so scored
-    or user-triaged rows are never touched. Returns
+    (the -1 sentinel counts as unscored, matching load_vacancies) AND to the
+    rows this pass actually classified — a reasoned row the pass never saw
+    (e.g. its company left 'active') keeps its reason instead of being
+    blanket-cleared without a re-decision. Returns
     {"persisted", "count", "reasons"} for the run summary / run state.
     """
     from database_supabase import _scoring_excluded_supported
@@ -696,6 +704,10 @@ def persist_scoring_exclusions(categories: dict) -> dict:
         return {"persisted": False, "count": 0, "reasons": {}}
 
     reason_by_id = _exclusion_reason_map(categories)
+    seen_ids = [vid for items in categories.values() for vid, _ in items]
+    if not seen_ids:
+        return {"persisted": True, "count": 0, "reasons": {}}
+
     whens = []
     params: list = []
     for vid, reason in reason_by_id.items():
@@ -707,8 +719,9 @@ def persist_scoring_exclusions(categories: dict) -> dict:
     cur = conn.cursor()
     cur.execute(
         f"UPDATE vacancy SET scoring_excluded_reason = {case_sql} "
-        "WHERE (llm_score IS NULL OR llm_score < 0) AND status = 'unseen'",
-        params,
+        "WHERE (llm_score IS NULL OR llm_score < 0) AND status = 'unseen' "
+        "AND id = ANY(%s::uuid[])",
+        params + [seen_ids],
     )
     conn.commit()
     cur.close()
