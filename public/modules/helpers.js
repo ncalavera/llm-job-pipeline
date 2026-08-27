@@ -1088,11 +1088,21 @@ export function isSafeFragment(url) {
   return SAFE_FRAGMENT.test(String(url || ""));
 }
 
-// A money amount or a grouped number: "$23,658", "$1,000", "12,206,029", "226".
-// Bare one- and two-digit numbers are left alone — they are usually prose ("six
-// to twelve months"), and setting those in mono would speckle the paragraph.
+// A money amount with its currency symbol: "$23,658", "€1,000", "£450.50".
+// This is the only pattern used in a LIST item, and the reason is the real
+// EAIF report: its bullets open as data ("**Name** — $21,739 — 2025 Q1 —") and
+// then continue as an ordinary sentence. A rule wide enough to catch every
+// grouped number also catches the prose in the tail of that same bullet —
+// "80,000 Hours Guide in Polish", "a 100 page book", "the Fall 2023 app
+// cycle" — and sets three typefaces in one line. The amounts are what a reader
+// compares down the list; the numbers inside the sentence are words.
+const MONEY_TOKEN = /([$€£]\d[\d,]*(?:\.\d+)?)/g;
+
+// Money OR any grouped/large bare number: adds "12,206,029" and "226". Used
+// only in TABLE cells, where a column really is a column of figures and the
+// surrounding text cannot be prose.
 const NUMBER_TOKEN =
-  /(\$\d[\d,]*(?:\.\d+)?|\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b|\b\d{3,}(?:\.\d+)?\b)/g;
+  /([$€£]\d[\d,]*(?:\.\d+)?|\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b|\b\d{3,}(?:\.\d+)?\b)/g;
 
 /**
  * Set every money amount and grouped number in the monospace face.
@@ -1111,8 +1121,10 @@ const NUMBER_TOKEN =
 // or an em-dash placeholder. Anything with words in it is prose and stays left.
 const NUMERIC_CELL = /^[$€£]?[\d,. %+\u2013\u2014-]+$/;
 
-//: Passed to inlineFormat where the reader scans rather than reads.
-const NUMERIC = { numbers: true };
+// Passed to inlineFormat where the reader scans rather than reads. "all" is for
+// table cells; "money" is for list items, whose tail is usually a sentence.
+const NUMERIC = { numbers: "all" };
+const MONEY_ONLY = { numbers: "money" };
 
 export function isNumericCell(text) {
   const value = String(text == null ? "" : text).trim();
@@ -1120,13 +1132,14 @@ export function isNumericCell(text) {
   return /\d/.test(value) && NUMERIC_CELL.test(value);
 }
 
-export function wrapNumbers(html) {
+export function wrapNumbers(html, mode) {
+  const token = mode === "money" ? MONEY_TOKEN : NUMBER_TOKEN;
   return String(html == null ? "" : html)
     .split(/(<[^>]*>)/)
     .map((part) =>
       part.startsWith("<")
         ? part
-        : part.replace(NUMBER_TOKEN, '<span class="md-num">$1</span>'),
+        : part.replace(token, '<span class="md-num">$1</span>'),
     )
     .join("");
 }
@@ -1164,7 +1177,7 @@ export function inlineFormat(text, opts) {
           "</a>"
       : label;
   });
-  return opts && opts.numbers ? wrapNumbers(text) : text;
+  return opts && opts.numbers ? wrapNumbers(text, opts.numbers) : text;
 }
 
 /**
@@ -1385,7 +1398,7 @@ export function mdToHtml(text, opts) {
         out.push("<ul>");
         inList = true;
       }
-      out.push("<li>" + inlineFormat(RegExp.$1, NUMERIC) + "</li>");
+      out.push("<li>" + inlineFormat(RegExp.$1, MONEY_ONLY) + "</li>");
       continue;
     }
 
@@ -1401,7 +1414,7 @@ export function mdToHtml(text, opts) {
         out.push("<ol>");
         inOrderedList = true;
       }
-      out.push("<li>" + inlineFormat(RegExp.$1, NUMERIC) + "</li>");
+      out.push("<li>" + inlineFormat(RegExp.$1, MONEY_ONLY) + "</li>");
       continue;
     }
 

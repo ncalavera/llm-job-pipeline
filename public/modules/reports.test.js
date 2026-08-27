@@ -241,6 +241,45 @@ test("a table renders with a head and a body, and its separator row is dropped",
   assert.ok(!html.includes("---"));
 });
 
+// --- Numbers in the monospace face ----------------------------------------
+// The real EAIF report is 299 bullets that open as data and finish as a
+// sentence: "**Name** — $21,739 — 2025 Q1 — 5-month stipend to test a career
+// advising project through the launch of 80,000 Hours Guide in Polish". The
+// amount is compared down the list; "80,000 Hours" is the name of an
+// organisation. Only the first belongs in mono.
+
+test("a money amount in a list item is set in mono", () => {
+  const html = mdToHtml("- Polish EA — $21,739 — 2025 Q1");
+  assert.ok(html.includes('<span class="md-num">$21,739</span>'));
+});
+
+test("a bare number in a list item stays in the body face", () => {
+  const html = mdToHtml("- launch of 80,000 Hours Guide in Polish");
+  assert.ok(!html.includes("md-num"));
+});
+
+test("a list item keeps the amount in mono and the prose out of it", () => {
+  const html = mdToHtml(
+    "- Grant — $21,739 — help 100 page book for 80,000 Hours",
+  );
+  assert.ok(html.includes('<span class="md-num">$21,739</span>'));
+  assert.ok(!html.includes('<span class="md-num">100</span>'));
+  assert.ok(!html.includes('<span class="md-num">80,000</span>'));
+});
+
+test("a table cell still sets a bare grouped number in mono", () => {
+  // A table column IS a column of figures — the wider rule still applies there.
+  const html = mdToHtml(
+    "| Funder | Grants |\n| --- | --- |\n| EA Funds | 1,673 |",
+  );
+  assert.ok(html.includes('<span class="md-num">1,673</span>'));
+});
+
+test("a paragraph never sets numbers in mono", () => {
+  const html = mdToHtml("In 2022 it made 293 grants totaling $12,206,029.");
+  assert.ok(!html.includes("md-num"));
+});
+
 // --- Table alignment ------------------------------------------------------
 // Alignment is a property of the COLUMN, not of the cell. A generic renderer
 // cannot be told which column holds money, but it can read the whole column

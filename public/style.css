@@ -5374,3 +5374,30 @@ body::after {
   font-weight: 700;
   color: var(--sky-text);
 }
+
+/* --- Reports on a narrow screen ------------------------------------------
+   A 9,825-word report is the one thing here that is genuinely READ rather
+   than scanned, so line length matters more than on any other tab. At 390px
+   the icon rail already takes ~72px; the sheet's own 32px side padding then
+   left a ~238px column, about 35 characters — far under the 70–80 the house
+   style asks for, and short enough that phrases break mid-word ("uni-
+   students", "pre-college") on almost every line.
+
+   Reclaiming the side padding is the only width available without touching
+   the global shell, and it buys back a third of the column.
+   ------------------------------------------------------------------------ */
+
+@media (max-width: 700px) {
+  .report-detail {
+    padding: 20px 16px 40px;
+    /* The shell's scroll-to-top button is fixed at bottom:32px/right:32px and
+       floats over whatever is beneath it. Clearing its full height plus its
+       offset means the END of a report — where a reader actually stops — is
+       never hidden under it. */
+    padding-bottom: 96px;
+  }
+
+  .reports-section {
+    max-width: none;
+  }
+}
