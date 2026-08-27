@@ -28,7 +28,7 @@ Environment variables required — set them in your `.env` file or shell environ
 python3 scripts/telegram_digest.py send
 ```
 
-Picks the top 5 unseen vacancies by score, formats each as a message with inline buttons (Like / Pass), and sends them to the configured Telegram chat. Sets `vacancy.digest_sent_at` on each sent vacancy so they are not re-sent.
+Sends ONE tiered morning message (split only when Telegram's size limit forces it): a counts header ("Night run: F fetched, S scored, D dropped, U not scored yet" + "N deadlines this week"), top matches with Like/Pass buttons, mid scores as one-liners, and every dropped vacancy as one line with its drop reason. Sets `vacancy.digest_sent_at` on top/mid rows so they are not re-sent.
 
 ### Poll responses
 

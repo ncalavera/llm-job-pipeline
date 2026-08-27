@@ -419,6 +419,21 @@ STRINGS: dict[str, dict[str, str]] = {
         "digest_nothing": "🗞 No fresh vacancies for the digest today.",
         "digest_recorded": "Recorded: {label}",
         "digest_save_error": "⚠️ Couldn't save your choice, please tap again.",
+        # telegram_digest.py — tiered morning digest (U3)
+        "digest_run_header": "🌙 <b>Night run</b>: {fetched} fetched, {scored} scored, {dropped} dropped, {unscored} not scored yet",
+        "digest_no_progress": "⚠️ scored 0 of {n} — the session made no progress",
+        "digest_deadlines_week": "⏰ {n} deadlines this week",
+        "digest_tier_top": "🔥 <b>Top matches</b> — tap 👍 / 👎",
+        "digest_tier_mid": "📊 <b>Mid scores</b>",
+        "digest_tier_dropped": "🗑 <b>Dropped</b>",
+        "digest_dropped_prefix": "dropped:",
+        "digest_dropped_more": "…+{n} more",
+        "digest_carried_over": "⏭ carried over to the next run (no progress): {what}",
+        "digest_carried_roles": "{n} role(s)",
+        "digest_carried_companies": "{n} company(ies)",
+        "digest_rolled_over": "📚 learning review rolled over: {n} verdict(s) still pending",
+        "digest_pending_verdicts": "📱 {n} scored match(es) await your verdict",
+        "digest_quiet": "😴 Quiet night — nothing new.",
     },
     # Russian — verbatim from the maintainer's prior dashboard build.
     "ru": {
@@ -794,6 +809,21 @@ STRINGS: dict[str, dict[str, str]] = {
         "digest_nothing": "🗞 Свежих вакансий для дайджеста сегодня нет.",
         "digest_recorded": "Записал: {label}",
         "digest_save_error": "⚠️ Не удалось сохранить выбор, нажмите ещё раз.",
+        # telegram_digest.py — трёхъярусный утренний дайджест (U3)
+        "digest_run_header": "🌙 <b>Ночной прогон</b>: {fetched} собрано, {scored} оценено, {dropped} отсеяно, {unscored} ещё не оценено",
+        "digest_no_progress": "⚠️ оценено 0 из {n} — сессия не продвинулась",
+        "digest_deadlines_week": "⏰ дедлайнов на этой неделе: {n}",
+        "digest_tier_top": "🔥 <b>Лучшие совпадения</b> — жми 👍 / 👎",
+        "digest_tier_mid": "📊 <b>Средние оценки</b>",
+        "digest_tier_dropped": "🗑 <b>Отсеяно</b>",
+        "digest_dropped_prefix": "отсеяно:",
+        "digest_dropped_more": "…и ещё {n}",
+        "digest_carried_over": "⏭ перенесено на следующий прогон (без прогресса): {what}",
+        "digest_carried_roles": "ролей: {n}",
+        "digest_carried_companies": "компаний: {n}",
+        "digest_rolled_over": "📚 разбор вердиктов перенесён: {n} вердикт(ов) ждут",
+        "digest_pending_verdicts": "📱 вердикта ждут {n} оценённых вакансий",
+        "digest_quiet": "😴 Тихая ночь — ничего нового.",
     },
 }
 

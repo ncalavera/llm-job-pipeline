@@ -338,6 +338,8 @@ def digest() -> dict:
         "deadline_soon_days": int(_num(sec, "deadline_soon_days", 7)),
         "default_limit": volume()["digest_size"],
         "default_min_score": int(_num(sec, "default_min_score", 40)),
+        "mid_min_score": int(_num(sec, "mid_min_score", 40)),
+        "dropped_max_lines": int(_num(sec, "dropped_max_lines", 25)),
         "summary_fallback_chars": int(_num(sec, "summary_fallback_chars", 600)),
         "summary_max_chars": int(_num(sec, "summary_max_chars", 1500)),
         "message_max_chars": int(_num(sec, "message_max_chars", 4000)),
