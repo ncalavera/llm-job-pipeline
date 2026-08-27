@@ -1288,14 +1288,14 @@ def _vacancy_has_column(col: str) -> bool:
     return _table_has_column("vacancy", col)
 
 
-# ``scoring_excluded_reason`` (migration 0020) is migration-only, like
+# ``scoring_excluded_reason`` (migration 0025) is migration-only, like
 # scored_by: presence is detected once per process so a pre-migration install
 # degrades to the old "unscored" definition instead of crashing on every load.
 _scoring_excluded_supported_cache: bool | None = None
 
 
 def _scoring_excluded_supported() -> bool:
-    """True once ``vacancy.scoring_excluded_reason`` exists (migration 0020)."""
+    """True once ``vacancy.scoring_excluded_reason`` exists (migration 0025)."""
     global _scoring_excluded_supported_cache
     if _scoring_excluded_supported_cache is None:
         _scoring_excluded_supported_cache = _vacancy_has_column("scoring_excluded_reason")
@@ -1371,7 +1371,7 @@ def load_vacancies(
         conditions.append("(v.llm_score IS NULL OR v.llm_score < 0)")
         conditions.append("v.status != 'archived'")
         # The filter pass is the single decider of "not scored" (migration
-        # 0020): a row it excluded carries the reason and is no longer offered
+        # 0025): a row it excluded carries the reason and is no longer offered
         # as unscored anywhere. Column-guarded so a pre-migration install
         # degrades to the old behaviour instead of crashing.
         if not include_scoring_excluded and _scoring_excluded_supported():

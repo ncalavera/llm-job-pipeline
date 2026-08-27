@@ -280,7 +280,7 @@ class _Sqlite:
                 # took effect. New migrations must be idempotent on their own
                 # terms (e.g. ``ADD COLUMN IF NOT EXISTS`` as in 0006) rather
                 # than relying on this catch.
-                known = ("0003", "0005", "0009", "0011", "0013", "0014", "0020", "0021")
+                known = ("0003", "0005", "0009", "0011", "0013", "0014", "0025", "0026")
                 if version not in known or "duplicate column name" not in str(e):
                     raise
                 print(f"    (column already present — treating {version} as applied: {e})")

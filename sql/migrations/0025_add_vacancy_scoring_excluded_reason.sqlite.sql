@@ -1,4 +1,4 @@
--- 0020_add_vacancy_scoring_excluded_reason — SQLite variant (see .postgres.sql
+-- 0025_add_vacancy_scoring_excluded_reason — SQLite variant (see .postgres.sql
 -- for the rationale).
 --
 -- The frozen baseline (sql/schema.sqlite.sql) does not declare this column on

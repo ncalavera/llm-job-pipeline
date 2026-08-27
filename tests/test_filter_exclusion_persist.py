@@ -1,4 +1,4 @@
-"""One exclusion pass that records its reason (migration 0020, R8).
+"""One exclusion pass that records its reason (migration 0025, R8).
 
 filter_vacancies.persist_scoring_exclusions() is the single decider of "not
 scored" for new vacancies: it writes vacancy.scoring_excluded_reason in ONE
@@ -7,7 +7,7 @@ UPDATE per run (set and clear in the same statement), and every reader of
 dashboard count, run_daily._unscored_unseen — excludes reasoned rows, so the
 reason shown downstream is the reason that applied.
 
-Each test runs on its own fresh temp SQLite DB with migration 0020 applied
+Each test runs on its own fresh temp SQLite DB with migration 0025 applied
 from the real migration file (which doubles as the "migration applies on
 SQLite" proof).
 """
@@ -28,7 +28,7 @@ MIGRATION_SQLITE = (
     Path(__file__).resolve().parent.parent
     / "sql"
     / "migrations"
-    / "0020_add_vacancy_scoring_excluded_reason.sqlite.sql"
+    / "0025_add_vacancy_scoring_excluded_reason.sqlite.sql"
 )
 
 
@@ -54,7 +54,7 @@ def _force_sqlite(monkeypatch, db_file):
 
 
 def _apply_0020(db):
-    """Apply the REAL 0020 SQLite migration file to the fresh baseline DB."""
+    """Apply the REAL 0025 SQLite migration file to the fresh baseline DB."""
     sql = MIGRATION_SQLITE.read_text(encoding="utf-8")
     conn = db.get_conn()
     cur = conn.cursor()
@@ -481,7 +481,7 @@ def test_h_filter_records_excluded_count_and_histogram(tmp_path, monkeypatch):
 
 
 def test_migration_applies_and_loader_query_runs_on_sqlite(env):
-    """The real 0020 file applied cleanly (fixture) and the reasoned-row
+    """The real 0025 file applied cleanly (fixture) and the reasoned-row
     condition is live in the loader SQL."""
     db, fv = env
     assert db._vacancy_has_column("scoring_excluded_reason")

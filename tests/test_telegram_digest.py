@@ -1,7 +1,7 @@
 """Tests for telegram_digest.py — pure builders plus the tiered send.
 
-The tiered-send tests run against a fresh temp SQLite DB (migrations 0020 and
-0021 applied from the real files) with ``tg_call`` faked — no network, no
+The tiered-send tests run against a fresh temp SQLite DB (migrations 0025 and
+0026 applied from the real files) with ``tg_call`` faked — no network, no
 Postgres.
 """
 
@@ -19,8 +19,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 import telegram_digest as td
 
 _MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "sql" / "migrations"
-MIGRATION_0020 = _MIGRATIONS_DIR / "0020_add_vacancy_scoring_excluded_reason.sqlite.sql"
-MIGRATION_0021 = _MIGRATIONS_DIR / "0021_add_vacancy_digest_dropped_at.sqlite.sql"
+MIGRATION_0020 = _MIGRATIONS_DIR / "0025_add_vacancy_scoring_excluded_reason.sqlite.sql"
+MIGRATION_0021 = _MIGRATIONS_DIR / "0026_add_vacancy_digest_dropped_at.sqlite.sql"
 
 
 ROW = {

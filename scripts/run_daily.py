@@ -462,7 +462,7 @@ def _candidate_names_to_score(limit: int) -> list[str]:
 def _unscored_unseen() -> int:
     from database_supabase import _scoring_excluded_supported
 
-    # Rows the filter pass excluded from scoring (migration 0020) are not
+    # Rows the filter pass excluded from scoring (migration 0025) are not
     # "awaiting scoring" — counting them would hold the scoring gate open for
     # rows the scorer will never be offered. Column-guarded for pre-migration
     # installs.
@@ -1395,7 +1395,7 @@ def _h_filter(state, entry, opts):
     ready = data.get("ready", 0)
     delete_ids = data.get("delete_ids", {}) or {}
     junk = sum(len(v) for v in delete_ids.values())
-    # Exclusion tally (migration 0020) — kept in the run state so the nightly
+    # Exclusion tally (migration 0025) — kept in the run state so the nightly
     # digest header can show "N excluded" with a per-reason breakdown (R10).
     excluded = data.get("scoring_excluded", {}) or {}
     entry["filter"] = {

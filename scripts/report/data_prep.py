@@ -142,7 +142,7 @@ def _count_unscored(all_vacs: dict) -> int:
         for v in all_vacs.values()
         if (v.get("llm_score") is None or v.get("llm_score", -1) < 0)
         and (v.get("status") or "unseen") == "unseen"
-        # A row the filter pass excluded from scoring (migration 0020) is not
+        # A row the filter pass excluded from scoring (migration 0025) is not
         # awaiting scoring — it must not inflate the "run scoring next" hint.
         and not v.get("scoring_excluded_reason")
     )

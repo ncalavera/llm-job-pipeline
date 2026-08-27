@@ -567,7 +567,7 @@ def classify_vacancies(db: dict = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Scoring-exclusion record (migration 0020) — the reason a new vacancy is not
+# Scoring-exclusion record (migration 0025) — the reason a new vacancy is not
 # sent to scoring, written on the row so the scorer's loader and the digest
 # read the SAME record. NULL = awaiting scoring (ready / still enriching).
 # ---------------------------------------------------------------------------

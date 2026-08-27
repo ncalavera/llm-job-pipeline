@@ -1,6 +1,6 @@
 """score_vacancies._load_and_dedup honours the filter pass's exclusion record.
 
-The filter stage (migration 0020) writes vacancy.scoring_excluded_reason; the
+The filter stage (migration 0025) writes vacancy.scoring_excluded_reason; the
 scorer's loader selects only reasoned-NULL rows, orders oldest-unscored-first
 when unattended, and keeps its own blind/boilerplate check for one proven
 night before that check is removed.
@@ -22,7 +22,7 @@ MIGRATION_SQLITE = (
     Path(__file__).resolve().parent.parent
     / "sql"
     / "migrations"
-    / "0020_add_vacancy_scoring_excluded_reason.sqlite.sql"
+    / "0025_add_vacancy_scoring_excluded_reason.sqlite.sql"
 )
 
 

@@ -142,9 +142,9 @@ WHERE v.status = 'unseen'
 ORDER BY v.llm_score DESC, v.created_at DESC
 """
 
-# Tier 3: dropped vacancies (migration 0020) not shown in a digest yet.
+# Tier 3: dropped vacancies (migration 0025) not shown in a digest yet.
 # Claimed like tiers 1–2: the fetched (capped) rows stamp digest_dropped_at
-# (migration 0021) before their message part is sent, released on failure.
+# (migration 0026) before their message part is sent, released on failure.
 # Rows beyond the cap stay unstamped and surface next morning. A timestamp
 # cutoff on first_seen cannot do this job — first_seen is a DATE, so rows
 # dropped later the same day would sit below the cutoff forever. And

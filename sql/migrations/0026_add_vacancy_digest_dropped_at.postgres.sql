@@ -1,4 +1,4 @@
--- 0021_add_vacancy_digest_dropped_at — claim stamp for tier-3 (dropped) lines
+-- 0026_add_vacancy_digest_dropped_at — claim stamp for tier-3 (dropped) lines
 -- of the morning digest.
 --
 -- The digest must show every dropped vacancy exactly once. The old gate
@@ -14,5 +14,5 @@
 -- tiers 1–2, which gate on digest_sent_at.
 --
 -- Guarded with IF NOT EXISTS so replaying the chain against a DB that already
--- has the column is a clean no-op (matches 0006/0009/0011/0013/0014/0020).
+-- has the column is a clean no-op (matches 0006/0009/0011/0013/0014/0025).
 ALTER TABLE vacancy ADD COLUMN IF NOT EXISTS digest_dropped_at TIMESTAMPTZ;

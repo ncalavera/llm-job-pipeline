@@ -93,7 +93,7 @@ def test_load_vacancies_status_exclude_filters_in_sql(monkeypatch):
 
     conn, cur = _mock_conn()
     monkeypatch.setattr(db, "get_conn", lambda: conn)
-    # Prime the migration-0020 column cache so the presence probe (a PRAGMA /
+    # Prime the migration-0025 column cache so the presence probe (a PRAGMA /
     # information_schema query) doesn't land in the captured execute() calls.
     monkeypatch.setattr(db, "_scoring_excluded_supported_cache", True)
 
@@ -120,7 +120,7 @@ def test_load_vacancies_status_exclude_omitted_no_clause(monkeypatch):
 
     conn, cur = _mock_conn()
     monkeypatch.setattr(db, "get_conn", lambda: conn)
-    # Prime the migration-0020 column cache (see the status_exclude test above).
+    # Prime the migration-0025 column cache (see the status_exclude test above).
     monkeypatch.setattr(db, "_scoring_excluded_supported_cache", True)
 
     db.load_vacancies(unscored_only=True)

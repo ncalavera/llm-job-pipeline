@@ -596,7 +596,7 @@ _PIPELINE_ENTRYPOINTS = frozenset(
         "fetch_companies.py",
         "fetch_vacancies.py",
         "filter_companies.py",
-        # Writes since migration 0020: persists vacancy.scoring_excluded_reason
+        # Writes since migration 0025: persists vacancy.scoring_excluded_reason
         # (the one exclusion pass) on every default run.
         "filter_vacancies.py",
         "find_company_urls.py",

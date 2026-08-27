@@ -1,4 +1,4 @@
--- 0020_add_vacancy_scoring_excluded_reason — record WHY a new vacancy is not
+-- 0025_add_vacancy_scoring_excluded_reason — record WHY a new vacancy is not
 -- sent to scoring.
 --
 -- The unattended nightly run needs one decider of "not scored": the filter
