@@ -491,7 +491,7 @@ def build_call_llm(model_tier: str):
     fail-safe keep per candidate instead of cleanly deferring to subagents."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print(
-            "  screen: ANTHROPIC_API_KEY unset — deferring to subagent screening",
+            "  screen: screening runs in a Claude session, not a direct model call",
             file=sys.stderr,
         )
         return None
@@ -596,7 +596,7 @@ def cmd_save(files: "list[str] | None") -> int:
 def _print_report(summary: dict, applied: bool) -> None:
     kept, dropped, pending = summary["keep"], summary["drop"], summary["pending"]
     head = "APPLIED" if applied else "DRY-RUN"
-    llm_note = "LLM screen ran" if summary["llm_ran"] else "no API key — LLM screen deferred"
+    llm_note = "LLM screen ran" if summary["llm_ran"] else "screen runs in a Claude session"
     print(
         f"[{head}] {summary['total']} fresh candidate(s): {len(kept)} kept, "
         f"{len(dropped)} dropped, {len(pending)} pending subagent screen ({llm_note})"
