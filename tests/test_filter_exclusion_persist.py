@@ -53,12 +53,22 @@ def _force_sqlite(monkeypatch, db_file):
     return db
 
 
+#: 0013 adds vacancy.source_board — the filter reads it to leave the cards
+#: Nikita added himself alone.
+MIGRATION_SOURCE_BOARD = (
+    Path(__file__).resolve().parent.parent / "sql" / "migrations" / "0013_add_source_board.sqlite.sql"
+)
+
+
 def _apply_0020(db):
-    """Apply the REAL 0025 SQLite migration file to the fresh baseline DB."""
-    sql = MIGRATION_SQLITE.read_text(encoding="utf-8")
+    """Apply the REAL 0013 + 0025 SQLite migration files to the baseline DB."""
     conn = db.get_conn()
     cur = conn.cursor()
-    cur.execute(sql)
+    for path in (MIGRATION_SOURCE_BOARD, MIGRATION_SQLITE):
+        try:
+            cur.execute(path.read_text(encoding="utf-8"))
+        except Exception:  # already in the baseline
+            pass
     conn.commit()
     cur.close()
 
@@ -828,3 +838,72 @@ def test_decided_junk_role_is_context_only_and_never_proposed_as_work(env):
     assert fv.decided_count(all_cats) == 1
     assert _reason(db, vid) is None
     assert result["classified"] == result["stamped"] == result["out_of_scope"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Not-a-vacancy rows: dropped by the pass, and never Nikita's own cards
+# ---------------------------------------------------------------------------
+
+
+def test_program_page_is_dropped_with_a_plain_reason(env):
+    db, fv = env
+    vid = _seed(
+        db,
+        "High Impact Professionals",
+        "Impact Accelerator Program",
+        desc="A six-week cohort for people who want more impact. Places are limited.",
+    )
+
+    _run_pass(fv)
+
+    assert _reason(db, vid) == "a program or grant to apply to, not a job"
+    assert vid not in db.load_vacancies(unscored_only=True)
+
+
+def test_recruiter_test_posting_is_dropped(env):
+    db, fv = env
+    vid = _seed(db, "FundraiseUp", "US TEST JOB 2026 - DO NOT APPLY")
+
+    _run_pass(fv)
+
+    assert _reason(db, vid) == "test posting, not a real job"
+
+
+def test_a_card_nikita_added_himself_is_never_dropped(env):
+    """He tracks programmes and grants on the board on purpose. The gate is
+    only about what the sources push at him."""
+    db, fv = env
+    vid = _seed(
+        db,
+        "EA Infrastructure Fund",
+        "Individual grant (career transition / community project)",
+        desc=(
+            "Apply for an individual grant to cover a career transition or a "
+            "community project. Rolling deadline, decisions in six weeks."
+        ),
+    )
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE vacancy SET source_board = 'manual' WHERE id = ?", (vid,))
+    conn.commit()
+    cur.close()
+
+    _run_pass(fv)
+
+    assert _reason(db, vid) is None
+    assert vid in db.load_vacancies(unscored_only=True)
+
+
+def test_a_real_role_at_the_same_company_still_goes_to_scoring(env):
+    db, fv = env
+    vid = _seed(
+        db,
+        "Google DeepMind",
+        "Senior Program Manager, Google DeepMind Impact Accelerator",
+        dedup_hash="real-role",
+    )
+
+    _run_pass(fv)
+
+    assert _reason(db, vid) is None
+    assert vid in db.load_vacancies(unscored_only=True)
