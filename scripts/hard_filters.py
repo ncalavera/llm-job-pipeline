@@ -53,6 +53,12 @@ _FIELD_LINE = re.compile(r"^([a-z][a-z_]*)\s*:")
 # filter parser to spot the intended entries in ## COMPANY_TITLE_FILTERS.
 _BULLET_LINE = re.compile(r"^[-*]\s+(.*\S)\s*$")
 
+#: Marks a COMPANY_TITLE_FILTERS pattern as matching the job BODY, not the title.
+#: Defined here (the profile's own vocabulary) and re-exported by config so
+#: filters.py can split the scopes without importing this module directly.
+DESC_PATTERN_PREFIX = "desc:"
+
+
 
 def _warn(message: str) -> None:
     """Loud stderr warning, matching the profile-fallback warning style."""
@@ -235,10 +241,12 @@ def _parse_company_title_filters(body: str) -> dict[str, list[str]]:
     """Parse a ``## COMPANY_TITLE_FILTERS`` body into {company: [patterns]}.
 
     Each entry is one bullet line ``- <company> :: <comma-separated patterns>``.
-    Patterns are lowercased/trimmed (reusing ``_split_csv``). A malformed entry —
-    a bullet or ``::``-bearing line with no ``::``, an empty company, or an empty
-    pattern list — is skipped with a loud warning, never a crash. Prose lines
-    that are neither a bullet nor carry ``::`` are ignored silently.
+    Patterns are lowercased/trimmed (reusing ``_split_csv``). A pattern keeps its
+    ``desc:`` prefix, if any; filters.py splits the scopes when it compiles them.
+    A malformed entry — a bullet or ``::``-bearing line with no ``::``, an empty
+    company, or an empty pattern list — is skipped with a loud warning, never a
+    crash. Prose lines that are neither a bullet nor carry ``::`` are ignored
+    silently.
     """
     body = _HTML_COMMENT.sub("", body or "")
     out: dict[str, list[str]] = {}
@@ -270,6 +278,15 @@ def _parse_company_title_filters(body: str) -> dict[str, list[str]]:
             continue
         bucket = out.setdefault(company, [])
         for pattern in patterns:
+            # "desc:" with nothing after it would compile to nothing and silently
+            # void the pattern the user meant to write. Say so and skip it.
+            if pattern.rstrip() == DESC_PATTERN_PREFIX:
+                _warn(
+                    f"profile COMPANY_TITLE_FILTERS entry for '{company}' has a bare "
+                    f"'{DESC_PATTERN_PREFIX}' with no words after it. Skipped — write "
+                    f"'{DESC_PATTERN_PREFIX}<words to find in the job body>'."
+                )
+                continue
             if pattern not in bucket:
                 bucket.append(pattern)
     return out

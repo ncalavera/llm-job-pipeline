@@ -143,6 +143,7 @@ REGION_KEYWORDS: dict[str, list[str]] = {
 # ---------------------------------------------------------------------------
 
 from hard_filters import (  # noqa: E402
+    DESC_PATTERN_PREFIX,
     load_hard_filters,
     load_company_title_filters,
     load_company_never_fetch,

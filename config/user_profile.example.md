@@ -203,22 +203,43 @@ One entry per line:
 
     - <canonical company name> :: <comma-separated include patterns>
 
-Semantics: for a LISTED company, a role is DROPPED AT FETCH TIME unless its
-title matches at least one pattern (whole-word, case-insensitive — the same
-matching the title blacklist uses). Dropped means never stored: the pipeline
-does not pay to save, enrich, score or report it. Company names are
-alias-resolved, so a board spelling ("WFP") still hits an include-list declared
-under the canonical name. The filter stage keeps the same check as a safety net
-for rows stored before you added the entry — it flags them as delete candidates
-with the reason "company_title_filter — not in <Company> include list"
-(reviewable in /jobs-review before anything is deleted). UNLISTED companies are
-completely unaffected. A missing or empty section = feature OFF. A malformed
-line is skipped with a warning.
+Semantics: for a LISTED company, a role is DROPPED AT FETCH TIME unless it
+matches at least one pattern (whole-word, case-insensitive — the same matching
+the title blacklist uses). Dropped means never stored: the pipeline does not pay
+to save, enrich, score or report it. Company names are alias-resolved, so a board
+spelling ("WFP") still hits an include-list declared under the canonical name.
+The filter stage keeps the same check as a safety net for rows stored before you
+added the entry — it flags them as delete candidates with the reason
+"company_title_filter — not in <Company> include list" (reviewable in
+/jobs-review before anything is deleted). UNLISTED companies are completely
+unaffected. A missing or empty section = feature OFF. A malformed line is skipped
+with a warning.
 
 Example — keep WFP and FHI 360 active but only surface programme/data roles:
 
     - World Food Programme :: monitoring, evaluation, programme officer, data
     - FHI 360 :: research, evaluation, data, strategy
+
+MATCHING THE JOB BODY. A pattern matches the TITLE by default. Prefix it with
+"desc:" to match the job DESCRIPTION instead:
+
+    - WFP :: business innovation, product manager, desc:innovation accelerator
+
+Use it when the thing you want is never in the title. A team, a unit or a product
+that the employer names only in the body — "you will join our Innovation
+Accelerator" — cannot be found any other way. The two scopes UNION: a role
+survives when its title matches a title pattern OR its body matches a desc
+pattern, so adding a desc pattern only ever widens what you keep.
+
+Two cautions, both learned the hard way:
+
+  * A body is long, so a body match is much looser than a title match. Employers
+    name-drop their own famous units in boilerplate ("X was launched as a pilot of
+    our Innovation Accelerator") in roles that have nothing to do with them. Check
+    what a new desc pattern actually keeps before you trust it.
+  * A desc pattern can never keep a role whose body we do not have. If the source
+    gave no description, the title patterns alone decide. Nothing is let through
+    on a body we could not read.
 
 The template below is EMPTY on purpose. Add your own only if you are sure.
 -->

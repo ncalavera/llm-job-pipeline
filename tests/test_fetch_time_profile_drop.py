@@ -99,8 +99,14 @@ def test_broken_profile_never_raises(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _write_profile(dir_path: Path, *, title_filters: str = "", never_fetch: str = "") -> Path:
-    """Write a minimal profile with the two sections under test.
+def _write_profile(
+    dir_path: Path,
+    *,
+    title_filters: str = "",
+    never_fetch: str = "",
+    exclude_title_keywords: str = "(none)",
+) -> Path:
+    """Write a minimal profile with the sections under test.
 
     Headers stay at column 0 — the profile parser requires that.
     """
@@ -108,6 +114,9 @@ def _write_profile(dir_path: Path, *, title_filters: str = "", never_fetch: str 
     profile = dir_path / "user_profile.md"
     profile.write_text(
         "## USER_PROFILE\n\nTest person.\n\n"
+        "## HARD_FILTERS\n\n"
+        "exclude_countries: (none)\n"
+        f"exclude_title_keywords: {exclude_title_keywords}\n\n"
         f"## COMPANY_TITLE_FILTERS\n\n{title_filters}\n\n"
         f"## COMPANY_NEVER_FETCH\n\n{never_fetch}\n\n"
         "## OUTPUT_LANGUAGE\n\nEnglish\n",
@@ -479,6 +488,287 @@ def test_wfp_patterns_drop_the_rest(title, tmp_path, monkeypatch, restore_profil
         import filters
 
         assert filters.fetch_time_drop_reason("WFP - World Food Programme", title) is not None
+    finally:
+        db.close_conn()
+        _restore_chain(saved)
+
+
+# ---------------------------------------------------------------------------
+# Description-scoped include patterns (the "desc:" prefix)
+#
+# Some units never put their name in the title. WFP's Innovation Accelerator is
+# the case that forced this: its roles ship as "Product Manager - Specialist" or
+# "Lead Backend Specialist" and name the unit only in the body.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def filters_mod():
+    """The live filters module, for monkeypatching a hand-built include map."""
+    import filters
+
+    return filters
+
+
+def test_parser_keeps_the_desc_prefix_for_filters_to_split():
+    parsed = hf._parse_company_title_filters(
+        "- WFP :: product manager, desc:Innovation Accelerator"
+    )
+    assert parsed == {"WFP": ["product manager", "desc:innovation accelerator"]}
+
+
+def test_bare_desc_prefix_warns_and_is_skipped(capsys):
+    """'desc:' with no words would compile to nothing and silently void itself."""
+    parsed = hf._parse_company_title_filters("- WFP :: desc:, product manager")
+    assert parsed == {"WFP": ["product manager"]}
+    err = capsys.readouterr().err
+    assert "desc:" in err
+    assert "WFP" in err
+
+
+def test_build_splits_the_two_scopes(filters_mod):
+    built = filters_mod._build_company_title_include(
+        {"WFP": ["product manager", "desc:innovation accelerator"]}
+    )
+    entry = built["wfp"]
+    assert entry.title.search("senior product manager")
+    assert not entry.title.search("we are the innovation accelerator")
+    assert entry.desc.search("you will join the innovation accelerator team")
+    assert not entry.desc.search("senior product manager")
+
+
+def test_title_only_company_is_unchanged_by_the_new_argument(filters_mod, monkeypatch):
+    """THE regression guard: a company with no desc: pattern behaves exactly as
+    before, whatever body is passed — including a body that would have matched."""
+    monkeypatch.setattr(
+        filters_mod,
+        "_COMPANY_TITLE_INCLUDE",
+        filters_mod._build_company_title_include({"Plain Org": ["product manager"]}),
+    )
+    reason = "company_title_filter — not in Plain Org include list"
+    # Title matches → kept, with or without a body.
+    assert filters_mod.company_title_filter_reason("Plain Org", "Product Manager") is None
+    assert filters_mod.company_title_filter_reason("Plain Org", "Product Manager", "") is None
+    assert (
+        filters_mod.company_title_filter_reason("Plain Org", "Product Manager", "any body") is None
+    )
+    # Title misses → dropped, and no body can rescue it.
+    assert filters_mod.company_title_filter_reason("Plain Org", "Driver") == reason
+    assert filters_mod.company_title_filter_reason("Plain Org", "Driver", "") == reason
+    assert (
+        filters_mod.company_title_filter_reason("Plain Org", "Driver", "product manager stuff")
+        == reason
+    )
+
+
+def test_desc_pattern_keeps_a_role_whose_title_hides_its_unit(filters_mod, monkeypatch):
+    monkeypatch.setattr(
+        filters_mod,
+        "_COMPANY_TITLE_INCLUDE",
+        filters_mod._build_company_title_include(
+            {"WFP": ["business innovation", "desc:innovation accelerator"]}
+        ),
+    )
+    body = "ShareTheMeal was launched as a pilot of WFP's Innovation Accelerator."
+    # Title alone would drop it; the body keeps it.
+    assert filters_mod.company_title_filter_reason("WFP", "Lead Backend Specialist", "") is not None
+    assert filters_mod.company_title_filter_reason("WFP", "Lead Backend Specialist", body) is None
+    # And the title scope still works on its own.
+    assert filters_mod.company_title_filter_reason("WFP", "Business Innovation Manager", "") is None
+
+
+def test_missing_body_falls_back_to_the_title_rule(filters_mod, monkeypatch):
+    """A body we do not have can never win a role its keep — only cost it one."""
+    monkeypatch.setattr(
+        filters_mod,
+        "_COMPANY_TITLE_INCLUDE",
+        filters_mod._build_company_title_include({"WFP": ["desc:innovation accelerator"]}),
+    )
+    # "" = the SOURCE gave no body. None = the CALLER has none to give (the
+    # filter-stage safety net). Both decide on the title alone, so both drop.
+    assert filters_mod.company_title_filter_reason("WFP", "Lead Backend Specialist", "") is not None
+    assert filters_mod.company_title_filter_reason("WFP", "Lead Backend Specialist") is not None
+    assert (
+        filters_mod.company_title_filter_reason("WFP", "Lead Backend Specialist", None) is not None
+    )
+
+
+def test_fetch_time_reason_passes_the_body_through(filters_mod, monkeypatch):
+    monkeypatch.setattr(
+        filters_mod,
+        "_COMPANY_TITLE_INCLUDE",
+        filters_mod._build_company_title_include({"WFP": ["desc:innovation accelerator"]}),
+    )
+    assert (
+        filters_mod.fetch_time_drop_reason("WFP", "Anything", "the Innovation Accelerator") is None
+    )
+    assert filters_mod.fetch_time_drop_reason("WFP", "Anything", "unrelated body") is not None
+    assert filters_mod.fetch_time_drop_reason("WFP", "Anything") is not None
+
+
+# --- end-to-end: a body-kept role must actually reach the database -----------
+
+BODY_JOBS = [
+    {
+        "title": "Lead Systems Specialist",
+        "full_description": "You will join WFP's Innovation Accelerator in Munich. " * 4,
+        "url": "https://x/1",
+    },
+    {
+        "title": "Supply Chain Assistant",
+        "full_description": "Warehouse and dispatch duties in the country office. " * 4,
+        "url": "https://x/2",
+    },
+]
+
+
+def test_body_match_is_saved_and_the_rest_is_dropped(tmp_path, monkeypatch, restore_profile_env):
+    profile = _write_profile(
+        tmp_path / "p",
+        title_filters="- Narrow Org :: product manager, desc:innovation accelerator",
+    )
+    db, saved = _reset_chain(monkeypatch, tmp_path / "jobsearch.db", profile)
+    try:
+        db.ensure_company("Narrow Org", status="active")
+        db.get_conn().commit()
+
+        import fetch_vacancies as fv
+        import run_status
+
+        _quiet_disk_writes(monkeypatch, fv, run_status, tmp_path)
+        _run_fetch(fv, monkeypatch, {"Narrow Org": dict(CONFIG)}, BODY_JOBS)
+        db.get_conn().commit()
+
+        # Kept purely because its BODY named the unit — its title matches nothing.
+        assert _stored_titles(db) == {"Lead Systems Specialist"}
+        assert _read_stats(tmp_path)[fv.PROFILE_DROP_KEY] == {"Narrow Org": 1}
+    finally:
+        db.close_conn()
+        _restore_chain(saved)
+
+
+def test_bodyless_role_is_judged_on_its_title(tmp_path, monkeypatch, restore_profile_env):
+    """The source gave no description, so the desc: pattern cannot keep it."""
+    jobs = [
+        {"title": "Lead Systems Specialist", "url": "https://x/1"},
+        {
+            "title": "Product Manager",
+            "full_description": "Ordinary body, no unit named. " * 6,
+            "url": "https://x/2",
+        },
+    ]
+    profile = _write_profile(
+        tmp_path / "p",
+        title_filters="- Narrow Org :: product manager, desc:innovation accelerator",
+    )
+    db, saved = _reset_chain(monkeypatch, tmp_path / "jobsearch.db", profile)
+    try:
+        db.ensure_company("Narrow Org", status="active")
+        db.get_conn().commit()
+
+        import fetch_vacancies as fv
+        import run_status
+
+        _quiet_disk_writes(monkeypatch, fv, run_status, tmp_path)
+        _run_fetch(fv, monkeypatch, {"Narrow Org": dict(CONFIG)}, jobs)
+        db.get_conn().commit()
+
+        # The bodyless role is gone (title rule alone); the title match survives.
+        assert _stored_titles(db) == {"Product Manager"}
+    finally:
+        db.close_conn()
+        _restore_chain(saved)
+
+
+# --- what the WFP desc: pattern really does, measured against real text ------
+
+#: The ONLY sentence in any WFP posting that names the Innovation Accelerator —
+#: identical boilerplate in every ShareTheMeal role, verbatim from the live feed
+#: on 2026-08-28. It is a false positive: ShareTheMeal is an Accelerator
+#: GRADUATE, so the sentence marks a ShareTheMeal role, not an Accelerator one.
+WFP_SHARETHEMEAL_BOILERPLATE = (
+    "ShareTheMeal was launched in 2015 as the first pilot of WFP's Innovation "
+    "Accelerator, which among other things supports start-ups and innovators in "
+    "developing their ideas for zero hunger."
+)
+
+
+def test_wfp_desc_pattern_matches_only_the_sharethemeal_boilerplate(filters_mod, monkeypatch):
+    """Pins the measured behaviour so a later edit cannot quietly change it.
+
+    Of 145 live and 368 historical WFP roles, this sentence is the only body text
+    'innovation accelerator' hits. The roles carrying it are ShareTheMeal roles,
+    not Accelerator ones.
+    """
+    monkeypatch.setattr(
+        filters_mod,
+        "_COMPANY_TITLE_INCLUDE",
+        filters_mod._build_company_title_include(
+            {"WFP - World Food Programme": WFP_PATTERNS + ["desc:innovation accelerator"]}
+        ),
+    )
+    org = "WFP - World Food Programme"
+    # The boilerplate keeps the role at the company-filter step.
+    assert (
+        filters_mod.company_title_filter_reason(
+            org, "Lead Backend Specialist", WFP_SHARETHEMEAL_BOILERPLATE
+        )
+        is None
+    )
+    # The one such role that is not an engineering title was already kept by title.
+    assert filters_mod.company_title_filter_reason(org, "Product Manager - Specialist", "") is None
+    # Ordinary WFP bulk is untouched by the desc pattern.
+    for title in ("Conductor GS2", "Supply Chain Officer NOA", "Programme Policy Officer"):
+        assert (
+            filters_mod.company_title_filter_reason(
+                org, title, "Country office duties, no unit named."
+            )
+            is not None
+        )
+
+
+def test_global_title_blacklist_still_beats_a_desc_match(
+    tmp_path, monkeypatch, restore_profile_env
+):
+    """A company include-list may WIDEN what a company contributes, never punch a
+    hole in the user's global title ban.
+
+    This is what actually happens to the WFP roles the Accelerator boilerplate
+    keeps: two of the three are engineering titles, and Nikita's own
+    exclude_title_keywords kills them before any company rule is consulted. If
+    that order ever inverted, engineering roles would start arriving.
+    """
+    jobs = [
+        {
+            "title": "Lead Backend Specialist",
+            "full_description": WFP_SHARETHEMEAL_BOILERPLATE + " Long body. " * 8,
+            "url": "https://x/1",
+        },
+        {
+            "title": "Product Manager - Specialist",
+            "full_description": WFP_SHARETHEMEAL_BOILERPLATE + " Long body. " * 8,
+            "url": "https://x/2",
+        },
+    ]
+    profile = _write_profile(
+        tmp_path / "p",
+        title_filters="- Narrow Org :: product manager, desc:innovation accelerator",
+        exclude_title_keywords="backend, engineer",
+    )
+    db, saved = _reset_chain(monkeypatch, tmp_path / "jobsearch.db", profile)
+    try:
+        db.ensure_company("Narrow Org", status="active")
+        db.get_conn().commit()
+
+        import fetch_vacancies as fv
+        import run_status
+
+        _quiet_disk_writes(monkeypatch, fv, run_status, tmp_path)
+        _run_fetch(fv, monkeypatch, {"Narrow Org": dict(CONFIG)}, jobs)
+        db.get_conn().commit()
+
+        # Both bodies name the Accelerator; only the non-engineering one is kept.
+        assert _stored_titles(db) == {"Product Manager - Specialist"}
     finally:
         db.close_conn()
         _restore_chain(saved)

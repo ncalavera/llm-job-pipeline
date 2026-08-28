@@ -14,6 +14,7 @@ db_conn / db_backend), so the DAL can import filters without a cycle.
 import html
 import re
 from difflib import SequenceMatcher
+from typing import NamedTuple
 
 from config import (
     GLOBAL_BLACKLIST,
@@ -21,6 +22,7 @@ from config import (
     GLOBAL_BLACKLIST_DESC_SUBSTR,
     COMPANY_TITLE_FILTERS,
     COMPANY_NEVER_FETCH,
+    DESC_PATTERN_PREFIX,
     resolve_canonical_name,
 )
 
@@ -103,16 +105,24 @@ def title_words_blacklisted(title: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Per-company title INCLUDE-filters
+# Per-company INCLUDE-filters
 #
 # COMPANY_TITLE_FILTERS (profile ## COMPANY_TITLE_FILTERS) maps a company to a
-# list of title include patterns. For a listed company, a role passes only when
-# its title matches at least one pattern; unlisted companies are unaffected.
+# list of include patterns. For a listed company, a role passes only when it
+# matches at least one pattern; unlisted companies are unaffected.
+#
+# A pattern is TITLE-scoped by default and DESCRIPTION-scoped when written with
+# the ``desc:`` prefix. The two scopes UNION: a role survives when its title
+# matches a title pattern OR its body matches a desc pattern. The description
+# scope exists because some units never put their name in the title — WFP's
+# Innovation Accelerator badges its roles only in the body, so "Product Manager
+# - Specialist" is indistinguishable from any other WFP product role by title.
+#
 # Keys are ALIAS-PROOF: both the profile spelling and the queried org go through
 # resolve_canonical_name (the same alias resolution find_duplicates uses), after
 # HTML-entity unescaping, so a board delivering "WFP" still hits an include-list
 # declared as "WFP - World Food Programme". Patterns are COMPILED once at import
-# so the per-role check is a dict hit plus one regex search.
+# so the per-role check is a dict hit plus one or two regex searches.
 # ---------------------------------------------------------------------------
 
 
@@ -132,40 +142,77 @@ def _canonical_company_key(name: str) -> str:
     return _normalize_company_key(resolve_canonical_name(html.unescape(name or "")))
 
 
-def _build_company_title_include(company_filters: dict) -> dict[str, re.Pattern]:
-    """``{canonical company key: compiled include-pattern}`` from the profile map.
+class CompanyInclude(NamedTuple):
+    """A company's compiled include-patterns, one per scope.
 
-    The alternation regex is compiled ONCE per company here — never per call.
-    Two profile spellings that resolve to the same canonical company merge their
-    pattern lists before compiling.
+    ``title`` and ``desc`` are each a compiled alternation or None when the
+    company declared no pattern in that scope.
     """
-    merged: dict[str, list[str]] = {}
+
+    title: re.Pattern | None
+    desc: re.Pattern | None
+
+
+def _build_company_title_include(company_filters: dict) -> dict[str, CompanyInclude]:
+    """``{canonical company key: CompanyInclude}`` from the profile map.
+
+    Splits each company's patterns by scope on the ``desc:`` prefix and compiles
+    each scope's alternation ONCE here — never per call. Two profile spellings
+    that resolve to the same canonical company merge their pattern lists first.
+    """
+    merged: dict[str, tuple[list[str], list[str]]] = {}
     for company, patterns in company_filters.items():
         if not patterns:
             continue
-        bucket = merged.setdefault(_canonical_company_key(company), [])
+        titles, descs = merged.setdefault(_canonical_company_key(company), ([], []))
         for pattern in patterns:
-            if pattern not in bucket:
-                bucket.append(pattern)
-    return {key: build_title_blacklist_pattern(pats) for key, pats in merged.items()}
+            if pattern.startswith(DESC_PATTERN_PREFIX):
+                body = pattern[len(DESC_PATTERN_PREFIX) :].strip()
+                bucket = descs
+            else:
+                body = pattern
+                bucket = titles
+            if body and body not in bucket:
+                bucket.append(body)
+    return {
+        key: CompanyInclude(
+            build_title_blacklist_pattern(titles) if titles else None,
+            build_title_blacklist_pattern(descs) if descs else None,
+        )
+        for key, (titles, descs) in merged.items()
+        if titles or descs
+    }
 
 
 _COMPANY_TITLE_INCLUDE = _build_company_title_include(COMPANY_TITLE_FILTERS)
 
 
-def company_title_filter_reason(org: str, title: str) -> str | None:
-    """Kill reason when a per-company title include-filter drops this role.
+def company_title_filter_reason(org: str, title: str, desc: str | None = None) -> str | None:
+    """Kill reason when a per-company include-filter drops this role.
 
-    Returns a reason string naming the rule when ``org`` has an include-list AND
-    ``title`` matches none of its patterns; returns None when the company has no
-    include-list (unaffected) or the title matches. The reason names the rule so
+    Returns a reason string naming the rule when ``org`` has an include-list and
+    the role matches none of its patterns; returns None when the company has no
+    include-list (unaffected) or the role matches. The reason names the rule so
     a later review can trace the drop:
     ``"company_title_filter — not in <Company> include list"``.
+
+    ``desc`` is the role's body, and its two empty values mean different things:
+
+      * ``""`` — the SOURCE gave no body. The title rule alone decides; a
+        description pattern can never keep a role on a body we do not have.
+      * ``None`` (the default) — the CALLER has no body to give. Same decision,
+        so a caller that only knows the title behaves exactly as it did before
+        description scopes existed.
+
+    Either way a missing body can only ever cost a role its keep, never win it
+    one, so nothing is silently let through.
     """
     compiled = _COMPANY_TITLE_INCLUDE.get(_canonical_company_key(org))
     if compiled is None:
         return None
-    if compiled.search((title or "").lower()):
+    if compiled.title is not None and compiled.title.search((title or "").lower()):
+        return None
+    if compiled.desc is not None and desc and compiled.desc.search(desc.lower()):
         return None
     return f"company_title_filter — not in {org} include list"
 
@@ -193,17 +240,20 @@ def company_never_fetch_reason(org: str) -> str | None:
     return None
 
 
-def fetch_time_drop_reason(org: str, title: str) -> str | None:
+def fetch_time_drop_reason(org: str, title: str, desc: str = "") -> str | None:
     """Kill reason when the user's profile says this role must never be STORED.
 
-    The union of the two profile rules that are decidable from org + title
-    alone: the whole-company ban and the per-company title include-list. The
-    fetch path calls this to drop a role BEFORE the save, so the pipeline never
-    pays to store, enrich, score or report it. The filter stage keeps applying
-    ``company_title_filter_reason`` as the safety net for rows stored before a
-    profile change; for a freshly fetched role it now finds nothing left to do.
+    The union of the two profile rules the fetch path can decide: the
+    whole-company ban and the per-company include-list. Called BEFORE the save,
+    so the pipeline never pays to store, enrich, score or report the role.
+
+    ``desc`` is the fetched body. The fetch path always HAS it (or knows the
+    source gave none), so it passes ``""`` rather than None for a bodyless role
+    — a description pattern then cannot keep it, and the title rule alone
+    decides. The filter stage keeps calling ``company_title_filter_reason`` as
+    the safety net for rows stored before a profile change.
     """
-    return company_never_fetch_reason(org) or company_title_filter_reason(org, title)
+    return company_never_fetch_reason(org) or company_title_filter_reason(org, title, desc or "")
 
 
 def description_words_blacklisted(desc: str) -> bool:
