@@ -356,9 +356,10 @@ def _write_run_state(
         N = len(stages[vacancy_scoring].target_ids).
       * optional top-level ``counts`` {"new_vacancies": F, "scored": S}
         (run_daily._run_counts persisted into the state).
-      * stages[filter].filter.excluded_count → the D in the header.
+      * stages[filter].filter.excluded_count → recorded, but NOT the header's
+        D: the header counts dropped rows in the database instead.
       * stages[vacancy_scoring].carried_over / stages[company_scoring].carried_over
-        → the U in the header + the tier-4 carried-over line.
+        → the tier-4 carried-over line (the header's U is the live pool).
       * stages[learning_review].rolled_over, stages[verdicts].pending_verdicts
         → their own tier-4 lines.
     """
@@ -442,14 +443,38 @@ def test_tier_order_top_mid_dropped_carried(denv):
 
 
 def test_header_counts_from_run_state(denv):
+    """fetched/scored come from the run state (THIS run); dropped and
+    still-to-score are counted in the database (the backlog NOW), so both can
+    be checked against what the message itself lists."""
+    _seed(denv.db, "Org C", "Dropped One", reason="US-only location")
+    _seed(denv.db, "Org C", "Dropped Two", reason="junk title: talent pool")
+    _seed(denv.db, "Org D", "Waiting Role")  # no score, no reason
     _write_run_state(
         denv.run_state,
         counts={"new_vacancies": 12, "scored": 5},
-        excluded_count=4,
+        excluded_count=4,  # the in-memory filter tally — must NOT reach the header
         vac_carried=3,
     )
     td.cmd_send(_args())
-    assert "12 fetched, 5 scored, 4 dropped, 3 not scored yet" in _sent_texts(denv.calls)[0]
+    header = _sent_texts(denv.calls)[0]
+    assert "12 fetched, 5 scored" in header
+    assert "2 dropped (listed below), 1 still to score" in header
+    # The carried-over batch keeps its own tier-4 line; it is not the pool.
+    assert "3 role(s)" in "\n".join(_sent_texts(denv.calls))
+
+
+def test_header_dropped_equals_the_dropped_lines_the_digest_lists(denv):
+    """The header's "dropped" is the number of tier-3 rows this message claims,
+    not the filter's in-memory tally (the 2026-08-27 mismatch: 128 vs 74)."""
+    for i in range(3):
+        _seed(denv.db, "Org X", f"Dropped {i}", reason="US-only location")
+    _write_run_state(denv.run_state, counts={"new_vacancies": 9, "scored": 1}, excluded_count=99)
+    td.cmd_send(_args())
+    texts = _sent_texts(denv.calls)
+    assert "3 dropped (listed below)" in texts[0]
+    assert "99" not in texts[0]
+    body = "\n".join(texts)
+    assert len([ln for ln in body.splitlines() if "dropped:" in ln]) == 3
 
 
 def test_header_counts_from_db_without_run_state(denv):
@@ -458,7 +483,9 @@ def test_header_counts_from_db_without_run_state(denv):
     _seed(denv.db, "Org C", "Dropped Role", reason="US-only location")
     _seed(denv.db, "Org D", "Waiting Role")  # no score, no reason
     td.cmd_send(_args())
-    assert "4 fetched, 2 scored, 1 dropped, 1 not scored yet" in _sent_texts(denv.calls)[0]
+    header = _sent_texts(denv.calls)[0]
+    assert "4 fetched, 2 scored" in header
+    assert "1 dropped (listed below), 1 still to score" in header
 
 
 def test_deadline_header_line_and_candidate_hot_in_tier1(denv):
@@ -662,6 +689,44 @@ def test_split_tier1_keyboard_lands_on_the_part_with_its_rows(denv, monkeypatch)
         assert _keyboard_numbers(p) == _entry_numbers(p["text"])
         seen.extend(_entry_numbers(p["text"]))
     assert seen == [1, 2, 3, 4, 5]
+
+
+def test_keyboard_never_lands_on_a_message_that_ends_in_dropped_lines(denv, monkeypatch):
+    """#22: tier 3 always opens its own message. Buttons belong under the
+    numbered entries they act on — never under 'dropped' rows they cannot
+    touch (the 2026-08-27 digest put them there)."""
+    top = _seed(denv.db, "Org A", "Top Role", score=80)
+    for i in range(3):
+        _seed(denv.db, "Org X", f"Dropped {i}", reason="US-only location")
+    td.cmd_send(_args())
+    payloads = [p for m, p in denv.calls if m == "sendMessage"]
+    assert len(payloads) == 2
+    with_kb = [p for p in payloads if p.get("reply_markup")]
+    assert len(with_kb) == 1
+    assert "dropped:" not in with_kb[0]["text"]
+    assert "Top Role" in with_kb[0]["text"]
+    # The dropped message carries no buttons at all.
+    assert "dropped:" in payloads[1]["text"]
+    assert "reply_markup" not in payloads[1]
+    # The rows of each part are still claimed by that part.
+    assert _col(denv.db, top, "digest_sent_at") is not None
+
+
+def test_part_break_does_not_split_a_digest_that_has_no_dropped_rows(denv):
+    """The break is tier-3's alone: a night without dropped rows stays one
+    message, buttons included."""
+    _seed(denv.db, "Org A", "Top Role", score=80)
+    td.cmd_send(_args())
+    payloads = [p for m, p in denv.calls if m == "sendMessage"]
+    assert len(payloads) == 1
+    assert payloads[0].get("reply_markup")
+
+
+def test_part_break_renders_nothing_of_its_own(denv):
+    """The sentinel is a control block: it must never reach a message body."""
+    parts = td.split_message_parts(["header", td.PART_BREAK, "tail"])
+    assert [p["text"] for p in parts] == ["header", "tail"]
+    assert td.PART_BREAK not in "".join(p["text"] for p in parts)
 
 
 def test_failure_on_part_two_releases_only_that_part(denv, monkeypatch):

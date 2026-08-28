@@ -1346,7 +1346,9 @@ def _h_fetch(state, entry, opts):
     stats = _read_fetch_stats()
     new = stats.get("total_new", "?")
     errs = len(stats.get("errors", {}) or {})
-    note = f"{new} new vacancies · " + _fetch_source_counters(stats)
+    # "this run" is load-bearing: the filter stage's note counts the WHOLE
+    # unscored backlog, so this number must not read as its denominator.
+    note = f"{new} new vacancies this run · " + _fetch_source_counters(stats)
     if errs:
         note += f"; {errs} source(s) had a fetch error (does not block the other sources)"
     return "advance", note
@@ -1392,23 +1394,46 @@ def _h_filter(state, entry, opts):
         data = _extract_json(res.stdout)
     except Exception:
         return "error", "filter did not emit valid JSON"
-    ready = data.get("ready", 0)
+    ready = int(data.get("ready", 0) or 0)
+    cats = data.get("categories") or {}
     delete_ids = data.get("delete_ids", {}) or {}
-    junk = sum(len(v) for v in delete_ids.values())
-    # Exclusion tally (migration 0025) — kept in the run state so the nightly
-    # digest header can show "N excluded" with a per-reason breakdown (R10).
-    excluded = data.get("scoring_excluded", {}) or {}
+    reenrich_ids = data.get("reenrich_ids", {}) or {}
+    # The filter's own categories are the source of truth; the id lists are the
+    # fallback for a payload that predates them (they hold the same rows).
+    if cats:
+        excluded = sum(n for k, n in cats.items() if k.startswith("delete_"))
+        reenrich = sum(n for k, n in cats.items() if k.startswith("reenrich_"))
+    else:
+        excluded = sum(len(v) for v in delete_ids.values())
+        reenrich = sum(len(v) for v in reenrich_ids.values())
+    scanned = int(data.get("total_unscored") or 0) or (ready + excluded + reenrich)
+    # Exclusion tally (migration 0025) — what the pass DECIDED vs what the
+    # database actually carries. "stamped" is the number of rows that now hold
+    # a reason; the older "count" key meant the in-memory decision.
+    excl = data.get("scoring_excluded", {}) or {}
+    stamped = int(excl.get("stamped", excl.get("count", 0)) or 0)
     entry["filter"] = {
+        "scanned": scanned,
         "ready": ready,
-        "junk_flagged": junk,
-        "excluded_count": int(excluded.get("count", 0) or 0),
-        "excluded_reasons": excluded.get("reasons") or {},
+        "excluded": excluded,
+        "reenrich": reenrich,
+        "reasons_written": stamped,
+        "reasons_cleared": int(excl.get("cleared", 0) or 0),
+        "excluded_count": stamped,  # back-compat: rows carrying a reason
+        "excluded_reasons": excl.get("reasons") or {},
     }
-    note = f"{ready} ready to score"
-    if junk:
-        note += f"; {junk} junk candidate(s) flagged (NOT deleted — review in /jobs-review)"
-    if entry["filter"]["excluded_count"]:
-        note += f"; {entry['filter']['excluded_count']} excluded from scoring (reasons recorded)"
+    # One partition of one pool, denominator first: ready + excluded + re-enrich
+    # must add up to the pool the pass scanned. Nothing here is printed twice
+    # under two names.
+    note = (
+        f"{scanned} unscored role(s) scanned \u2192 {ready} ready to score, "
+        f"{excluded} excluded from scoring ({stamped} reason(s) written to the row; "
+        f"nothing deleted \u2014 review in /jobs-review), "
+        f"{reenrich} waiting for re-enrichment"
+    )
+    parts_sum = ready + excluded + reenrich
+    if parts_sum != scanned:
+        note += f"; the parts add up to {parts_sum}, not {scanned} \u2014 the filter categories disagree"
     return "advance", note
 
 
@@ -1434,9 +1459,9 @@ def _h_company_scoring(state, entry, opts):
             entry,
             "score",
             len(remaining),
-            f"company scoring carried over — {len(remaining)} company(ies) still "
-            "unscored with no progress since the last stop; they stay candidates "
-            "for the next run",
+            f"session stopped early — {len(remaining)} of "
+            f"{len(entry.get('target_ids', []))} company(ies) left unscored; they stay "
+            "candidates for the next run",
         )
         if carried:
             return carried
@@ -1715,9 +1740,9 @@ def _h_vacancy_scoring(state, entry, opts):
                 entry,
                 "screen",
                 len(remaining_ids),
-                f"scoring carried over — {len(remaining_ids)} role(s) still unscored "
-                "with no progress since the last stop; they lead the next run's "
-                "batch (oldest first)",
+                f"session stopped early — {len(remaining_ids)} of "
+                f"{len(entry.get('target_ids', []))} role(s) left unscored; they lead "
+                "the next run's batch (oldest first)",
                 finish=True,
             )
             if carried:
@@ -1822,9 +1847,9 @@ def _h_vacancy_scoring(state, entry, opts):
             entry,
             "escalate",
             len(remaining_ids),
-            f"escalation carried over — {len(remaining_ids)} finalist(s) still "
-            "unscored with no progress since the last stop; they lead the next "
-            "run's batch",
+            f"session stopped early — {len(remaining_ids)} of "
+            f"{len(entry.get('escalate_target_ids', []))} finalist(s) left unscored; "
+            "they lead the next run's batch",
             finish=True,
         )
         if carried:
@@ -2377,6 +2402,17 @@ _STATUS_MARK = {
     "pending": " ",
 }
 
+#: Report-card mark for a stage that advanced but left its work unfinished.
+PARTIAL_MARK = "!"
+
+
+def _stage_partial(stage: dict) -> bool:
+    """True when the stage advanced the run but did NOT finish its own work:
+    an unattended scoring gate whose session stopped early carries the unscored
+    remainder over (``carried_over``). Such a stage must never read as a green
+    OK on the report card — the roles are still unscored."""
+    return bool(stage.get("carried_over")) and stage.get("status") == "done"
+
 
 def _stage_verdict(stage: dict, warnings: "list[dict]") -> str:
     """One-word report-card verdict for a stage (R5).
@@ -2384,6 +2420,9 @@ def _stage_verdict(stage: dict, warnings: "list[dict]") -> str:
     OK       — finished cleanly.
     OK-BUT   — finished, but a best-effort sub-step of this stage warned (degraded,
                e.g. evidence collection failed → WANT scores fell back to cache).
+    PARTIAL  — the stage advanced but left its own work unfinished: the scoring
+               session stopped early and the remainder carried over. The note
+               says how many of how many.
     FAILED   — the stage errored/aborted, OR it carries a BLOCKING warning (the
                screen crash: the stage "skipped" its paid work on purpose, but the
                failure is real and blocks publish — it reads FAILED, not SKIPPED).
@@ -2397,6 +2436,8 @@ def _stage_verdict(stage: dict, warnings: "list[dict]") -> str:
     if status in ("error", "aborted"):
         return "FAILED"
     if status == "done":
+        if _stage_partial(stage):
+            return "PARTIAL"
         return "OK-BUT" if stage_warnings else "OK"
     if status == "skipped":
         return "SKIPPED"
@@ -2409,7 +2450,13 @@ def _print_stage_board(state: dict, *, verdict: bool = False) -> None:
     SKIPPED column (the report card); the plain form is the live status view."""
     warnings = state.get("warnings", []) or []
     for s in state["stages"]:
-        mark = _STATUS_MARK.get(s.get("status", "pending"), "?")
+        # A partial stage keeps its own mark: a ✓ next to "35 of 55 left
+        # unscored" is the exact contradiction this column exists to avoid.
+        mark = (
+            PARTIAL_MARK
+            if _stage_partial(s)
+            else _STATUS_MARK.get(s.get("status", "pending"), "?")
+        )
         note = s.get("note", "")
         if verdict:
             print(f"  [{mark}] {s['name']:<18} {_stage_verdict(s, warnings):<8} {note}")

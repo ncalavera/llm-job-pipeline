@@ -1354,6 +1354,40 @@ def test_stage_verdict_blocking_warning_reads_failed(rd):
     assert rd._stage_verdict(stage, warnings) == "FAILED"
 
 
+def test_stage_that_left_work_undone_reads_partial_not_ok(rd):
+    """A scoring stage that carried roles over did NOT finish its work; a green
+    OK beside "35 of 55 left unscored" is the contradiction the card exists to
+    prevent (2026-08-27)."""
+    partial = {
+        "name": "vacancy_scoring",
+        "status": "done",
+        "carried_over": 35,
+        "note": "session stopped early — 35 of 55 role(s) left unscored",
+    }
+    assert rd._stage_verdict(partial, []) == "PARTIAL"
+    assert rd._stage_partial(partial) is True
+    # A carry-over recorded on a stage that never finished keeps its own status.
+    assert rd._stage_verdict({**partial, "status": "error"}, []) == "FAILED"
+    # No carry-over -> unchanged behaviour.
+    assert rd._stage_verdict({"name": "vacancy_scoring", "status": "done"}, []) == "OK"
+
+
+def test_report_card_marks_a_partial_stage_and_says_why(rd, capsys):
+    state = rd._new_state(rd.Opts())
+    vac = rd._stage(state, "vacancy_scoring")
+    vac["status"] = "done"
+    vac["carried_over"] = 35
+    vac["note"] = "session stopped early — 35 of 55 role(s) left unscored"
+
+    rd._print_stage_board(state, verdict=True)
+    out = capsys.readouterr().out
+    line = next(ln for ln in out.splitlines() if "vacancy_scoring" in ln)
+    assert "PARTIAL" in line
+    assert f"[{rd.PARTIAL_MARK}]" in line
+    assert "✓" not in line
+    assert "35 of 55" in line
+
+
 def test_report_card_renders_four_distinct_verdicts(rd, capsys):
     state = rd._new_state(rd.Opts())
     rd._stage(state, "fetch")["status"] = "done"
@@ -1673,7 +1707,8 @@ def test_unattended_escalate_carries_over_when_stuck(rd, monkeypatch, tmp_path):
     kind, note = rd._h_vacancy_scoring(state, entry, opts)
     assert kind == "advance"
     assert entry["carried_over"] == 1
-    assert "carried over" in note
+    # The note names what was left undone, out of how many (report card R5).
+    assert "session stopped early — 1 of 1 finalist(s) left unscored" in note
 
 
 def test_attended_scoring_gate_still_re_emits_without_progress(rd, monkeypatch, tmp_path):
@@ -1849,7 +1884,7 @@ def test_unattended_company_scoring_carries_over_without_progress(rd, monkeypatc
     kind, note = rd._h_company_scoring(state, entry, opts)
     assert kind == "advance"
     assert entry["carried_over"] == 2
-    assert "carried over" in note
+    assert "session stopped early — 2 of 2 company(ies) left unscored" in note
 
 
 def test_unattended_company_scoring_re_emits_on_progress(rd, monkeypatch, tmp_path):

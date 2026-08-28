@@ -134,6 +134,16 @@ FAKE_CLAUDE = textwrap.dedent(
     elif mode == "other_error":
         sys.stderr.write("Error: the model fell over sideways\\n")
         sys.exit(1)
+    elif mode == "rate_limit":
+        # The real shape: a rate_limit_event line, then the stream-json result
+        # object the wrapper used to paste straight into Telegram.
+        sys.stdout.write(json.dumps({"type": "system", "subtype": "rate_limit_event",
+            "rate_limit": {"status": "rejected", "resetsAt": 1756400000}}) + "\\n")
+        sys.stdout.write(json.dumps({"type": "result", "subtype": "error_during_execution",
+            "is_error": True, "duration_api_ms": 721597, "num_turns": 41,
+            "api_error_status": 429, "result": "Claude AI usage limit reached"}) + "\\n")
+        sys.stdout.flush()
+        sys.exit(1)
     elif mode == "malformed_one":
         write(ins[0], json.dumps(result(ins[0])))
         write(ins[1], "{{{ this is not json")
@@ -349,13 +359,42 @@ def test_fast_auth_exit_alerts_login_failure(nr):
     assert any("login failure" in t for t in nr.texts())
 
 
-def test_fast_other_exit_alerts_see_transcript(nr):
+def test_fast_other_exit_alerts_in_plain_words(nr):
+    """A dead session alerts with a sentence and a log pointer — never a raw
+    stream-json blob (the transcript itself stays in the night log)."""
     nr.set_steps(
         [{"exit": 10, "action": "score_vacancies", "payload": _vac_payload(2)}, {"exit": 0}]
     )
     nr.set_mode("other_error")
     assert nr.mod.run_night() == 0
-    assert any("exited early, see transcript" in t for t in nr.texts())
+    alert = next(t for t in nr.texts() if "score_vacancies" in t)
+    assert "the session stopped early (exit 1)" in alert
+    assert "Unscored roles carry over" in alert
+    assert "Log: nightly/" in alert
+    assert "{" not in alert  # no JSON reached the phone
+
+
+def test_rate_limited_session_alerts_in_words_with_the_reset_clock(nr):
+    """A 429 reaches the phone as a sentence: what happened, when it lifts,
+    what happens to the work, and where the log is. No JSON."""
+    nr.set_steps(
+        [{"exit": 10, "action": "score_vacancies", "payload": _vac_payload(2)}, {"exit": 0}]
+    )
+    nr.set_mode("rate_limit")
+    assert nr.mod.run_night() == 0
+    alert = next(t for t in nr.texts() if "score_vacancies" in t)
+    assert "Claude usage limit reached (HTTP 429)" in alert
+    assert f"resets {datetime.fromtimestamp(1756400000).strftime('%H:%M on %-d %b')}" in alert
+    assert "Unscored roles carry over" in alert
+    assert "Log: nightly/" in alert and "claude-score_vacancies.jsonl" in alert
+    # None of the machine output leaked into the message.
+    assert "is_error" not in alert and "duration_api_ms" not in alert and "{" not in alert
+    # The transcript itself is still on disk for a real investigation.
+    assert (nr.night_dir() / "claude-score_vacancies.jsonl").exists()
+
+
+def test_reset_clock_accepts_milliseconds(nr):
+    assert nr.mod._reset_clock(1756400000000) == nr.mod._reset_clock(1756400000)
 
 
 def test_claude_resuming_mid_batch_reports_the_shortfall(nr):

@@ -16,7 +16,10 @@ Survival rules (R4, R12, R15):
     unattended gate logic carries unscored work over to the next night;
   * any failure (driver abort/error, gate-loop overrun, SIGTERM, a wrapper
     crash) sends one short Telegram alert naming the failed stage, the
-    exception class and the first 200 masked characters of the message;
+    exception class and the first 200 masked characters of the message; a
+    dead Claude session gets a plain sentence instead (the reason, the reset
+    clock on a rate limit, and the night log to open) — never a raw
+    stream-json blob on a phone screen;
   * the wrapper exits non-zero ONLY when that alert itself could not be sent.
 
 Privacy (R17, KTD3): all night output lives in ``vacancies/nightly/<date>/``
@@ -337,6 +340,69 @@ def _transcript_tail(out_path: Path, err_path: Path) -> str:
     return "empty transcript"
 
 
+def _tail_text(path: Path, nbytes: int = 65536) -> str:
+    """Final ``nbytes`` of a possibly huge file, as text ('' when unreadable)."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - nbytes))
+            return fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+_RATE_LIMIT_RESET_RE = re.compile(r'"resetsAt"\s*:\s*(\d{9,16})')
+_API_ERROR_STATUS_RE = re.compile(r'"api_error_status"\s*:\s*"?(\d{3})')
+
+
+def _reset_clock(stamp: int) -> str:
+    """'04:15 on 28 Aug' from a unix timestamp in seconds or milliseconds."""
+    if stamp > 10**11:  # milliseconds
+        stamp //= 1000
+    return datetime.fromtimestamp(stamp).strftime("%H:%M on %-d %b")
+
+
+def _log_ref(path: Path) -> str:
+    """Short, retypeable pointer to a night log: ``nightly/<date>/<file>``.
+    Kept short on purpose — the whole alert must fit ALERT_MSG_CHARS."""
+    return f"nightly/{path.parent.name}/{path.name}"
+
+
+def _session_failure_message(out_path: Path, err_path: Path, rc: "int | None") -> str:
+    """One plain sentence about a session that exited non-zero — never a raw
+    JSON blob. The stream-json transcript is machine output; a phone needs the
+    reason, the clock and where to look:
+
+      * HTTP 429 in the transcript -> the rate limit, and when it resets
+        (the ``resetsAt`` unix stamp of the rate_limit_event line);
+      * a login/auth failure -> named as such, with what to do;
+      * anything else -> the exit code plus the transcript path.
+    """
+    tail = _tail_text(out_path) + "\n" + _tail_text(err_path)
+    where = _log_ref(out_path)
+    status = _API_ERROR_STATUS_RE.search(tail)
+    if (status and status.group(1) == "429") or "rate_limit" in tail:
+        reset = _RATE_LIMIT_RESET_RE.search(tail)
+        when = f", resets {_reset_clock(int(reset.group(1)))}" if reset else ""
+        return (
+            f"Claude usage limit reached (HTTP 429) — scoring stopped{when}. "
+            f"Unscored roles carry over. Log: {where}"
+        )
+    if status:
+        return (
+            f"the Claude API answered HTTP {status.group(1)} — the session stopped. "
+            f"Unscored roles carry over. Log: {where}"
+        )
+    if _LOGIN_FAILURE_RE.search(_transcript_tail(out_path, err_path)):
+        return (
+            "Claude login failure — sign in on the server again. "
+            f"Unscored roles carry over. Log: {where}"
+        )
+    return (
+        f"the session stopped early (exit {rc}). Unscored roles carry over. Log: {where}"
+    )
+
+
 def _failed_stage_from_state(state: dict | None) -> tuple[str, str | None]:
     """(stage, note) of the first errored/aborted stage in the checkpoint, or
     ("unknown stage", None) when the driver died before recording one."""
@@ -527,12 +593,11 @@ def _run_session(ctx: _Ctx, action: str, phase: str) -> None:
             "result file(s) present; the rest carries over to the next night"
         )
     elif rc != 0:
+        # The transcript itself stays in the night log; the alert carries one
+        # readable sentence (R12) — never a truncated stream-json blob.
+        ctx.alert(action, _session_failure_message(out_path, err_path, rc))
         tail = _transcript_tail(out_path, err_path)
-        if _LOGIN_FAILURE_RE.search(tail):
-            ctx.alert(action, f"Claude login failure — {tail}")
-        else:
-            ctx.alert(action, f"Claude exited early, see transcript — {tail}")
-        ctx.log(f"{action}: session exited {rc} after {elapsed}s")
+        ctx.log(f"{action}: session exited {rc} after {elapsed}s — {tail}")
     elif n_out == 0:
         # The digest's "no progress" header line is about vacancy scoring only;
         # a stalled company gate keeps its alert + carry-over without it.

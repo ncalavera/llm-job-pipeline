@@ -112,7 +112,10 @@ Two read-only surfaces answer "does the pipeline work as intended?" without
 reading logs:
 
 - **Run report card** — every `run_daily.py` run ends with a per-stage verdict
-  table (`OK / OK-BUT / FAILED / SKIPPED`) rendered from `run_state.json`.
+  table (`OK / OK-BUT / PARTIAL / FAILED / SKIPPED`) rendered from
+  `run_state.json`. `PARTIAL` is a stage that advanced the run but left its own
+  work undone — a scoring session that stopped early and carried the remainder
+  over; its note says how many of how many.
 - **Health tab** (dashboard) — `public/modules/health.js` renders four blocks
   from the live `api/health-detail.js` endpoint (read-only, no LLM spend):
   - **Boards** — per enabled board: freshness, failure streak, vacancy count,

@@ -343,10 +343,57 @@ def test_stale_reason_is_cleared_in_the_same_statement(env):
     db, fv = env
     vid = _seed(db, "CleanOrg", "Backend Engineer", reason="junk title: talent pool")
 
-    _run_pass(fv)
+    result = _run_pass(fv)
 
     assert _reason(db, vid) is None
     assert vid in db.load_vacancies(unscored_only=True)
+    # The clear is counted, and only real removals count.
+    assert result["cleared"] == 1
+
+
+# ---------------------------------------------------------------------------
+# What was DECIDED vs what the database actually carries
+# ---------------------------------------------------------------------------
+
+
+def test_counters_report_the_database_not_the_in_memory_decision(env):
+    """The write scope (status='unseen') is narrower than the load scope
+    (status != 'archived'), so a classified row can end up carrying no reason.
+    The return value must show that gap instead of reporting the decision as a
+    database fact — the 2026-08-27 over-count (128 reported, 74 written)."""
+    db, fv = env
+    vid_unseen = _seed(db, "Acme Foundation", "Talent Pool — General Application")
+    vid_expiring = _seed(
+        db,
+        "Acme Foundation",
+        "Talent Pool — Expiring Application",
+        dedup_hash="pool-expiring",
+        status="expiring",
+    )
+
+    result = _run_pass(fv)
+
+    # Both rows were classified as excluded ...
+    assert result["classified"] == 2
+    # ... but only the 'unseen' one is inside the write scope.
+    assert result["stamped"] == 1
+    assert result["out_of_scope"] == 1
+    assert result["count"] == result["stamped"]
+    assert _reason(db, vid_unseen) == "junk title: talent pool"
+    assert _reason(db, vid_expiring) is None
+    # The histogram counts stamped rows only.
+    assert result["reasons"] == {"junk title: talent pool": 1}
+
+
+def test_counters_are_zero_and_persisted_when_nothing_is_excluded(env):
+    db, fv = env
+    _seed(db, "CleanOrg", "Backend Engineer")
+
+    result = _run_pass(fv)
+
+    assert result["persisted"] is True
+    assert result["classified"] == result["stamped"] == result["cleared"] == 0
+    assert result["out_of_scope"] == 0
 
 
 def test_row_at_demoted_company_keeps_its_reason(env):
@@ -478,6 +525,88 @@ def test_h_filter_records_excluded_count_and_histogram(tmp_path, monkeypatch):
         "US-only location": 2,
         "archived before": 1,
     }
+
+
+def _h_filter_note(monkeypatch, payload):
+    """Run run_daily's filter stage over one fake filter payload -> (entry, note)."""
+    sys.modules.pop("run_daily", None)
+    import run_daily as rd
+
+    importlib.reload(rd)
+
+    class _Res:
+        returncode = 0
+        stdout = json.dumps(payload)
+        stderr = ""
+
+    monkeypatch.setattr(rd, "_run_capture", lambda *a, **k: _Res())
+    state = rd._new_state(rd.Opts())
+    entry = rd._stage(state, "filter")
+    kind, note = rd._h_filter(state, entry, rd.Opts())
+    assert kind == "advance"
+    return entry, note
+
+
+def test_filter_note_is_one_partition_of_one_pool(tmp_path, monkeypatch):
+    """The note names its denominator and its parts add up to it: the reader
+    can check 41 + 128 + 279 = 448 without another source (the 2026-08-27 note
+    printed 41 and 128 with no denominator, and 128 + 41 != 144)."""
+    payload = {
+        "total_unscored": 448,
+        "categories": {
+            "delete_blacklist": 100,
+            "delete_geo": 28,
+            "reenrich_blind": 200,
+            "reenrich_thin": 79,
+            "ready": 41,
+        },
+        "ready": 41,
+        "scoring_excluded": {"classified": 128, "stamped": 74, "cleared": 5, "reasons": {}},
+    }
+    entry, note = _h_filter_note(monkeypatch, payload)
+
+    assert note == (
+        "448 unscored role(s) scanned → 41 ready to score, 128 excluded from scoring "
+        "(74 reason(s) written to the row; nothing deleted — review in /jobs-review), "
+        "279 waiting for re-enrichment"
+    )
+    assert entry["filter"]["scanned"] == 448
+    assert (
+        entry["filter"]["ready"] + entry["filter"]["excluded"] + entry["filter"]["reenrich"]
+        == entry["filter"]["scanned"]
+    )
+    # Rows the pass classified but never wrote are NOT reported as written.
+    assert entry["filter"]["reasons_written"] == 74
+    assert entry["filter"]["excluded_count"] == 74
+
+
+def test_filter_note_says_so_when_the_parts_do_not_add_up(tmp_path, monkeypatch):
+    """A payload whose categories disagree with its own total is reported as
+    it is — the note never forces the sum."""
+    payload = {
+        "total_unscored": 500,
+        "categories": {"delete_junk": 10, "reenrich_thin": 5, "ready": 3},
+        "ready": 3,
+        "scoring_excluded": {"stamped": 10},
+    }
+    _, note = _h_filter_note(monkeypatch, payload)
+    assert "the parts add up to 18, not 500" in note
+
+
+def test_filter_note_never_prints_the_same_set_under_two_names(tmp_path, monkeypatch):
+    """"junk flagged" and "excluded" were the same rows printed twice. One
+    excluded count now, and the reasons-written figure beside it is a
+    different, smaller thing."""
+    payload = {
+        "total_unscored": 10,
+        "categories": {"delete_junk": 6, "ready": 4},
+        "ready": 4,
+        "delete_ids": {"delete_junk": ["a", "b", "c", "d", "e", "f"]},
+        "scoring_excluded": {"classified": 6, "stamped": 6},
+    }
+    _, note = _h_filter_note(monkeypatch, payload)
+    assert "junk candidate" not in note
+    assert note.count("6") == 2  # once as "6 excluded", once as "6 reason(s) written"
 
 
 def test_migration_applies_and_loader_query_runs_on_sqlite(env):

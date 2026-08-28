@@ -2,9 +2,10 @@
 """Telegram vacancy digest with 👍/👎 buttons.
 
 Two modes:
-  send  — ONE tiered morning message (split only when Telegram's size limit
-          forces it, parts arrive in order): a counts header ("Night run: F
-          fetched, S scored, D dropped, U not scored yet" + "N deadlines this
+  send  — ONE tiered morning message (split when Telegram's size limit forces
+          it, and always before tier 3; parts arrive in order): a counts header
+          ("Night run: F fetched, S scored" for THIS run, then "Backlog now: D
+          dropped, U still to score" counted in the database + "N deadlines this
           week"), tier 1 top matches with like/pass buttons (fresh rows scoring
           hot_vacancy_score+ plus strong roles at unreviewed companies), tier 2
           mid scores as one-liners, tier 3 every dropped vacancy as one line
@@ -181,6 +182,20 @@ SELECT count(*) AS fetched,
                 THEN 1 ELSE 0 END) AS unscored
 FROM vacancy v
 WHERE v.first_seen > %s
+"""
+
+# Roles still waiting to be scored, right now — the header's "still to score".
+# Same definition as load_vacancies(unscored_only=True) and the dashboard's
+# unscored count: a negative sentinel counts as unscored, and a row carrying a
+# scoring_excluded_reason is dropped, not waiting.
+COUNT_UNSCORED_POOL_SQL = """
+SELECT count(*) AS n
+FROM vacancy v
+JOIN company c ON v.company_id = c.id
+WHERE (v.llm_score IS NULL OR v.llm_score < 0)
+  AND v.status = 'unseen'
+  AND v.scoring_excluded_reason IS NULL
+  AND c.status = 'active'
 """
 
 # Protected high-fit roles (status='expiring') that haven't been alerted yet.
@@ -441,10 +456,12 @@ def update_state_file(path, **fields):
 #     carried_over).
 #   * optional top-level "counts" {"new_vacancies": F, "scored": S}.
 #     Missing pieces degrade to fetch_stats.json / stage fields.
-#   * stages[filter].filter.excluded_count — the dropped count.
 #   * stages[vacancy_scoring|company_scoring].carried_over,
 #     stages[learning_review].rolled_over, stages[verdicts].pending_verdicts
-#     — the header's "not scored yet" and the tier-4 lines.
+#     — the tier-4 lines.
+# The header's "dropped" and "still to score" are NOT read from here: they are
+# counted in the database, so a reader can check them against what tier 3 lists
+# and against the dashboard.
 
 
 def run_state_path():
@@ -491,15 +508,31 @@ def _fetch_stats_total_new():
         return 0
 
 
+def fetch_unscored_pool(conn):
+    """Roles still waiting to be scored in the database, right now."""
+    with _dict_cursor(conn) as cur:
+        cur.execute(COUNT_UNSCORED_POOL_SQL)
+        return int(dict(cur.fetchone() or {}).get("n") or 0)
+
+
 def gather_counts(conn, run_state, since, dropped_total=None):
-    """Header numbers (R10). From the fresh run state when there is one, else
-    from database counts over rows first seen since the last digest — except
-    the dropped count, which becomes ``dropped_total`` (rows not shown in a
-    digest yet) so the header matches what tier 3 actually lists."""
+    """Header numbers (R10), each one checkable.
+
+    Two denominators, said in that order and labelled in the header string:
+      * ``fetched`` / ``scored`` — THIS run (from the run state, else from
+        rows first seen since the last digest);
+      * ``dropped`` / ``unscored`` — the backlog as it stands NOW. ``dropped``
+        is ``dropped_total``, the count of not-yet-shown dropped rows, so it
+        equals what tier 3 claims; ``unscored`` is the live pool of roles
+        awaiting a score — NOT the carried-over batch, which is a subset of it
+        and has its own tier-4 line.
+    """
+    unscored = fetch_unscored_pool(conn)
     if run_state is None:
         counts = fetch_counts_since(conn, since)
         if dropped_total is not None:
             counts["dropped"] = dropped_total
+        counts["unscored"] = unscored
         counts["targets"] = 0
         return counts
     c = run_state.get("counts") or {}
@@ -516,12 +549,11 @@ def gather_counts(conn, run_state, since, dropped_total=None):
         scored = c["scored"]
     else:
         scored = max(targets - carried, 0)
-    filt = _run_stage(run_state, "filter").get("filter") or {}
     return {
         "fetched": _int(fetched),
         "scored": _int(scored),
-        "dropped": _int(filt.get("excluded_count")),
-        "unscored": carried,
+        "dropped": _int(dropped_total),
+        "unscored": unscored,
         "targets": targets,
     }
 
@@ -568,6 +600,10 @@ def build_tail_lines(run_state):
     return lines
 
 
+#: Block sentinel: the next block starts a NEW message part. Not rendered.
+PART_BREAK = "\x00PART_BREAK\x00"
+
+
 def assemble_digest(header_lines, top_rows, mid_rows, dropped_rows, tail_lines, dropped_total=None):
     """All blocks of the morning message, in tier order (R6). Blocks that
     render a database row are ``(text, row, tier)`` tuples so the sender can
@@ -587,7 +623,10 @@ def assemble_digest(header_lines, top_rows, mid_rows, dropped_rows, tail_lines, 
         blocks.append(_t("digest_tier_mid"))
         blocks.extend((build_mid_line(r), r, "mid") for r in mid_rows)
     if dropped_rows:
-        blocks.append("")
+        # Tier 3 always opens a NEW message: the tier-1 like/pass keyboard sits
+        # at the bottom of its message, so sharing a message with dropped lines
+        # would park the buttons under rows they do not belong to.
+        blocks.append(PART_BREAK)
         blocks.append(_t("digest_tier_dropped"))
         shown = dropped_rows[:DROPPED_MAX_LINES]
         blocks.extend((build_dropped_line(r), r, "dropped") for r in shown)
@@ -605,13 +644,19 @@ def assemble_digest(header_lines, top_rows, mid_rows, dropped_rows, tail_lines, 
 def split_message_parts(blocks, limit=None):
     """Pack blocks into message parts of at most ``limit`` chars, splitting
     only at block boundaries so order and lines survive intact (R6). A block is
-    a plain string or an ``(text, row, tier)`` tuple (assemble_digest); each
+    a plain string, the ``PART_BREAK`` sentinel (closes the current part and
+    renders nothing), or an ``(text, row, tier)`` tuple (assemble_digest); each
     part comes back as ``{"text": str, "rows": [(row, tier), ...]}`` with the
     rows rendered inside that part."""
     limit = limit or MESSAGE_MAX_CHARS
     parts = []
     cur_text, cur_rows = "", []
     for block in blocks:
+        if block == PART_BREAK:
+            if cur_text.strip():
+                parts.append({"text": cur_text, "rows": cur_rows})
+                cur_text, cur_rows = "", []
+            continue
         text, row, tier = block if isinstance(block, tuple) else (block, None, None)
         if len(text) > limit:
             text = _truncate(text, limit - 1)

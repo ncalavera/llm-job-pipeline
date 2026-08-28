@@ -416,7 +416,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "digest_recorded": "Recorded: {label}",
         "digest_save_error": "⚠️ Couldn't save your choice, please tap again.",
         # telegram_digest.py — tiered morning digest (U3)
-        "digest_run_header": "🌙 <b>Night run</b>: {fetched} fetched, {scored} scored, {dropped} dropped, {unscored} not scored yet",
+        "digest_run_header": "🌙 <b>Night run</b>: {fetched} fetched, {scored} scored. Backlog now: {dropped} dropped (listed below), {unscored} still to score",
         "digest_no_progress": "⚠️ scored 0 of {n} — the session made no progress",
         "digest_deadlines_week": "⏰ {n} deadlines this week",
         "digest_tier_top": "🔥 <b>Top matches</b> — tap 👍 / 👎",
@@ -802,7 +802,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "digest_recorded": "Записал: {label}",
         "digest_save_error": "⚠️ Не удалось сохранить выбор, нажмите ещё раз.",
         # telegram_digest.py — трёхъярусный утренний дайджест (U3)
-        "digest_run_header": "🌙 <b>Ночной прогон</b>: {fetched} собрано, {scored} оценено, {dropped} отсеяно, {unscored} ещё не оценено",
+        "digest_run_header": "🌙 <b>Ночной прогон</b>: собрано {fetched}, оценено {scored}. Сейчас в очереди: {dropped} отсеяно (список ниже), {unscored} ждут оценки",
         "digest_no_progress": "⚠️ оценено 0 из {n} — сессия не продвинулась",
         "digest_deadlines_week": "⏰ дедлайнов на этой неделе: {n}",
         "digest_tier_top": "🔥 <b>Лучшие совпадения</b> — жми 👍 / 👎",

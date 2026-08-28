@@ -682,18 +682,35 @@ def _exclusion_reason_map(categories: dict) -> dict[str, str]:
 
 
 def persist_scoring_exclusions(categories: dict) -> dict:
-    """Write the exclusion record in ONE statement: set the reason on every
-    excluded row and clear it on every no-longer-excluded row.
+    """Write the exclusion record: set the reason on every excluded row and
+    clear it on every no-longer-excluded row, in ONE UPDATE.
 
-    Scoped to `(llm_score IS NULL OR llm_score < 0) AND status = 'unseen'`
-    (the -1 sentinel counts as unscored, matching load_vacancies) AND to the
-    rows this pass actually classified — a reasoned row the pass never saw
-    (e.g. its company left 'active') keeps its reason instead of being
-    blanket-cleared without a re-decision. Returns
-    {"persisted", "count", "reasons"} for the run summary / run state.
+    The write is scoped to `(llm_score IS NULL OR llm_score < 0) AND
+    status = 'unseen'` AND to the rows this pass classified. That scope is
+    NARROWER than ``load_vacancies(unscored_only=True)``, which loads every
+    non-archived status — so a classified row whose status is not 'unseen'
+    (e.g. 'passed', 'expiring') is decided in memory but never written. The
+    counters below keep that gap visible instead of reporting the in-memory
+    tally as a database fact:
+
+      classified    — rows this pass decided to exclude (in memory)
+      stamped       — rows that now carry a reason in the database
+      cleared       — rows whose reason this pass removed
+      out_of_scope  — classified - stamped (decided, outside the write scope)
+      count         — back-compat alias of ``stamped``
+      reasons       — histogram of the reasons actually stamped
     """
     from database_supabase import _scoring_excluded_supported
 
+    empty = {
+        "persisted": False,
+        "count": 0,
+        "classified": 0,
+        "stamped": 0,
+        "cleared": 0,
+        "out_of_scope": 0,
+        "reasons": {},
+    }
     if not _scoring_excluded_supported():
         print(
             "  scoring_excluded_reason column missing (run scripts/migrate.py) — "
@@ -701,12 +718,12 @@ def persist_scoring_exclusions(categories: dict) -> dict:
             file=sys.stderr,
             flush=True,
         )
-        return {"persisted": False, "count": 0, "reasons": {}}
+        return empty
 
     reason_by_id = _exclusion_reason_map(categories)
     seen_ids = [vid for items in categories.values() for vid, _ in items]
     if not seen_ids:
-        return {"persisted": True, "count": 0, "reasons": {}}
+        return {**empty, "persisted": True}
 
     whens = []
     params: list = []
@@ -715,20 +732,38 @@ def persist_scoring_exclusions(categories: dict) -> dict:
         params.extend([vid, reason])
     case_sql = "CASE " + " ".join(whens) + " ELSE NULL END" if whens else "NULL"
 
+    scope_sql = (
+        "WHERE (llm_score IS NULL OR llm_score < 0) AND status = 'unseen' "
+        "AND id = ANY(%s::uuid[])"
+    )
+
     conn = get_conn()
     cur = conn.cursor()
+    # Pre-state of exactly the rows the UPDATE can touch: RETURNING carries the
+    # NEW value only, so "how many reasons were removed" needs the old one.
+    cur.execute(f"SELECT id, scoring_excluded_reason FROM vacancy {scope_sql}", [seen_ids])
+    before = {str(row[0]): row[1] for row in cur.fetchall()}
+    # fetchall() before commit(): on SQLite an UPDATE ... RETURNING applies its
+    # rows as they are stepped, so the result set must be drained here.
     cur.execute(
-        f"UPDATE vacancy SET scoring_excluded_reason = {case_sql} "
-        "WHERE (llm_score IS NULL OR llm_score < 0) AND status = 'unseen' "
-        "AND id = ANY(%s::uuid[])",
+        f"UPDATE vacancy SET scoring_excluded_reason = {case_sql} {scope_sql} "
+        "RETURNING id, scoring_excluded_reason",
         params + [seen_ids],
     )
+    written = [(str(row[0]), row[1]) for row in cur.fetchall()]
     conn.commit()
     cur.close()
+
+    stamped = [reason for vid, reason in written if reason]
+    cleared = sum(1 for vid, reason in written if not reason and before.get(vid))
     return {
         "persisted": True,
-        "count": len(reason_by_id),
-        "reasons": dict(Counter(reason_by_id.values())),
+        "classified": len(reason_by_id),
+        "stamped": len(stamped),
+        "cleared": cleared,
+        "out_of_scope": len(reason_by_id) - len(stamped),
+        "count": len(stamped),
+        "reasons": dict(Counter(stamped)),
     }
 
 
@@ -1562,11 +1597,17 @@ def main():
             flush=True,
         )
     if scoring_excluded.get("persisted"):
-        print(
-            f"  Excluded from scoring (reason persisted): {scoring_excluded['count']}",
-            file=sys.stderr,
-            flush=True,
+        line = (
+            f"  Excluded from scoring: {scoring_excluded['classified']} classified, "
+            f"{scoring_excluded['stamped']} reason(s) written, "
+            f"{scoring_excluded['cleared']} stale reason(s) cleared"
         )
+        if scoring_excluded["out_of_scope"]:
+            line += (
+                f" ({scoring_excluded['out_of_scope']} classified row(s) sat outside the "
+                "write scope — not status='unseen' — and carry no reason)"
+            )
+        print(line, file=sys.stderr, flush=True)
     print(f"  Ready to score: {stats['ready_count']}", file=sys.stderr, flush=True)
     print("--- End Filter Summary ---\n", file=sys.stderr, flush=True)
 
