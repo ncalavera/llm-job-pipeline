@@ -109,6 +109,7 @@ STAGE_ORDER = [
     "learning_review",  # GATE  — verdict-driven corrections (skippable, rolls over)
     "fetch",  # AUTO  — pull new vacancies (heartbeat inside the script)
     "enrich",  # AUTO  — backfill blind descriptions (Firecrawl)
+    "dedup",  # AUTO  — merge repeated copies of one role; report look-alikes
     "filter",  # AUTO  — quality report; never auto-deletes
     "company_scoring",  # GATE  — WANT-score new candidate companies
     "vacancy_scoring",  # GATE  — per-vacancy subagent scoring (1 vac = 1 agent)
@@ -129,6 +130,7 @@ STAGE_ABOUT = {
     "learning_review": "offering verdict-driven filter / scoring corrections",
     "fetch": "pulling new vacancies from your companies and boards",
     "enrich": "backfilling blind vacancy descriptions",
+    "dedup": "removing repeated copies of the same role",
     "filter": "quality-filtering the freshly fetched roles",
     "company_scoring": "WANT-scoring new candidate companies",
     "vacancy_scoring": "scoring new roles (cheap screen, then strong finalists)",
@@ -1391,6 +1393,49 @@ def _h_enrich(state, entry, opts):
     return "advance", "blind vacancies enriched"
 
 
+def _h_dedup(state, entry, opts):
+    """Merge repeated copies of one role before anything counts or scores them.
+
+    It ran only behind an explicit ``--dedup`` flag before, so the nightly run
+    never did it and nothing ever reported it. Its own stage makes the repeated
+    noise the sources send visible on the report card.
+    """
+    res = _run_capture(_py("filter_vacancies.py") + ["--dedup-only"], opts)
+    if res.returncode != 0:
+        return "error", f"dedup exited with code {res.returncode}: {res.stderr[-400:]}"
+    try:
+        data = _extract_json(res.stdout)
+    except Exception:
+        return "error", "dedup did not emit valid JSON"
+    entry["dedup"] = {
+        "groups": int(data.get("examined", 0) or 0),
+        "removed": int(data.get("merged", 0) or 0),
+        "kept_decided": int(data.get("protected", 0) or 0),
+        "look_alike_pairs": int(data.get("fuzzy_pairs", 0) or 0),
+    }
+    d = entry["dedup"]
+    parts = []
+    if d["removed"]:
+        parts.append(
+            f"Removed {d['removed']} repeated cop{'y' if d['removed'] == 1 else 'ies'} of "
+            f"{_roles(d['groups'])} the sources sent more than once."
+        )
+    else:
+        parts.append("No repeated copies to remove.")
+    if d["kept_decided"]:
+        parts.append(
+            f"Kept {d['kept_decided']} cop{'y' if d['kept_decided'] == 1 else 'ies'} "
+            "you had already decided about."
+        )
+    if d["look_alike_pairs"]:
+        n = d["look_alike_pairs"]
+        parts.append(
+            f"{n} pair{' looks' if n == 1 else 's look'} like the same role under two names "
+            "\u2014 check them in /jobs-review."
+        )
+    return "advance", " ".join(parts)
+
+
 def _h_filter(state, entry, opts):
     res = _run_capture(_py("filter_vacancies.py"), opts)
     if res.returncode != 0:
@@ -1990,6 +2035,7 @@ HANDLERS = {
     "learning_review": _h_learning_review,
     "fetch": _h_fetch,
     "enrich": _h_enrich,
+    "dedup": _h_dedup,
     "filter": _h_filter,
     "company_scoring": _h_company_scoring,
     "vacancy_scoring": _h_vacancy_scoring,

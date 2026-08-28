@@ -356,33 +356,50 @@ def test_stale_reason_is_cleared_in_the_same_statement(env):
 # ---------------------------------------------------------------------------
 
 
-def test_counters_report_the_database_not_the_in_memory_decision(env):
-    """The write scope (status='unseen') is narrower than the load scope
-    (status != 'archived'), so a classified row can end up carrying no reason.
-    The return value must show that gap instead of reporting the decision as a
-    database fact — the 2026-08-27 over-count (128 reported, 74 written)."""
+def test_what_the_pass_decides_is_what_the_database_can_hold(env):
+    """The gap that produced the 2026-08-27 over-count (128 decided, 74 saved)
+    is closed by construction: the pass only decides about roles still waiting
+    for a decision, which is exactly the set a note can be saved on."""
     db, fv = env
     vid_unseen = _seed(db, "Acme Foundation", "Talent Pool — General Application")
-    vid_expiring = _seed(
+    vid_decided = _seed(
         db,
         "Acme Foundation",
-        "Talent Pool — Expiring Application",
-        dedup_hash="pool-expiring",
-        status="expiring",
+        "Talent Pool — Decided Application",
+        dedup_hash="pool-decided",
+        status="passed",
     )
 
     result = _run_pass(fv)
 
-    # Both rows were classified as excluded ...
-    assert result["classified"] == 2
-    # ... but only the 'unseen' one is inside the write scope.
-    assert result["stamped"] == 1
-    assert result["out_of_scope"] == 1
+    assert result["classified"] == result["stamped"] == 1
+    assert result["out_of_scope"] == 0
     assert result["count"] == result["stamped"]
     assert _reason(db, vid_unseen) == "junk title: talent pool"
-    assert _reason(db, vid_expiring) is None
-    # The histogram counts stamped rows only.
+    assert _reason(db, vid_decided) is None
     assert result["reasons"] == {"junk title: talent pool": 1}
+
+
+def test_every_decided_status_is_left_alone(env):
+    """Not just 'passed': anything Nikita has decided is left alone, and a
+    status added later is left alone too (the rule names 'unseen', not a list
+    of decisions)."""
+    db, fv = env
+    for i, status in enumerate(("passed", "skipped", "declined", "interview", "expiring")):
+        _seed(
+            db,
+            "DecidedOrg",
+            f"Talent Pool — General Application {i}",
+            dedup_hash=f"dec-{i}",
+            status=status,
+        )
+    vid_unseen = _seed(db, "DecidedOrg", "Talent Pool — General Application X", dedup_hash="dec-x")
+
+    result = _run_pass(fv)
+
+    assert result["classified"] == result["stamped"] == 1
+    assert result["out_of_scope"] == 0
+    assert _reason(db, vid_unseen) == "junk title: talent pool"
 
 
 def test_counters_are_zero_and_persisted_when_nothing_is_excluded(env):
@@ -700,3 +717,114 @@ def test_migration_applies_and_loader_query_runs_on_sqlite(env):
     db, fv = env
     assert db._vacancy_has_column("scoring_excluded_reason")
     assert db.load_vacancies(unscored_only=True) == {}
+
+
+# ---------------------------------------------------------------------------
+# CHARACTERISATION — how a role group's note is decided TODAY.
+#
+# _exclusion_reason_map picks each group's representative by longest
+# description and derives the group's note from it, and the location note
+# reaches a group only when EVERY member is location-excluded. Both rules read
+# every member the pass classified — including roles Nikita has already
+# decided on. These tests pin the resulting notes so that dropping decided
+# roles from the pass cannot change them unnoticed.
+# ---------------------------------------------------------------------------
+
+
+def test_char_decided_sibling_is_the_group_representative(env):
+    """A 'passed' sibling with the longest description decides the note that
+    the still-undecided sibling carries."""
+    db, fv = env
+    vid_passed = _seed(
+        db,
+        "RepOrg",
+        "Program Manager",
+        dedup_hash="rep-passed",
+        status="passed",
+        desc="404 not found — this page is gone. " * 20,
+    )
+    vid_unseen = _seed(
+        db, "RepOrg", "Program Manager", dedup_hash="rep-unseen", desc="404 not found"
+    )
+
+    _run_pass(fv)
+
+    assert _reason(db, vid_unseen) == "junk content: error page"
+    assert _reason(db, vid_passed) is None  # decided rows are never written to
+
+
+def test_char_mixed_location_group_with_a_decided_sibling_is_still_scored(env):
+    """The location note needs EVERY member excluded. A 'passed' sibling in a
+    kept location today holds the whole group open, so the undecided US-only
+    sibling carries no note and still reaches scoring."""
+    db, fv = env
+    vid_passed_de = _seed(
+        db,
+        "MixedDecidedOrg",
+        "Program Manager",
+        dedup_hash="mixdec-de",
+        status="passed",
+        location="Berlin, Germany",
+    )
+    vid_unseen_us = _seed(
+        db,
+        "MixedDecidedOrg",
+        "Program Manager",
+        dedup_hash="mixdec-us",
+        location="New York, US only",
+    )
+
+    _run_pass(fv)
+
+    assert _reason(db, vid_passed_de) is None
+    assert _reason(db, vid_unseen_us) is None
+    assert vid_unseen_us in db.load_vacancies(unscored_only=True)
+
+
+def test_char_decided_sibling_widens_the_location_note(env, monkeypatch):
+    """When every member is location-excluded, a decided sibling's country is
+    named in the note the undecided sibling carries."""
+    db, fv = env
+    monkeypatch.setattr(fv, "_BANNED_COUNTRIES", frozenset({"united states", "canada"}))
+    _seed(
+        db,
+        "AllExcludedOrg",
+        "Program Manager",
+        dedup_hash="allexc-passed",
+        status="passed",
+        location="Toronto, Canada",
+    )
+    vid_unseen = _seed(
+        db,
+        "AllExcludedOrg",
+        "Program Manager",
+        dedup_hash="allexc-unseen",
+        location="New York, US only",
+    )
+
+    _run_pass(fv)
+
+    assert _reason(db, vid_unseen) == "excluded locations only (Canada, US)"
+
+
+def test_decided_junk_role_is_context_only_and_never_proposed_as_work(env):
+    """A decided role is still LOADED — the grouping rules above need it — but
+    it is no longer counted, no longer offered for deletion, and no longer
+    produces a note that cannot be saved."""
+    db, fv = env
+    vid = _seed(
+        db,
+        "DecidedJunkOrg",
+        "Talent Pool — General Application",
+        status="passed",
+    )
+
+    result = _run_pass(fv)
+    all_cats = fv.classify_vacancies()
+    work = fv.only_undecided(all_cats)
+
+    assert vid in [v for v, _ in all_cats["delete_blacklist"]]  # context
+    assert work["delete_blacklist"] == []  # not work
+    assert fv.decided_count(all_cats) == 1
+    assert _reason(db, vid) is None
+    assert result["classified"] == result["stamped"] == result["out_of_scope"] == 0

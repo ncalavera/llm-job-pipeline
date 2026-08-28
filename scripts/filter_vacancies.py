@@ -30,6 +30,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run dedup pre-step: clean exact hash dupes + find fuzzy dupes",
     )
+    parser.add_argument(
+        "--dedup-only",
+        action="store_true",
+        help="Run ONLY the dedup pass and print its JSON (the driver's dedup stage)",
+    )
     return parser
 
 
@@ -98,6 +103,30 @@ _PROTECTED_STATUSES: frozenset[str] = frozenset(
         "archived",
     }
 )
+#: A role Nikita has already decided about is not work for this pass. The pass
+#: still LOADS it, because a decided sibling is what tells the location rule
+#: that the same role also exists in Berlin — it is context, never work. It is
+#: never counted, never proposed for deletion or re-enrichment, and never given
+#: a note: the note can only be saved on an undecided role, so deciding about a
+#: decided one only produces a note that cannot be saved.
+_UNDECIDED_STATUS = "unseen"
+
+
+def _undecided(vac: dict) -> bool:
+    """True when this role is still waiting for a decision."""
+    return (vac.get("status") or _UNDECIDED_STATUS) == _UNDECIDED_STATUS
+
+
+def only_undecided(categories: dict) -> dict:
+    """``categories`` with the already-decided roles removed from every bucket."""
+    return {cat: [(vid, v) for vid, v in items if _undecided(v)] for cat, items in categories.items()}
+
+
+def decided_count(categories: dict) -> int:
+    """How many already-decided roles this pass saw (and left alone)."""
+    return sum(1 for items in categories.values() for _, v in items if not _undecided(v))
+
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -283,6 +312,50 @@ def _clean_exact_dupes() -> dict:
         "protected": protected_count,
         "archived_path": str(archive_path),
     }
+
+
+def run_dedup() -> dict:
+    """Remove copies of the same role and find the look-alikes.
+
+    Two steps, one pass: identical roles (same dedup hash) are merged into the
+    best copy and the extras archived, then the remaining roles are compared by
+    title inside each company to surface pairs that look like the same role
+    under two names — those are only reported, never removed.
+
+    Returns {examined, merged, protected, fuzzy_pairs, fuzzy}.
+    """
+    result = dict(_clean_exact_dupes())
+    fuzzy = _find_fuzzy_dupes(load_vacancies(unscored_only=True))
+    result["fuzzy_pairs"] = len(fuzzy)
+    result["fuzzy"] = fuzzy
+    return result
+
+
+def dedup_lines(result: dict) -> list[str]:
+    """What the dedup pass did, in plain words. One line per thing that
+    happened; nothing at all to say is said too."""
+    merged = int(result.get("merged", 0) or 0)
+    protected = int(result.get("protected", 0) or 0)
+    groups = int(result.get("examined", 0) or 0)
+    fuzzy = int(result.get("fuzzy_pairs", 0) or 0)
+    lines = []
+    if merged:
+        lines.append(
+            f"Removed {merged} repeated cop{'y' if merged == 1 else 'ies'} of "
+            f"{groups} role{'' if groups == 1 else 's'} the sources sent more than once."
+        )
+    else:
+        lines.append("No repeated copies to remove.")
+    if protected:
+        lines.append(
+            f"Kept {protected} cop{'y' if protected == 1 else 'ies'} you had already decided about."
+        )
+    if fuzzy:
+        lines.append(
+            f"{fuzzy} pair{' looks' if fuzzy == 1 else 's look'} like the same role under "
+            "two names — check them in /jobs-review."
+        )
+    return lines
 
 
 def _find_fuzzy_dupes(vacancies: dict) -> list[dict]:
@@ -658,10 +731,12 @@ def _exclusion_reason_map(categories: dict) -> dict[str, str]:
     """
     groups: dict[tuple[str, str], list[tuple[str, dict]]] = {}
     cat_by_id: dict[str, str] = {}
+    vac_by_id: dict[str, dict] = {}
     for cat, items in categories.items():
         for vid, vac in items:
             groups.setdefault((vac.get("org", ""), vac.get("title", "")), []).append((vid, vac))
             cat_by_id[vid] = cat
+            vac_by_id[vid] = vac
 
     reasons: dict[str, str] = {}
     for members in groups.values():
@@ -683,7 +758,10 @@ def _exclusion_reason_map(categories: dict) -> dict[str, str]:
                 continue
             if reason:
                 reasons[vid] = reason
-    return reasons
+    # Decided roles shaped the groups above (representative, and the
+    # every-location-excluded test) but never carry a note themselves, so what
+    # this pass decides is exactly what the database can hold.
+    return {vid: reason for vid, reason in reasons.items() if _undecided(vac_by_id[vid])}
 
 
 def persist_scoring_exclusions(categories: dict) -> dict:
@@ -726,7 +804,7 @@ def persist_scoring_exclusions(categories: dict) -> dict:
         return empty
 
     reason_by_id = _exclusion_reason_map(categories)
-    seen_ids = [vid for items in categories.values() for vid, _ in items]
+    seen_ids = [vid for items in categories.values() for vid, v in items if _undecided(v)]
     if not seen_ids:
         return {**empty, "persisted": True}
 
@@ -1543,46 +1621,33 @@ def main():
         delete_vacancies_filtered(ids)
         return
 
-    # Optional: dedup pre-step (DB-mutating, must be explicit)
+    # Dedup (DB-mutating, must be explicit). --dedup-only is the driver's own
+    # dedup stage: run the pass, report it, stop.
     dedup_result = None
     fuzzy_dupes = []
-    if args.dedup:
-        print("Running dedup pre-step...", file=sys.stderr, flush=True)
-        dedup_result = _clean_exact_dupes()
-        if dedup_result.get("merged", 0) > 0:
-            print(
-                f"  Exact dupes cleaned: {dedup_result['merged']} "
-                f"(examined {dedup_result['examined']} groups, "
-                f"{dedup_result.get('protected', 0)} protected)",
-                file=sys.stderr,
-                flush=True,
-            )
-        else:
-            print(
-                f"  No exact dupes found ({dedup_result['examined']} groups examined)",
-                file=sys.stderr,
-                flush=True,
-            )
-
-        # Fuzzy dedup on remaining unscored vacancies
-        all_vacs = load_vacancies(unscored_only=True)
-        fuzzy_dupes = _find_fuzzy_dupes(all_vacs)
-        if fuzzy_dupes:
-            print(
-                f"  Fuzzy dupes found: {len(fuzzy_dupes)} pairs (quarantined for review)",
-                file=sys.stderr,
-                flush=True,
-            )
-        else:
-            print("  No fuzzy dupes found", file=sys.stderr, flush=True)
+    if args.dedup or args.dedup_only:
+        print("Removing repeated copies of the same role...", file=sys.stderr, flush=True)
+        dedup_result = run_dedup()
+        for line in dedup_lines(dedup_result):
+            print(f"  {line}", file=sys.stderr, flush=True)
+        fuzzy_dupes = dedup_result.get("fuzzy") or []
+        if args.dedup_only:
+            print(json.dumps({k: v for k, v in dedup_result.items()}, indent=2, ensure_ascii=False))
+            return
 
     # Default: analyze + report + JSON
-    categories = classify_vacancies()
+    all_categories = classify_vacancies()
+    # Everything below reports and proposes WORK, so it sees only the roles
+    # still waiting for a decision. The full set stays with
+    # persist_scoring_exclusions, whose grouping rules need the decided
+    # siblings as context.
+    categories = only_undecided(all_categories)
+    already_decided = decided_count(all_categories)
     stats = compute_stats(categories)
 
     # Persist the exclusion record — the one decider of "not scored" (R8):
     # set the reason on excluded rows, clear rows a rule no longer matches.
-    scoring_excluded = persist_scoring_exclusions(categories)
+    scoring_excluded = persist_scoring_exclusions(all_categories)
     waiting = waiting_to_score()
 
     # --- Structured filter summary (for feedback loop) ---
@@ -1643,6 +1708,12 @@ def main():
                 file=sys.stderr,
                 flush=True,
             )
+    if already_decided:
+        print(
+            f"  Left {_roles(already_decided)} alone \u2014 you have already decided about them.",
+            file=sys.stderr,
+            flush=True,
+        )
     print(f"  {_roles(stats['ready_count'])} go on to scoring.", file=sys.stderr, flush=True)
     print(
         f"  {_roles(waiting['active'])} wait to be scored now, and {waiting['candidate']} more "
@@ -1674,6 +1745,7 @@ def main():
 
     output = {
         "total_unscored": stats["total"],
+        "already_decided": already_decided,
         "categories": {cat: len(items) for cat, items in categories.items()},
         "delete_ids": delete_ids,
         "reenrich_ids": reenrich_ids,

@@ -45,6 +45,7 @@ def test_stage_order_is_the_documented_sequence(rd):
         "learning_review",
         "fetch",
         "enrich",
+        "dedup",
         "filter",
         "company_scoring",
         "vacancy_scoring",
@@ -2060,3 +2061,83 @@ def test_pre_digest_checkpoint_still_resumes(rd):
     assert any(s["name"] == "digest" for s in state["stages"])
     with pytest.raises(KeyError):
         rd._stage(state, "never_a_stage")
+
+
+# ---------------------------------------------------------------------------
+# Dedup — its own stage, its own number on the card
+# ---------------------------------------------------------------------------
+
+
+def _dedup_note(rd, monkeypatch, payload):
+    import json as _json
+    import subprocess
+
+    monkeypatch.setattr(
+        rd,
+        "_run_capture",
+        lambda cmd, opts: subprocess.CompletedProcess(cmd, 0, _json.dumps(payload), ""),
+    )
+    state = rd._new_state(rd.Opts())
+    entry = rd._stage(state, "dedup")
+    kind, note = rd._h_dedup(state, entry, rd.Opts())
+    assert kind == "advance"
+    return entry, note
+
+
+def test_dedup_runs_before_filter(rd):
+    """Copies are merged before anything counts or scores them."""
+    assert rd.STAGE_ORDER.index("dedup") < rd.STAGE_ORDER.index("filter")
+    assert rd.STAGE_ORDER.index("fetch") < rd.STAGE_ORDER.index("dedup")
+    assert "dedup" in rd.HANDLERS and "dedup" in rd.STAGE_ABOUT
+
+
+def test_dedup_note_reports_what_it_did(rd, monkeypatch):
+    entry, note = _dedup_note(
+        rd, monkeypatch, {"examined": 12, "merged": 15, "protected": 2, "fuzzy_pairs": 3}
+    )
+    assert note == (
+        "Removed 15 repeated copies of 12 roles the sources sent more than once. "
+        "Kept 2 copies you had already decided about. "
+        "3 pairs look like the same role under two names — check them in /jobs-review."
+    )
+    assert entry["dedup"] == {
+        "groups": 12,
+        "removed": 15,
+        "kept_decided": 2,
+        "look_alike_pairs": 3,
+    }
+
+
+def test_dedup_note_is_singular_when_it_should_be(rd, monkeypatch):
+    _, note = _dedup_note(
+        rd, monkeypatch, {"examined": 1, "merged": 1, "protected": 1, "fuzzy_pairs": 1}
+    )
+    assert "Removed 1 repeated copy of 1 role" in note
+    assert "Kept 1 copy you had already decided about." in note
+    assert "1 pair looks like the same role" in note
+
+
+def test_dedup_note_says_so_when_there_was_nothing_to_do(rd, monkeypatch):
+    _, note = _dedup_note(
+        rd, monkeypatch, {"examined": 0, "merged": 0, "protected": 0, "fuzzy_pairs": 0}
+    )
+    assert note == "No repeated copies to remove."
+
+
+def test_dedup_note_carries_no_internal_vocabulary(rd, monkeypatch):
+    _, note = _dedup_note(
+        rd, monkeypatch, {"examined": 9, "merged": 4, "protected": 1, "fuzzy_pairs": 2}
+    )
+    for word in ("dedup", "hash", "fuzzy", "row", "merged", "protected", "examined"):
+        assert word not in note.lower(), word
+
+
+def test_dedup_stage_fails_loudly_on_a_bad_exit(rd, monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(
+        rd, "_run_capture", lambda cmd, opts: subprocess.CompletedProcess(cmd, 1, "", "boom")
+    )
+    state = rd._new_state(rd.Opts())
+    kind, note = rd._h_dedup(state, rd._stage(state, "dedup"), rd.Opts())
+    assert kind == "error" and "boom" in note
