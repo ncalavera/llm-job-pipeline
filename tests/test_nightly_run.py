@@ -221,7 +221,9 @@ def nr(monkeypatch, tmp_path):
         % {
             "mode_file": str(mode_file),
             "reset_file": str(reset_file),
-            "resume_cmd": repr([sys.executable, str(driver), str(vac), str(steps_path), "--resume"]),
+            "resume_cmd": repr(
+                [sys.executable, str(driver), str(vac), str(steps_path), "--resume"]
+            ),
         },
         encoding="utf-8",
     )
@@ -765,8 +767,7 @@ def test_alert_masks_database_credentials(nr):
                 "exit": 30,
                 "stage": "preflight",
                 "note": (
-                    "OperationalError: could not connect to "
-                    "postgres://user:secretpass@db.example/x"
+                    "OperationalError: could not connect to postgres://user:secretpass@db.example/x"
                 ),
             }
         ]
@@ -824,9 +825,7 @@ def test_failed_alert_send_exits_nonzero(nr):
 
 def test_manual_checkpoint_parks_the_night(nr):
     (nr.vac / "run_state.json").write_text(
-        json.dumps(
-            {"run_id": "manual", "finished": False, "options": {"unattended": False}}
-        ),
+        json.dumps({"run_id": "manual", "finished": False, "options": {"unattended": False}}),
         encoding="utf-8",
     )
     assert nr.mod.run_night() == 0

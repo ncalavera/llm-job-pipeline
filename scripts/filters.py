@@ -197,6 +197,7 @@ def not_a_vacancy_reason(title: str, description: str = "") -> str | None:
         return None
     return "a program or grant to apply to, not a job"
 
+
 # ---------------------------------------------------------------------------
 # Per-company INCLUDE-filters
 #

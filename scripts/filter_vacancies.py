@@ -119,7 +119,9 @@ def _undecided(vac: dict) -> bool:
 
 def only_undecided(categories: dict) -> dict:
     """``categories`` with the already-decided roles removed from every bucket."""
-    return {cat: [(vid, v) for vid, v in items if _undecided(v)] for cat, items in categories.items()}
+    return {
+        cat: [(vid, v) for vid, v in items if _undecided(v)] for cat, items in categories.items()
+    }
 
 
 def decided_count(categories: dict) -> int:
@@ -131,7 +133,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _roles(n: int) -> str:
-    """"1 role" / "3 roles" — the summary talks to a person, not a log parser."""
+    """ "1 role" / "3 roles" — the summary talks to a person, not a log parser."""
     return f"{n} role" if n == 1 else f"{n} roles"
 
 
@@ -854,8 +856,7 @@ def persist_scoring_exclusions(categories: dict) -> dict:
     case_sql = "CASE " + " ".join(whens) + " ELSE NULL END" if whens else "NULL"
 
     scope_sql = (
-        "WHERE (llm_score IS NULL OR llm_score < 0) AND status = 'unseen' "
-        "AND id = ANY(%s::uuid[])"
+        "WHERE (llm_score IS NULL OR llm_score < 0) AND status = 'unseen' AND id = ANY(%s::uuid[])"
     )
 
     conn = get_conn()
@@ -1735,12 +1736,11 @@ def main():
         rest = []
         if decided:
             rest.append(
-                f"the other {decided} you had already decided on, "
-                "so there was nothing left to mark"
+                f"the other {decided} you had already decided on, so there was nothing left to mark"
             )
         if unmarked > 0:
             rest.append(f"{unmarked} carry no note of their own")
-        line += ("; " + "; ".join(rest) + "." ) if rest else "."
+        line += ("; " + "; ".join(rest) + ".") if rest else "."
         print(line, file=sys.stderr, flush=True)
         if scoring_excluded["cleared"]:
             print(

@@ -56,7 +56,10 @@ def _force_sqlite(monkeypatch, db_file):
 #: 0013 adds vacancy.source_board — the filter reads it to leave the cards
 #: Nikita added himself alone.
 MIGRATION_SOURCE_BOARD = (
-    Path(__file__).resolve().parent.parent / "sql" / "migrations" / "0013_add_source_board.sqlite.sql"
+    Path(__file__).resolve().parent.parent
+    / "sql"
+    / "migrations"
+    / "0013_add_source_board.sqlite.sql"
 )
 
 
@@ -428,7 +431,9 @@ def test_row_at_demoted_company_keeps_its_reason(env):
     company left 'active' (invisible to classify_vacancies) is NOT cleared,
     while a stale reason at an active company still is."""
     db, fv = env
-    vid_cand = _seed(db, "DemotedOrg", "Talent Pool — General Application", reason="junk title: talent pool")
+    vid_cand = _seed(
+        db, "DemotedOrg", "Talent Pool — General Application", reason="junk title: talent pool"
+    )
     vid_active = _seed(db, "CleanOrg", "Backend Engineer", reason="stale reason")
     conn = db.get_conn()
     cur = conn.cursor()
@@ -617,9 +622,7 @@ def test_filter_note_is_one_partition_of_one_pool(tmp_path, monkeypatch):
     assert entry["filter"]["waiting_behind_candidates"] == 357
 
 
-def test_filter_note_names_the_parked_backlog_even_when_the_queue_is_small(
-    tmp_path, monkeypatch
-):
+def test_filter_note_names_the_parked_backlog_even_when_the_queue_is_small(tmp_path, monkeypatch):
     """357 roles parked behind unapproved companies must not hide behind a
     "20 waiting" figure — nothing else in the run counts them."""
     payload = {
@@ -706,7 +709,7 @@ def test_filter_note_says_so_when_the_parts_do_not_add_up(tmp_path, monkeypatch)
 
 
 def test_filter_note_never_prints_the_same_set_under_two_names(tmp_path, monkeypatch):
-    """"junk flagged" and "excluded" were the same rows printed twice. One
+    """ "junk flagged" and "excluded" were the same rows printed twice. One
     excluded count now, and the reasons-written figure beside it is a
     different, smaller thing."""
     payload = {
@@ -1089,9 +1092,12 @@ def test_a_role_kept_by_its_body_is_not_flagged_by_the_filter(env, monkeypatch):
     # The fetch keeps it ...
     import filters
 
-    assert filters.fetch_time_drop_reason(
-        "Initech", "Senior Delivery Partner", "the innovation accelerator"
-    ) is None
+    assert (
+        filters.fetch_time_drop_reason(
+            "Initech", "Senior Delivery Partner", "the innovation accelerator"
+        )
+        is None
+    )
 
     _run_pass(fv)
 

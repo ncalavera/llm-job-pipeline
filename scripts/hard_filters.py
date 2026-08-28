@@ -59,7 +59,6 @@ _BULLET_LINE = re.compile(r"^[-*]\s+(.*\S)\s*$")
 DESC_PATTERN_PREFIX = "desc:"
 
 
-
 def _warn(message: str) -> None:
     """Loud stderr warning, matching the profile-fallback warning style."""
     print(f"⚠  {message}", file=sys.stderr)

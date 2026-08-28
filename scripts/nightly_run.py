@@ -419,9 +419,9 @@ def _session_failure_message(out_path: Path, err_path: Path, rc: "int | None") -
             "Claude login failure — sign in on the server again. "
             f"Unscored roles carry over. Log: {where}"
         )
-    return (
-        f"the session stopped early (exit {rc}). Unscored roles carry over. Log: {where}"
-    )
+    return f"the session stopped early (exit {rc}). Unscored roles carry over. Log: {where}"
+
+
 def _rate_limit_reset(out_path: Path, err_path: Path) -> int | None:
     """The unix second at which the Claude usage limit lifts, read from the
     session transcript — or None when the session died of something else.
@@ -660,9 +660,7 @@ def _run_session(ctx: _Ctx, action: str, phase: str) -> None:
     )
     budget = max(budget, 1.0)
     cmd = _claude_cmd(action, ctx.night_dir, ctx.cfg, phase)
-    ctx.log(
-        f"claude session for {action} ({phase}): {len(items)} item(s), budget {int(budget)}s"
-    )
+    ctx.log(f"claude session for {action} ({phase}): {len(items)} item(s), budget {int(budget)}s")
     ctx.log("claude cmd: " + " ".join(cmd))
 
     out_path = ctx.night_dir / f"claude-{action}.jsonl"

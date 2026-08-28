@@ -162,9 +162,7 @@ def test_there_is_no_poll_subcommand():
     import subprocess
 
     script = Path(__file__).resolve().parent.parent / "scripts" / "telegram_digest.py"
-    res = subprocess.run(
-        [sys.executable, str(script), "poll"], capture_output=True, text=True
-    )
+    res = subprocess.run([sys.executable, str(script), "poll"], capture_output=True, text=True)
     assert res.returncode != 0
     assert "invalid choice: 'poll'" in res.stderr
 
@@ -986,7 +984,10 @@ def test_a_location_reason_keeps_its_place_name(stored, plain):
 @pytest.mark.parametrize(
     "stored,plain",
     [
-        ("a program or grant to apply to, not a job", "a programme or grant to apply to, not a job"),
+        (
+            "a program or grant to apply to, not a job",
+            "a programme or grant to apply to, not a job",
+        ),
         ("test posting, not a real job", "a test posting, not a real job"),
     ],
 )

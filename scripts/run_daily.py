@@ -1432,7 +1432,7 @@ def _h_fetch(state, entry, opts):
 
 
 def _roles(n: int) -> str:
-    """"1 role" / "3 roles" — the report card talks to a person."""
+    """ "1 role" / "3 roles" — the report card talks to a person."""
     return f"{n} role" if n == 1 else f"{n} roles"
 
 
@@ -2033,8 +2033,7 @@ def _h_verdicts(state, entry, opts):
         entry["pending_verdicts"] = n
         return (
             "advance",
-            f"{n} scored match(es) await your verdict on the phone — a night run "
-            "never writes one",
+            f"{n} scored match(es) await your verdict on the phone — a night run never writes one",
         )
     return "gate", {
         "action": "verdicts",
@@ -2273,7 +2272,11 @@ def drive(state: dict, opts: Opts, observe: bool = False) -> int:
             # ``phase`` tells the nightly wrapper which model tier answers a
             # scoring gate ("screen"/"escalate" for vacancies, "screen"/"score"
             # for companies); None on every other gate.
-            state["gate"] = {"stage": name, "action": info.get("action"), "phase": info.get("phase")}
+            state["gate"] = {
+                "stage": name,
+                "action": info.get("action"),
+                "phase": info.get("phase"),
+            }
             _save_state(state)
             if observe:
                 _record_history(state, opts)
@@ -2594,9 +2597,7 @@ def _print_stage_board(state: dict, *, verdict: bool = False) -> None:
         # A partial stage keeps its own mark: a ✓ next to "35 of 55 left
         # unscored" is the exact contradiction this column exists to avoid.
         mark = (
-            PARTIAL_MARK
-            if _stage_partial(s)
-            else _STATUS_MARK.get(s.get("status", "pending"), "?")
+            PARTIAL_MARK if _stage_partial(s) else _STATUS_MARK.get(s.get("status", "pending"), "?")
         )
         note = s.get("note", "")
         if verdict:
