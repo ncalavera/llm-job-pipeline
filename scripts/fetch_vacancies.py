@@ -546,10 +546,12 @@ def _drop_by_profile(default_org, jobs, fetch_stats):
     enrich, score and report a role it will only exclude again tomorrow.
 
     ``default_org`` is the company (or board) the batch came from; a board row
-    carrying ``org_override`` is judged by that instead. Per-company drop counts
-    land in ``fetch_stats[PROFILE_DROP_KEY]``. Returns the surviving list, and
-    returns an empty batch untouched so Firecrawl's ``UnchangedListing``
-    sentinel keeps its ``unchanged`` flag.
+    carrying ``org_override`` is judged by that instead. The role's fetched body
+    goes in too, so a ``desc:`` include-pattern can keep a role whose title hides
+    its unit; a row the source gave no body for is judged on its title alone.
+    Per-company drop counts land in ``fetch_stats[PROFILE_DROP_KEY]``. Returns
+    the surviving list, and returns an empty batch untouched so Firecrawl's
+    ``UnchangedListing`` sentinel keeps its ``unchanged`` flag.
     """
     if not jobs:
         return jobs
@@ -557,7 +559,8 @@ def _drop_by_profile(default_org, jobs, fetch_stats):
     dropped: dict[str, int] = {}
     for job in jobs:
         org = job.get("org_override") or default_org
-        if filters.fetch_time_drop_reason(org, job.get("title", "")) is None:
+        body = job.get("full_description") or job.get("snippet") or ""
+        if filters.fetch_time_drop_reason(org, job.get("title", ""), body) is None:
             kept.append(job)
         else:
             dropped[org] = dropped.get(org, 0) + 1

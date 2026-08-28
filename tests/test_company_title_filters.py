@@ -280,7 +280,9 @@ def test_include_map_holds_precompiled_patterns(monkeypatch, filters_mod):
 
     built = filters_mod._build_company_title_include({"Org A": ["data"], "org a": ["evaluation"]})
     assert list(built) == ["org a"]  # same canonical key → merged, compiled once
-    assert all(isinstance(p, _re.Pattern) for p in built.values())
+    assert all(isinstance(c.title, _re.Pattern) for c in built.values())
+    # A company with no desc: pattern carries no description scope at all.
+    assert built["org a"].desc is None
     # Merged pattern list covers both profile spellings' patterns.
-    assert built["org a"].search("data analyst")
-    assert built["org a"].search("evaluation officer")
+    assert built["org a"].title.search("data analyst")
+    assert built["org a"].title.search("evaluation officer")
