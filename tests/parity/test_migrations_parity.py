@@ -4,10 +4,13 @@ the same shape for the tables the DAL actually uses, and the REAL
 must be well-behaved -- idempotent, zero-pending after a full run -- on both.
 """
 
+import re
+
 import pytest
 
 from _bootstrap import (
     PARITY_PG_URL,
+    REPO_ROOT,
     bootstrap_postgres,
     bootstrap_sqlite,
     raw_migrate_fresh_sqlite,
@@ -195,3 +198,45 @@ def test_shared_table_columns_match_between_backends(tmp_path, monkeypatch):
             f"sqlite-only={sqlite_cols[table] - pg_cols[table]} "
             f"postgres-only={pg_cols[table] - sqlite_cols[table]}"
         )
+
+
+def test_parity_bootstrap_replays_every_sqlite_migration(tmp_path, monkeypatch):
+    """The SQLite side of the parity comparison must replay EVERY migration the
+    backend has, not a list someone remembered to update.
+
+    This exists because it was a literal tuple ending at 0018. Migrations 0025
+    (`vacancy.scoring_excluded_reason`) and 0026 (`vacancy.digest_dropped_at`)
+    were added afterwards and never reached this bootstrap, so the fresh SQLite
+    DB it built was missing two columns Postgres had — and
+    test_shared_table_columns_match_between_backends failed on main for every
+    commit in between. The list is derived now; this asserts it stays complete.
+    """
+    from _bootstrap import _sqlite_migration_files
+
+    on_disk = set()
+    for path in (REPO_ROOT / "sql" / "migrations").glob("*.sql"):
+        m = re.match(r"^(\d+)_(.+?)(?:\.(postgres|sqlite))?\.sql$", path.name)
+        if m and m.group(3) != "postgres":
+            on_disk.add(m.group(1))
+    replayed = set()
+    for path in _sqlite_migration_files():
+        replayed.add(re.match(r"^(\d+)_", path.name).group(1))
+
+    assert replayed == on_disk, (
+        "the parity bootstrap does not replay every SQLite migration -- "
+        f"missing={sorted(on_disk - replayed)} unexpected={sorted(replayed - on_disk)}. "
+        "A migration that is not replayed makes the SQLite side of the column "
+        "diff wrong, which is how 0025 and 0026 went unnoticed."
+    )
+
+
+def test_bootstrapped_sqlite_carries_the_late_migration_columns(tmp_path, monkeypatch):
+    """The two columns whose absence broke the cross-backend diff. Named
+    explicitly so the regression has a test that says what it was about."""
+    dal = bootstrap_sqlite(monkeypatch, tmp_path)
+    try:
+        cols = table_columns(dal, "vacancy")
+    finally:
+        dal.close_conn()
+    for column in ("scoring_excluded_reason", "digest_dropped_at"):
+        assert column in cols, f"vacancy.{column} missing from the bootstrapped SQLite DB"
