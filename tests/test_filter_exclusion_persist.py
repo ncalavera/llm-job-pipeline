@@ -567,11 +567,14 @@ def test_filter_note_is_one_partition_of_one_pool(tmp_path, monkeypatch):
     entry, note = _h_filter_note(monkeypatch, payload)
 
     assert note == (
-        "448 unscored role(s) scanned → 41 pass the filter, 128 excluded from scoring "
-        "(74 reason(s) written to the row; nothing deleted — review in /jobs-review), "
-        "279 waiting for re-enrichment; 20 role(s) now wait to be scored, "
-        "357 more behind not-yet-approved companies"
+        "Looked at 448 roles with no score yet: 41 go on to scoring, 128 skipped "
+        "(marked why on 74; nothing deleted — check them in /jobs-review), "
+        "279 need their description fetched again. 20 roles wait to be scored now, "
+        "and 357 more sit behind companies you have not approved yet."
     )
+    # No internal vocabulary reached the card.
+    for word in ("classified", "stamped", "written", "scope", "row", "persisted", "partition"):
+        assert word not in note.lower()
     assert entry["filter"]["scanned"] == 448
     assert (
         entry["filter"]["ready"] + entry["filter"]["excluded"] + entry["filter"]["reenrich"]
@@ -582,7 +585,7 @@ def test_filter_note_is_one_partition_of_one_pool(tmp_path, monkeypatch):
     assert entry["filter"]["excluded_count"] == 74
     # "pass the filter" (this scan) and "wait to be scored" (the live queue)
     # are different questions and now carry different words.
-    assert "ready to score" not in note
+    assert "ready to score" not in note and "pass the filter" not in note
     assert entry["filter"]["waiting_to_score"] == 20
     assert entry["filter"]["waiting_behind_candidates"] == 357
 
@@ -600,7 +603,10 @@ def test_filter_note_names_the_parked_backlog_even_when_the_queue_is_small(
         "scoring_excluded": {"stamped": 0},
     }
     _, note = _h_filter_note(monkeypatch, payload)
-    assert "20 role(s) now wait to be scored, 357 more behind not-yet-approved companies" in note
+    assert (
+        "20 roles wait to be scored now, and 357 more sit behind companies "
+        "you have not approved yet." in note
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -669,7 +675,7 @@ def test_filter_note_says_so_when_the_parts_do_not_add_up(tmp_path, monkeypatch)
         "scoring_excluded": {"stamped": 10},
     }
     _, note = _h_filter_note(monkeypatch, payload)
-    assert "the parts add up to 18, not 500" in note
+    assert "That adds up to 18, not 500 — the count is off." in note
 
 
 def test_filter_note_never_prints_the_same_set_under_two_names(tmp_path, monkeypatch):
@@ -685,7 +691,7 @@ def test_filter_note_never_prints_the_same_set_under_two_names(tmp_path, monkeyp
     }
     _, note = _h_filter_note(monkeypatch, payload)
     assert "junk candidate" not in note
-    assert note.count("6") == 2  # once as "6 excluded", once as "6 reason(s) written"
+    assert note.count("6") == 2  # once as "6 skipped", once as "marked why on 6"
 
 
 def test_migration_applies_and_loader_query_runs_on_sqlite(env):

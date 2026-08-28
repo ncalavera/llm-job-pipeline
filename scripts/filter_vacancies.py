@@ -101,6 +101,11 @@ _PROTECTED_STATUSES: frozenset[str] = frozenset(
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
+def _roles(n: int) -> str:
+    """"1 role" / "3 roles" — the summary talks to a person, not a log parser."""
+    return f"{n} role" if n == 1 else f"{n} roles"
+
+
 def _strip_punct(title: str) -> str:
     """Strip all punctuation, lowercase, collapse whitespace."""
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", title.lower())).strip()
@@ -713,8 +718,8 @@ def persist_scoring_exclusions(categories: dict) -> dict:
     }
     if not _scoring_excluded_supported():
         print(
-            "  scoring_excluded_reason column missing (run scripts/migrate.py) — "
-            "exclusion reasons NOT persisted this run",
+            "  The database cannot store why a role was skipped yet "
+            "(run scripts/migrate.py) — nothing was marked this run.",
             file=sys.stderr,
             flush=True,
         )
@@ -1612,21 +1617,36 @@ def main():
             flush=True,
         )
     if scoring_excluded.get("persisted"):
-        line = (
-            f"  Excluded from scoring: {scoring_excluded['classified']} classified, "
-            f"{scoring_excluded['stamped']} reason(s) written, "
-            f"{scoring_excluded['cleared']} stale reason(s) cleared"
-        )
-        if scoring_excluded["out_of_scope"]:
-            line += (
-                f" ({scoring_excluded['out_of_scope']} classified row(s) sat outside the "
-                "write scope — not status='unseen' — and carry no reason)"
+        # Plain words on purpose: this is the line Nikita reads at 09:00.
+        # "decided on" covers passed and declined alike — those roles are the
+        # ones the write scope leaves alone, and no note can be added to a
+        # decision he already made.
+        skipped = stats["delete_count"]
+        marked = scoring_excluded["stamped"]
+        decided = scoring_excluded["out_of_scope"]
+        unmarked = skipped - marked - decided
+        line = f"  Skipped {_roles(skipped)}. Marked why on {marked} of them"
+        rest = []
+        if decided:
+            rest.append(
+                f"the other {decided} you had already decided on, "
+                "so there was nothing left to mark"
             )
+        if unmarked > 0:
+            rest.append(f"{unmarked} carry no note of their own")
+        line += ("; " + "; ".join(rest) + "." ) if rest else "."
         print(line, file=sys.stderr, flush=True)
-    print(f"  Pass the filter: {stats['ready_count']}", file=sys.stderr, flush=True)
+        if scoring_excluded["cleared"]:
+            print(
+                f"  {_roles(scoring_excluded['cleared'])} are back in line — "
+                "the rule that skipped them no longer applies.",
+                file=sys.stderr,
+                flush=True,
+            )
+    print(f"  {_roles(stats['ready_count'])} go on to scoring.", file=sys.stderr, flush=True)
     print(
-        f"  Waiting to be scored now: {waiting['active']} "
-        f"(+{waiting['candidate']} behind not-yet-approved companies)",
+        f"  {_roles(waiting['active'])} wait to be scored now, and {waiting['candidate']} more "
+        "sit behind companies you have not approved yet.",
         file=sys.stderr,
         flush=True,
     )

@@ -408,7 +408,7 @@ def test_dropped_line_renders_reason_and_link(denv):
     )
     td.cmd_send(_args())
     body = "\n".join(_sent_texts(denv.calls))
-    assert "Program Manager — GiveWell — dropped: US-only location" in body
+    assert "Program Manager — GiveWell — skipped: US-only location" in body
     assert 'href="https://example.test/givewell/pm"' in body
 
 
@@ -457,8 +457,8 @@ def test_header_counts_from_run_state(denv):
     )
     td.cmd_send(_args())
     header = _sent_texts(denv.calls)[0]
-    assert "12 fetched, 5 scored" in header
-    assert "2 dropped (listed below), 1 still to score" in header
+    assert "found 12 new roles, scored 5" in header
+    assert "2 skipped (listed below), 1 still to score" in header
     # The carried-over batch keeps its own tier-4 line; it is not the pool.
     assert "3 role(s)" in "\n".join(_sent_texts(denv.calls))
 
@@ -472,7 +472,7 @@ def test_header_names_the_backlog_parked_behind_unapproved_companies(denv):
     td.cmd_send(_args())
     header = _sent_texts(denv.calls)[0]
     assert "1 still to score" in header
-    assert "4 more roles wait behind not-yet-approved companies" in header
+    assert "4 more roles are waiting behind companies you have not approved yet" in header
 
 
 def test_header_omits_the_parked_line_when_nothing_is_parked(denv):
@@ -480,7 +480,7 @@ def test_header_omits_the_parked_line_when_nothing_is_parked(denv):
     td.cmd_send(_args())
     header = _sent_texts(denv.calls)[0]
     assert "1 still to score" in header
-    assert "wait behind" not in header
+    assert "waiting behind" not in header
 
 
 def test_waiting_figure_counts_only_roles_the_scorer_would_take(denv):
@@ -502,10 +502,10 @@ def test_header_dropped_equals_the_dropped_lines_the_digest_lists(denv):
     _write_run_state(denv.run_state, counts={"new_vacancies": 9, "scored": 1}, excluded_count=99)
     td.cmd_send(_args())
     texts = _sent_texts(denv.calls)
-    assert "3 dropped (listed below)" in texts[0]
+    assert "3 skipped (listed below)" in texts[0]
     assert "99" not in texts[0]
     body = "\n".join(texts)
-    assert len([ln for ln in body.splitlines() if "dropped:" in ln]) == 3
+    assert len([ln for ln in body.splitlines() if "skipped:" in ln]) == 3
 
 
 def test_header_counts_from_db_without_run_state(denv):
@@ -515,8 +515,8 @@ def test_header_counts_from_db_without_run_state(denv):
     _seed(denv.db, "Org D", "Waiting Role")  # no score, no reason
     td.cmd_send(_args())
     header = _sent_texts(denv.calls)[0]
-    assert "4 fetched, 2 scored" in header
-    assert "1 dropped (listed below), 1 still to score" in header
+    assert "found 4 new roles, scored 2" in header
+    assert "1 skipped (listed below), 1 still to score" in header
 
 
 def test_deadline_header_line_and_candidate_hot_in_tier1(denv):
@@ -580,7 +580,7 @@ def test_empty_night_sends_header_and_nothing_new(denv):
     td.cmd_send(_args())
     texts = _sent_texts(denv.calls)
     assert len(texts) == 1
-    assert "0 fetched" in texts[0]
+    assert "found 0 new roles" in texts[0]
     assert "Quiet night" in texts[0]
 
 
@@ -734,13 +734,81 @@ def test_keyboard_never_lands_on_a_message_that_ends_in_dropped_lines(denv, monk
     assert len(payloads) == 2
     with_kb = [p for p in payloads if p.get("reply_markup")]
     assert len(with_kb) == 1
-    assert "dropped:" not in with_kb[0]["text"]
+    assert "skipped:" not in with_kb[0]["text"]
     assert "Top Role" in with_kb[0]["text"]
-    # The dropped message carries no buttons at all.
-    assert "dropped:" in payloads[1]["text"]
+    # The skipped-roles message carries no buttons at all.
+    assert "skipped:" in payloads[1]["text"]
     assert "reply_markup" not in payloads[1]
     # The rows of each part are still claimed by that part.
     assert _col(denv.db, top, "digest_sent_at") is not None
+
+
+# ===========================================================================
+# Plain words — the morning message is read on a phone, not in a log viewer
+# ===========================================================================
+
+#: Internal vocabulary. It belongs in code identifiers, docstrings and
+#: comments — never in a line a person reads.
+JARGON = (
+    "classified",
+    "stamped",
+    "cleared",
+    "write scope",
+    "out of scope",
+    "persisted",
+    "sentinel",
+    "denominator",
+    "partition",
+    "backlog",
+    "unseen",
+    "row",
+)
+
+DIGEST_KEYS = (
+    "digest_run_header",
+    "digest_waiting_parked",
+    "digest_tier_dropped",
+    "digest_dropped_prefix",
+    "digest_no_progress",
+    "digest_tier_top",
+    "digest_tier_mid",
+)
+
+
+def test_digest_strings_carry_no_internal_vocabulary():
+    from i18n import STRINGS
+
+    for lang in ("en", "ru"):
+        for key in DIGEST_KEYS:
+            text = STRINGS[lang][key].lower()
+            for word in JARGON:
+                assert word not in text, f"{lang}.{key} says {word!r}"
+
+
+def test_russian_digest_strings_are_actually_russian():
+    """No English loanwords or transliterated jargon: outside HTML tags and
+    {placeholders}, the Russian strings carry no Latin letters."""
+    import re
+
+    from i18n import STRINGS
+
+    for key in DIGEST_KEYS:
+        text = STRINGS["ru"][key]
+        bare = re.sub(r"<[^>]+>|\{[^}]+\}", "", text)
+        assert not re.search(r"[A-Za-z]", bare), f"ru.{key} has Latin letters: {bare!r}"
+
+
+def test_both_languages_define_every_digest_string():
+    from i18n import STRINGS
+
+    for key in DIGEST_KEYS:
+        assert key in STRINGS["en"] and key in STRINGS["ru"], key
+        # Same placeholders on both sides, or one language crashes on format.
+        import re
+
+        assert set(re.findall(r"\{(\w+)\}", STRINGS["en"][key])) == set(
+            re.findall(r"\{(\w+)\}", STRINGS["ru"][key])
+        ), key
 
 
 def test_keyboard_never_lands_on_a_message_that_ends_in_mid_scores(denv):
@@ -775,7 +843,7 @@ def test_every_tier_opens_its_own_message(denv):
     # Every message with a keyboard carries only tier-1 rows.
     for p in payloads:
         if p.get("reply_markup"):
-            assert "Mid scores" not in p["text"] and "Dropped" not in p["text"]
+            assert "Mid scores" not in p["text"] and "Skipped" not in p["text"]
 
 
 def test_part_break_does_not_split_a_digest_with_only_one_tier(denv):

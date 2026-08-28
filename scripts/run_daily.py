@@ -1354,6 +1354,11 @@ def _h_fetch(state, entry, opts):
     return "advance", note
 
 
+def _roles(n: int) -> str:
+    """"1 role" / "3 roles" — the report card talks to a person."""
+    return f"{n} role" if n == 1 else f"{n} roles"
+
+
 def _fetch_source_counters(stats: dict) -> str:
     """Two labeled counters for the fetch stage note: company CAREER SITES vs job
     BOARDS (R7 terminology). Each shows sources-that-yielded / sources-attempted;
@@ -1426,26 +1431,24 @@ def _h_filter(state, entry, opts):
         "excluded_count": stamped,  # back-compat: rows carrying a reason
         "excluded_reasons": excl.get("reasons") or {},
     }
-    # One partition of one pool, denominator first: pass + excluded + re-enrich
-    # must add up to the pool the pass scanned. Nothing here is printed twice
-    # under two names.
+    # One sentence, plain words, and the three parts add up to the number in
+    # front of them. Internal vocabulary stays in the code, not on the card.
     note = (
-        f"{scanned} unscored role(s) scanned \u2192 {ready} pass the filter, "
-        f"{excluded} excluded from scoring ({stamped} reason(s) written to the row; "
-        f"nothing deleted \u2014 review in /jobs-review), "
-        f"{reenrich} waiting for re-enrichment"
+        f"Looked at {_roles(scanned)} with no score yet: {ready} go on to scoring, "
+        f"{excluded} skipped (marked why on {stamped}; nothing deleted \u2014 "
+        f"check them in /jobs-review), {reenrich} need their description fetched again."
     )
     parts_sum = ready + excluded + reenrich
     if parts_sum != scanned:
-        note += f"; the parts add up to {parts_sum}, not {scanned} \u2014 the filter categories disagree"
-    # "Pass the filter" is about THIS scan; "waiting to be scored" is the live
-    # queue, counted with the definition the digest header uses (they are not
-    # the same set: the scan also sees rows the scorer refuses). Roles parked
-    # behind unapproved companies get their own number — nothing else counts
-    # them, so a small queue must not hide a large parked backlog.
+        note += f" That adds up to {parts_sum}, not {scanned} \u2014 the count is off."
+    # "Go on to scoring" is about THIS look; "wait to be scored" is the live
+    # queue, counted the way the digest header counts it (they are not the same
+    # set: this pass also sees roles the scorer refuses). Roles behind
+    # unapproved companies get their own number - nothing else counts them, so
+    # a small queue must not hide a large one parked out of sight.
     note += (
-        f"; {waiting['active']} role(s) now wait to be scored, "
-        f"{waiting['candidate']} more behind not-yet-approved companies"
+        f" {_roles(waiting['active'])} wait to be scored now, and "
+        f"{waiting['candidate']} more sit behind companies you have not approved yet."
     )
     return "advance", note
 
@@ -1472,9 +1475,9 @@ def _h_company_scoring(state, entry, opts):
             entry,
             "score",
             len(remaining),
-            f"session stopped early — {len(remaining)} of "
-            f"{len(entry.get('target_ids', []))} company(ies) left unscored; they stay "
-            "candidates for the next run",
+            f"The scoring session stopped early — {len(remaining)} of "
+            f"{len(entry.get('target_ids', []))} companies are still unscored. "
+            "They stay candidates for the next run.",
         )
         if carried:
             return carried
@@ -1753,9 +1756,9 @@ def _h_vacancy_scoring(state, entry, opts):
                 entry,
                 "screen",
                 len(remaining_ids),
-                f"session stopped early — {len(remaining_ids)} of "
-                f"{len(entry.get('target_ids', []))} role(s) left unscored; they lead "
-                "the next run's batch (oldest first)",
+                f"The scoring session stopped early — {len(remaining_ids)} of "
+                f"{len(entry.get('target_ids', []))} roles are still unscored. "
+                "They go first in the next run, oldest ones first.",
                 finish=True,
             )
             if carried:
@@ -1860,9 +1863,9 @@ def _h_vacancy_scoring(state, entry, opts):
             entry,
             "escalate",
             len(remaining_ids),
-            f"session stopped early — {len(remaining_ids)} of "
-            f"{len(entry.get('escalate_target_ids', []))} finalist(s) left unscored; "
-            "they lead the next run's batch",
+            f"The scoring session stopped early — {len(remaining_ids)} of "
+            f"{len(entry.get('escalate_target_ids', []))} finalists are still unscored. "
+            "They go first in the next run.",
             finish=True,
         )
         if carried:

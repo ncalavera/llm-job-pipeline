@@ -1362,7 +1362,7 @@ def test_stage_that_left_work_undone_reads_partial_not_ok(rd):
         "name": "vacancy_scoring",
         "status": "done",
         "carried_over": 35,
-        "note": "session stopped early — 35 of 55 role(s) left unscored",
+        "note": "The scoring session stopped early — 35 of 55 roles are still unscored.",
     }
     assert rd._stage_verdict(partial, []) == "PARTIAL"
     assert rd._stage_partial(partial) is True
@@ -1377,7 +1377,7 @@ def test_report_card_marks_a_partial_stage_and_says_why(rd, capsys):
     vac = rd._stage(state, "vacancy_scoring")
     vac["status"] = "done"
     vac["carried_over"] = 35
-    vac["note"] = "session stopped early — 35 of 55 role(s) left unscored"
+    vac["note"] = "The scoring session stopped early — 35 of 55 roles are still unscored."
 
     rd._print_stage_board(state, verdict=True)
     out = capsys.readouterr().out
@@ -1708,7 +1708,7 @@ def test_unattended_escalate_carries_over_when_stuck(rd, monkeypatch, tmp_path):
     assert kind == "advance"
     assert entry["carried_over"] == 1
     # The note names what was left undone, out of how many (report card R5).
-    assert "session stopped early — 1 of 1 finalist(s) left unscored" in note
+    assert "The scoring session stopped early — 1 of 1 finalists are still unscored" in note
 
 
 def test_attended_scoring_gate_still_re_emits_without_progress(rd, monkeypatch, tmp_path):
@@ -1884,7 +1884,7 @@ def test_unattended_company_scoring_carries_over_without_progress(rd, monkeypatc
     kind, note = rd._h_company_scoring(state, entry, opts)
     assert kind == "advance"
     assert entry["carried_over"] == 2
-    assert "session stopped early — 2 of 2 company(ies) left unscored" in note
+    assert "The scoring session stopped early — 2 of 2 companies are still unscored" in note
 
 
 def test_unattended_company_scoring_re_emits_on_progress(rd, monkeypatch, tmp_path):
