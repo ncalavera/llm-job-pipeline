@@ -1052,3 +1052,80 @@ def test_preflight_note_names_both_numbers(env):
     assert kind == "advance"
     assert "1 role from an earlier run is still waiting to be scored" in note
     assert "1 more sits behind a company you have not approved yet" in note
+
+
+# ---------------------------------------------------------------------------
+# One rule, one answer at both ends
+#
+# A per-company include-list may scope a pattern to the body ("desc:..."). The
+# fetch honours that and keeps the role; the filter and the scorer are the
+# safety nets for the same rule, so they must reach the same verdict on the
+# same role. Judging on the title alone at this end would flag a role the
+# fetch deliberately kept.
+# ---------------------------------------------------------------------------
+
+
+def _desc_scoped_company(monkeypatch, org, pattern):
+    """Give ``org`` an include-list with a single description-scoped pattern."""
+    import filters
+
+    compiled = filters._build_company_title_include({org: [pattern]})
+    monkeypatch.setattr(filters, "_COMPANY_TITLE_INCLUDE", compiled)
+
+
+def test_a_role_kept_by_its_body_is_not_flagged_by_the_filter(env, monkeypatch):
+    db, fv = env
+    _desc_scoped_company(monkeypatch, "Initech", "desc:innovation accelerator")
+    vid = _seed(
+        db,
+        "Initech",
+        "Senior Delivery Partner",
+        desc=(
+            "You will run the innovation accelerator with our partners. "
+            "Responsibilities include the whole programme. " * 3
+        ),
+    )
+
+    # The fetch keeps it ...
+    import filters
+
+    assert filters.fetch_time_drop_reason(
+        "Initech", "Senior Delivery Partner", "the innovation accelerator"
+    ) is None
+
+    _run_pass(fv)
+
+    # ... and the filter agrees: no reason, still offered to the scorer.
+    assert _reason(db, vid) is None
+    assert vid in db.load_vacancies(unscored_only=True)
+
+
+def test_a_role_matching_neither_scope_is_still_flagged(env, monkeypatch):
+    """The safety net still works — this is agreement, not a blanket keep."""
+    db, fv = env
+    _desc_scoped_company(monkeypatch, "Initech", "desc:innovation accelerator")
+    vid = _seed(
+        db,
+        "Initech",
+        "Senior Delivery Partner",
+        dedup_hash="no-match",
+        desc="A perfectly ordinary role description with nothing matching. " * 4,
+    )
+
+    _run_pass(fv)
+
+    assert _reason(db, vid) == "company_title_filter — not in Initech include list"
+
+
+def test_the_scorer_reaches_the_same_verdict_on_the_same_role(monkeypatch):
+    """score_vacancies is the other safety net; it must agree too."""
+    import filters
+
+    _desc_scoped_company(monkeypatch, "Initech", "desc:innovation accelerator")
+    body = "You will run the innovation accelerator."
+
+    # Body given -> kept, at every end.
+    assert filters.company_title_filter_reason("Initech", "Senior Delivery Partner", body) is None
+    # Title alone -> dropped. This is the disagreement the call sites must avoid
+    # by passing the body they already hold.
+    assert filters.company_title_filter_reason("Initech", "Senior Delivery Partner") is not None

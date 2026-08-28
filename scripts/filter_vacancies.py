@@ -596,7 +596,13 @@ def classify_vacancies(db: dict = None) -> dict:
         # matches an include pattern; everything else at that company is dropped
         # here (unlisted companies are untouched). Mirrors the blacklist drop but
         # carries a rule-named reason so the learning review can revisit it.
-        ctf_reason = filters.company_title_filter_reason(org, title)
+        # The body matters: a description-scoped pattern (desc:...) keeps a
+        # role on its body, and fetch time already honoured that. Passing the
+        # title alone here would flag a role the fetch deliberately kept — the
+        # two ends of one rule disagreeing about the same role.
+        ctf_reason = filters.company_title_filter_reason(
+            org, title, vac.get("full_description", "")
+        )
         if ctf_reason:
             vac["_filter_reason"] = ctf_reason
             categories["delete_company_title_filter"].append((vid, vac))
@@ -721,7 +727,11 @@ def _group_exclusion_reason(category: str, rep: dict) -> str | None:
     if category == "delete_company_title_filter":
         return (
             rep.get("_filter_reason")
-            or filters.company_title_filter_reason(rep.get("org", ""), rep.get("title", ""))
+            or filters.company_title_filter_reason(
+                rep.get("org", ""),
+                rep.get("title", ""),
+                rep.get("full_description") or rep.get("snippet") or "",
+            )
             or "company title filter"
         )
     if category == "delete_not_a_vacancy":
