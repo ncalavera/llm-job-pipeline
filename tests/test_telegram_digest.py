@@ -463,6 +463,37 @@ def test_header_counts_from_run_state(denv):
     assert "3 role(s)" in "\n".join(_sent_texts(denv.calls))
 
 
+def test_header_names_the_backlog_parked_behind_unapproved_companies(denv):
+    """B: 357 unscored roles at candidate companies were invisible in every
+    report. The header now labels them next to the waiting figure."""
+    _seed(denv.db, "Org A", "Waiting Role")
+    for i in range(4):
+        _seed(denv.db, "Stranger Co", f"Parked {i}", company_status="candidate")
+    td.cmd_send(_args())
+    header = _sent_texts(denv.calls)[0]
+    assert "1 still to score" in header
+    assert "4 more roles wait behind not-yet-approved companies" in header
+
+
+def test_header_omits_the_parked_line_when_nothing_is_parked(denv):
+    _seed(denv.db, "Org A", "Waiting Role")
+    td.cmd_send(_args())
+    header = _sent_texts(denv.calls)[0]
+    assert "1 still to score" in header
+    assert "wait behind" not in header
+
+
+def test_waiting_figure_counts_only_roles_the_scorer_would_take(denv):
+    """passed / liked / already-scored / dropped rows are not waiting."""
+    _seed(denv.db, "Org A", "Waiting Role")
+    _seed(denv.db, "Org A", "Passed Role", status="passed")
+    _seed(denv.db, "Org A", "Liked Role", status="liked")
+    _seed(denv.db, "Org A", "Scored Role", score=70)
+    _seed(denv.db, "Org A", "Dropped Role", reason="US-only location")
+    td.cmd_send(_args())
+    assert "1 still to score" in _sent_texts(denv.calls)[0]
+
+
 def test_header_dropped_equals_the_dropped_lines_the_digest_lists(denv):
     """The header's "dropped" is the number of tier-3 rows this message claims,
     not the filter's in-memory tally (the 2026-08-27 mismatch: 128 vs 74)."""

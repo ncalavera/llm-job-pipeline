@@ -48,8 +48,10 @@ DEFAULT_STATE_FILE = "~/.jobsearch_digest_state.json"
 # Digest defaults come from config/defaults.toml ([digest]) when the settings
 # loader is importable. This script also runs standalone on a bare host (no
 # project tree), so fall back to neutral literals if settings is unavailable.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import unscored_pool  # noqa: E402 — the shared "waiting to be scored" definition
+
 try:
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
     import settings as _settings  # noqa: E402
 
     _DIGEST = _settings.digest()
@@ -182,20 +184,6 @@ SELECT count(*) AS fetched,
                 THEN 1 ELSE 0 END) AS unscored
 FROM vacancy v
 WHERE v.first_seen > %s
-"""
-
-# Roles still waiting to be scored, right now — the header's "still to score".
-# Same definition as load_vacancies(unscored_only=True) and the dashboard's
-# unscored count: a negative sentinel counts as unscored, and a row carrying a
-# scoring_excluded_reason is dropped, not waiting.
-COUNT_UNSCORED_POOL_SQL = """
-SELECT count(*) AS n
-FROM vacancy v
-JOIN company c ON v.company_id = c.id
-WHERE (v.llm_score IS NULL OR v.llm_score < 0)
-  AND v.status = 'unseen'
-  AND v.scoring_excluded_reason IS NULL
-  AND c.status = 'active'
 """
 
 # Protected high-fit roles (status='expiring') that haven't been alerted yet.
@@ -509,10 +497,10 @@ def _fetch_stats_total_new():
 
 
 def fetch_unscored_pool(conn):
-    """Roles still waiting to be scored in the database, right now."""
+    """Roles waiting to be scored right now, by company status. ONE definition,
+    shared with the filter stage's note — see scripts/unscored_pool.py."""
     with _dict_cursor(conn) as cur:
-        cur.execute(COUNT_UNSCORED_POOL_SQL)
-        return int(dict(cur.fetchone() or {}).get("n") or 0)
+        return unscored_pool.counts(cur)
 
 
 def gather_counts(conn, run_state, since, dropped_total=None):
@@ -527,12 +515,14 @@ def gather_counts(conn, run_state, since, dropped_total=None):
         awaiting a score — NOT the carried-over batch, which is a subset of it
         and has its own tier-4 line.
     """
-    unscored = fetch_unscored_pool(conn)
+    pool = fetch_unscored_pool(conn)
+    unscored, parked = pool["active"], pool["candidate"]
     if run_state is None:
         counts = fetch_counts_since(conn, since)
         if dropped_total is not None:
             counts["dropped"] = dropped_total
         counts["unscored"] = unscored
+        counts["parked"] = parked
         counts["targets"] = 0
         return counts
     c = run_state.get("counts") or {}
@@ -554,13 +544,15 @@ def gather_counts(conn, run_state, since, dropped_total=None):
         "scored": _int(scored),
         "dropped": _int(dropped_total),
         "unscored": unscored,
+        "parked": parked,
         "targets": targets,
     }
 
 
 def build_header_lines(counts, deadlines_soon, run_state):
     """Counts line first — a short message must read "quiet night", never
-    "broken night" (R10) — then the AE7 no-progress line, then deadlines."""
+    "broken night" (R10) — then the parked-backlog line, the AE7 no-progress
+    line, then deadlines."""
     lines = [
         _t(
             "digest_run_header",
@@ -570,6 +562,10 @@ def build_header_lines(counts, deadlines_soon, run_state):
             unscored=counts["unscored"],
         )
     ]
+    # A big parked backlog must never hide behind a small "waiting" figure:
+    # roles at unapproved companies are unscored and invisible everywhere else.
+    if counts.get("parked"):
+        lines.append(_t("digest_waiting_parked", n=counts["parked"]))
     if run_state and run_state.get("no_progress"):
         lines.append(_t("digest_no_progress", n=counts["targets"]))
     if deadlines_soon:

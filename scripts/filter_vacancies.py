@@ -767,6 +767,20 @@ def persist_scoring_exclusions(categories: dict) -> dict:
     }
 
 
+def waiting_to_score() -> dict:
+    """Roles waiting to be scored right now, by company status. Uses the ONE
+    shared definition (scripts/unscored_pool.py) so this stage's note and the
+    morning digest header cannot print two different numbers for it."""
+    import unscored_pool
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        return unscored_pool.counts(cur)
+    finally:
+        cur.close()
+
+
 # ---------------------------------------------------------------------------
 # Stats aggregation
 # ---------------------------------------------------------------------------
@@ -1564,6 +1578,7 @@ def main():
     # Persist the exclusion record — the one decider of "not scored" (R8):
     # set the reason on excluded rows, clear rows a rule no longer matches.
     scoring_excluded = persist_scoring_exclusions(categories)
+    waiting = waiting_to_score()
 
     # --- Structured filter summary (for feedback loop) ---
     print("\n--- Filter Summary ---", file=sys.stderr, flush=True)
@@ -1608,7 +1623,13 @@ def main():
                 "write scope — not status='unseen' — and carry no reason)"
             )
         print(line, file=sys.stderr, flush=True)
-    print(f"  Ready to score: {stats['ready_count']}", file=sys.stderr, flush=True)
+    print(f"  Pass the filter: {stats['ready_count']}", file=sys.stderr, flush=True)
+    print(
+        f"  Waiting to be scored now: {waiting['active']} "
+        f"(+{waiting['candidate']} behind not-yet-approved companies)",
+        file=sys.stderr,
+        flush=True,
+    )
     print("--- End Filter Summary ---\n", file=sys.stderr, flush=True)
 
     report_path = PROJECT_ROOT / "reports" / "REPORT-filter.html"
@@ -1637,6 +1658,7 @@ def main():
         "delete_ids": delete_ids,
         "reenrich_ids": reenrich_ids,
         "ready": stats["ready_count"],
+        "waiting_to_score": waiting,
         "scoring_excluded": scoring_excluded,
         "report_path": str(report_path),
     }

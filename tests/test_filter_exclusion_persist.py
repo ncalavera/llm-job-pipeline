@@ -561,14 +561,16 @@ def test_filter_note_is_one_partition_of_one_pool(tmp_path, monkeypatch):
             "ready": 41,
         },
         "ready": 41,
+        "waiting_to_score": {"active": 20, "candidate": 357, "other": 6},
         "scoring_excluded": {"classified": 128, "stamped": 74, "cleared": 5, "reasons": {}},
     }
     entry, note = _h_filter_note(monkeypatch, payload)
 
     assert note == (
-        "448 unscored role(s) scanned → 41 ready to score, 128 excluded from scoring "
+        "448 unscored role(s) scanned → 41 pass the filter, 128 excluded from scoring "
         "(74 reason(s) written to the row; nothing deleted — review in /jobs-review), "
-        "279 waiting for re-enrichment"
+        "279 waiting for re-enrichment; 20 role(s) now wait to be scored, "
+        "357 more behind not-yet-approved companies"
     )
     assert entry["filter"]["scanned"] == 448
     assert (
@@ -578,6 +580,83 @@ def test_filter_note_is_one_partition_of_one_pool(tmp_path, monkeypatch):
     # Rows the pass classified but never wrote are NOT reported as written.
     assert entry["filter"]["reasons_written"] == 74
     assert entry["filter"]["excluded_count"] == 74
+    # "pass the filter" (this scan) and "wait to be scored" (the live queue)
+    # are different questions and now carry different words.
+    assert "ready to score" not in note
+    assert entry["filter"]["waiting_to_score"] == 20
+    assert entry["filter"]["waiting_behind_candidates"] == 357
+
+
+def test_filter_note_names_the_parked_backlog_even_when_the_queue_is_small(
+    tmp_path, monkeypatch
+):
+    """357 roles parked behind unapproved companies must not hide behind a
+    "20 waiting" figure — nothing else in the run counts them."""
+    payload = {
+        "total_unscored": 5,
+        "categories": {"ready": 5},
+        "ready": 5,
+        "waiting_to_score": {"active": 20, "candidate": 357, "other": 0},
+        "scoring_excluded": {"stamped": 0},
+    }
+    _, note = _h_filter_note(monkeypatch, payload)
+    assert "20 role(s) now wait to be scored, 357 more behind not-yet-approved companies" in note
+
+
+# ---------------------------------------------------------------------------
+# One definition of "waiting to be scored", shared by both stages
+# ---------------------------------------------------------------------------
+
+
+def test_both_stages_report_the_same_waiting_number(env):
+    """The 2026-08-28 mismatch: the filter said 26 and the digest said 20 in
+    the same minute against the same database. Both now count with
+    unscored_pool, so they cannot disagree."""
+    db, fv = env
+    import telegram_digest as td
+    import unscored_pool
+
+    # Waiting: unseen, unscored, no reason, at an active company.
+    _seed(db, "ActiveOrg", "Waiting One", dedup_hash="w1")
+    _seed(db, "ActiveOrg", "Waiting Two", dedup_hash="w2")
+    # NOT waiting — each for its own reason.
+    _seed(db, "ActiveOrg", "Passed Role", dedup_hash="p1", status="passed")
+    _seed(db, "ActiveOrg", "Liked Role", dedup_hash="l1", status="liked")
+    _seed(db, "ActiveOrg", "Scored Role", dedup_hash="s1", llm_score=70)
+    _seed(db, "ActiveOrg", "Dropped Role", dedup_hash="d1", reason="US-only location")
+    # Parked behind a company nobody approved.
+    for i in range(3):
+        _seed(db, "CandOrg", f"Parked {i}", dedup_hash=f"c{i}")
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE company SET status = 'candidate' WHERE canonical_name = ?", ("CandOrg",))
+    conn.commit()
+    cur.close()
+
+    from_filter = fv.waiting_to_score()
+    from_digest = td.fetch_unscored_pool(db.get_conn())
+
+    assert from_filter == from_digest
+    assert from_filter == {"active": 2, "candidate": 3, "other": 0}
+    # And the shared module is what both of them called.
+    cur = db.get_conn().cursor()
+    assert unscored_pool.counts(cur) == from_filter
+    cur.close()
+
+
+def test_waiting_pool_matches_what_the_scorer_will_actually_be_offered(env):
+    """A 'passed' row is refused by score_vacancies (status_exclude), so it is
+    not waiting — this is exactly where the filter's looser 'ready' count and
+    the digest disagreed."""
+    db, fv = env
+    _seed(db, "ActiveOrg", "Passed Role", dedup_hash="p1", status="passed")
+    _seed(db, "ActiveOrg", "Waiting Role", dedup_hash="w1")
+
+    assert fv.waiting_to_score()["active"] == 1
+    # The filter's own scan still SEES the passed row — different question.
+    cats = fv.classify_vacancies()
+    seen = {vid for items in cats.values() for vid, _ in items}
+    assert len(seen) == 2
 
 
 def test_filter_note_says_so_when_the_parts_do_not_add_up(tmp_path, monkeypatch):

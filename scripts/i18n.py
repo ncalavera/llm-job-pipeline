@@ -417,6 +417,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "digest_save_error": "⚠️ Couldn't save your choice, please tap again.",
         # telegram_digest.py — tiered morning digest (U3)
         "digest_run_header": "🌙 <b>Night run</b>: {fetched} fetched, {scored} scored. Backlog now: {dropped} dropped (listed below), {unscored} still to score",
+        "digest_waiting_parked": "↳ {n} more roles wait behind not-yet-approved companies",
         "digest_no_progress": "⚠️ scored 0 of {n} — the session made no progress",
         "digest_deadlines_week": "⏰ {n} deadlines this week",
         "digest_tier_top": "🔥 <b>Top matches</b> — tap 👍 / 👎",
@@ -803,6 +804,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "digest_save_error": "⚠️ Не удалось сохранить выбор, нажмите ещё раз.",
         # telegram_digest.py — трёхъярусный утренний дайджест (U3)
         "digest_run_header": "🌙 <b>Ночной прогон</b>: собрано {fetched}, оценено {scored}. Сейчас в очереди: {dropped} отсеяно (список ниже), {unscored} ждут оценки",
+        "digest_waiting_parked": "↳ за ещё не одобренными компаниями ждут ещё {n} ролей",
         "digest_no_progress": "⚠️ оценено 0 из {n} — сессия не продвинулась",
         "digest_deadlines_week": "⏰ дедлайнов на этой неделе: {n}",
         "digest_tier_top": "🔥 <b>Лучшие совпадения</b> — жми 👍 / 👎",

@@ -1412,6 +1412,8 @@ def _h_filter(state, entry, opts):
     # a reason; the older "count" key meant the in-memory decision.
     excl = data.get("scoring_excluded", {}) or {}
     stamped = int(excl.get("stamped", excl.get("count", 0)) or 0)
+    raw_waiting = data.get("waiting_to_score") or {}
+    waiting = {k: int(raw_waiting.get(k, 0) or 0) for k in ("active", "candidate", "other")}
     entry["filter"] = {
         "scanned": scanned,
         "ready": ready,
@@ -1419,14 +1421,16 @@ def _h_filter(state, entry, opts):
         "reenrich": reenrich,
         "reasons_written": stamped,
         "reasons_cleared": int(excl.get("cleared", 0) or 0),
+        "waiting_to_score": waiting["active"],
+        "waiting_behind_candidates": waiting["candidate"],
         "excluded_count": stamped,  # back-compat: rows carrying a reason
         "excluded_reasons": excl.get("reasons") or {},
     }
-    # One partition of one pool, denominator first: ready + excluded + re-enrich
+    # One partition of one pool, denominator first: pass + excluded + re-enrich
     # must add up to the pool the pass scanned. Nothing here is printed twice
     # under two names.
     note = (
-        f"{scanned} unscored role(s) scanned \u2192 {ready} ready to score, "
+        f"{scanned} unscored role(s) scanned \u2192 {ready} pass the filter, "
         f"{excluded} excluded from scoring ({stamped} reason(s) written to the row; "
         f"nothing deleted \u2014 review in /jobs-review), "
         f"{reenrich} waiting for re-enrichment"
@@ -1434,6 +1438,15 @@ def _h_filter(state, entry, opts):
     parts_sum = ready + excluded + reenrich
     if parts_sum != scanned:
         note += f"; the parts add up to {parts_sum}, not {scanned} \u2014 the filter categories disagree"
+    # "Pass the filter" is about THIS scan; "waiting to be scored" is the live
+    # queue, counted with the definition the digest header uses (they are not
+    # the same set: the scan also sees rows the scorer refuses). Roles parked
+    # behind unapproved companies get their own number — nothing else counts
+    # them, so a small queue must not hide a large parked backlog.
+    note += (
+        f"; {waiting['active']} role(s) now wait to be scored, "
+        f"{waiting['candidate']} more behind not-yet-approved companies"
+    )
     return "advance", note
 
 
