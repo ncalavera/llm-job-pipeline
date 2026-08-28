@@ -3,7 +3,9 @@
 
 Two modes:
   send  — ONE tiered morning message (split when Telegram's size limit forces
-          it, and always before tier 3; parts arrive in order): a counts header
+          it, and always before tier 2 and tier 3, so the tier-1 like/pass
+          keyboard can only ever sit under the numbered entries it acts on;
+          parts arrive in order): a counts header
           ("Night run: F fetched, S scored" for THIS run, then "Backlog now: D
           dropped, U still to score" counted in the database + "N deadlines this
           week"), tier 1 top matches with like/pass buttons (fresh rows scoring
@@ -615,13 +617,14 @@ def assemble_digest(header_lines, top_rows, mid_rows, dropped_rows, tail_lines, 
         blocks.append(_t("digest_tier_top"))
         blocks.extend((build_top_line(r, i), r, "top") for i, r in enumerate(top_rows, 1))
     if mid_rows:
-        blocks.append("")
+        # Tier 2 opens a NEW message for the same reason tier 3 does: the
+        # tier-1 keyboard sits at the bottom of its message, and a message that
+        # ends on "Mid scores" lines puts the buttons under rows they do not
+        # act on. Tier 1 therefore always ends on its own numbered entries.
+        blocks.append(PART_BREAK)
         blocks.append(_t("digest_tier_mid"))
         blocks.extend((build_mid_line(r), r, "mid") for r in mid_rows)
     if dropped_rows:
-        # Tier 3 always opens a NEW message: the tier-1 like/pass keyboard sits
-        # at the bottom of its message, so sharing a message with dropped lines
-        # would park the buttons under rows they do not belong to.
         blocks.append(PART_BREAK)
         blocks.append(_t("digest_tier_dropped"))
         shown = dropped_rows[:DROPPED_MAX_LINES]

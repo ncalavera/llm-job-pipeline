@@ -743,9 +743,44 @@ def test_keyboard_never_lands_on_a_message_that_ends_in_dropped_lines(denv, monk
     assert _col(denv.db, top, "digest_sent_at") is not None
 
 
-def test_part_break_does_not_split_a_digest_that_has_no_dropped_rows(denv):
-    """The break is tier-3's alone: a night without dropped rows stays one
-    message, buttons included."""
+def test_keyboard_never_lands_on_a_message_that_ends_in_mid_scores(denv):
+    """Same rule as tier 3: a message whose tail is "Mid scores" lines must not
+    carry the tier-1 keyboard — those rows have no buttons of their own."""
+    top = _seed(denv.db, "Org A", "Top Role", score=80)
+    _seed(denv.db, "Org B", "Mid One", score=48)
+    _seed(denv.db, "Org C", "Mid Two", score=44)
+    td.cmd_send(_args())
+    payloads = [p for m, p in denv.calls if m == "sendMessage"]
+    assert len(payloads) == 2
+    with_kb = [p for p in payloads if p.get("reply_markup")]
+    assert len(with_kb) == 1
+    assert "Mid One" not in with_kb[0]["text"] and "Mid Two" not in with_kb[0]["text"]
+    assert "Top Role" in with_kb[0]["text"]
+    assert "reply_markup" not in payloads[1]
+    assert _col(denv.db, top, "digest_sent_at") is not None
+
+
+def test_every_tier_opens_its_own_message(denv):
+    """Tier 1 / 2 / 3 never share a message, so the keyboard message always
+    ends on the numbered entries it acts on."""
+    _seed(denv.db, "Org A", "Top Role", score=80)
+    _seed(denv.db, "Org B", "Mid Role", score=45)
+    _seed(denv.db, "Org C", "Dropped Role", reason="US-only location")
+    td.cmd_send(_args())
+    payloads = [p for m, p in denv.calls if m == "sendMessage"]
+    assert len(payloads) == 3
+    assert payloads[0].get("reply_markup") and "Top Role" in payloads[0]["text"]
+    assert "Mid Role" in payloads[1]["text"] and "reply_markup" not in payloads[1]
+    assert "Dropped Role" in payloads[2]["text"] and "reply_markup" not in payloads[2]
+    # Every message with a keyboard carries only tier-1 rows.
+    for p in payloads:
+        if p.get("reply_markup"):
+            assert "Mid scores" not in p["text"] and "Dropped" not in p["text"]
+
+
+def test_part_break_does_not_split_a_digest_with_only_one_tier(denv):
+    """The break fires per tier: a night with tier 1 alone stays one message,
+    buttons included."""
     _seed(denv.db, "Org A", "Top Role", score=80)
     td.cmd_send(_args())
     payloads = [p for m, p in denv.calls if m == "sendMessage"]
