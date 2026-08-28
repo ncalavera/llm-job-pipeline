@@ -510,19 +510,29 @@ def _candidate_names_to_score(limit: int) -> list[str]:
     return names[:limit] if limit else names
 
 
-def _unscored_unseen() -> int:
-    from database_supabase import _scoring_excluded_supported
+def _waiting_to_score() -> dict:
+    """Roles waiting to be scored, by company status — the ONE shared
+    definition (scripts/unscored_pool.py), so this agrees with the filter
+    stage's note and the digest header instead of being a third answer.
 
-    # Rows the filter pass excluded from scoring (migration 0025) are not
-    # "awaiting scoring" — counting them would hold the scoring gate open for
-    # rows the scorer will never be offered. Column-guarded for pre-migration
-    # installs.
-    cond = ""
-    if _scoring_excluded_supported():
-        cond = " AND scoring_excluded_reason IS NULL"
-    return _scalar(
-        "SELECT count(*) FROM vacancy WHERE status = 'unseen' AND llm_score IS NULL" + cond
-    )
+    What it used to count differently: it missed the negative sentinel score
+    (awaiting scoring to every other reader), and it counted roles behind
+    unapproved and inactive companies as if the main pool would pick them up.
+    Degrades to zeros rather than crashing a run on a pre-migration install.
+    """
+    import unscored_pool
+
+    try:
+        from database_supabase import get_conn
+
+        conn = get_conn()
+        cur = conn.cursor()
+        try:
+            return unscored_pool.counts(cur)
+        finally:
+            cur.close()
+    except Exception:
+        return {"active": 0, "candidate": 0, "other": 0}
 
 
 def _scored_unseen() -> int:
@@ -1281,10 +1291,19 @@ def _h_preflight(state, entry, opts):
         state["first_run"] = True
         return "advance", "empty company table — first-run onboarding required"
     state["first_run"] = False
-    pending = _unscored_unseen()
+    waiting = _waiting_to_score()
     note = f"{n} companies tracked"
-    if pending:
-        note += f"; {pending} unscored vacancies from a prior run will be picked up in scoring"
+    if waiting["active"]:
+        note += (
+            f"; {_roles(waiting['active'])} from an earlier run "
+            f"{'is' if waiting['active'] == 1 else 'are'} still waiting to be scored"
+        )
+        if waiting["candidate"]:
+            note += (
+                f", and {waiting['candidate']} more "
+                f"{'sits' if waiting['candidate'] == 1 else 'sit'} behind a company you have "
+                "not approved yet"
+            )
     missing = _check_keys(state)
     if missing:
         n = len(missing)

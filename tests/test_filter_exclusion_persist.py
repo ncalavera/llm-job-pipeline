@@ -4,7 +4,7 @@ filter_vacancies.persist_scoring_exclusions() is the single decider of "not
 scored" for new vacancies: it writes vacancy.scoring_excluded_reason in ONE
 UPDATE per run (set and clear in the same statement), and every reader of
 "unscored" — load_vacancies(unscored_only=True), the candidate rescue, the
-dashboard count, run_daily._unscored_unseen — excludes reasoned rows, so the
+dashboard count, run_daily._waiting_to_score — excludes reasoned rows, so the
 reason shown downstream is the reason that applied.
 
 Each test runs on its own fresh temp SQLite DB with migration 0025 applied
@@ -485,7 +485,7 @@ def test_unscored_unseen_count_excludes_reasoned_rows(env):
     import run_daily
 
     importlib.reload(run_daily)
-    assert run_daily._unscored_unseen() == 1
+    assert run_daily._waiting_to_score()["active"] == 1
     assert vid_clean in db.load_vacancies(unscored_only=True)
 
 
@@ -987,3 +987,68 @@ def test_char_a_decided_sibling_is_still_never_counted_as_work(env):
 
     assert fv.decided_count(all_cats) == 1
     assert sum(len(v) for v in work.values()) == 1
+
+
+# ---------------------------------------------------------------------------
+# CHARACTERISATION — run_daily's own "unscored" count, before it adopts the
+# shared definition. Two ways it disagrees with every other reader.
+# ---------------------------------------------------------------------------
+
+
+def _preflight_count(env):
+    db, fv = env
+    sys.modules.pop("run_daily", None)
+    import run_daily
+
+    importlib.reload(run_daily)
+    return run_daily
+
+
+def test_char_preflight_count_and_the_sentinel_row(env):
+    """A -1 sentinel row is awaiting scoring everywhere else (load_vacancies,
+    the dashboard, unscored_pool). The preflight count must agree."""
+    db, fv = env
+    _seed(db, "CleanOrg", "Backend Engineer", dedup_hash="clean")
+    _seed(db, "SentinelOrg", "Data Analyst", dedup_hash="sentinel", llm_score=-1)
+    rd = _preflight_count(env)
+
+    assert len(db.load_vacancies(unscored_only=True)) == 2
+    assert rd._waiting_to_score()["active"] == 2
+
+
+def test_char_preflight_count_and_an_unapproved_company(env):
+    """A role behind a company nobody approved is not going to be picked up by
+    the main pool, so it must not be counted as if it were."""
+    db, fv = env
+    _seed(db, "CleanOrg", "Backend Engineer", dedup_hash="clean")
+    vid = _seed(db, "CandOrg", "Program Officer", dedup_hash="cand")
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE company SET status = 'candidate' WHERE canonical_name = ?", ("CandOrg",))
+    conn.commit()
+    cur.close()
+    rd = _preflight_count(env)
+
+    counts = rd._waiting_to_score()
+    assert counts["active"] == 1
+    assert counts["candidate"] == 1
+    assert vid  # the parked role is counted, separately
+
+
+def test_preflight_note_names_both_numbers(env):
+    db, fv = env
+    _seed(db, "CleanOrg", "Backend Engineer", dedup_hash="clean")
+    _seed(db, "CandOrg", "Program Officer", dedup_hash="cand")
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE company SET status = 'candidate' WHERE canonical_name = ?", ("CandOrg",))
+    conn.commit()
+    cur.close()
+    rd = _preflight_count(env)
+
+    state = rd._new_state(rd.Opts())
+    kind, note = rd._h_preflight(state, rd._stage(state, "preflight"), rd.Opts())
+
+    assert kind == "advance"
+    assert "1 role from an earlier run is still waiting to be scored" in note
+    assert "1 more sits behind a company you have not approved yet" in note
