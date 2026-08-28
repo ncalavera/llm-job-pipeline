@@ -30,6 +30,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run dedup pre-step: clean exact hash dupes + find fuzzy dupes",
     )
+    parser.add_argument(
+        "--dedup-only",
+        action="store_true",
+        help="Run ONLY the dedup pass and print its JSON (the driver's dedup stage)",
+    )
     return parser
 
 
@@ -98,7 +103,38 @@ _PROTECTED_STATUSES: frozenset[str] = frozenset(
         "archived",
     }
 )
+#: A role Nikita has already decided about is not work for this pass. The pass
+#: still LOADS it, because a decided sibling is what tells the location rule
+#: that the same role also exists in Berlin — it is context, never work. It is
+#: never counted, never proposed for deletion or re-enrichment, and never given
+#: a note: the note can only be saved on an undecided role, so deciding about a
+#: decided one only produces a note that cannot be saved.
+_UNDECIDED_STATUS = "unseen"
+
+
+def _undecided(vac: dict) -> bool:
+    """True when this role is still waiting for a decision."""
+    return (vac.get("status") or _UNDECIDED_STATUS) == _UNDECIDED_STATUS
+
+
+def only_undecided(categories: dict) -> dict:
+    """``categories`` with the already-decided roles removed from every bucket."""
+    return {
+        cat: [(vid, v) for vid, v in items if _undecided(v)] for cat, items in categories.items()
+    }
+
+
+def decided_count(categories: dict) -> int:
+    """How many already-decided roles this pass saw (and left alone)."""
+    return sum(1 for items in categories.values() for _, v in items if not _undecided(v))
+
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _roles(n: int) -> str:
+    """ "1 role" / "3 roles" — the summary talks to a person, not a log parser."""
+    return f"{n} role" if n == 1 else f"{n} roles"
 
 
 def _strip_punct(title: str) -> str:
@@ -278,6 +314,50 @@ def _clean_exact_dupes() -> dict:
         "protected": protected_count,
         "archived_path": str(archive_path),
     }
+
+
+def run_dedup() -> dict:
+    """Remove copies of the same role and find the look-alikes.
+
+    Two steps, one pass: identical roles (same dedup hash) are merged into the
+    best copy and the extras archived, then the remaining roles are compared by
+    title inside each company to surface pairs that look like the same role
+    under two names — those are only reported, never removed.
+
+    Returns {examined, merged, protected, fuzzy_pairs, fuzzy}.
+    """
+    result = dict(_clean_exact_dupes())
+    fuzzy = _find_fuzzy_dupes(load_vacancies(unscored_only=True))
+    result["fuzzy_pairs"] = len(fuzzy)
+    result["fuzzy"] = fuzzy
+    return result
+
+
+def dedup_lines(result: dict) -> list[str]:
+    """What the dedup pass did, in plain words. One line per thing that
+    happened; nothing at all to say is said too."""
+    merged = int(result.get("merged", 0) or 0)
+    protected = int(result.get("protected", 0) or 0)
+    groups = int(result.get("examined", 0) or 0)
+    fuzzy = int(result.get("fuzzy_pairs", 0) or 0)
+    lines = []
+    if merged:
+        lines.append(
+            f"Removed {merged} repeated cop{'y' if merged == 1 else 'ies'} of "
+            f"{groups} role{'' if groups == 1 else 's'} the sources sent more than once."
+        )
+    else:
+        lines.append("No repeated copies to remove.")
+    if protected:
+        lines.append(
+            f"Kept {protected} cop{'y' if protected == 1 else 'ies'} you had already decided about."
+        )
+    if fuzzy:
+        lines.append(
+            f"{fuzzy} pair{' looks' if fuzzy == 1 else 's look'} like the same role under "
+            "two names — check them in /jobs-review."
+        )
+    return lines
 
 
 def _find_fuzzy_dupes(vacancies: dict) -> list[dict]:
@@ -473,6 +553,7 @@ def classify_vacancies(db: dict = None) -> dict:
     categories = {
         "delete_blacklist": [],
         "delete_company_title_filter": [],
+        "delete_not_a_vacancy": [],
         "delete_junk": [],
         "delete_rearchived": [],
         "delete_geo": [],
@@ -494,9 +575,13 @@ def classify_vacancies(db: dict = None) -> dict:
         if score is not None and score >= 0:
             continue
 
-        if vac.get("status", "unseen") in _PROTECTED_STATUSES:
-            continue
-
+        # Every sibling is classified, whatever Nikita decided about it. The
+        # grouping rules below answer "where does this role exist?", and a
+        # listing's location does not change because he liked or passed it.
+        # Skipping the decided ones made the strongest signal he can give —
+        # a role he LIKED in Berlin — the one that gave its New-York twin no
+        # protection, while a role he passed on did. Work is still filtered to
+        # the undecided rows afterwards (only_undecided / _exclusion_reason_map).
         title = vac.get("title", "")
         org = vac.get("org", "")
         has_url = bool(_get_vacancy_url(vac))
@@ -513,11 +598,31 @@ def classify_vacancies(db: dict = None) -> dict:
         # matches an include pattern; everything else at that company is dropped
         # here (unlisted companies are untouched). Mirrors the blacklist drop but
         # carries a rule-named reason so the learning review can revisit it.
-        ctf_reason = filters.company_title_filter_reason(org, title)
+        # The body matters: a description-scoped pattern (desc:...) keeps a
+        # role on its body, and fetch time already honoured that. Passing the
+        # title alone here would flag a role the fetch deliberately kept — the
+        # two ends of one rule disagreeing about the same role.
+        ctf_reason = filters.company_title_filter_reason(
+            org, title, vac.get("full_description", "")
+        )
         if ctf_reason:
             vac["_filter_reason"] = ctf_reason
             categories["delete_company_title_filter"].append((vid, vac))
             continue
+
+        # Priority 1c: not a vacancy at all — a program, course, grant or
+        # directory listed beside jobs on the EA-ecosystem boards, or a
+        # recruiter's test posting. A row Nikita added HIMSELF (source_board
+        # "manual") is never touched: he tracks programmes and grants on the
+        # board on purpose, and this gate is only about what the sources push.
+        if vac.get("source_board") != "manual":
+            nv_reason = filters.not_a_vacancy_reason(
+                title, vac.get("full_description") or vac.get("snippet") or ""
+            )
+            if nv_reason:
+                vac["_not_vacancy_reason"] = nv_reason
+                categories["delete_not_a_vacancy"].append((vid, vac))
+                continue
 
         # Priority 2: content junk (reCAPTCHA, donation widgets, error pages)
         junk_reason = filters.is_content_junk(vac.get("full_description", ""))
@@ -581,6 +686,7 @@ _GROUP_REASON_CATEGORIES = frozenset(
     {
         "delete_blacklist",
         "delete_company_title_filter",
+        "delete_not_a_vacancy",
         "delete_junk",
         "delete_rearchived",
         "delete_stale_blind",
@@ -623,8 +729,20 @@ def _group_exclusion_reason(category: str, rep: dict) -> str | None:
     if category == "delete_company_title_filter":
         return (
             rep.get("_filter_reason")
-            or filters.company_title_filter_reason(rep.get("org", ""), rep.get("title", ""))
+            or filters.company_title_filter_reason(
+                rep.get("org", ""),
+                rep.get("title", ""),
+                rep.get("full_description") or rep.get("snippet") or "",
+            )
             or "company title filter"
+        )
+    if category == "delete_not_a_vacancy":
+        return (
+            rep.get("_not_vacancy_reason")
+            or filters.not_a_vacancy_reason(
+                rep.get("title", ""), rep.get("full_description") or rep.get("snippet") or ""
+            )
+            or "not a job posting"
         )
     if category == "delete_junk":
         junk = rep.get("_junk_reason") or filters.is_content_junk(
@@ -653,10 +771,12 @@ def _exclusion_reason_map(categories: dict) -> dict[str, str]:
     """
     groups: dict[tuple[str, str], list[tuple[str, dict]]] = {}
     cat_by_id: dict[str, str] = {}
+    vac_by_id: dict[str, dict] = {}
     for cat, items in categories.items():
         for vid, vac in items:
             groups.setdefault((vac.get("org", ""), vac.get("title", "")), []).append((vid, vac))
             cat_by_id[vid] = cat
+            vac_by_id[vid] = vac
 
     reasons: dict[str, str] = {}
     for members in groups.values():
@@ -678,35 +798,55 @@ def _exclusion_reason_map(categories: dict) -> dict[str, str]:
                 continue
             if reason:
                 reasons[vid] = reason
-    return reasons
+    # Decided roles shaped the groups above (representative, and the
+    # every-location-excluded test) but never carry a note themselves, so what
+    # this pass decides is exactly what the database can hold.
+    return {vid: reason for vid, reason in reasons.items() if _undecided(vac_by_id[vid])}
 
 
 def persist_scoring_exclusions(categories: dict) -> dict:
-    """Write the exclusion record in ONE statement: set the reason on every
-    excluded row and clear it on every no-longer-excluded row.
+    """Write the exclusion record: set the reason on every excluded row and
+    clear it on every no-longer-excluded row, in ONE UPDATE.
 
-    Scoped to `(llm_score IS NULL OR llm_score < 0) AND status = 'unseen'`
-    (the -1 sentinel counts as unscored, matching load_vacancies) AND to the
-    rows this pass actually classified — a reasoned row the pass never saw
-    (e.g. its company left 'active') keeps its reason instead of being
-    blanket-cleared without a re-decision. Returns
-    {"persisted", "count", "reasons"} for the run summary / run state.
+    The write is scoped to `(llm_score IS NULL OR llm_score < 0) AND
+    status = 'unseen'` AND to the rows this pass classified. That scope is
+    NARROWER than ``load_vacancies(unscored_only=True)``, which loads every
+    non-archived status — so a classified row whose status is not 'unseen'
+    (e.g. 'passed', 'expiring') is decided in memory but never written. The
+    counters below keep that gap visible instead of reporting the in-memory
+    tally as a database fact:
+
+      classified    — rows this pass decided to exclude (in memory)
+      stamped       — rows that now carry a reason in the database
+      cleared       — rows whose reason this pass removed
+      out_of_scope  — classified - stamped (decided, outside the write scope)
+      count         — back-compat alias of ``stamped``
+      reasons       — histogram of the reasons actually stamped
     """
     from database_supabase import _scoring_excluded_supported
 
+    empty = {
+        "persisted": False,
+        "count": 0,
+        "classified": 0,
+        "stamped": 0,
+        "cleared": 0,
+        "out_of_scope": 0,
+        "reasons": {},
+    }
     if not _scoring_excluded_supported():
         print(
-            "  scoring_excluded_reason column missing (run scripts/migrate.py) — "
-            "exclusion reasons NOT persisted this run",
+            "  The database cannot store why a role was skipped yet "
+            "(run scripts/migrate.py) — nothing was marked this run.",
             file=sys.stderr,
             flush=True,
         )
-        return {"persisted": False, "count": 0, "reasons": {}}
+        return empty
 
     reason_by_id = _exclusion_reason_map(categories)
-    seen_ids = [vid for items in categories.values() for vid, _ in items]
+    seen_ids = [vid for items in categories.values() for vid, v in items if _undecided(v)]
     if not seen_ids:
-        return {"persisted": True, "count": 0, "reasons": {}}
+        return {**empty, "persisted": True}
 
     whens = []
     params: list = []
@@ -715,21 +855,52 @@ def persist_scoring_exclusions(categories: dict) -> dict:
         params.extend([vid, reason])
     case_sql = "CASE " + " ".join(whens) + " ELSE NULL END" if whens else "NULL"
 
+    scope_sql = (
+        "WHERE (llm_score IS NULL OR llm_score < 0) AND status = 'unseen' AND id = ANY(%s::uuid[])"
+    )
+
     conn = get_conn()
     cur = conn.cursor()
+    # Pre-state of exactly the rows the UPDATE can touch: RETURNING carries the
+    # NEW value only, so "how many reasons were removed" needs the old one.
+    cur.execute(f"SELECT id, scoring_excluded_reason FROM vacancy {scope_sql}", [seen_ids])
+    before = {str(row[0]): row[1] for row in cur.fetchall()}
+    # fetchall() before commit(): on SQLite an UPDATE ... RETURNING applies its
+    # rows as they are stepped, so the result set must be drained here.
     cur.execute(
-        f"UPDATE vacancy SET scoring_excluded_reason = {case_sql} "
-        "WHERE (llm_score IS NULL OR llm_score < 0) AND status = 'unseen' "
-        "AND id = ANY(%s::uuid[])",
+        f"UPDATE vacancy SET scoring_excluded_reason = {case_sql} {scope_sql} "
+        "RETURNING id, scoring_excluded_reason",
         params + [seen_ids],
     )
+    written = [(str(row[0]), row[1]) for row in cur.fetchall()]
     conn.commit()
     cur.close()
+
+    stamped = [reason for vid, reason in written if reason]
+    cleared = sum(1 for vid, reason in written if not reason and before.get(vid))
     return {
         "persisted": True,
-        "count": len(reason_by_id),
-        "reasons": dict(Counter(reason_by_id.values())),
+        "classified": len(reason_by_id),
+        "stamped": len(stamped),
+        "cleared": cleared,
+        "out_of_scope": len(reason_by_id) - len(stamped),
+        "count": len(stamped),
+        "reasons": dict(Counter(stamped)),
     }
+
+
+def waiting_to_score() -> dict:
+    """Roles waiting to be scored right now, by company status. Uses the ONE
+    shared definition (scripts/unscored_pool.py) so this stage's note and the
+    morning digest header cannot print two different numbers for it."""
+    import unscored_pool
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        return unscored_pool.counts(cur)
+    finally:
+        cur.close()
 
 
 # ---------------------------------------------------------------------------
@@ -743,6 +914,7 @@ def compute_stats(categories: dict) -> dict:
     delete_count = (
         len(categories["delete_blacklist"])
         + len(categories.get("delete_company_title_filter", []))
+        + len(categories.get("delete_not_a_vacancy", []))
         + len(categories.get("delete_junk", []))
         + len(categories.get("delete_rearchived", []))
         + len(categories.get("delete_geo", []))
@@ -768,6 +940,7 @@ def compute_stats(categories: dict) -> dict:
     delete_cats = [
         "delete_blacklist",
         "delete_company_title_filter",
+        "delete_not_a_vacancy",
         "delete_junk",
         "delete_rearchived",
         "delete_geo",
@@ -1489,52 +1662,41 @@ def main():
         delete_vacancies_filtered(ids)
         return
 
-    # Optional: dedup pre-step (DB-mutating, must be explicit)
+    # Dedup (DB-mutating, must be explicit). --dedup-only is the driver's own
+    # dedup stage: run the pass, report it, stop.
     dedup_result = None
     fuzzy_dupes = []
-    if args.dedup:
-        print("Running dedup pre-step...", file=sys.stderr, flush=True)
-        dedup_result = _clean_exact_dupes()
-        if dedup_result.get("merged", 0) > 0:
-            print(
-                f"  Exact dupes cleaned: {dedup_result['merged']} "
-                f"(examined {dedup_result['examined']} groups, "
-                f"{dedup_result.get('protected', 0)} protected)",
-                file=sys.stderr,
-                flush=True,
-            )
-        else:
-            print(
-                f"  No exact dupes found ({dedup_result['examined']} groups examined)",
-                file=sys.stderr,
-                flush=True,
-            )
-
-        # Fuzzy dedup on remaining unscored vacancies
-        all_vacs = load_vacancies(unscored_only=True)
-        fuzzy_dupes = _find_fuzzy_dupes(all_vacs)
-        if fuzzy_dupes:
-            print(
-                f"  Fuzzy dupes found: {len(fuzzy_dupes)} pairs (quarantined for review)",
-                file=sys.stderr,
-                flush=True,
-            )
-        else:
-            print("  No fuzzy dupes found", file=sys.stderr, flush=True)
+    if args.dedup or args.dedup_only:
+        print("Removing repeated copies of the same role...", file=sys.stderr, flush=True)
+        dedup_result = run_dedup()
+        for line in dedup_lines(dedup_result):
+            print(f"  {line}", file=sys.stderr, flush=True)
+        fuzzy_dupes = dedup_result.get("fuzzy") or []
+        if args.dedup_only:
+            print(json.dumps({k: v for k, v in dedup_result.items()}, indent=2, ensure_ascii=False))
+            return
 
     # Default: analyze + report + JSON
-    categories = classify_vacancies()
+    all_categories = classify_vacancies()
+    # Everything below reports and proposes WORK, so it sees only the roles
+    # still waiting for a decision. The full set stays with
+    # persist_scoring_exclusions, whose grouping rules need the decided
+    # siblings as context.
+    categories = only_undecided(all_categories)
+    already_decided = decided_count(all_categories)
     stats = compute_stats(categories)
 
     # Persist the exclusion record — the one decider of "not scored" (R8):
     # set the reason on excluded rows, clear rows a rule no longer matches.
-    scoring_excluded = persist_scoring_exclusions(categories)
+    scoring_excluded = persist_scoring_exclusions(all_categories)
+    waiting = waiting_to_score()
 
     # --- Structured filter summary (for feedback loop) ---
     print("\n--- Filter Summary ---", file=sys.stderr, flush=True)
     for cat in [
         "delete_blacklist",
         "delete_company_title_filter",
+        "delete_not_a_vacancy",
         "delete_junk",
         "delete_rearchived",
         "delete_geo",
@@ -1562,12 +1724,44 @@ def main():
             flush=True,
         )
     if scoring_excluded.get("persisted"):
+        # Plain words on purpose: this is the line Nikita reads at 09:00.
+        # "decided on" covers passed and declined alike — those roles are the
+        # ones the write scope leaves alone, and no note can be added to a
+        # decision he already made.
+        skipped = stats["delete_count"]
+        marked = scoring_excluded["stamped"]
+        decided = scoring_excluded["out_of_scope"]
+        unmarked = skipped - marked - decided
+        line = f"  Skipped {_roles(skipped)}. Marked why on {marked} of them"
+        rest = []
+        if decided:
+            rest.append(
+                f"the other {decided} you had already decided on, so there was nothing left to mark"
+            )
+        if unmarked > 0:
+            rest.append(f"{unmarked} carry no note of their own")
+        line += ("; " + "; ".join(rest) + ".") if rest else "."
+        print(line, file=sys.stderr, flush=True)
+        if scoring_excluded["cleared"]:
+            print(
+                f"  {_roles(scoring_excluded['cleared'])} are back in line — "
+                "the rule that skipped them no longer applies.",
+                file=sys.stderr,
+                flush=True,
+            )
+    if already_decided:
         print(
-            f"  Excluded from scoring (reason persisted): {scoring_excluded['count']}",
+            f"  Left {_roles(already_decided)} alone \u2014 you have already decided about them.",
             file=sys.stderr,
             flush=True,
         )
-    print(f"  Ready to score: {stats['ready_count']}", file=sys.stderr, flush=True)
+    print(f"  {_roles(stats['ready_count'])} go on to scoring.", file=sys.stderr, flush=True)
+    print(
+        f"  {_roles(waiting['active'])} wait to be scored now, and {waiting['candidate']} more "
+        "sit behind companies you have not approved yet.",
+        file=sys.stderr,
+        flush=True,
+    )
     print("--- End Filter Summary ---\n", file=sys.stderr, flush=True)
 
     report_path = PROJECT_ROOT / "reports" / "REPORT-filter.html"
@@ -1578,6 +1772,7 @@ def main():
     for cat in [
         "delete_blacklist",
         "delete_company_title_filter",
+        "delete_not_a_vacancy",
         "delete_junk",
         "delete_rearchived",
         "delete_geo",
@@ -1592,10 +1787,12 @@ def main():
 
     output = {
         "total_unscored": stats["total"],
+        "already_decided": already_decided,
         "categories": {cat: len(items) for cat, items in categories.items()},
         "delete_ids": delete_ids,
         "reenrich_ids": reenrich_ids,
         "ready": stats["ready_count"],
+        "waiting_to_score": waiting,
         "scoring_excluded": scoring_excluded,
         "report_path": str(report_path),
     }

@@ -109,6 +109,7 @@ STAGE_ORDER = [
     "learning_review",  # GATE  — verdict-driven corrections (skippable, rolls over)
     "fetch",  # AUTO  — pull new vacancies (heartbeat inside the script)
     "enrich",  # AUTO  — backfill blind descriptions (Firecrawl)
+    "dedup",  # AUTO  — merge repeated copies of one role; report look-alikes
     "filter",  # AUTO  — quality report; never auto-deletes
     "company_scoring",  # GATE  — WANT-score new candidate companies
     "vacancy_scoring",  # GATE  — per-vacancy subagent scoring (1 vac = 1 agent)
@@ -117,6 +118,55 @@ STAGE_ORDER = [
     #                     a dashboard refresh failure can never cost the digest)
     "publish",  # AUTO  — publish always; warns loudly when the run was not clean
 ]
+
+
+# Keys the run needs, and what quietly stops working without one. EXA_API_KEY
+# was absent from the forge .env on 2026-08-27: company evidence collection
+# failed every Exa call all night and said so only in a log line nobody reads at
+# 02:00. A missing key must reach the report card and the phone, not a log.
+#
+# Each entry: capability id -> (env var, the stage that degrades, the plain
+# sentence for the report card). The digest translates the capability id
+# through i18n instead of carrying this English text, so the Russian digest
+# stays Russian.
+DEGRADED_WITHOUT_KEY = {
+    "firecrawl": (
+        "FIRECRAWL_API_KEY",
+        "enrich",
+        "Job pages could not be read, so roles that arrived without a description "
+        "stayed empty. Add the Firecrawl key on the server.",
+    ),
+    "exa": (
+        "EXA_API_KEY",
+        "company_scoring",
+        "Company research could not search the web, so companies were judged on "
+        "what was already stored. Add the Exa key on the server.",
+    ),
+}
+# ANTHROPIC_API_KEY is deliberately NOT here. Nikita said twice on 2026-08-28
+# that he does not want the key anywhere: scoring and screening run through
+# subagents on his Claude subscription, and a key in the environment would
+# quietly move the night's spend onto per-token billing. Its absence is the
+# intended state — screen_candidates falls through to subagents on purpose —
+# so reporting it as degraded would be wrong.
+
+
+def _check_keys(state: dict) -> list[str]:
+    """Record every capability that will silently degrade for a missing key.
+
+    Runs once at preflight, BEFORE the stages that need the keys, so the run
+    knows what it cannot do while it can still say so. Writes both channels:
+    a warning (the report card) and the capability id (the digest).
+    """
+    missing = []
+    for cap, (env_name, stage, message) in DEGRADED_WITHOUT_KEY.items():
+        if os.environ.get(env_name):
+            continue
+        missing.append(cap)
+        _add_warning(state, stage, message)
+    if missing:
+        state["degraded"] = missing
+    return missing
 
 
 # Plain-language "about to" line for each stage, printed at its START so a
@@ -129,6 +179,7 @@ STAGE_ABOUT = {
     "learning_review": "offering verdict-driven filter / scoring corrections",
     "fetch": "pulling new vacancies from your companies and boards",
     "enrich": "backfilling blind vacancy descriptions",
+    "dedup": "removing repeated copies of the same role",
     "filter": "quality-filtering the freshly fetched roles",
     "company_scoring": "WANT-scoring new candidate companies",
     "vacancy_scoring": "scoring new roles (cheap screen, then strong finalists)",
@@ -459,19 +510,29 @@ def _candidate_names_to_score(limit: int) -> list[str]:
     return names[:limit] if limit else names
 
 
-def _unscored_unseen() -> int:
-    from database_supabase import _scoring_excluded_supported
+def _waiting_to_score() -> dict:
+    """Roles waiting to be scored, by company status — the ONE shared
+    definition (scripts/unscored_pool.py), so this agrees with the filter
+    stage's note and the digest header instead of being a third answer.
 
-    # Rows the filter pass excluded from scoring (migration 0025) are not
-    # "awaiting scoring" — counting them would hold the scoring gate open for
-    # rows the scorer will never be offered. Column-guarded for pre-migration
-    # installs.
-    cond = ""
-    if _scoring_excluded_supported():
-        cond = " AND scoring_excluded_reason IS NULL"
-    return _scalar(
-        "SELECT count(*) FROM vacancy WHERE status = 'unseen' AND llm_score IS NULL" + cond
-    )
+    What it used to count differently: it missed the negative sentinel score
+    (awaiting scoring to every other reader), and it counted roles behind
+    unapproved and inactive companies as if the main pool would pick them up.
+    Degrades to zeros rather than crashing a run on a pre-migration install.
+    """
+    import unscored_pool
+
+    try:
+        from database_supabase import get_conn
+
+        conn = get_conn()
+        cur = conn.cursor()
+        try:
+            return unscored_pool.counts(cur)
+        finally:
+            cur.close()
+    except Exception:
+        return {"active": 0, "candidate": 0, "other": 0}
 
 
 def _scored_unseen() -> int:
@@ -1230,10 +1291,26 @@ def _h_preflight(state, entry, opts):
         state["first_run"] = True
         return "advance", "empty company table — first-run onboarding required"
     state["first_run"] = False
-    pending = _unscored_unseen()
+    waiting = _waiting_to_score()
     note = f"{n} companies tracked"
-    if pending:
-        note += f"; {pending} unscored vacancies from a prior run will be picked up in scoring"
+    if waiting["active"]:
+        note += (
+            f"; {_roles(waiting['active'])} from an earlier run "
+            f"{'is' if waiting['active'] == 1 else 'are'} still waiting to be scored"
+        )
+        if waiting["candidate"]:
+            note += (
+                f", and {waiting['candidate']} more "
+                f"{'sits' if waiting['candidate'] == 1 else 'sit'} behind a company you have "
+                "not approved yet"
+            )
+    missing = _check_keys(state)
+    if missing:
+        n = len(missing)
+        note += (
+            f"; {n} thing{'' if n == 1 else 's'} will not work tonight because a key is "
+            "missing on the server \u2014 the warnings under the report card say which"
+        )
     return "advance", note
 
 
@@ -1346,10 +1423,17 @@ def _h_fetch(state, entry, opts):
     stats = _read_fetch_stats()
     new = stats.get("total_new", "?")
     errs = len(stats.get("errors", {}) or {})
-    note = f"{new} new vacancies · " + _fetch_source_counters(stats)
+    # "this run" is load-bearing: the filter stage's note counts the WHOLE
+    # unscored backlog, so this number must not read as its denominator.
+    note = f"{new} new vacancies this run · " + _fetch_source_counters(stats)
     if errs:
         note += f"; {errs} source(s) had a fetch error (does not block the other sources)"
     return "advance", note
+
+
+def _roles(n: int) -> str:
+    """ "1 role" / "3 roles" — the report card talks to a person."""
+    return f"{n} role" if n == 1 else f"{n} roles"
 
 
 def _fetch_source_counters(stats: dict) -> str:
@@ -1384,6 +1468,49 @@ def _h_enrich(state, entry, opts):
     return "advance", "blind vacancies enriched"
 
 
+def _h_dedup(state, entry, opts):
+    """Merge repeated copies of one role before anything counts or scores them.
+
+    It ran only behind an explicit ``--dedup`` flag before, so the nightly run
+    never did it and nothing ever reported it. Its own stage makes the repeated
+    noise the sources send visible on the report card.
+    """
+    res = _run_capture(_py("filter_vacancies.py") + ["--dedup-only"], opts)
+    if res.returncode != 0:
+        return "error", f"dedup exited with code {res.returncode}: {res.stderr[-400:]}"
+    try:
+        data = _extract_json(res.stdout)
+    except Exception:
+        return "error", "dedup did not emit valid JSON"
+    entry["dedup"] = {
+        "groups": int(data.get("examined", 0) or 0),
+        "removed": int(data.get("merged", 0) or 0),
+        "kept_decided": int(data.get("protected", 0) or 0),
+        "look_alike_pairs": int(data.get("fuzzy_pairs", 0) or 0),
+    }
+    d = entry["dedup"]
+    parts = []
+    if d["removed"]:
+        parts.append(
+            f"Removed {d['removed']} repeated cop{'y' if d['removed'] == 1 else 'ies'} of "
+            f"{_roles(d['groups'])} the sources sent more than once."
+        )
+    else:
+        parts.append("No repeated copies to remove.")
+    if d["kept_decided"]:
+        parts.append(
+            f"Kept {d['kept_decided']} cop{'y' if d['kept_decided'] == 1 else 'ies'} "
+            "you had already decided about."
+        )
+    if d["look_alike_pairs"]:
+        n = d["look_alike_pairs"]
+        parts.append(
+            f"{n} pair{' looks' if n == 1 else 's look'} like the same role under two names "
+            "\u2014 check them in /jobs-review."
+        )
+    return "advance", " ".join(parts)
+
+
 def _h_filter(state, entry, opts):
     res = _run_capture(_py("filter_vacancies.py"), opts)
     if res.returncode != 0:
@@ -1392,23 +1519,57 @@ def _h_filter(state, entry, opts):
         data = _extract_json(res.stdout)
     except Exception:
         return "error", "filter did not emit valid JSON"
-    ready = data.get("ready", 0)
+    ready = int(data.get("ready", 0) or 0)
+    cats = data.get("categories") or {}
     delete_ids = data.get("delete_ids", {}) or {}
-    junk = sum(len(v) for v in delete_ids.values())
-    # Exclusion tally (migration 0025) — kept in the run state so the nightly
-    # digest header can show "N excluded" with a per-reason breakdown (R10).
-    excluded = data.get("scoring_excluded", {}) or {}
+    reenrich_ids = data.get("reenrich_ids", {}) or {}
+    # The filter's own categories are the source of truth; the id lists are the
+    # fallback for a payload that predates them (they hold the same rows).
+    if cats:
+        excluded = sum(n for k, n in cats.items() if k.startswith("delete_"))
+        reenrich = sum(n for k, n in cats.items() if k.startswith("reenrich_"))
+    else:
+        excluded = sum(len(v) for v in delete_ids.values())
+        reenrich = sum(len(v) for v in reenrich_ids.values())
+    scanned = int(data.get("total_unscored") or 0) or (ready + excluded + reenrich)
+    # Exclusion tally (migration 0025) — what the pass DECIDED vs what the
+    # database actually carries. "stamped" is the number of rows that now hold
+    # a reason; the older "count" key meant the in-memory decision.
+    excl = data.get("scoring_excluded", {}) or {}
+    stamped = int(excl.get("stamped", excl.get("count", 0)) or 0)
+    raw_waiting = data.get("waiting_to_score") or {}
+    waiting = {k: int(raw_waiting.get(k, 0) or 0) for k in ("active", "candidate", "other")}
     entry["filter"] = {
+        "scanned": scanned,
         "ready": ready,
-        "junk_flagged": junk,
-        "excluded_count": int(excluded.get("count", 0) or 0),
-        "excluded_reasons": excluded.get("reasons") or {},
+        "excluded": excluded,
+        "reenrich": reenrich,
+        "reasons_written": stamped,
+        "reasons_cleared": int(excl.get("cleared", 0) or 0),
+        "waiting_to_score": waiting["active"],
+        "waiting_behind_candidates": waiting["candidate"],
+        "excluded_count": stamped,  # back-compat: rows carrying a reason
+        "excluded_reasons": excl.get("reasons") or {},
     }
-    note = f"{ready} ready to score"
-    if junk:
-        note += f"; {junk} junk candidate(s) flagged (NOT deleted — review in /jobs-review)"
-    if entry["filter"]["excluded_count"]:
-        note += f"; {entry['filter']['excluded_count']} excluded from scoring (reasons recorded)"
+    # One sentence, plain words, and the three parts add up to the number in
+    # front of them. Internal vocabulary stays in the code, not on the card.
+    note = (
+        f"Looked at {_roles(scanned)} with no score yet: {ready} go on to scoring, "
+        f"{excluded} skipped (marked why on {stamped}; nothing deleted \u2014 "
+        f"check them in /jobs-review), {reenrich} need their description fetched again."
+    )
+    parts_sum = ready + excluded + reenrich
+    if parts_sum != scanned:
+        note += f" That adds up to {parts_sum}, not {scanned} \u2014 the count is off."
+    # "Go on to scoring" is about THIS look; "wait to be scored" is the live
+    # queue, counted the way the digest header counts it (they are not the same
+    # set: this pass also sees roles the scorer refuses). Roles behind
+    # unapproved companies get their own number - nothing else counts them, so
+    # a small queue must not hide a large one parked out of sight.
+    note += (
+        f" {_roles(waiting['active'])} wait to be scored now, and "
+        f"{waiting['candidate']} more sit behind companies you have not approved yet."
+    )
     return "advance", note
 
 
@@ -1434,9 +1595,9 @@ def _h_company_scoring(state, entry, opts):
             entry,
             "score",
             len(remaining),
-            f"company scoring carried over — {len(remaining)} company(ies) still "
-            "unscored with no progress since the last stop; they stay candidates "
-            "for the next run",
+            f"The scoring session stopped early — {len(remaining)} of "
+            f"{len(entry.get('target_ids', []))} companies are still unscored. "
+            "They stay candidates for the next run.",
         )
         if carried:
             return carried
@@ -1715,9 +1876,9 @@ def _h_vacancy_scoring(state, entry, opts):
                 entry,
                 "screen",
                 len(remaining_ids),
-                f"scoring carried over — {len(remaining_ids)} role(s) still unscored "
-                "with no progress since the last stop; they lead the next run's "
-                "batch (oldest first)",
+                f"The scoring session stopped early — {len(remaining_ids)} of "
+                f"{len(entry.get('target_ids', []))} roles are still unscored. "
+                "They go first in the next run, oldest ones first.",
                 finish=True,
             )
             if carried:
@@ -1822,9 +1983,9 @@ def _h_vacancy_scoring(state, entry, opts):
             entry,
             "escalate",
             len(remaining_ids),
-            f"escalation carried over — {len(remaining_ids)} finalist(s) still "
-            "unscored with no progress since the last stop; they lead the next "
-            "run's batch",
+            f"The scoring session stopped early — {len(remaining_ids)} of "
+            f"{len(entry.get('escalate_target_ids', []))} finalists are still unscored. "
+            "They go first in the next run.",
             finish=True,
         )
         if carried:
@@ -1872,8 +2033,7 @@ def _h_verdicts(state, entry, opts):
         entry["pending_verdicts"] = n
         return (
             "advance",
-            f"{n} scored match(es) await your verdict on the phone — a night run "
-            "never writes one",
+            f"{n} scored match(es) await your verdict on the phone — a night run never writes one",
         )
     return "gate", {
         "action": "verdicts",
@@ -1949,6 +2109,7 @@ HANDLERS = {
     "learning_review": _h_learning_review,
     "fetch": _h_fetch,
     "enrich": _h_enrich,
+    "dedup": _h_dedup,
     "filter": _h_filter,
     "company_scoring": _h_company_scoring,
     "vacancy_scoring": _h_vacancy_scoring,
@@ -2111,7 +2272,11 @@ def drive(state: dict, opts: Opts, observe: bool = False) -> int:
             # ``phase`` tells the nightly wrapper which model tier answers a
             # scoring gate ("screen"/"escalate" for vacancies, "screen"/"score"
             # for companies); None on every other gate.
-            state["gate"] = {"stage": name, "action": info.get("action"), "phase": info.get("phase")}
+            state["gate"] = {
+                "stage": name,
+                "action": info.get("action"),
+                "phase": info.get("phase"),
+            }
             _save_state(state)
             if observe:
                 _record_history(state, opts)
@@ -2262,6 +2427,10 @@ def _print_summary(state: dict, opts: Opts) -> None:
     print(bar)
     if new is not None:
         print("  • " + t("summary_new_vac", n=new))
+        # Two units appear on this card — vacancies from the fetch, roles from
+        # the filter and the scorer. Say once what the difference is, so 144
+        # and 85 on adjacent lines cannot read as the same measurement.
+        print("    " + t("summary_unit_note"))
     print("  • " + t("summary_companies", active=active, candidates=candidates, scored=cand_scored))
     print("  • " + t("summary_verdicts", scored_unseen=scored_unseen, liked=liked))
     print("  • " + t("summary_publish", note=publish_note))
@@ -2377,6 +2546,17 @@ _STATUS_MARK = {
     "pending": " ",
 }
 
+#: Report-card mark for a stage that advanced but left its work unfinished.
+PARTIAL_MARK = "!"
+
+
+def _stage_partial(stage: dict) -> bool:
+    """True when the stage advanced the run but did NOT finish its own work:
+    an unattended scoring gate whose session stopped early carries the unscored
+    remainder over (``carried_over``). Such a stage must never read as a green
+    OK on the report card — the roles are still unscored."""
+    return bool(stage.get("carried_over")) and stage.get("status") == "done"
+
 
 def _stage_verdict(stage: dict, warnings: "list[dict]") -> str:
     """One-word report-card verdict for a stage (R5).
@@ -2384,6 +2564,9 @@ def _stage_verdict(stage: dict, warnings: "list[dict]") -> str:
     OK       — finished cleanly.
     OK-BUT   — finished, but a best-effort sub-step of this stage warned (degraded,
                e.g. evidence collection failed → WANT scores fell back to cache).
+    PARTIAL  — the stage advanced but left its own work unfinished: the scoring
+               session stopped early and the remainder carried over. The note
+               says how many of how many.
     FAILED   — the stage errored/aborted, OR it carries a BLOCKING warning (the
                screen crash: the stage "skipped" its paid work on purpose, but the
                failure is real and blocks publish — it reads FAILED, not SKIPPED).
@@ -2397,6 +2580,8 @@ def _stage_verdict(stage: dict, warnings: "list[dict]") -> str:
     if status in ("error", "aborted"):
         return "FAILED"
     if status == "done":
+        if _stage_partial(stage):
+            return "PARTIAL"
         return "OK-BUT" if stage_warnings else "OK"
     if status == "skipped":
         return "SKIPPED"
@@ -2409,7 +2594,11 @@ def _print_stage_board(state: dict, *, verdict: bool = False) -> None:
     SKIPPED column (the report card); the plain form is the live status view."""
     warnings = state.get("warnings", []) or []
     for s in state["stages"]:
-        mark = _STATUS_MARK.get(s.get("status", "pending"), "?")
+        # A partial stage keeps its own mark: a ✓ next to "35 of 55 left
+        # unscored" is the exact contradiction this column exists to avoid.
+        mark = (
+            PARTIAL_MARK if _stage_partial(s) else _STATUS_MARK.get(s.get("status", "pending"), "?")
+        )
         note = s.get("note", "")
         if verdict:
             print(f"  [{mark}] {s['name']:<18} {_stage_verdict(s, warnings):<8} {note}")

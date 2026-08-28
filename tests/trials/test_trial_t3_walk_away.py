@@ -31,6 +31,7 @@ def test_stage_order_and_handlers_are_owned_by_the_driver(monkeypatch, tmp_path)
         "learning_review",
         "fetch",
         "enrich",
+        "dedup",
         "filter",
         "company_scoring",
         "vacancy_scoring",

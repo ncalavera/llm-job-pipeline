@@ -142,7 +142,12 @@ REGION_KEYWORDS: dict[str, list[str]] = {
 # profile. See scripts/hard_filters.py for the loader.
 # ---------------------------------------------------------------------------
 
-from hard_filters import load_hard_filters, load_company_title_filters  # noqa: E402
+from hard_filters import (  # noqa: E402
+    DESC_PATTERN_PREFIX,
+    load_hard_filters,
+    load_company_title_filters,
+    load_company_never_fetch,
+)
 
 _HARD_FILTERS = load_hard_filters()
 
@@ -151,6 +156,11 @@ _HARD_FILTERS = load_hard_filters()
 #: company a vacancy survives the filter stage only when its title matches one
 #: of the patterns; unlisted companies are unaffected. Empty {} → feature off.
 COMPANY_TITLE_FILTERS = load_company_title_filters()
+
+#: Companies from ``## COMPANY_NEVER_FETCH`` (see hard_filters.py). A listed
+#: company is skipped whole at fetch time — no request, no stored row — while
+#: staying in the registry. Unlisted companies are unaffected. Empty [] → off.
+COMPANY_NEVER_FETCH = load_company_never_fetch()
 
 #: Countries the user never wants. A vacancy is dropped only when EVERY one of
 #: its locations is in one of these countries. Empty → drop nothing on geo.

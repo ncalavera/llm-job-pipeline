@@ -266,9 +266,12 @@ def _load_and_dedup(
         ):
             stats["blacklisted"] += 1
             continue
-        # Per-company title INCLUDE-filter — for a listed company, keep the role
-        # out of scoring unless its title matches the company's include-list.
-        ctf_reason = filters.company_title_filter_reason(rep["org"], rep["title"])
+        # Per-company INCLUDE-filter — for a listed company, keep the role out
+        # of scoring unless it matches the company's include-list. The body goes
+        # in too: a description-scoped pattern keeps a role on its body, and
+        # fetch time already honoured that, so judging on the title alone here
+        # would drop a role the fetch deliberately kept.
+        ctf_reason = filters.company_title_filter_reason(rep["org"], rep["title"], desc)
         if ctf_reason:
             stats["company_title_filtered"] += 1
             print(

@@ -45,6 +45,7 @@ def test_stage_order_is_the_documented_sequence(rd):
         "learning_review",
         "fetch",
         "enrich",
+        "dedup",
         "filter",
         "company_scoring",
         "vacancy_scoring",
@@ -1354,6 +1355,40 @@ def test_stage_verdict_blocking_warning_reads_failed(rd):
     assert rd._stage_verdict(stage, warnings) == "FAILED"
 
 
+def test_stage_that_left_work_undone_reads_partial_not_ok(rd):
+    """A scoring stage that carried roles over did NOT finish its work; a green
+    OK beside "35 of 55 left unscored" is the contradiction the card exists to
+    prevent (2026-08-27)."""
+    partial = {
+        "name": "vacancy_scoring",
+        "status": "done",
+        "carried_over": 35,
+        "note": "The scoring session stopped early — 35 of 55 roles are still unscored.",
+    }
+    assert rd._stage_verdict(partial, []) == "PARTIAL"
+    assert rd._stage_partial(partial) is True
+    # A carry-over recorded on a stage that never finished keeps its own status.
+    assert rd._stage_verdict({**partial, "status": "error"}, []) == "FAILED"
+    # No carry-over -> unchanged behaviour.
+    assert rd._stage_verdict({"name": "vacancy_scoring", "status": "done"}, []) == "OK"
+
+
+def test_report_card_marks_a_partial_stage_and_says_why(rd, capsys):
+    state = rd._new_state(rd.Opts())
+    vac = rd._stage(state, "vacancy_scoring")
+    vac["status"] = "done"
+    vac["carried_over"] = 35
+    vac["note"] = "The scoring session stopped early — 35 of 55 roles are still unscored."
+
+    rd._print_stage_board(state, verdict=True)
+    out = capsys.readouterr().out
+    line = next(ln for ln in out.splitlines() if "vacancy_scoring" in ln)
+    assert "PARTIAL" in line
+    assert f"[{rd.PARTIAL_MARK}]" in line
+    assert "✓" not in line
+    assert "35 of 55" in line
+
+
 def test_report_card_renders_four_distinct_verdicts(rd, capsys):
     state = rd._new_state(rd.Opts())
     rd._stage(state, "fetch")["status"] = "done"
@@ -1673,7 +1708,8 @@ def test_unattended_escalate_carries_over_when_stuck(rd, monkeypatch, tmp_path):
     kind, note = rd._h_vacancy_scoring(state, entry, opts)
     assert kind == "advance"
     assert entry["carried_over"] == 1
-    assert "carried over" in note
+    # The note names what was left undone, out of how many (report card R5).
+    assert "The scoring session stopped early — 1 of 1 finalists are still unscored" in note
 
 
 def test_attended_scoring_gate_still_re_emits_without_progress(rd, monkeypatch, tmp_path):
@@ -1849,7 +1885,7 @@ def test_unattended_company_scoring_carries_over_without_progress(rd, monkeypatc
     kind, note = rd._h_company_scoring(state, entry, opts)
     assert kind == "advance"
     assert entry["carried_over"] == 2
-    assert "carried over" in note
+    assert "The scoring session stopped early — 2 of 2 companies are still unscored" in note
 
 
 def test_unattended_company_scoring_re_emits_on_progress(rd, monkeypatch, tmp_path):
@@ -2025,3 +2061,165 @@ def test_pre_digest_checkpoint_still_resumes(rd):
     assert any(s["name"] == "digest" for s in state["stages"])
     with pytest.raises(KeyError):
         rd._stage(state, "never_a_stage")
+
+
+# ---------------------------------------------------------------------------
+# Dedup — its own stage, its own number on the card
+# ---------------------------------------------------------------------------
+
+
+def _dedup_note(rd, monkeypatch, payload):
+    import json as _json
+    import subprocess
+
+    monkeypatch.setattr(
+        rd,
+        "_run_capture",
+        lambda cmd, opts: subprocess.CompletedProcess(cmd, 0, _json.dumps(payload), ""),
+    )
+    state = rd._new_state(rd.Opts())
+    entry = rd._stage(state, "dedup")
+    kind, note = rd._h_dedup(state, entry, rd.Opts())
+    assert kind == "advance"
+    return entry, note
+
+
+def test_dedup_runs_before_filter(rd):
+    """Copies are merged before anything counts or scores them."""
+    assert rd.STAGE_ORDER.index("dedup") < rd.STAGE_ORDER.index("filter")
+    assert rd.STAGE_ORDER.index("fetch") < rd.STAGE_ORDER.index("dedup")
+    assert "dedup" in rd.HANDLERS and "dedup" in rd.STAGE_ABOUT
+
+
+def test_dedup_note_reports_what_it_did(rd, monkeypatch):
+    entry, note = _dedup_note(
+        rd, monkeypatch, {"examined": 12, "merged": 15, "protected": 2, "fuzzy_pairs": 3}
+    )
+    assert note == (
+        "Removed 15 repeated copies of 12 roles the sources sent more than once. "
+        "Kept 2 copies you had already decided about. "
+        "3 pairs look like the same role under two names — check them in /jobs-review."
+    )
+    assert entry["dedup"] == {
+        "groups": 12,
+        "removed": 15,
+        "kept_decided": 2,
+        "look_alike_pairs": 3,
+    }
+
+
+def test_dedup_note_is_singular_when_it_should_be(rd, monkeypatch):
+    _, note = _dedup_note(
+        rd, monkeypatch, {"examined": 1, "merged": 1, "protected": 1, "fuzzy_pairs": 1}
+    )
+    assert "Removed 1 repeated copy of 1 role" in note
+    assert "Kept 1 copy you had already decided about." in note
+    assert "1 pair looks like the same role" in note
+
+
+def test_dedup_note_says_so_when_there_was_nothing_to_do(rd, monkeypatch):
+    _, note = _dedup_note(
+        rd, monkeypatch, {"examined": 0, "merged": 0, "protected": 0, "fuzzy_pairs": 0}
+    )
+    assert note == "No repeated copies to remove."
+
+
+def test_dedup_note_carries_no_internal_vocabulary(rd, monkeypatch):
+    _, note = _dedup_note(
+        rd, monkeypatch, {"examined": 9, "merged": 4, "protected": 1, "fuzzy_pairs": 2}
+    )
+    for word in ("dedup", "hash", "fuzzy", "row", "merged", "protected", "examined"):
+        assert word not in note.lower(), word
+
+
+def test_dedup_stage_fails_loudly_on_a_bad_exit(rd, monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(
+        rd, "_run_capture", lambda cmd, opts: subprocess.CompletedProcess(cmd, 1, "", "boom")
+    )
+    state = rd._new_state(rd.Opts())
+    kind, note = rd._h_dedup(state, rd._stage(state, "dedup"), rd.Opts())
+    assert kind == "error" and "boom" in note
+
+
+# ---------------------------------------------------------------------------
+# A missing key must be loud (2026-08-27: EXA_API_KEY absent all night)
+# ---------------------------------------------------------------------------
+
+
+def test_missing_key_is_recorded_on_both_channels(rd, monkeypatch):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "x")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    state = rd._new_state(rd.Opts())
+
+    missing = rd._check_keys(state)
+
+    assert missing == ["exa"]
+    # the digest channel: a capability id, so the message can be translated
+    assert state["degraded"] == ["exa"]
+    # the report-card channel: a warning on the stage that will degrade
+    warning = next(w for w in state["warnings"] if w["stage"] == "company_scoring")
+    assert "could not search the web" in warning["message"]
+    assert "Add the Exa key on the server." in warning["message"]
+    assert not warning.get("blocking")  # the run still finishes
+
+
+def test_every_missing_key_is_recorded(rd, monkeypatch):
+    for name in ("EXA_API_KEY", "FIRECRAWL_API_KEY", "ANTHROPIC_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    state = rd._new_state(rd.Opts())
+
+    assert sorted(rd._check_keys(state)) == ["exa", "firecrawl"]
+    assert len(state["warnings"]) == 2
+
+
+def test_a_missing_anthropic_key_is_not_a_degradation(rd, monkeypatch):
+    """Nikita said twice on 2026-08-28 that he does not want that key
+    anywhere: screening and scoring run through subagents on his subscription,
+    and a key in the environment would move the night's spend onto per-token
+    billing. Its absence is the intended state, not something to report."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("EXA_API_KEY", "x")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "x")
+    state = rd._new_state(rd.Opts())
+
+    assert rd._check_keys(state) == []
+    assert "degraded" not in state
+    assert state["warnings"] == []
+    assert "ANTHROPIC_API_KEY" not in rd.DEGRADED_WITHOUT_KEY.values().__str__()
+
+
+def test_nothing_is_recorded_when_every_key_is_present(rd, monkeypatch):
+    for name in ("EXA_API_KEY", "FIRECRAWL_API_KEY"):
+        monkeypatch.setenv(name, "present")
+    state = rd._new_state(rd.Opts())
+
+    assert rd._check_keys(state) == []
+    assert "degraded" not in state
+    assert state["warnings"] == []
+
+
+def test_the_report_card_shows_what_did_not_happen(rd, monkeypatch, capsys):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "x")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    state = rd._new_state(rd.Opts())
+    rd._check_keys(state)
+    rd._stage(state, "company_scoring")["status"] = "done"
+
+    rd._print_stage_board(state, verdict=True)
+    out = capsys.readouterr().out
+    assert "OK-BUT" in out  # the stage finished, but not fully
+
+
+def test_the_warning_names_the_capability_not_the_variable(rd, monkeypatch):
+    for name in ("EXA_API_KEY", "FIRECRAWL_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    state = rd._new_state(rd.Opts())
+    rd._check_keys(state)
+
+    for w in state["warnings"]:
+        assert "_API_KEY" not in w["message"], w["message"]
+        assert "Add the" in w["message"] and "on the server." in w["message"]

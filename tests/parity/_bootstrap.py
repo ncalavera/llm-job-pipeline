@@ -14,6 +14,8 @@ the same shape on both backends.
 
 import importlib
 import os
+import re
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -53,6 +55,25 @@ def _reload_chain():
         sys.modules.pop(mod, None)
 
 
+def _sqlite_migration_files():
+    """Every migration file the SQLite backend should replay on top of the
+    frozen baseline, in version order. A dialect-specific ``.sqlite.sql`` wins
+    over the generic ``.sql`` for a version; a Postgres-only version is simply
+    absent here, which is correct — it has nothing to apply."""
+    by_version: dict[str, Path] = {}
+    for path in sorted((REPO_ROOT / "sql" / "migrations").glob("*.sql")):
+        m = re.match(r"^(\d+)_(.+?)(?:\.(postgres|sqlite))?\.sql$", path.name)
+        if not m:
+            continue
+        version, dialect = m.group(1), m.group(3)
+        if dialect == "postgres":
+            continue
+        # A .sqlite.sql beats the generic .sql for the same version.
+        if dialect == "sqlite" or version not in by_version:
+            by_version[version] = path
+    return [by_version[v] for v in sorted(by_version)]
+
+
 def bootstrap_sqlite(monkeypatch, tmp_path):
     """Fresh temp-file SQLite DB, brought up the way the rest of this repo's
     test suite already does it: a bare first connection (auto-applies the
@@ -89,25 +110,24 @@ def bootstrap_sqlite(monkeypatch, tmp_path):
     # Apply via the RAW sqlite3 connection's executescript, the way migrate.py's
     # _Sqlite.run does: a migration file can hold several statements (0010 =
     # CREATE TABLE + indexes) and the psycopg2-compatible cursor.execute runs
-    # only one statement at a time. Order matters: 0011 ALTERs the board table
-    # that 0002 creates.
+    # only one statement at a time.
+    #
+    # The list is DERIVED, never hand-written. A literal tuple here goes stale
+    # the moment a migration is added and nobody edits it: the SQLite side then
+    # builds a database missing those columns, and the cross-backend column
+    # diff fails without naming the cause. Globbing cannot go stale.
+    #
+    # Files are applied in version order. The frozen baseline already declares
+    # some of what the early migrations add (0003/0005), so a duplicate column
+    # is tolerated here exactly as migrate.py tolerates it — that overlap is
+    # the baseline being ahead, not a broken migration.
     raw = conn._conn
-    for post_baseline in (
-        "0002_board_table",
-        "0009_add_scored_by",
-        "0010_application",
-        "0011_board_enabled",
-        "0013_add_source_board",
-        "0014_add_vacancy_status_reason",
-        "0015_fetch_health",
-        "0016_company_coverage",
-        "0017_screen_column_board_hidden",
-        "0018_field_mece_cleanup",
-    ):
-        sql = (REPO_ROOT / "sql" / "migrations" / f"{post_baseline}.sqlite.sql").read_text(
-            encoding="utf-8"
-        )
-        raw.executescript(sql)
+    for path in _sqlite_migration_files():
+        try:
+            raw.executescript(path.read_text(encoding="utf-8"))
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" not in str(e):
+                raise AssertionError(f"parity bootstrap: {path.name} failed -- {e}") from e
     conn.commit()
 
     import database_supabase as dal

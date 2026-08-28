@@ -86,7 +86,7 @@ def _job(title, *, city="Berlin, Germany", desc=None, url=None):
 ACME_DAY1 = [
     _job("Volunteer Coordinator"),
     _job("Software Engineer", city="London, United Kingdom"),
-    _job("Research Fellowship", city="Remote"),
+    _job("Research Fellow", city="Remote"),
     _job("Talent Pool — General Application", desc="Register your interest."),
     _job("Expression of Interest", desc="Tell us about yourself for future roles."),
 ]
@@ -211,11 +211,11 @@ def test_day1_filter_drops_junk_keeps_real_with_empty_profile(dal):
 
     # Junk is gone before classification.
     titles = {v["title"] for v in dal.load_vacancies().values()}
-    assert titles == {"Volunteer Coordinator", "Software Engineer", "Research Fellowship"}
+    assert titles == {"Volunteer Coordinator", "Software Engineer", "Research Fellow"}
 
     cats = filter_vacancies.classify_vacancies()
     ready_titles = {v["title"] for _, v in cats["ready"]}
-    assert ready_titles == {"Volunteer Coordinator", "Software Engineer", "Research Fellowship"}
+    assert ready_titles == {"Volunteer Coordinator", "Software Engineer", "Research Fellow"}
     assert cats["delete_blacklist"] == []
     assert cats["delete_geo"] == []
 
@@ -314,7 +314,7 @@ def test_day1_report_builds_with_and_without_data(dal, monkeypatch):
     data = data_prep.prepare_report_data()
     assert len(data["groups"]) == 3  # the browser derives total_roles from this
     report_titles = {g["title"] for g in data["groups"]}
-    assert report_titles == {"Volunteer Coordinator", "Software Engineer", "Research Fellowship"}
+    assert report_titles == {"Volunteer Coordinator", "Software Engineer", "Research Fellow"}
 
 
 def test_report_stats_carries_only_the_nonderivable_run_fact(dal):
@@ -444,7 +444,7 @@ def test_day2_refetch_dedup_new_and_gone(day2, monkeypatch):
     before = db.load_vacancies()
     assert len(before) == 3  # the 3 real day-1 roles persisted across reconnect
 
-    # Day-2 listing OMITS "Research Fellowship", REPEATS the others, adds a NEW
+    # Day-2 listing OMITS "Research Fellow", REPEATS the others, adds a NEW
     # "Programme Lead".
     day2_listing = [
         _job("Volunteer Coordinator"),  # repeat → dedup
@@ -463,7 +463,7 @@ def test_day2_refetch_dedup_new_and_gone(day2, monkeypatch):
     live = {
         v["title"]: v["status"] for v in db.load_vacancies(include_inactive_companies=True).values()
     }
-    assert live.get("Research Fellowship") == "archived"
+    assert live.get("Research Fellow") == "archived"
     live_titles = {t for t, s in live.items() if s != "archived"}
     assert live_titles == {"Volunteer Coordinator", "Software Engineer", "Programme Lead"}
 

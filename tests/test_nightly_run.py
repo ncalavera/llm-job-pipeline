@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import textwrap
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -35,6 +36,8 @@ FAKE_DRIVER = textwrap.dedent(
     import json, os, sys
     vac, steps_path = sys.argv[1], sys.argv[2]
     flags = sys.argv[3:]
+    with open(os.path.join(vac, "driver_env.json"), "w") as fh:
+        json.dump(dict(os.environ), fh)
     with open(steps_path) as fh:
         data = json.load(fh)
     data.setdefault("calls", []).append(flags)
@@ -134,6 +137,35 @@ FAKE_CLAUDE = textwrap.dedent(
     elif mode == "other_error":
         sys.stderr.write("Error: the model fell over sideways\\n")
         sys.exit(1)
+    elif mode.startswith("rate_limit"):
+        # The real 2026-08-27 shape: utilization warnings, then the rejected
+        # event, then a result line with api_error_status 429. Everything the
+        # session managed before the limit is already in score_out.
+        # "rate_limit_once" hits the limit on its first session only, so the
+        # retry after the wait can score the rest.
+        reset = int(open(%(reset_file)r).read().strip())
+        flag = os.path.join(night, "limit_hit")
+        if mode == "rate_limit_once" and os.path.exists(flag):
+            for n in ins:
+                write(n, json.dumps(result(n)))
+            sys.exit(0)
+        open(flag, "w").close()
+        if mode in ("rate_limit_half", "rate_limit_once"):
+            for n in ins[: max(1, len(ins) // 2)]:
+                write(n, json.dumps(result(n)))
+        for util in (0.97, 0.98, 0.99):
+            sys.stdout.write(json.dumps({"type": "rate_limit_event", "rate_limit_info":
+                {"status": "allowed_warning", "utilization": util,
+                 "resetsAt": reset, "rateLimitType": "five_hour"}}) + "\\n")
+        sys.stdout.write(json.dumps({"type": "rate_limit_event", "rate_limit_info":
+            {"status": "rejected", "resetsAt": reset, "rateLimitType": "five_hour",
+             "overageStatus": "rejected", "overageDisabledReason": "out_of_credits",
+             "isUsingOverage": False}}) + "\\n")
+        sys.stdout.write(json.dumps({"type": "result", "subtype": "error_during_execution",
+            "is_error": True, "api_error_status": 429,
+            "result": "You've hit your session limit - resets 10:40pm (UTC)"}) + "\\n")
+        sys.stdout.flush()
+        sys.exit(1)
     elif mode == "malformed_one":
         write(ins[0], json.dumps(result(ins[0])))
         write(ins[1], "{{{ this is not json")
@@ -179,16 +211,27 @@ def nr(monkeypatch, tmp_path):
 
     mode_file = tmp_path / "claude_mode.txt"
     mode_file.write_text("score_all", encoding="utf-8")
+    # The usage-limit modes read their resetsAt stamp from here: six minutes
+    # ahead, as on the real 2026-08-27 night.
+    reset_file = tmp_path / "claude_reset.txt"
+    reset_file.write_text(str(int(time.time()) + 360), encoding="utf-8")
     claude = tmp_path / "fake_claude.py"
     claude.write_text(
         FAKE_CLAUDE
         % {
             "mode_file": str(mode_file),
-            "resume_cmd": repr([sys.executable, str(driver), str(vac), str(steps_path), "--resume"]),
+            "reset_file": str(reset_file),
+            "resume_cmd": repr(
+                [sys.executable, str(driver), str(vac), str(steps_path), "--resume"]
+            ),
         },
         encoding="utf-8",
     )
     monkeypatch.setenv("NIGHTLY_CLAUDE_BIN", f"{sys.executable} {claude}")
+
+    # Fake clock: the wait computes its real duration but never spends it.
+    slept = []
+    monkeypatch.setattr(nightly_run, "_sleep", lambda s: slept.append(s))
 
     def set_steps(steps):
         steps_path.write_text(json.dumps({"steps": steps, "i": 0}), encoding="utf-8")
@@ -197,6 +240,9 @@ def nr(monkeypatch, tmp_path):
 
     def set_mode(mode):
         mode_file.write_text(mode, encoding="utf-8")
+
+    def set_reset(epoch):
+        reset_file.write_text(str(int(epoch)), encoding="utf-8")
 
     def driver_calls():
         return json.loads(steps_path.read_text(encoding="utf-8")).get("calls", [])
@@ -220,6 +266,8 @@ def nr(monkeypatch, tmp_path):
         calls=calls,
         set_steps=set_steps,
         set_mode=set_mode,
+        set_reset=set_reset,
+        slept=slept,
         driver_calls=driver_calls,
         texts=texts,
         night_dir=night_dir,
@@ -349,13 +397,210 @@ def test_fast_auth_exit_alerts_login_failure(nr):
     assert any("login failure" in t for t in nr.texts())
 
 
-def test_fast_other_exit_alerts_see_transcript(nr):
+def test_fast_other_exit_alerts_in_plain_words(nr):
+    """A dead session alerts with a sentence and a log pointer — never a raw
+    stream-json blob (the transcript itself stays in the night log)."""
     nr.set_steps(
         [{"exit": 10, "action": "score_vacancies", "payload": _vac_payload(2)}, {"exit": 0}]
     )
     nr.set_mode("other_error")
     assert nr.mod.run_night() == 0
-    assert any("exited early, see transcript" in t for t in nr.texts())
+    alert = next(t for t in nr.texts() if "score_vacancies" in t)
+    assert "the session stopped early (exit 1)" in alert
+    assert "Unscored roles carry over" in alert
+    assert "Log: nightly/" in alert
+    assert "{" not in alert  # no JSON reached the phone
+
+
+def test_rate_limited_session_pauses_instead_of_alerting_a_failure(nr):
+    """A usage limit is no longer a failure. The night waits it out and retries
+    the same gate, so the phone gets the pause sentence — never a failure alert,
+    and never JSON. The transcript stays on disk for a real investigation."""
+    nr.set_steps(
+        [{"exit": 10, "action": "score_vacancies", "payload": _vac_payload(2)}, {"exit": 0}]
+    )
+    nr.set_mode("rate_limit")
+    assert nr.mod.run_night() == 0
+    texts = nr.texts()
+    # The old behaviour: "Night run failed at score_vacancies: ...". Gone.
+    assert not any("failed at" in t for t in texts), texts
+    paused = next(t for t in texts if "usage limit" in t)
+    assert "nothing is lost" in paused or "carry over" in paused
+    # None of the machine output leaks into any message on the phone.
+    for t in texts:
+        assert "is_error" not in t and "api_error_status" not in t and "{" not in t
+    assert (nr.night_dir() / "claude-score_vacancies.jsonl").exists()
+
+
+def test_reset_clock_accepts_milliseconds(nr):
+    assert nr.mod._reset_clock(1756400000000) == nr.mod._reset_clock(1756400000)
+
+
+# ---------------------------------------------------------------------------
+# The Claude usage limit: wait it out and retry the same gate (2026-08-27)
+# ---------------------------------------------------------------------------
+
+_ALERT_PREFIX = "🌙 Night run: "
+
+
+def _rate_limit_alert(nr):
+    return next(t for t in nr.texts() if "usage limit" in t)
+
+
+def test_reset_is_read_from_a_real_shaped_transcript(nr, tmp_path):
+    """The rejected event's resetsAt wins over the warnings that led up to it,
+    and a session that died of anything else reads as no limit at all."""
+    out = tmp_path / "t.jsonl"
+    err = tmp_path / "t.err"
+    err.write_text("", encoding="utf-8")
+    out.write_text(
+        json.dumps(
+            {
+                "type": "rate_limit_event",
+                "rate_limit_info": {
+                    "status": "allowed_warning",
+                    "utilization": 0.99,
+                    "resetsAt": 1787860000,
+                },
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "type": "rate_limit_event",
+                "rate_limit_info": {
+                    "status": "rejected",
+                    "resetsAt": 1787870400,
+                    "rateLimitType": "five_hour",
+                    "overageDisabledReason": "out_of_credits",
+                },
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "type": "result",
+                "is_error": True,
+                "api_error_status": 429,
+                "result": "You've hit your session limit",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert nr.mod._rate_limit_reset(out, err) == 1787870400
+
+    out.write_text('{"type":"result","is_error":true,"result":"the model fell over"}\n')
+    assert nr.mod._rate_limit_reset(out, err) is None
+
+
+def test_usage_limit_waits_then_retries_the_same_gate_without_a_trip(nr):
+    """The 2026-08-27 bug: the wrapper burned a gate trip on a nine-second 429
+    and ended the night three hours early. It now sleeps out the limit and
+    re-runs the same gate on the trip it already paid for."""
+    nr.set_steps(
+        [
+            {"exit": 10, "action": "score_vacancies", "payload": _vac_payload(4)},
+            {"exit": 10, "action": "score_vacancies", "payload": _vac_payload(4, prefix="w")},
+            {"exit": 0},
+        ]
+    )
+    nr.set_mode("rate_limit_once")
+    assert nr.mod.run_night() == 0
+    log = nr.wrapper_log()
+    assert "the Claude usage limit stopped the session" in log
+    assert "gate trip 1/8 again: score_vacancies (after the usage-limit wait)" in log
+    assert "gate trip 2/8" not in log  # the wait cost no trip
+    assert len(nr.slept) == 1 and nr.slept[0] > 0  # it really waited (fake clock)
+    # The retry scored the whole re-emitted payload — the night went on.
+    assert len(list((nr.night_dir() / "score_out").glob("*.json"))) == 4
+    assert len(nr.texts()) == 1  # the pause is the ONLY message; no failure alert
+
+
+def test_the_wait_is_logged_with_start_reset_and_resume(nr):
+    nr.set_steps(
+        [{"exit": 10, "action": "score_vacancies", "payload": _vac_payload(2)}, {"exit": 0}]
+    )
+    nr.set_mode("rate_limit_once")
+    assert nr.mod.run_night() == 0
+    log = nr.wrapper_log()
+    assert "usage limit wait 1/2: sleeping" in log
+    assert "limit lifts" in log and "scoring resumes" in log
+    assert "usage limit wait over at" in log
+
+
+def test_the_pause_alert_is_one_plain_sentence_within_the_cap(nr):
+    nr.set_steps(
+        [{"exit": 10, "action": "score_vacancies", "payload": _vac_payload(2)}, {"exit": 0}]
+    )
+    nr.set_mode("rate_limit_once")
+    assert nr.mod.run_night() == 0
+    alert = _rate_limit_alert(nr)
+    assert "scoring paused" in alert and "starts again at" in alert
+    assert "nothing is lost" in alert
+    assert len(alert) <= nr.mod.ALERT_MSG_CHARS + len(_ALERT_PREFIX)
+    for jargon in ("{", "429", "resetsAt", "api_error_status", "HTTP", "rate_limit"):
+        assert jargon not in alert
+
+
+def test_wait_is_skipped_when_the_limit_lifts_after_the_deadline(nr):
+    """Past the night's own deadline the wrapper must not sleep: it carries the
+    work over exactly as it does today, and says so once."""
+    nr.set_steps(
+        [{"exit": 10, "action": "score_vacancies", "payload": _vac_payload(2)}, {"exit": 0}]
+    )
+    nr.set_mode("rate_limit")
+    nr.set_reset(time.time() + 60 * 60 * 24)  # tomorrow: far past a 225-minute night
+    assert nr.mod.run_night() == 0
+    assert nr.slept == []  # nothing slept
+    alert = _rate_limit_alert(nr)
+    assert "after tonight's deadline" in alert and "carry over" in alert
+    assert len(alert) <= nr.mod.ALERT_MSG_CHARS + len(_ALERT_PREFIX)
+    assert "after the deadline" in nr.wrapper_log()
+    assert nr.driver_calls()[-1] == ["--resume"]  # the night still ran out to the digest
+
+
+def test_two_waits_a_night_and_no_more(nr):
+    """A pathological night that keeps hitting the limit stops waiting after
+    RATE_LIMIT_WAITS — otherwise a stale reset stamp would spin the loop."""
+    nr.set_steps(
+        [
+            {"exit": 10, "action": "score_vacancies", "payload": _vac_payload(2)},
+            {"exit": 10, "action": "score_vacancies", "payload": _vac_payload(2, prefix="w")},
+            {"exit": 10, "action": "score_vacancies", "payload": _vac_payload(2, prefix="x")},
+            {"exit": 0},
+        ]
+    )
+    nr.set_mode("rate_limit_half")
+    assert nr.mod.run_night() == 0
+    assert len(nr.slept) == nr.mod.RATE_LIMIT_WAITS == 2
+    last = nr.texts()[-1]
+    assert "spent again after 2 waits tonight" in last and "carry over" in last
+    assert len(last) <= nr.mod.ALERT_MSG_CHARS + len(_ALERT_PREFIX)
+    assert "gate trip 2/8" not in nr.wrapper_log()  # both waits rode trip 1
+
+
+def test_a_sigterm_during_the_wait_is_not_swallowed(nr):
+    """R4: systemd stops the unit mid-sleep — the handler's SystemExit must
+    leave through the wait, not be caught on the way out."""
+    import settings
+
+    night = nr.night_dir()
+    night.mkdir(parents=True, exist_ok=True)
+    ctx = nr.mod._Ctx(settings.nightly(), night, datetime.now() + timedelta(hours=1))
+    nr.mod._CURRENT = ctx
+
+    def stopped(seconds):
+        nr.mod._handle_sigterm(signal.SIGTERM, None)
+
+    nr.mod._sleep = stopped
+    try:
+        with pytest.raises(SystemExit) as exc:
+            nr.mod._wait_out_rate_limit(ctx, int(time.time()) + 300, 0)
+    finally:
+        nr.mod._CURRENT = None
+    assert exc.value.code == 0
+    assert any("SIGTERM" in t for t in nr.texts())
 
 
 def test_claude_resuming_mid_batch_reports_the_shortfall(nr):
@@ -435,6 +680,27 @@ def test_claude_env_is_scrubbed_of_telegram_and_firecrawl_on_vacancy_gate(nr, mo
     assert "PATH" in env and "HOME" in env
 
 
+def test_claude_child_never_carries_an_anthropic_api_key(nr, monkeypatch):
+    """The night scores on the Claude subscription through the headless login.
+    Claude Code prefers an API key whenever it finds one, so an inherited key
+    would silently move the whole night's spend to per-token billing — the
+    child must not see one even when the wrapper's own environment has it."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "api-key-must-not-pass")
+    assert "ANTHROPIC_API_KEY" not in nr.mod._CHILD_ENV_ALLOWLIST
+    assert "ANTHROPIC_API_KEY" in nr.mod._SECRET_ENV_KEYS  # still masked in logs
+    nr.set_steps(
+        [{"exit": 10, "action": "score_vacancies", "payload": _vac_payload(1)}, {"exit": 0}]
+    )
+    assert nr.mod.run_night() == 0
+    env = json.loads((nr.night_dir() / "claude_env-score_vacancies.json").read_text())
+    assert "ANTHROPIC_API_KEY" not in env
+    assert "api-key-must-not-pass" not in json.dumps(env)
+    # The driver keeps the full environment: its Python stages still see the
+    # key if one is ever configured.
+    driver_env = json.loads((nr.vac / "driver_env.json").read_text())
+    assert driver_env["ANTHROPIC_API_KEY"] == "api-key-must-not-pass"
+
+
 def test_claude_env_reads_the_token_from_the_systemd_credentials_dir(nr, monkeypatch, tmp_path):
     cred_dir = tmp_path / "creds"
     cred_dir.mkdir()
@@ -501,8 +767,7 @@ def test_alert_masks_database_credentials(nr):
                 "exit": 30,
                 "stage": "preflight",
                 "note": (
-                    "OperationalError: could not connect to "
-                    "postgres://user:secretpass@db.example/x"
+                    "OperationalError: could not connect to postgres://user:secretpass@db.example/x"
                 ),
             }
         ]
@@ -560,9 +825,7 @@ def test_failed_alert_send_exits_nonzero(nr):
 
 def test_manual_checkpoint_parks_the_night(nr):
     (nr.vac / "run_state.json").write_text(
-        json.dumps(
-            {"run_id": "manual", "finished": False, "options": {"unattended": False}}
-        ),
+        json.dumps({"run_id": "manual", "finished": False, "options": {"unattended": False}}),
         encoding="utf-8",
     )
     assert nr.mod.run_night() == 0
@@ -787,3 +1050,59 @@ def test_dry_run_prints_the_dispatch_table_with_masked_commands(nr, capsys):
     assert "TELEGRAM_* never passed" in out
     assert "tok-123456-secret" not in out  # the token value never prints
     assert nr.driver_calls() == []  # dry run launches nothing
+
+
+# ---------------------------------------------------------------------------
+# The dated pause (config [nightly] paused_until / NIGHTLY_PAUSED_UNTIL)
+# ---------------------------------------------------------------------------
+
+
+def _pause(monkeypatch, nr, value):
+    import settings
+
+    monkeypatch.setattr(settings, "nightly_paused_until", lambda: value)
+
+
+def test_paused_night_does_no_work_at_all(nr, monkeypatch):
+    """A paused night must cost nothing: no driver, no Claude session, no night
+    directory, no lock. It is a budget fuse, so 'cheap' is the whole point."""
+    _pause(monkeypatch, nr, "2999-01-01")
+    nr.set_steps([{"exit": 10, "action": "score_vacancies", "payload": _vac_payload(2)}])
+    assert nr.mod.run_night() == 0
+    assert nr.driver_calls() == [], "a paused night still ran the driver"
+    text = " ".join(nr.texts())
+    assert "paused until" in text and "nothing fetched or scored" in text
+    assert not (nr.mod.VACANCIES_DIR / "nightly.lock").exists()
+
+
+def test_the_pause_lifts_by_itself_on_the_day(nr, monkeypatch):
+    """Yesterday's date is not a pause — the rule expires without anyone
+    remembering to remove it."""
+    _pause(monkeypatch, nr, (datetime.now().date() - timedelta(days=1)).isoformat())
+    nr.set_steps([{"exit": 0}])
+    assert nr.mod.run_night() == 0
+    assert nr.driver_calls(), "an expired pause still blocked the night"
+
+
+def test_todays_date_runs(nr, monkeypatch):
+    """paused_until is the resume day, not the last paused day."""
+    _pause(monkeypatch, nr, datetime.now().date().isoformat())
+    nr.set_steps([{"exit": 0}])
+    assert nr.mod.run_night() == 0
+    assert nr.driver_calls()
+
+
+def test_a_typo_in_the_pause_date_runs_and_says_so(nr, monkeypatch):
+    """A misspelt date must not pause the pipeline forever in silence."""
+    _pause(monkeypatch, nr, "1st September")
+    nr.set_steps([{"exit": 0}])
+    assert nr.mod.run_night() == 0
+    assert nr.driver_calls(), "a typo silently paused the night"
+    assert any("is not a date" in t for t in nr.texts())
+
+
+def test_no_pause_configured_runs(nr, monkeypatch):
+    _pause(monkeypatch, nr, "")
+    nr.set_steps([{"exit": 0}])
+    assert nr.mod.run_night() == 0
+    assert nr.driver_calls()

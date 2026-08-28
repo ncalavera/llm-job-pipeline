@@ -9,6 +9,7 @@ session and its night-scorer subagents are meant to produce. Any other path
 posting that tricks a scorer cannot plant code for the next night.
 Interactive sessions never set the variable, so the hook is a no-op there.
 """
+
 import json
 import os
 import sys

@@ -14,12 +14,15 @@ db_conn / db_backend), so the DAL can import filters without a cycle.
 import html
 import re
 from difflib import SequenceMatcher
+from typing import NamedTuple
 
 from config import (
     GLOBAL_BLACKLIST,
     GLOBAL_BLACKLIST_SUBSTR,
     GLOBAL_BLACKLIST_DESC_SUBSTR,
     COMPANY_TITLE_FILTERS,
+    COMPANY_NEVER_FETCH,
+    DESC_PATTERN_PREFIX,
     resolve_canonical_name,
 )
 
@@ -102,16 +105,118 @@ def title_words_blacklisted(title: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Per-company title INCLUDE-filters
+# Not-a-vacancy titles
+#
+# EA-ecosystem boards list programs, courses, grants and talent directories
+# side by side with jobs. Each one that reaches scoring costs a real Opus call
+# (five of the first twenty items on the night of 2026-08-27) and can never be
+# a match, because it is not a role anyone is hired for.
+#
+# The discriminator is title SHAPE, not a keyword: a job title names a person's
+# role, an offering names a thing. "Impact Accelerator Program" is a thing;
+# "Senior Program Manager, Google DeepMind Impact Accelerator" is a person. So
+# an offering word only counts when the title carries NO role noun at all —
+# which is why "Program Manager", "Head of Courses", "OCDI Program and Grants
+# Associate" and "Career Bootcamp Lead" are all untouched.
+# ---------------------------------------------------------------------------
+
+#: Words that name a thing on offer rather than a job.
+_OFFERING_RE = re.compile(
+    r"\b(?:program|programme|programs|programmes|course|courses|"
+    r"accelerator|incubator|incubation|bootcamp|boot camp|"
+    r"fellowship|fellowships|scholarship|scholarships|"
+    r"grant|grants|funding round|cohort|curriculum|syllabus|"
+    r"summit|conference|webinar|workshop|hackathon|"
+    r"directory|talent pool|talent directory|newsletter)\b",
+    re.IGNORECASE,
+)
+
+#: Nouns that name the PERSON doing a job. One of these anywhere in the title
+#: means a human is being hired, whatever else the title mentions.
+_ROLE_NOUN_RE = re.compile(
+    r"\b(?:manager|managers|officer|officers|lead|leader|leads|director|"
+    r"head|chief|president|principal|partner|founder|"
+    r"associate|assistant|coordinator|specialist|analyst|adviser|advisor|"
+    r"consultant|engineer|developer|designer|architect|scientist|researcher|"
+    r"strategist|writer|editor|producer|recruiter|counsel|controller|"
+    r"administrator|executive|supervisor|representative|"
+    r"secretary|treasurer|steward|liaison|ambassador|expert|owner|"
+    r"charg\u00e9|chargee|responsable|gestionnaire|"
+    r"intern|internship|apprentice|trainee|volunteer|"
+    r"vp|svp|evp|cto|ceo|coo|cfo|cpo|cmo)\b",
+    re.IGNORECASE,
+)
+
+#: Job-description structure. Borrowed verbatim from quality.is_marketing_page,
+#: which draws the same line between a real posting and a page about something
+#: else. More than one of these and the text is a posting, whatever the title.
+_JD_STRUCTURE_RE = re.compile(
+    r"responsibilit|qualificat|requirement|you will|we(?:'re| are) looking|"
+    r"what you(?:'ll| will)|the role|reports? to|how to apply|"
+    r"application deadline|apply (?:now|here|for this|by|via|online)|"
+    r"minimum .{0,20}years|job description|key duties|role purpose",
+    re.IGNORECASE,
+)
+_OFFERING_MAX_JD_SIGNALS = 1
+
+#: Recruiter test postings and placeholders. Narrow on purpose — these phrases
+#: do not occur in a real title ("QA Test Engineer" carries none of them).
+_TEST_POSTING_RE = re.compile(
+    r"\bdo not apply\b|\btest job\b|\btest posting\b|\btest vacancy\b|"
+    r"\bthis is a test\b|\bdummy (?:job|posting|vacancy)\b|\bignore this\b|"
+    r"\bplease ignore\b|\bsample (?:job|posting)\b",
+    re.IGNORECASE,
+)
+
+
+def not_a_vacancy_reason(title: str, description: str = "") -> str | None:
+    """Why this is not a job posting, or None when it is (or may be) one.
+
+    Two classes only:
+
+      * a recruiter's test placeholder ("US TEST JOB 2026 - DO NOT APPLY").
+        Judged on the title alone — the phrases are unambiguous.
+
+      * an offering: a program, course, grant, fellowship or directory. THREE
+        conditions must hold together, because no single one is safe. The title
+        names an offering, AND it names no person's role, AND the text carries
+        no job-description structure. Measured against the whole live database,
+        the third condition is what saves "Policy Programs & Partnerships,
+        Global Impact" (a real Anthropic role, scored 78) and "GTM Strategy &
+        Operations, Strategic Programs" (a real OpenAI role) — both are titles
+        with no role noun at all, and both come with a full job description.
+    """
+    t = (title or "").strip()
+    if not t:
+        return None
+    if _TEST_POSTING_RE.search(t):
+        return "test posting, not a real job"
+    if not _OFFERING_RE.search(t) or _ROLE_NOUN_RE.search(t):
+        return None
+    if len(_JD_STRUCTURE_RE.findall(description or "")) > _OFFERING_MAX_JD_SIGNALS:
+        return None
+    return "a program or grant to apply to, not a job"
+
+
+# ---------------------------------------------------------------------------
+# Per-company INCLUDE-filters
 #
 # COMPANY_TITLE_FILTERS (profile ## COMPANY_TITLE_FILTERS) maps a company to a
-# list of title include patterns. For a listed company, a role passes only when
-# its title matches at least one pattern; unlisted companies are unaffected.
+# list of include patterns. For a listed company, a role passes only when it
+# matches at least one pattern; unlisted companies are unaffected.
+#
+# A pattern is TITLE-scoped by default and DESCRIPTION-scoped when written with
+# the ``desc:`` prefix. The two scopes UNION: a role survives when its title
+# matches a title pattern OR its body matches a desc pattern. The description
+# scope exists because some units never put their name in the title — WFP's
+# Innovation Accelerator badges its roles only in the body, so "Product Manager
+# - Specialist" is indistinguishable from any other WFP product role by title.
+#
 # Keys are ALIAS-PROOF: both the profile spelling and the queried org go through
 # resolve_canonical_name (the same alias resolution find_duplicates uses), after
 # HTML-entity unescaping, so a board delivering "WFP" still hits an include-list
 # declared as "WFP - World Food Programme". Patterns are COMPILED once at import
-# so the per-role check is a dict hit plus one regex search.
+# so the per-role check is a dict hit plus one or two regex searches.
 # ---------------------------------------------------------------------------
 
 
@@ -131,42 +236,118 @@ def _canonical_company_key(name: str) -> str:
     return _normalize_company_key(resolve_canonical_name(html.unescape(name or "")))
 
 
-def _build_company_title_include(company_filters: dict) -> dict[str, re.Pattern]:
-    """``{canonical company key: compiled include-pattern}`` from the profile map.
+class CompanyInclude(NamedTuple):
+    """A company's compiled include-patterns, one per scope.
 
-    The alternation regex is compiled ONCE per company here — never per call.
-    Two profile spellings that resolve to the same canonical company merge their
-    pattern lists before compiling.
+    ``title`` and ``desc`` are each a compiled alternation or None when the
+    company declared no pattern in that scope.
     """
-    merged: dict[str, list[str]] = {}
+
+    title: re.Pattern | None
+    desc: re.Pattern | None
+
+
+def _build_company_title_include(company_filters: dict) -> dict[str, CompanyInclude]:
+    """``{canonical company key: CompanyInclude}`` from the profile map.
+
+    Splits each company's patterns by scope on the ``desc:`` prefix and compiles
+    each scope's alternation ONCE here — never per call. Two profile spellings
+    that resolve to the same canonical company merge their pattern lists first.
+    """
+    merged: dict[str, tuple[list[str], list[str]]] = {}
     for company, patterns in company_filters.items():
         if not patterns:
             continue
-        bucket = merged.setdefault(_canonical_company_key(company), [])
+        titles, descs = merged.setdefault(_canonical_company_key(company), ([], []))
         for pattern in patterns:
-            if pattern not in bucket:
-                bucket.append(pattern)
-    return {key: build_title_blacklist_pattern(pats) for key, pats in merged.items()}
+            if pattern.startswith(DESC_PATTERN_PREFIX):
+                body = pattern[len(DESC_PATTERN_PREFIX) :].strip()
+                bucket = descs
+            else:
+                body = pattern
+                bucket = titles
+            if body and body not in bucket:
+                bucket.append(body)
+    return {
+        key: CompanyInclude(
+            build_title_blacklist_pattern(titles) if titles else None,
+            build_title_blacklist_pattern(descs) if descs else None,
+        )
+        for key, (titles, descs) in merged.items()
+        if titles or descs
+    }
 
 
 _COMPANY_TITLE_INCLUDE = _build_company_title_include(COMPANY_TITLE_FILTERS)
 
 
-def company_title_filter_reason(org: str, title: str) -> str | None:
-    """Kill reason when a per-company title include-filter drops this role.
+def company_title_filter_reason(org: str, title: str, desc: str | None = None) -> str | None:
+    """Kill reason when a per-company include-filter drops this role.
 
-    Returns a reason string naming the rule when ``org`` has an include-list AND
-    ``title`` matches none of its patterns; returns None when the company has no
-    include-list (unaffected) or the title matches. The reason names the rule so
+    Returns a reason string naming the rule when ``org`` has an include-list and
+    the role matches none of its patterns; returns None when the company has no
+    include-list (unaffected) or the role matches. The reason names the rule so
     a later review can trace the drop:
     ``"company_title_filter — not in <Company> include list"``.
+
+    ``desc`` is the role's body, and its two empty values mean different things:
+
+      * ``""`` — the SOURCE gave no body. The title rule alone decides; a
+        description pattern can never keep a role on a body we do not have.
+      * ``None`` (the default) — the CALLER has no body to give. Same decision,
+        so a caller that only knows the title behaves exactly as it did before
+        description scopes existed.
+
+    Either way a missing body can only ever cost a role its keep, never win it
+    one, so nothing is silently let through.
     """
     compiled = _COMPANY_TITLE_INCLUDE.get(_canonical_company_key(org))
     if compiled is None:
         return None
-    if compiled.search((title or "").lower()):
+    if compiled.title is not None and compiled.title.search((title or "").lower()):
+        return None
+    if compiled.desc is not None and desc and compiled.desc.search(desc.lower()):
         return None
     return f"company_title_filter — not in {org} include list"
+
+
+# ---------------------------------------------------------------------------
+# Whole-company NEVER-FETCH list
+#
+# COMPANY_NEVER_FETCH (profile ## COMPANY_NEVER_FETCH) names companies the user
+# wants nothing from at all. Keys go through the same alias resolution as the
+# include-lists, so a board spelling still hits a ban declared under the
+# canonical name. Empty list → nobody is banned.
+# ---------------------------------------------------------------------------
+
+_COMPANY_NEVER_FETCH = {_canonical_company_key(name) for name in COMPANY_NEVER_FETCH if name}
+
+
+def company_never_fetch_reason(org: str) -> str | None:
+    """Kill reason when the profile bans this company outright, else None.
+
+    The reason names the rule so a later review can trace the drop:
+    ``"company_never_fetch — <Company> is on the profile never-fetch list"``.
+    """
+    if _canonical_company_key(org) in _COMPANY_NEVER_FETCH:
+        return f"company_never_fetch — {org} is on the profile never-fetch list"
+    return None
+
+
+def fetch_time_drop_reason(org: str, title: str, desc: str = "") -> str | None:
+    """Kill reason when the user's profile says this role must never be STORED.
+
+    The union of the two profile rules the fetch path can decide: the
+    whole-company ban and the per-company include-list. Called BEFORE the save,
+    so the pipeline never pays to store, enrich, score or report the role.
+
+    ``desc`` is the fetched body. The fetch path always HAS it (or knows the
+    source gave none), so it passes ``""`` rather than None for a bodyless role
+    — a description pattern then cannot keep it, and the title rule alone
+    decides. The filter stage keeps calling ``company_title_filter_reason`` as
+    the safety net for rows stored before a profile change.
+    """
+    return company_never_fetch_reason(org) or company_title_filter_reason(org, title, desc or "")
 
 
 def description_words_blacklisted(desc: str) -> bool:

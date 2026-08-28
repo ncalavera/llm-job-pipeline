@@ -1,6 +1,7 @@
 """The night write fence (.claude/hooks/night-write-fence.py) refuses every
 Write/Edit outside <night_dir>/score_out/ while NIGHTLY_NIGHT_DIR is set, and
 stays silent for interactive sessions (variable unset)."""
+
 import json
 import os
 import subprocess
@@ -19,7 +20,9 @@ def _run(tool_input, night_dir=None):
     return subprocess.run(
         [sys.executable, str(HOOK)],
         input=json.dumps({"tool_name": "Write", "tool_input": tool_input}),
-        capture_output=True, text=True, env=env,
+        capture_output=True,
+        text=True,
+        env=env,
     )
 
 
@@ -62,8 +65,10 @@ def test_refuses_when_path_missing(tmp_path):
 def test_night_session_env_carries_the_venv_interpreter(tmp_path):
     """The session saves with the wrapper's own interpreter, never a bare python3."""
     import sys
+
     sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
     import nightly_run
+
     env = nightly_run._claude_env(False, tmp_path)
     assert env["NIGHTLY_PYTHON"] == sys.executable
     assert env["NIGHTLY_NIGHT_DIR"] == str(tmp_path.resolve())

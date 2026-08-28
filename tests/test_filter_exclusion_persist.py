@@ -4,7 +4,7 @@ filter_vacancies.persist_scoring_exclusions() is the single decider of "not
 scored" for new vacancies: it writes vacancy.scoring_excluded_reason in ONE
 UPDATE per run (set and clear in the same statement), and every reader of
 "unscored" — load_vacancies(unscored_only=True), the candidate rescue, the
-dashboard count, run_daily._unscored_unseen — excludes reasoned rows, so the
+dashboard count, run_daily._waiting_to_score — excludes reasoned rows, so the
 reason shown downstream is the reason that applied.
 
 Each test runs on its own fresh temp SQLite DB with migration 0025 applied
@@ -53,12 +53,25 @@ def _force_sqlite(monkeypatch, db_file):
     return db
 
 
+#: 0013 adds vacancy.source_board — the filter reads it to leave the cards
+#: Nikita added himself alone.
+MIGRATION_SOURCE_BOARD = (
+    Path(__file__).resolve().parent.parent
+    / "sql"
+    / "migrations"
+    / "0013_add_source_board.sqlite.sql"
+)
+
+
 def _apply_0020(db):
-    """Apply the REAL 0025 SQLite migration file to the fresh baseline DB."""
-    sql = MIGRATION_SQLITE.read_text(encoding="utf-8")
+    """Apply the REAL 0013 + 0025 SQLite migration files to the baseline DB."""
     conn = db.get_conn()
     cur = conn.cursor()
-    cur.execute(sql)
+    for path in (MIGRATION_SOURCE_BOARD, MIGRATION_SQLITE):
+        try:
+            cur.execute(path.read_text(encoding="utf-8"))
+        except Exception:  # already in the baseline
+            pass
     conn.commit()
     cur.close()
 
@@ -343,10 +356,74 @@ def test_stale_reason_is_cleared_in_the_same_statement(env):
     db, fv = env
     vid = _seed(db, "CleanOrg", "Backend Engineer", reason="junk title: talent pool")
 
-    _run_pass(fv)
+    result = _run_pass(fv)
 
     assert _reason(db, vid) is None
     assert vid in db.load_vacancies(unscored_only=True)
+    # The clear is counted, and only real removals count.
+    assert result["cleared"] == 1
+
+
+# ---------------------------------------------------------------------------
+# What was DECIDED vs what the database actually carries
+# ---------------------------------------------------------------------------
+
+
+def test_what_the_pass_decides_is_what_the_database_can_hold(env):
+    """The gap that produced the 2026-08-27 over-count (128 decided, 74 saved)
+    is closed by construction: the pass only decides about roles still waiting
+    for a decision, which is exactly the set a note can be saved on."""
+    db, fv = env
+    vid_unseen = _seed(db, "Acme Foundation", "Talent Pool — General Application")
+    vid_decided = _seed(
+        db,
+        "Acme Foundation",
+        "Talent Pool — Decided Application",
+        dedup_hash="pool-decided",
+        status="passed",
+    )
+
+    result = _run_pass(fv)
+
+    assert result["classified"] == result["stamped"] == 1
+    assert result["out_of_scope"] == 0
+    assert result["count"] == result["stamped"]
+    assert _reason(db, vid_unseen) == "junk title: talent pool"
+    assert _reason(db, vid_decided) is None
+    assert result["reasons"] == {"junk title: talent pool": 1}
+
+
+def test_every_decided_status_is_left_alone(env):
+    """Not just 'passed': anything Nikita has decided is left alone, and a
+    status added later is left alone too (the rule names 'unseen', not a list
+    of decisions)."""
+    db, fv = env
+    for i, status in enumerate(("passed", "skipped", "declined", "interview", "expiring")):
+        _seed(
+            db,
+            "DecidedOrg",
+            f"Talent Pool — General Application {i}",
+            dedup_hash=f"dec-{i}",
+            status=status,
+        )
+    vid_unseen = _seed(db, "DecidedOrg", "Talent Pool — General Application X", dedup_hash="dec-x")
+
+    result = _run_pass(fv)
+
+    assert result["classified"] == result["stamped"] == 1
+    assert result["out_of_scope"] == 0
+    assert _reason(db, vid_unseen) == "junk title: talent pool"
+
+
+def test_counters_are_zero_and_persisted_when_nothing_is_excluded(env):
+    db, fv = env
+    _seed(db, "CleanOrg", "Backend Engineer")
+
+    result = _run_pass(fv)
+
+    assert result["persisted"] is True
+    assert result["classified"] == result["stamped"] == result["cleared"] == 0
+    assert result["out_of_scope"] == 0
 
 
 def test_row_at_demoted_company_keeps_its_reason(env):
@@ -354,7 +431,9 @@ def test_row_at_demoted_company_keeps_its_reason(env):
     company left 'active' (invisible to classify_vacancies) is NOT cleared,
     while a stale reason at an active company still is."""
     db, fv = env
-    vid_cand = _seed(db, "DemotedOrg", "Talent Pool — General Application", reason="junk title: talent pool")
+    vid_cand = _seed(
+        db, "DemotedOrg", "Talent Pool — General Application", reason="junk title: talent pool"
+    )
     vid_active = _seed(db, "CleanOrg", "Backend Engineer", reason="stale reason")
     conn = db.get_conn()
     cur = conn.cursor()
@@ -411,7 +490,7 @@ def test_unscored_unseen_count_excludes_reasoned_rows(env):
     import run_daily
 
     importlib.reload(run_daily)
-    assert run_daily._unscored_unseen() == 1
+    assert run_daily._waiting_to_score()["active"] == 1
     assert vid_clean in db.load_vacancies(unscored_only=True)
 
 
@@ -480,9 +559,579 @@ def test_h_filter_records_excluded_count_and_histogram(tmp_path, monkeypatch):
     }
 
 
+def _h_filter_note(monkeypatch, payload):
+    """Run run_daily's filter stage over one fake filter payload -> (entry, note)."""
+    sys.modules.pop("run_daily", None)
+    import run_daily as rd
+
+    importlib.reload(rd)
+
+    class _Res:
+        returncode = 0
+        stdout = json.dumps(payload)
+        stderr = ""
+
+    monkeypatch.setattr(rd, "_run_capture", lambda *a, **k: _Res())
+    state = rd._new_state(rd.Opts())
+    entry = rd._stage(state, "filter")
+    kind, note = rd._h_filter(state, entry, rd.Opts())
+    assert kind == "advance"
+    return entry, note
+
+
+def test_filter_note_is_one_partition_of_one_pool(tmp_path, monkeypatch):
+    """The note names its denominator and its parts add up to it: the reader
+    can check 41 + 128 + 279 = 448 without another source (the 2026-08-27 note
+    printed 41 and 128 with no denominator, and 128 + 41 != 144)."""
+    payload = {
+        "total_unscored": 448,
+        "categories": {
+            "delete_blacklist": 100,
+            "delete_geo": 28,
+            "reenrich_blind": 200,
+            "reenrich_thin": 79,
+            "ready": 41,
+        },
+        "ready": 41,
+        "waiting_to_score": {"active": 20, "candidate": 357, "other": 6},
+        "scoring_excluded": {"classified": 128, "stamped": 74, "cleared": 5, "reasons": {}},
+    }
+    entry, note = _h_filter_note(monkeypatch, payload)
+
+    assert note == (
+        "Looked at 448 roles with no score yet: 41 go on to scoring, 128 skipped "
+        "(marked why on 74; nothing deleted — check them in /jobs-review), "
+        "279 need their description fetched again. 20 roles wait to be scored now, "
+        "and 357 more sit behind companies you have not approved yet."
+    )
+    # No internal vocabulary reached the card.
+    for word in ("classified", "stamped", "written", "scope", "row", "persisted", "partition"):
+        assert word not in note.lower()
+    assert entry["filter"]["scanned"] == 448
+    assert (
+        entry["filter"]["ready"] + entry["filter"]["excluded"] + entry["filter"]["reenrich"]
+        == entry["filter"]["scanned"]
+    )
+    # Rows the pass classified but never wrote are NOT reported as written.
+    assert entry["filter"]["reasons_written"] == 74
+    assert entry["filter"]["excluded_count"] == 74
+    # "pass the filter" (this scan) and "wait to be scored" (the live queue)
+    # are different questions and now carry different words.
+    assert "ready to score" not in note and "pass the filter" not in note
+    assert entry["filter"]["waiting_to_score"] == 20
+    assert entry["filter"]["waiting_behind_candidates"] == 357
+
+
+def test_filter_note_names_the_parked_backlog_even_when_the_queue_is_small(tmp_path, monkeypatch):
+    """357 roles parked behind unapproved companies must not hide behind a
+    "20 waiting" figure — nothing else in the run counts them."""
+    payload = {
+        "total_unscored": 5,
+        "categories": {"ready": 5},
+        "ready": 5,
+        "waiting_to_score": {"active": 20, "candidate": 357, "other": 0},
+        "scoring_excluded": {"stamped": 0},
+    }
+    _, note = _h_filter_note(monkeypatch, payload)
+    assert (
+        "20 roles wait to be scored now, and 357 more sit behind companies "
+        "you have not approved yet." in note
+    )
+
+
+# ---------------------------------------------------------------------------
+# One definition of "waiting to be scored", shared by both stages
+# ---------------------------------------------------------------------------
+
+
+def test_both_stages_report_the_same_waiting_number(env):
+    """The 2026-08-28 mismatch: the filter said 26 and the digest said 20 in
+    the same minute against the same database. Both now count with
+    unscored_pool, so they cannot disagree."""
+    db, fv = env
+    import telegram_digest as td
+    import unscored_pool
+
+    # Waiting: unseen, unscored, no reason, at an active company.
+    _seed(db, "ActiveOrg", "Waiting One", dedup_hash="w1")
+    _seed(db, "ActiveOrg", "Waiting Two", dedup_hash="w2")
+    # NOT waiting — each for its own reason.
+    _seed(db, "ActiveOrg", "Passed Role", dedup_hash="p1", status="passed")
+    _seed(db, "ActiveOrg", "Liked Role", dedup_hash="l1", status="liked")
+    _seed(db, "ActiveOrg", "Scored Role", dedup_hash="s1", llm_score=70)
+    _seed(db, "ActiveOrg", "Dropped Role", dedup_hash="d1", reason="US-only location")
+    # Parked behind a company nobody approved.
+    for i in range(3):
+        _seed(db, "CandOrg", f"Parked {i}", dedup_hash=f"c{i}")
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE company SET status = 'candidate' WHERE canonical_name = ?", ("CandOrg",))
+    conn.commit()
+    cur.close()
+
+    from_filter = fv.waiting_to_score()
+    from_digest = td.fetch_unscored_pool(db.get_conn())
+
+    assert from_filter == from_digest
+    assert from_filter == {"active": 2, "candidate": 3, "other": 0}
+    # And the shared module is what both of them called.
+    cur = db.get_conn().cursor()
+    assert unscored_pool.counts(cur) == from_filter
+    cur.close()
+
+
+def test_waiting_pool_matches_what_the_scorer_will_actually_be_offered(env):
+    """A 'passed' row is refused by score_vacancies (status_exclude), so it is
+    not waiting — this is exactly where the filter's looser 'ready' count and
+    the digest disagreed."""
+    db, fv = env
+    _seed(db, "ActiveOrg", "Passed Role", dedup_hash="p1", status="passed")
+    _seed(db, "ActiveOrg", "Waiting Role", dedup_hash="w1")
+
+    assert fv.waiting_to_score()["active"] == 1
+    # The filter's own scan still SEES the passed row — different question.
+    cats = fv.classify_vacancies()
+    seen = {vid for items in cats.values() for vid, _ in items}
+    assert len(seen) == 2
+
+
+def test_filter_note_says_so_when_the_parts_do_not_add_up(tmp_path, monkeypatch):
+    """A payload whose categories disagree with its own total is reported as
+    it is — the note never forces the sum."""
+    payload = {
+        "total_unscored": 500,
+        "categories": {"delete_junk": 10, "reenrich_thin": 5, "ready": 3},
+        "ready": 3,
+        "scoring_excluded": {"stamped": 10},
+    }
+    _, note = _h_filter_note(monkeypatch, payload)
+    assert "That adds up to 18, not 500 — the count is off." in note
+
+
+def test_filter_note_never_prints_the_same_set_under_two_names(tmp_path, monkeypatch):
+    """ "junk flagged" and "excluded" were the same rows printed twice. One
+    excluded count now, and the reasons-written figure beside it is a
+    different, smaller thing."""
+    payload = {
+        "total_unscored": 10,
+        "categories": {"delete_junk": 6, "ready": 4},
+        "ready": 4,
+        "delete_ids": {"delete_junk": ["a", "b", "c", "d", "e", "f"]},
+        "scoring_excluded": {"classified": 6, "stamped": 6},
+    }
+    _, note = _h_filter_note(monkeypatch, payload)
+    assert "junk candidate" not in note
+    assert note.count("6") == 2  # once as "6 skipped", once as "marked why on 6"
+
+
 def test_migration_applies_and_loader_query_runs_on_sqlite(env):
     """The real 0025 file applied cleanly (fixture) and the reasoned-row
     condition is live in the loader SQL."""
     db, fv = env
     assert db._vacancy_has_column("scoring_excluded_reason")
     assert db.load_vacancies(unscored_only=True) == {}
+
+
+# ---------------------------------------------------------------------------
+# CHARACTERISATION — how a role group's note is decided TODAY.
+#
+# _exclusion_reason_map picks each group's representative by longest
+# description and derives the group's note from it, and the location note
+# reaches a group only when EVERY member is location-excluded. Both rules read
+# every member the pass classified — including roles Nikita has already
+# decided on. These tests pin the resulting notes so that dropping decided
+# roles from the pass cannot change them unnoticed.
+# ---------------------------------------------------------------------------
+
+
+def test_char_decided_sibling_is_the_group_representative(env):
+    """A 'passed' sibling with the longest description decides the note that
+    the still-undecided sibling carries."""
+    db, fv = env
+    vid_passed = _seed(
+        db,
+        "RepOrg",
+        "Program Manager",
+        dedup_hash="rep-passed",
+        status="passed",
+        desc="404 not found — this page is gone. " * 20,
+    )
+    vid_unseen = _seed(
+        db, "RepOrg", "Program Manager", dedup_hash="rep-unseen", desc="404 not found"
+    )
+
+    _run_pass(fv)
+
+    assert _reason(db, vid_unseen) == "junk content: error page"
+    assert _reason(db, vid_passed) is None  # decided rows are never written to
+
+
+def test_char_mixed_location_group_with_a_decided_sibling_is_still_scored(env):
+    """The location note needs EVERY member excluded. A 'passed' sibling in a
+    kept location today holds the whole group open, so the undecided US-only
+    sibling carries no note and still reaches scoring."""
+    db, fv = env
+    vid_passed_de = _seed(
+        db,
+        "MixedDecidedOrg",
+        "Program Manager",
+        dedup_hash="mixdec-de",
+        status="passed",
+        location="Berlin, Germany",
+    )
+    vid_unseen_us = _seed(
+        db,
+        "MixedDecidedOrg",
+        "Program Manager",
+        dedup_hash="mixdec-us",
+        location="New York, US only",
+    )
+
+    _run_pass(fv)
+
+    assert _reason(db, vid_passed_de) is None
+    assert _reason(db, vid_unseen_us) is None
+    assert vid_unseen_us in db.load_vacancies(unscored_only=True)
+
+
+def test_char_decided_sibling_widens_the_location_note(env, monkeypatch):
+    """When every member is location-excluded, a decided sibling's country is
+    named in the note the undecided sibling carries."""
+    db, fv = env
+    monkeypatch.setattr(fv, "_BANNED_COUNTRIES", frozenset({"united states", "canada"}))
+    _seed(
+        db,
+        "AllExcludedOrg",
+        "Program Manager",
+        dedup_hash="allexc-passed",
+        status="passed",
+        location="Toronto, Canada",
+    )
+    vid_unseen = _seed(
+        db,
+        "AllExcludedOrg",
+        "Program Manager",
+        dedup_hash="allexc-unseen",
+        location="New York, US only",
+    )
+
+    _run_pass(fv)
+
+    assert _reason(db, vid_unseen) == "excluded locations only (Canada, US)"
+
+
+def test_decided_junk_role_is_context_only_and_never_proposed_as_work(env):
+    """A decided role is still LOADED — the grouping rules above need it — but
+    it is no longer counted, no longer offered for deletion, and no longer
+    produces a note that cannot be saved."""
+    db, fv = env
+    vid = _seed(
+        db,
+        "DecidedJunkOrg",
+        "Talent Pool — General Application",
+        status="passed",
+    )
+
+    result = _run_pass(fv)
+    all_cats = fv.classify_vacancies()
+    work = fv.only_undecided(all_cats)
+
+    assert vid in [v for v, _ in all_cats["delete_blacklist"]]  # context
+    assert work["delete_blacklist"] == []  # not work
+    assert fv.decided_count(all_cats) == 1
+    assert _reason(db, vid) is None
+    assert result["classified"] == result["stamped"] == result["out_of_scope"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Not-a-vacancy rows: dropped by the pass, and never Nikita's own cards
+# ---------------------------------------------------------------------------
+
+
+def test_program_page_is_dropped_with_a_plain_reason(env):
+    db, fv = env
+    vid = _seed(
+        db,
+        "High Impact Professionals",
+        "Impact Accelerator Program",
+        desc="A six-week cohort for people who want more impact. Places are limited.",
+    )
+
+    _run_pass(fv)
+
+    assert _reason(db, vid) == "a program or grant to apply to, not a job"
+    assert vid not in db.load_vacancies(unscored_only=True)
+
+
+def test_recruiter_test_posting_is_dropped(env):
+    db, fv = env
+    vid = _seed(db, "FundraiseUp", "US TEST JOB 2026 - DO NOT APPLY")
+
+    _run_pass(fv)
+
+    assert _reason(db, vid) == "test posting, not a real job"
+
+
+def test_a_card_nikita_added_himself_is_never_dropped(env):
+    """He tracks programmes and grants on the board on purpose. The gate is
+    only about what the sources push at him."""
+    db, fv = env
+    vid = _seed(
+        db,
+        "EA Infrastructure Fund",
+        "Individual grant (career transition / community project)",
+        desc=(
+            "Apply for an individual grant to cover a career transition or a "
+            "community project. Rolling deadline, decisions in six weeks."
+        ),
+    )
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE vacancy SET source_board = 'manual' WHERE id = ?", (vid,))
+    conn.commit()
+    cur.close()
+
+    _run_pass(fv)
+
+    assert _reason(db, vid) is None
+    assert vid in db.load_vacancies(unscored_only=True)
+
+
+def test_a_real_role_at_the_same_company_still_goes_to_scoring(env):
+    db, fv = env
+    vid = _seed(
+        db,
+        "Google DeepMind",
+        "Senior Program Manager, Google DeepMind Impact Accelerator",
+        dedup_hash="real-role",
+    )
+
+    _run_pass(fv)
+
+    assert _reason(db, vid) is None
+    assert vid in db.load_vacancies(unscored_only=True)
+
+
+# ---------------------------------------------------------------------------
+# CHARACTERISATION — which siblings shape a group's note.
+#
+# The location rule excludes a role only when EVERY member sits in an excluded
+# location. Which members count is therefore the whole question. These pin it.
+# ---------------------------------------------------------------------------
+
+
+def test_char_liked_sibling_in_a_kept_location(env):
+    """A role Nikita LIKED in Berlin, and its still-undecided New-York twin."""
+    db, fv = env
+    vid_liked = _seed(
+        db,
+        "LikedSiblingOrg",
+        "Program Manager",
+        dedup_hash="liked-de",
+        status="liked",
+        location="Berlin, Germany",
+    )
+    vid_unseen = _seed(
+        db,
+        "LikedSiblingOrg",
+        "Program Manager",
+        dedup_hash="liked-us",
+        location="New York, US only",
+    )
+
+    _run_pass(fv)
+
+    assert _reason(db, vid_liked) is None
+    # The strongest signal he can give must protect its twin, exactly as a
+    # 'passed' sibling does (test_char_mixed_location_group_...).
+    assert _reason(db, vid_unseen) is None
+    assert vid_unseen in db.load_vacancies(unscored_only=True)
+
+
+def test_char_applied_sibling_in_a_kept_location(env):
+    """Same for a role he has already applied to."""
+    db, fv = env
+    _seed(
+        db,
+        "AppliedSiblingOrg",
+        "Program Manager",
+        dedup_hash="applied-de",
+        status="applied",
+        location="Berlin, Germany",
+    )
+    vid_unseen = _seed(
+        db,
+        "AppliedSiblingOrg",
+        "Program Manager",
+        dedup_hash="applied-us",
+        location="New York, US only",
+    )
+
+    _run_pass(fv)
+
+    assert _reason(db, vid_unseen) is None
+
+
+def test_char_a_decided_sibling_is_still_never_counted_as_work(env):
+    """Context, not work: a decided sibling shapes the group and nothing else."""
+    db, fv = env
+    _seed(
+        db,
+        "ContextOnlyOrg",
+        "Program Manager",
+        dedup_hash="ctx-liked",
+        status="liked",
+        location="Berlin, Germany",
+    )
+    _seed(db, "ContextOnlyOrg", "Program Manager", dedup_hash="ctx-unseen")
+
+    all_cats = fv.classify_vacancies()
+    work = fv.only_undecided(all_cats)
+
+    assert fv.decided_count(all_cats) == 1
+    assert sum(len(v) for v in work.values()) == 1
+
+
+# ---------------------------------------------------------------------------
+# CHARACTERISATION — run_daily's own "unscored" count, before it adopts the
+# shared definition. Two ways it disagrees with every other reader.
+# ---------------------------------------------------------------------------
+
+
+def _preflight_count(env):
+    db, fv = env
+    sys.modules.pop("run_daily", None)
+    import run_daily
+
+    importlib.reload(run_daily)
+    return run_daily
+
+
+def test_char_preflight_count_and_the_sentinel_row(env):
+    """A -1 sentinel row is awaiting scoring everywhere else (load_vacancies,
+    the dashboard, unscored_pool). The preflight count must agree."""
+    db, fv = env
+    _seed(db, "CleanOrg", "Backend Engineer", dedup_hash="clean")
+    _seed(db, "SentinelOrg", "Data Analyst", dedup_hash="sentinel", llm_score=-1)
+    rd = _preflight_count(env)
+
+    assert len(db.load_vacancies(unscored_only=True)) == 2
+    assert rd._waiting_to_score()["active"] == 2
+
+
+def test_char_preflight_count_and_an_unapproved_company(env):
+    """A role behind a company nobody approved is not going to be picked up by
+    the main pool, so it must not be counted as if it were."""
+    db, fv = env
+    _seed(db, "CleanOrg", "Backend Engineer", dedup_hash="clean")
+    vid = _seed(db, "CandOrg", "Program Officer", dedup_hash="cand")
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE company SET status = 'candidate' WHERE canonical_name = ?", ("CandOrg",))
+    conn.commit()
+    cur.close()
+    rd = _preflight_count(env)
+
+    counts = rd._waiting_to_score()
+    assert counts["active"] == 1
+    assert counts["candidate"] == 1
+    assert vid  # the parked role is counted, separately
+
+
+def test_preflight_note_names_both_numbers(env):
+    db, fv = env
+    _seed(db, "CleanOrg", "Backend Engineer", dedup_hash="clean")
+    _seed(db, "CandOrg", "Program Officer", dedup_hash="cand")
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE company SET status = 'candidate' WHERE canonical_name = ?", ("CandOrg",))
+    conn.commit()
+    cur.close()
+    rd = _preflight_count(env)
+
+    state = rd._new_state(rd.Opts())
+    kind, note = rd._h_preflight(state, rd._stage(state, "preflight"), rd.Opts())
+
+    assert kind == "advance"
+    assert "1 role from an earlier run is still waiting to be scored" in note
+    assert "1 more sits behind a company you have not approved yet" in note
+
+
+# ---------------------------------------------------------------------------
+# One rule, one answer at both ends
+#
+# A per-company include-list may scope a pattern to the body ("desc:..."). The
+# fetch honours that and keeps the role; the filter and the scorer are the
+# safety nets for the same rule, so they must reach the same verdict on the
+# same role. Judging on the title alone at this end would flag a role the
+# fetch deliberately kept.
+# ---------------------------------------------------------------------------
+
+
+def _desc_scoped_company(monkeypatch, org, pattern):
+    """Give ``org`` an include-list with a single description-scoped pattern."""
+    import filters
+
+    compiled = filters._build_company_title_include({org: [pattern]})
+    monkeypatch.setattr(filters, "_COMPANY_TITLE_INCLUDE", compiled)
+
+
+def test_a_role_kept_by_its_body_is_not_flagged_by_the_filter(env, monkeypatch):
+    db, fv = env
+    _desc_scoped_company(monkeypatch, "Initech", "desc:innovation accelerator")
+    vid = _seed(
+        db,
+        "Initech",
+        "Senior Delivery Partner",
+        desc=(
+            "You will run the innovation accelerator with our partners. "
+            "Responsibilities include the whole programme. " * 3
+        ),
+    )
+
+    # The fetch keeps it ...
+    import filters
+
+    assert (
+        filters.fetch_time_drop_reason(
+            "Initech", "Senior Delivery Partner", "the innovation accelerator"
+        )
+        is None
+    )
+
+    _run_pass(fv)
+
+    # ... and the filter agrees: no reason, still offered to the scorer.
+    assert _reason(db, vid) is None
+    assert vid in db.load_vacancies(unscored_only=True)
+
+
+def test_a_role_matching_neither_scope_is_still_flagged(env, monkeypatch):
+    """The safety net still works — this is agreement, not a blanket keep."""
+    db, fv = env
+    _desc_scoped_company(monkeypatch, "Initech", "desc:innovation accelerator")
+    vid = _seed(
+        db,
+        "Initech",
+        "Senior Delivery Partner",
+        dedup_hash="no-match",
+        desc="A perfectly ordinary role description with nothing matching. " * 4,
+    )
+
+    _run_pass(fv)
+
+    assert _reason(db, vid) == "company_title_filter — not in Initech include list"
+
+
+def test_the_scorer_reaches_the_same_verdict_on_the_same_role(monkeypatch):
+    """score_vacancies is the other safety net; it must agree too."""
+    import filters
+
+    _desc_scoped_company(monkeypatch, "Initech", "desc:innovation accelerator")
+    body = "You will run the innovation accelerator."
+
+    # Body given -> kept, at every end.
+    assert filters.company_title_filter_reason("Initech", "Senior Delivery Partner", body) is None
+    # Title alone -> dropped. This is the disagreement the call sites must avoid
+    # by passing the body they already hold.
+    assert filters.company_title_filter_reason("Initech", "Senior Delivery Partner") is not None

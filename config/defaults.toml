@@ -637,6 +637,13 @@ vacancy_gate_minutes = 120
 run_deadline_minutes = 225
 # --max-turns for each headless Claude session (runaway-loop fuse).
 max_turns = 250
+# Skip every night before this date (YYYY-MM-DD) — a dated, self-expiring pause
+# for when the Claude usage budget is tight. The wrapper exits before the lock,
+# so no fetch, no scoring and no digest happen. Empty string = no pause. Once
+# the date passes the line is inert, so it costs nothing to leave it here.
+# A live pause belongs on the machine, not here: set NIGHTLY_PAUSED_UNTIL in
+# the server's .env, so a tracked default never pauses anyone else's pipeline.
+paused_until = ""
 
 # ===========================================================================
 # Telegram digest — defaults for the optional daily digest. Env vars still win

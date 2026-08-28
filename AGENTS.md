@@ -87,6 +87,34 @@ golden set so the screen drops none of the roles the strong model would surface.
 The direct `score_vacancies.py --local` contract above is the single-pass
 fallback for agents not driven by the daily runner.
 
+## No direct-API key is a supported setup, not a defect
+
+The pipeline is designed to run its LLM work through the agent you are already
+in — headless Claude sessions / subagents answering the driver's gates. A
+direct API key is one optional shortcut for one stage, never a requirement.
+
+So: **`ANTHROPIC_API_KEY` unset is the normal, intended configuration.** In
+`screen_candidates.py`, `build_call_llm()` returning `None` is the supported
+route — screening falls to the subagent path and the run proceeds. It is not a
+failure, a degradation, or something to warn the user about.
+
+Rules that follow, for any agent working here:
+
+- Never add, suggest adding, or ask the user for an `ANTHROPIC_API_KEY`.
+- Never emit a user-facing warning, report-card note or digest line saying a
+  run was degraded because that key is missing. `tests/test_no_anthropic_key_nagging.py`
+  fails the build if one appears.
+- Never let that key reach a Claude child process. `nightly_run.py` keeps it
+  out of `_CHILD_ENV_ALLOWLIST` on purpose: the session would prefer the key
+  over the subscription login and move the run's spend to per-token billing.
+- A log line reading `ANTHROPIC_API_KEY unset` in an old transcript is NOT
+  evidence of a bug. This section exists because that line was once read as
+  one, and the user was asked three times to add a key he had ruled out.
+
+`FIRECRAWL_API_KEY` and `EXA_API_KEY` are different — those are real external
+services with no in-agent substitute, and a run without them genuinely does
+less. Warning about those two is correct.
+
 ## Ground rules
 
 - Python scripts auto-load `.env` from the repo root (via `db_backend`; an

@@ -482,18 +482,25 @@ def write_summary(summary: dict, applied: bool, path: Path = SCREEN_SUMMARY_PATH
 
 def build_call_llm(model_tier: str):
     """Return a ``call_llm(system, user) -> str`` bound to the cheap model, or
-    ``None`` if no direct API key is configured (or the package is missing).
-    Returning None routes the run to the subagent (--local-style) path —
-    candidates stay kept until decisions come back via --save.
+    ``None`` to screen with subagents instead — the SUPPORTED default.
 
-    The explicit ANTHROPIC_API_KEY check matters: the SDK client constructs
-    fine without a key and only fails per-request, which would burn one
-    fail-safe keep per candidate instead of cleanly deferring to subagents."""
+    Subagents are the NORMAL route, not a fallback. The pipeline runs its LLM
+    work through the agent it is already inside: headless sessions on the
+    user's Claude subscription, answering the driver's gates. ``None`` routes
+    screening there — candidates stay kept until decisions come back via
+    --save. Running with no key is the intended setup: see AGENTS.md, "No
+    direct-API key is a supported setup, not a defect". Never report this
+    branch to the user as a missing-key problem.
+
+    The key is also kept out of the Claude child's environment on purpose
+    (``nightly_run._CHILD_ENV_ALLOWLIST``): a session that sees one prefers it
+    over the subscription login, moving the night's spend to per-token billing.
+
+    The explicit env check still matters: the SDK client constructs fine
+    without a key and only fails per-request, which would burn one fail-safe
+    keep per candidate instead of cleanly handing over to subagents."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        print(
-            "  screen: ANTHROPIC_API_KEY unset — deferring to subagent screening",
-            file=sys.stderr,
-        )
+        print("  screen: screening with subagents", file=sys.stderr)
         return None
     try:
         import anthropic
@@ -596,7 +603,7 @@ def cmd_save(files: "list[str] | None") -> int:
 def _print_report(summary: dict, applied: bool) -> None:
     kept, dropped, pending = summary["keep"], summary["drop"], summary["pending"]
     head = "APPLIED" if applied else "DRY-RUN"
-    llm_note = "LLM screen ran" if summary["llm_ran"] else "no API key — LLM screen deferred"
+    llm_note = "LLM screen ran" if summary["llm_ran"] else "screen runs in a Claude session"
     print(
         f"[{head}] {summary['total']} fresh candidate(s): {len(kept)} kept, "
         f"{len(dropped)} dropped, {len(pending)} pending subagent screen ({llm_note})"

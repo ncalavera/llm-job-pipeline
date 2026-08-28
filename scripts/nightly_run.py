@@ -14,9 +14,16 @@ Survival rules (R4, R12, R15):
     skipped and the run goes straight to the digest;
   * a stuck / wrong-turning / dead session never kills the night: the driver's
     unattended gate logic carries unscored work over to the next night;
+  * a session stopped by the Claude usage limit is the one failure worth
+    waiting out: the wrapper sleeps until the limit lifts (never past the
+    deadline, at most RATE_LIMIT_WAITS times) and retries the SAME gate
+    without spending a gate trip;
   * any failure (driver abort/error, gate-loop overrun, SIGTERM, a wrapper
     crash) sends one short Telegram alert naming the failed stage, the
-    exception class and the first 200 masked characters of the message;
+    exception class and the first 200 masked characters of the message; a
+    dead Claude session gets a plain sentence instead (the reason, the reset
+    clock on a rate limit, and the night log to open) — never a raw
+    stream-json blob on a phone screen;
   * the wrapper exits non-zero ONLY when that alert itself could not be sent.
 
 Privacy (R17, KTD3): all night output lives in ``vacancies/nightly/<date>/``
@@ -65,6 +72,15 @@ GATE_CAP = 8  # gate trips per night before the loop is declared runaway (KTD1)
 PRUNE_DAYS = 7  # R17: night directories older than this are deleted
 ALERT_MSG_CHARS = 200  # R12: masked message excerpt length in an alert
 
+# Waiting out the five-hour Claude usage limit (the 2026-08-27 night lost three
+# hours of budget to a limit that lifted six minutes later).
+RATE_LIMIT_WAITS = 2  # waits per night: one limit, plus one that lands again
+# The limit lifts on a whole-minute boundary from Anthropic's clock; ours can
+# sit seconds either side of it. 45 s covers that skew and costs a fraction of
+# a percent of a five-hour window — a retry one second early would waste a
+# whole wait instead.
+RATE_LIMIT_MARGIN_S = 45
+
 # The three gates the wrapper answers with a headless Claude session. Every
 # OTHER gate action is the driver's own unattended business (U2) — the wrapper
 # just resumes. ``payload`` names the driver's gate payload file under
@@ -100,13 +116,18 @@ GATES = {
 
 # Environment a Claude child is allowed to inherit (KTD3). Everything else —
 # TELEGRAM_* above all — is dropped. FIRECRAWL_API_KEY is added per gate.
+# ANTHROPIC_API_KEY is deliberately NOT here: the night scores on Nikita's
+# Claude subscription through the headless login, and Claude Code prefers an
+# API key whenever it finds one — inheriting it would silently move the whole
+# night's spend to per-token billing (one session billed $5.15 for 20 roles).
+# Python stages that want a direct model call run under the driver, which
+# inherits the full environment, so nothing else loses the key.
 _CHILD_ENV_ALLOWLIST = (
     "PATH",
     "HOME",
     "SUPABASE_DB_URL",
     "JOBSEARCH_DB_PATH",
     "CLAUDE_CODE_OAUTH_TOKEN",
-    "ANTHROPIC_API_KEY",
 )
 
 # Env values that must never reach Telegram or a log line, masked by value.
@@ -266,6 +287,9 @@ class _Ctx:
         self.items_left = int(cfg["max_items_per_night"])
         self.alert_failed = False
         self.deadline_noted = False
+        # Set by a session the Claude usage limit stopped (unix second the limit
+        # lifts); the gate loop reads it once and decides whether to wait.
+        self.rate_limit_reset: int | None = None
 
     def log(self, msg: str) -> None:
         # wrapper.log lives inside the 700 night directory — never the journal.
@@ -335,6 +359,163 @@ def _transcript_tail(out_path: Path, err_path: Path) -> str:
         if line:
             return line
     return "empty transcript"
+
+
+def _tail_text(path: Path, nbytes: int = 65536) -> str:
+    """Final ``nbytes`` of a possibly huge file, as text ('' when unreadable)."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - nbytes))
+            return fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+_RATE_LIMIT_RESET_RE = re.compile(r'"resetsAt"\s*:\s*(\d{9,16})')
+_API_ERROR_STATUS_RE = re.compile(r'"api_error_status"\s*:\s*"?(\d{3})')
+
+
+def _reset_clock(stamp: int) -> str:
+    """'22:40 on 27 Aug' from a unix timestamp in seconds or milliseconds."""
+    if stamp > 10**11:  # milliseconds
+        stamp //= 1000
+    return datetime.fromtimestamp(stamp).strftime("%H:%M on %-d %b")
+
+
+def _log_ref(path: Path) -> str:
+    """Short, retypeable pointer to a night log: ``nightly/<date>/<file>``.
+    Kept short on purpose — the whole alert must fit ALERT_MSG_CHARS."""
+    return f"nightly/{path.parent.name}/{path.name}"
+
+
+def _session_failure_message(out_path: Path, err_path: Path, rc: "int | None") -> str:
+    """One plain sentence about a session that exited non-zero — never a raw
+    JSON blob. The stream-json transcript is machine output; a phone needs the
+    reason, the clock and where to look:
+
+      * HTTP 429 in the transcript -> the rate limit, and when it resets
+        (the ``resetsAt`` unix stamp of the rate_limit_event line);
+      * a login/auth failure -> named as such, with what to do;
+      * anything else -> the exit code plus the transcript path.
+    """
+    tail = _tail_text(out_path) + "\n" + _tail_text(err_path)
+    where = _log_ref(out_path)
+    status = _API_ERROR_STATUS_RE.search(tail)
+    if (status and status.group(1) == "429") or "rate_limit" in tail:
+        reset = _rate_limit_reset(out_path, err_path)
+        when = f", resets {_reset_clock(reset)}" if reset else ""
+        return (
+            f"Claude usage limit reached (HTTP 429) — scoring stopped{when}. "
+            f"Unscored roles carry over. Log: {where}"
+        )
+    if status:
+        return (
+            f"the Claude API answered HTTP {status.group(1)} — the session stopped. "
+            f"Unscored roles carry over. Log: {where}"
+        )
+    if _LOGIN_FAILURE_RE.search(_transcript_tail(out_path, err_path)):
+        return (
+            "Claude login failure — sign in on the server again. "
+            f"Unscored roles carry over. Log: {where}"
+        )
+    return f"the session stopped early (exit {rc}). Unscored roles carry over. Log: {where}"
+
+
+def _rate_limit_reset(out_path: Path, err_path: Path) -> int | None:
+    """The unix second at which the Claude usage limit lifts, read from the
+    session transcript — or None when the session died of something else.
+
+    The transcript carries a ``rate_limit_event`` line per turn: ``allowed_warning``
+    while utilization climbs, then ``rejected`` when the limit actually bites.
+    Both carry a ``resetsAt``; the rejected one is the event that stopped this
+    session, so it wins. The session's result line carries ``api_error_status``
+    429 — either that or a rejected event is enough to call it a usage limit.
+    One parser serves the wait decision and the alert clock."""
+    tail = _tail_text(out_path) + "\n" + _tail_text(err_path)
+    rejected: int | None = None
+    warned: int | None = None
+    for line in tail.splitlines():
+        match = _RATE_LIMIT_RESET_RE.search(line)
+        if not match:
+            continue
+        stamp = int(match.group(1))
+        if stamp > 10**11:  # a millisecond stamp
+            stamp //= 1000
+        if '"rejected"' in line:
+            rejected = stamp
+        else:
+            warned = stamp  # the last warning holds the live window
+    status = _API_ERROR_STATUS_RE.search(tail)
+    if rejected is None and not (status and status.group(1) == "429"):
+        return None
+    return rejected if rejected is not None else warned
+
+
+def _sleep(seconds: float) -> None:
+    """The one sleep in the wrapper (tests replace it). A SIGTERM lands during
+    it: Python runs the handler, the handler raises SystemExit, and it leaves
+    through here — nothing between the sleep and run_night swallows it (R4)."""
+    if seconds > 0:
+        time.sleep(seconds)
+
+
+def _wait_out_rate_limit(ctx: _Ctx, reset_at: int, waits_used: int) -> bool:
+    """Sleep until the Claude usage limit lifts so the SAME gate can be retried;
+    True when the night waited. False — with one plain alert — when it must not:
+    the limit lifts after tonight's deadline, or the night has already waited
+    RATE_LIMIT_WAITS times (a stale reset stamp would otherwise spin the loop).
+    On False the work carries over exactly as it does today."""
+    resume_at = datetime.fromtimestamp(reset_at + RATE_LIMIT_MARGIN_S)
+    if waits_used >= RATE_LIMIT_WAITS:
+        ctx.log(
+            f"usage limit hit again after {waits_used} waits tonight — not waiting; "
+            "the rest carries over to the next night"
+        )
+        ctx.send(
+            "🌙 Night run: "
+            + (
+                f"the Claude usage limit is spent again after {waits_used} waits tonight "
+                "— scoring stops here; the unscored roles carry over to the next night."
+            )[:ALERT_MSG_CHARS]
+        )
+        return False
+    if resume_at >= ctx.deadline:
+        ctx.log(
+            f"usage limit lifts {resume_at.isoformat(timespec='seconds')}, after the "
+            f"deadline {ctx.deadline.isoformat(timespec='seconds')} — not waiting; carried over"
+        )
+        ctx.send(
+            "🌙 Night run: "
+            + (
+                f"the Claude usage limit is spent and only lifts at {_reset_clock(reset_at)}, "
+                "after tonight's deadline — scoring stops here; the unscored roles carry "
+                "over to the next night."
+            )[:ALERT_MSG_CHARS]
+        )
+        return False
+    started = datetime.now()
+    seconds = max(0.0, (resume_at - started).total_seconds())
+    ctx.log(
+        f"usage limit wait {waits_used + 1}/{RATE_LIMIT_WAITS}: sleeping {int(seconds)}s "
+        f"from {started.isoformat(timespec='seconds')}; limit lifts "
+        f"{datetime.fromtimestamp(reset_at).isoformat(timespec='seconds')}; scoring resumes "
+        f"{resume_at.isoformat(timespec='seconds')}"
+    )
+    ctx.send(
+        "🌙 Night run: "
+        + (
+            "scoring paused — the Claude usage limit is spent. It starts again at "
+            f"{_reset_clock(reset_at + RATE_LIMIT_MARGIN_S)} with the same roles; "
+            "nothing is lost."
+        )[:ALERT_MSG_CHARS]
+    )
+    _sleep(seconds)
+    ctx.log(
+        f"usage limit wait over at {datetime.now().isoformat(timespec='seconds')} — "
+        "retrying the same gate"
+    )
+    return True
 
 
 def _failed_stage_from_state(state: dict | None) -> tuple[str, str | None]:
@@ -479,9 +660,7 @@ def _run_session(ctx: _Ctx, action: str, phase: str) -> None:
     )
     budget = max(budget, 1.0)
     cmd = _claude_cmd(action, ctx.night_dir, ctx.cfg, phase)
-    ctx.log(
-        f"claude session for {action} ({phase}): {len(items)} item(s), budget {int(budget)}s"
-    )
+    ctx.log(f"claude session for {action} ({phase}): {len(items)} item(s), budget {int(budget)}s")
     ctx.log("claude cmd: " + " ".join(cmd))
 
     out_path = ctx.night_dir / f"claude-{action}.jsonl"
@@ -526,13 +705,23 @@ def _run_session(ctx: _Ctx, action: str, phase: str) -> None:
             f"{action}: session killed at its {int(budget)}s limit — {n_out}/{n_in} "
             "result file(s) present; the rest carries over to the next night"
         )
+    elif rc != 0 and (reset_at := _rate_limit_reset(out_path, err_path)) is not None:
+        # Not a failure to alert about here: the gate loop waits the limit out
+        # and retries this same gate, and it sends the one message about it.
+        # The night item cap counts work Claude actually did, so give back the
+        # roles the limit cut off — otherwise the retry finds the cap spent.
+        ctx.items_left += n_in - n_out
+        ctx.rate_limit_reset = reset_at
+        ctx.log(
+            f"{action}: the Claude usage limit stopped the session after {elapsed}s — "
+            f"{n_out}/{n_in} scored; the limit lifts {_reset_clock(reset_at)}"
+        )
     elif rc != 0:
+        # The transcript itself stays in the night log; the alert carries one
+        # readable sentence (R12) — never a truncated stream-json blob.
+        ctx.alert(action, _session_failure_message(out_path, err_path, rc))
         tail = _transcript_tail(out_path, err_path)
-        if _LOGIN_FAILURE_RE.search(tail):
-            ctx.alert(action, f"Claude login failure — {tail}")
-        else:
-            ctx.alert(action, f"Claude exited early, see transcript — {tail}")
-        ctx.log(f"{action}: session exited {rc} after {elapsed}s")
+        ctx.log(f"{action}: session exited {rc} after {elapsed}s — {tail}")
     elif n_out == 0:
         # The digest's "no progress" header line is about vacancy scoring only;
         # a stalled company gate keeps its alert + carry-over without it.
@@ -555,23 +744,37 @@ def _gate_loop(ctx: _Ctx) -> None:
     but 10, the trip cap fires, or the deadline forces a straight run-out."""
     rc = _run_driver(ctx, ["--new", "--unattended"])
     trips = 0
+    waits = 0
+    retry_gate: str | None = None  # the gate a usage-limit wait must re-run
     while rc == EXIT_GATE:
         state = _load_state()
         gate = (state or {}).get("gate") or {}
         action = gate.get("action")
-        trips += 1
-        if trips > GATE_CAP:
-            ctx.alert(
-                "gate loop",
-                f"exceeded the cap of {GATE_CAP} gate sessions in one night — "
-                "stopping; unscored work waits for the next night",
-            )
-            return
-        ctx.log(f"gate trip {trips}/{GATE_CAP}: {action}")
+        free = retry_gate is not None and action == retry_gate
+        retry_gate = None
+        if free:
+            # A retry after a usage-limit wait rides the trip it already paid
+            # for: a night that hits the limit twice must not spend its gate
+            # budget on waiting instead of on scoring.
+            ctx.log(f"gate trip {trips}/{GATE_CAP} again: {action} (after the usage-limit wait)")
+        else:
+            trips += 1
+            if trips > GATE_CAP:
+                ctx.alert(
+                    "gate loop",
+                    f"exceeded the cap of {GATE_CAP} gate sessions in one night — "
+                    "stopping; unscored work waits for the next night",
+                )
+                return
+            ctx.log(f"gate trip {trips}/{GATE_CAP}: {action}")
         if action not in GATES:
             ctx.log(f"gate '{action}' needs no Claude session — the driver answers it")
         elif datetime.now() < ctx.deadline:
             _run_session(ctx, action, gate.get("phase") or "score")
+            reset_at, ctx.rate_limit_reset = ctx.rate_limit_reset, None
+            if reset_at is not None and _wait_out_rate_limit(ctx, reset_at, waits):
+                waits += 1
+                retry_gate = action
         elif not ctx.deadline_noted:
             ctx.deadline_noted = True
             ctx.log("run deadline reached — scoring skipped, carried over")
@@ -625,6 +828,28 @@ def run_night() -> int:
         import settings
 
         cfg = settings.nightly()
+
+        # A dated pause beats everything below: no lock, no night dir, no fetch,
+        # no scoring, no digest. It runs before the lock on purpose — a paused
+        # night must cost nothing at all, and Persistent=true means a missed
+        # night fires a catch-up run at the next boot, which this also stops.
+        paused_until = settings.nightly_paused_until()
+        if paused_until:
+            try:
+                resume_on = datetime.strptime(paused_until, "%Y-%m-%d").date()
+            except ValueError:
+                # A typo must not silently pause forever, nor silently run.
+                _send(
+                    f"🌙 Night run: the pause date '{paused_until[:20]}' is not a "
+                    "date (YYYY-MM-DD) — running tonight as usual."
+                )
+                resume_on = None
+            if resume_on and datetime.now().date() < resume_on:
+                ok = _send(
+                    f"🌙 Night run paused until {resume_on.strftime('%-d %b')} — "
+                    "nothing fetched or scored tonight."
+                )
+                return 0 if ok else 1
 
         # A parked MANUAL run is the user's evening work — never discard it (KTD1).
         state = _load_state()
@@ -693,7 +918,8 @@ def _print_dry_run() -> None:
     )
     print(
         f"  bounds:  {GATE_CAP} gate sessions, {cfg['max_items_per_night']} items/night, "
-        f"deadline start + {cfg['run_deadline_minutes']:g} min"
+        f"deadline start + {cfg['run_deadline_minutes']:g} min, "
+        f"{RATE_LIMIT_WAITS} usage-limit waits (+{RATE_LIMIT_MARGIN_S}s margin)"
     )
     for action, spec in GATES.items():
         minutes = cfg[spec["limit_key"]]
