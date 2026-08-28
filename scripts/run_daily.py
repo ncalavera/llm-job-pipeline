@@ -142,13 +142,13 @@ DEGRADED_WITHOUT_KEY = {
         "Company research could not search the web, so companies were judged on "
         "what was already stored. Add the Exa key on the server.",
     ),
-    "anthropic": (
-        "ANTHROPIC_API_KEY",
-        "company_scoring",
-        "New companies could not be screened by the cheap model, so the run used "
-        "the slower path. Add the Anthropic key on the server.",
-    ),
 }
+# ANTHROPIC_API_KEY is deliberately NOT here. Nikita said twice on 2026-08-28
+# that he does not want the key anywhere: scoring and screening run through
+# subagents on his Claude subscription, and a key in the environment would
+# quietly move the night's spend onto per-token billing. Its absence is the
+# intended state — screen_candidates falls through to subagents on purpose —
+# so reporting it as degraded would be wrong.
 
 
 def _check_keys(state: dict) -> list[str]:

@@ -426,7 +426,6 @@ STRINGS: dict[str, dict[str, str]] = {
         # 2026-08-27, so it goes on the phone, not only into a log.
         "digest_degraded_firecrawl": "⚠️ Could not read job pages all night — roles arrived without a description. Add the Firecrawl key on the server.",
         "digest_degraded_exa": "⚠️ Could not search the web about companies all night — they were judged on what was already stored. Add the Exa key on the server.",
-        "digest_degraded_anthropic": "⚠️ Could not screen new companies with the cheap model — the run used the slower path. Add the Anthropic key on the server.",
         "digest_no_progress": "⚠️ scored 0 of {n} — the session made no progress",
         "digest_deadlines_week": "⏰ {n} deadlines this week",
         "digest_tier_top": "🔥 <b>Top matches</b>",
@@ -816,7 +815,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "digest_waiting_parked": "↳ и ещё {n} ролей ждут за компаниями, которые вы пока не одобрили",
         "digest_degraded_firecrawl": "⚠️ Всю ночь не удавалось прочитать страницы вакансий — роли пришли без описания. Добавьте ключ Firecrawl на сервере.",
         "digest_degraded_exa": "⚠️ Всю ночь не удавалось искать в сети о компаниях — их оценили по тому, что уже было сохранено. Добавьте ключ Exa на сервере.",
-        "digest_degraded_anthropic": "⚠️ Не удалось быстро отсмотреть новые компании — прогон пошёл медленным путём. Добавьте ключ Anthropic на сервере.",
         "digest_no_progress": "⚠️ оценено 0 из {n} — сессия не продвинулась",
         "digest_deadlines_week": "⏰ дедлайнов на этой неделе: {n}",
         "digest_tier_top": "🔥 <b>Лучшие совпадения</b>",

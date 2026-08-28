@@ -730,7 +730,6 @@ DIGEST_KEYS = (
     "digest_waiting_parked",
     "digest_degraded_firecrawl",
     "digest_degraded_exa",
-    "digest_degraded_anthropic",
     "digest_tier_dropped",
     "digest_dropped_prefix",
     "digest_no_progress",
@@ -795,11 +794,22 @@ def test_a_missing_key_reaches_the_phone(denv):
 
 
 def test_every_missing_key_gets_its_own_line(denv):
-    _write_run_state(denv.run_state, degraded=["firecrawl", "exa", "anthropic"])
+    _write_run_state(denv.run_state, degraded=["firecrawl", "exa"])
     td.cmd_send(_args())
     header = _sent_texts(denv.calls)[0]
-    assert header.count("⚠️") == 3
-    assert "Firecrawl key" in header and "Exa key" in header and "Anthropic key" in header
+    assert header.count("⚠️") == 2
+    assert "Firecrawl key" in header and "Exa key" in header
+
+
+def test_a_missing_anthropic_key_is_never_reported(denv):
+    """Nikita said twice on 2026-08-28 that he does not want that key
+    anywhere — scoring runs on his subscription through subagents. Its absence
+    is the intended state, so it must never read as something to fix."""
+    _write_run_state(denv.run_state, degraded=["anthropic"])
+    td.cmd_send(_args())
+    header = _sent_texts(denv.calls)[0]
+    assert "Anthropic" not in header
+    assert "⚠️" not in header
 
 
 def test_a_capability_the_digest_does_not_know_is_passed_over(denv):
