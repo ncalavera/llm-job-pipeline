@@ -109,6 +109,7 @@ if __name__ == "__main__" and wants_help():
     build_parser().parse_args()
 
 import settings
+import filters
 from config import (
     COMPANIES,
     JOB_BOARDS,
@@ -527,6 +528,47 @@ def _filter_companies(args) -> dict:
     return filtered
 
 
+#: fetch_stats key: {company name: roles dropped by the profile this run}.
+PROFILE_DROP_KEY = "profile_dropped"
+#: fetch_stats key: companies skipped whole by ## COMPANY_NEVER_FETCH this run.
+PROFILE_SKIPPED_KEY = "profile_never_fetched"
+
+
+def _drop_by_profile(default_org, jobs, fetch_stats):
+    """Drop fetched roles the user's profile says must never be stored.
+
+    THE choke point for the two profile rules that need only org + title: the
+    whole-company ban and the per-company title include-list. Every company
+    fetcher converges on ``_fetch_one_company`` and every board fetcher on
+    ``_fetch_one_board``, so this one helper covers all of them — no fetcher
+    knows about it. Dropping here, before ``save_vacancies`` /
+    ``save_board_vacancies``, is what stops the pipeline paying to store,
+    enrich, score and report a role it will only exclude again tomorrow.
+
+    ``default_org`` is the company (or board) the batch came from; a board row
+    carrying ``org_override`` is judged by that instead. Per-company drop counts
+    land in ``fetch_stats[PROFILE_DROP_KEY]``. Returns the surviving list, and
+    returns an empty batch untouched so Firecrawl's ``UnchangedListing``
+    sentinel keeps its ``unchanged`` flag.
+    """
+    if not jobs:
+        return jobs
+    kept = []
+    dropped: dict[str, int] = {}
+    for job in jobs:
+        org = job.get("org_override") or default_org
+        if filters.fetch_time_drop_reason(org, job.get("title", "")) is None:
+            kept.append(job)
+        else:
+            dropped[org] = dropped.get(org, 0) + 1
+    if dropped:
+        bucket = fetch_stats.setdefault(PROFILE_DROP_KEY, {})
+        for org, count in dropped.items():
+            bucket[org] = bucket.get(org, 0) + count
+            print(f"  [{org}] profile filter: {count} role(s) dropped before saving")
+    return kept
+
+
 def _fetch_one_company(org_name, config, tier, strategy, fetch_stats) -> int:
     """Fetch one tracked company, save its vacancies, and record source tracking
     + gone-detection telemetry. Returns the count of new vacancies added."""
@@ -621,6 +663,12 @@ def _fetch_one_company(org_name, config, tier, strategy, fetch_stats) -> int:
                 f"  [{org_name}] department filter: {excluded}/{before} excluded, {len(jobs)} remaining"
             )
 
+    # Profile drop (## COMPANY_TITLE_FILTERS / ## COMPANY_NEVER_FETCH), applied
+    # BEFORE the save so an unwanted role is never stored, enriched, scored or
+    # reported. Runs after raw_jobs is captured — gone-detection still diffs
+    # against the source's full listing.
+    jobs = _drop_by_profile(org_name, jobs, fetch_stats)
+
     new_count = save_vacancies(org_name, tier, jobs)
 
     # Firecrawl reported the careers page byte-identical to the last scrape
@@ -666,7 +714,7 @@ def _fetch_one_company(org_name, config, tier, strategy, fetch_stats) -> int:
     return new_count
 
 
-def _fetch_one_board(board_id, board_cfg, strategy) -> tuple[int, str]:
+def _fetch_one_board(board_id, board_cfg, strategy, fetch_stats) -> tuple[int, str]:
     """Fetch one job board, save its vacancies, update source tracking and mark
     the board fetched. Returns (count of new vacancies added, fetch status —
     'ok' or an error string); the caller uses the status as the
@@ -718,6 +766,10 @@ def _fetch_one_board(board_id, board_cfg, strategy) -> tuple[int, str]:
 
     # Save raw fetch log
     _save_fetch_log(f"{strategy}_{board_id}", jobs, board_fetch_status)
+
+    # Same profile drop as the company path: a board listing a banned company —
+    # or a role outside that company's include-list — must not be stored either.
+    jobs = _drop_by_profile(board_name, jobs, fetch_stats)
 
     new_count = save_board_vacancies(board_cfg, jobs)
     update_source_tracking(
@@ -778,6 +830,11 @@ def main():
         "total_new": 0,
         "career_sites": {"total": 0, "yielded": 0},
         "boards": {"total": 0, "fetched": 0, "ttl_skipped": 0, "yielded": 0},
+        # What the profile's own rules saved this run: roles dropped before the
+        # save ({company: count}) and companies skipped whole. Seeded here so a
+        # quiet run reports an honest zero rather than a missing key.
+        PROFILE_DROP_KEY: {},
+        PROFILE_SKIPPED_KEY: [],
     }
 
     if not args.report_only:
@@ -812,6 +869,15 @@ def main():
             run_status.step(org_name, org_idx, new=total_new)
             strategy = config["strategy"]
             tier = config.get("tier")
+
+            # Whole-company ban (## COMPANY_NEVER_FETCH): skip before the
+            # request, so a company the user wants nothing from costs nothing —
+            # no HTTP call, no Firecrawl credit, no stored row. The company
+            # stays in the registry with its history and aliases intact.
+            if filters.company_never_fetch_reason(org_name):
+                print(f"  [{org_name}] Skipped (profile COMPANY_NEVER_FETCH)")
+                fetch_stats.setdefault(PROFILE_SKIPPED_KEY, []).append(org_name)
+                continue
 
             if strategy == "manual_check":
                 manual_companies.append((org_name, config.get("careers_url", "")))
@@ -884,7 +950,9 @@ def main():
                     fetch_stats["boards"]["ttl_skipped"] += 1
                     continue
 
-                board_new, board_status = _fetch_one_board(board_id, board_cfg, strategy)
+                board_new, board_status = _fetch_one_board(
+                    board_id, board_cfg, strategy, fetch_stats
+                )
                 if board_status == "ok":
                     fetched_ok_boards.add(board_name)
                 total_new += board_new

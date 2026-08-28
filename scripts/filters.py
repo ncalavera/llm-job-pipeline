@@ -20,6 +20,7 @@ from config import (
     GLOBAL_BLACKLIST_SUBSTR,
     GLOBAL_BLACKLIST_DESC_SUBSTR,
     COMPANY_TITLE_FILTERS,
+    COMPANY_NEVER_FETCH,
     resolve_canonical_name,
 )
 
@@ -260,6 +261,42 @@ def company_title_filter_reason(org: str, title: str) -> str | None:
     if compiled.search((title or "").lower()):
         return None
     return f"company_title_filter — not in {org} include list"
+
+
+# ---------------------------------------------------------------------------
+# Whole-company NEVER-FETCH list
+#
+# COMPANY_NEVER_FETCH (profile ## COMPANY_NEVER_FETCH) names companies the user
+# wants nothing from at all. Keys go through the same alias resolution as the
+# include-lists, so a board spelling still hits a ban declared under the
+# canonical name. Empty list → nobody is banned.
+# ---------------------------------------------------------------------------
+
+_COMPANY_NEVER_FETCH = {_canonical_company_key(name) for name in COMPANY_NEVER_FETCH if name}
+
+
+def company_never_fetch_reason(org: str) -> str | None:
+    """Kill reason when the profile bans this company outright, else None.
+
+    The reason names the rule so a later review can trace the drop:
+    ``"company_never_fetch — <Company> is on the profile never-fetch list"``.
+    """
+    if _canonical_company_key(org) in _COMPANY_NEVER_FETCH:
+        return f"company_never_fetch — {org} is on the profile never-fetch list"
+    return None
+
+
+def fetch_time_drop_reason(org: str, title: str) -> str | None:
+    """Kill reason when the user's profile says this role must never be STORED.
+
+    The union of the two profile rules that are decidable from org + title
+    alone: the whole-company ban and the per-company title include-list. The
+    fetch path calls this to drop a role BEFORE the save, so the pipeline never
+    pays to store, enrich, score or report it. The filter stage keeps applying
+    ``company_title_filter_reason`` as the safety net for rows stored before a
+    profile change; for a freshly fetched role it now finds nothing left to do.
+    """
+    return company_never_fetch_reason(org) or company_title_filter_reason(org, title)
 
 
 def description_words_blacklisted(desc: str) -> bool:
