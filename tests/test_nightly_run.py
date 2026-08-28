@@ -1051,3 +1051,59 @@ def test_dry_run_prints_the_dispatch_table_with_masked_commands(nr, capsys):
     assert "TELEGRAM_* never passed" in out
     assert "tok-123456-secret" not in out  # the token value never prints
     assert nr.driver_calls() == []  # dry run launches nothing
+
+
+# ---------------------------------------------------------------------------
+# The dated pause (config [nightly] paused_until / NIGHTLY_PAUSED_UNTIL)
+# ---------------------------------------------------------------------------
+
+
+def _pause(monkeypatch, nr, value):
+    import settings
+
+    monkeypatch.setattr(settings, "nightly_paused_until", lambda: value)
+
+
+def test_paused_night_does_no_work_at_all(nr, monkeypatch):
+    """A paused night must cost nothing: no driver, no Claude session, no night
+    directory, no lock. It is a budget fuse, so 'cheap' is the whole point."""
+    _pause(monkeypatch, nr, "2999-01-01")
+    nr.set_steps([{"exit": 10, "action": "score_vacancies", "payload": _vac_payload(2)}])
+    assert nr.mod.run_night() == 0
+    assert nr.driver_calls() == [], "a paused night still ran the driver"
+    text = " ".join(nr.texts())
+    assert "paused until" in text and "nothing fetched or scored" in text
+    assert not (nr.mod.VACANCIES_DIR / "nightly.lock").exists()
+
+
+def test_the_pause_lifts_by_itself_on_the_day(nr, monkeypatch):
+    """Yesterday's date is not a pause — the rule expires without anyone
+    remembering to remove it."""
+    _pause(monkeypatch, nr, (datetime.now().date() - timedelta(days=1)).isoformat())
+    nr.set_steps([{"exit": 0}])
+    assert nr.mod.run_night() == 0
+    assert nr.driver_calls(), "an expired pause still blocked the night"
+
+
+def test_todays_date_runs(nr, monkeypatch):
+    """paused_until is the resume day, not the last paused day."""
+    _pause(monkeypatch, nr, datetime.now().date().isoformat())
+    nr.set_steps([{"exit": 0}])
+    assert nr.mod.run_night() == 0
+    assert nr.driver_calls()
+
+
+def test_a_typo_in_the_pause_date_runs_and_says_so(nr, monkeypatch):
+    """A misspelt date must not pause the pipeline forever in silence."""
+    _pause(monkeypatch, nr, "1st September")
+    nr.set_steps([{"exit": 0}])
+    assert nr.mod.run_night() == 0
+    assert nr.driver_calls(), "a typo silently paused the night"
+    assert any("is not a date" in t for t in nr.texts())
+
+
+def test_no_pause_configured_runs(nr, monkeypatch):
+    _pause(monkeypatch, nr, "")
+    nr.set_steps([{"exit": 0}])
+    assert nr.mod.run_night() == 0
+    assert nr.driver_calls()

@@ -831,6 +831,28 @@ def run_night() -> int:
 
         cfg = settings.nightly()
 
+        # A dated pause beats everything below: no lock, no night dir, no fetch,
+        # no scoring, no digest. It runs before the lock on purpose — a paused
+        # night must cost nothing at all, and Persistent=true means a missed
+        # night fires a catch-up run at the next boot, which this also stops.
+        paused_until = settings.nightly_paused_until()
+        if paused_until:
+            try:
+                resume_on = datetime.strptime(paused_until, "%Y-%m-%d").date()
+            except ValueError:
+                # A typo must not silently pause forever, nor silently run.
+                _send(
+                    f"🌙 Night run: the pause date '{paused_until[:20]}' is not a "
+                    "date (YYYY-MM-DD) — running tonight as usual."
+                )
+                resume_on = None
+            if resume_on and datetime.now().date() < resume_on:
+                ok = _send(
+                    f"🌙 Night run paused until {resume_on.strftime('%-d %b')} — "
+                    "nothing fetched or scored tonight."
+                )
+                return 0 if ok else 1
+
         # A parked MANUAL run is the user's evening work — never discard it (KTD1).
         state = _load_state()
         if (

@@ -373,6 +373,18 @@ def nightly() -> dict:
     return out
 
 
+def nightly_paused_until() -> str:
+    """``[nightly] paused_until`` as a bare ``YYYY-MM-DD`` string, or "" when
+    unset. Kept out of ``nightly()`` because every knob there is numeric and
+    falls back when non-positive. ``NIGHTLY_PAUSED_UNTIL`` in the environment
+    wins, so a pause can be lifted without editing a tracked file."""
+    env = (os.environ.get("NIGHTLY_PAUSED_UNTIL") or "").strip()
+    if env:
+        return env
+    val = _section("nightly").get("paused_until")
+    return str(val).strip() if isinstance(val, str) else ""
+
+
 # ---------------------------------------------------------------------------
 # Job boards
 # ---------------------------------------------------------------------------
