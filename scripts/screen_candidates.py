@@ -482,23 +482,25 @@ def write_summary(summary: dict, applied: bool, path: Path = SCREEN_SUMMARY_PATH
 
 def build_call_llm(model_tier: str):
     """Return a ``call_llm(system, user) -> str`` bound to the cheap model, or
-    ``None`` — the SUPPORTED default — when no direct API key is configured.
+    ``None`` to screen with subagents instead — the SUPPORTED default.
 
-    ``None`` is not an error path and not a degradation. It routes screening to
-    the subagent (--local-style) path, where the agent already running the
-    pipeline does the judging on the user's subscription; candidates stay kept
-    until decisions come back via --save. Running with no key is the intended
-    setup: see AGENTS.md, "No direct-API key is a supported setup, not a
-    defect". Never report this branch to the user as a missing-key problem.
+    Subagents are the NORMAL route, not a fallback. The pipeline runs its LLM
+    work through the agent it is already inside: headless sessions on the
+    user's Claude subscription, answering the driver's gates. ``None`` routes
+    screening there — candidates stay kept until decisions come back via
+    --save. Running with no key is the intended setup: see AGENTS.md, "No
+    direct-API key is a supported setup, not a defect". Never report this
+    branch to the user as a missing-key problem.
 
-    The explicit env check matters: the SDK client constructs fine without a
-    key and only fails per-request, which would burn one fail-safe keep per
-    candidate instead of cleanly taking the subagent route."""
+    The key is also kept out of the Claude child's environment on purpose
+    (``nightly_run._CHILD_ENV_ALLOWLIST``): a session that sees one prefers it
+    over the subscription login, moving the night's spend to per-token billing.
+
+    The explicit env check still matters: the SDK client constructs fine
+    without a key and only fails per-request, which would burn one fail-safe
+    keep per candidate instead of cleanly handing over to subagents."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        print(
-            "  screen: screening runs in a Claude session, not a direct model call",
-            file=sys.stderr,
-        )
+        print("  screen: screening with subagents", file=sys.stderr)
         return None
     try:
         import anthropic

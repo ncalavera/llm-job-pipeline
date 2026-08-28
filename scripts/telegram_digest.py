@@ -1,43 +1,45 @@
 #!/usr/bin/env python3
-"""Telegram vacancy digest with 👍/👎 buttons.
+"""Telegram vacancy digest.
 
-Two modes:
+One mode:
   send  — ONE tiered morning message (split when Telegram's size limit forces
-          it, and always before tier 2 and tier 3, so the tier-1 like/pass
-          keyboard can only ever sit under the numbered entries it acts on;
+          it, and always before tier 2 and tier 3, so the top matches arrive as
+          their own message instead of scrolling away under the longer lists;
           parts arrive in order): a counts header
           ("Night run: F fetched, S scored" for THIS run, then "Backlog now: D
           dropped, U still to score" counted in the database + "N deadlines this
           week"), tier 1 top matches with like/pass buttons (fresh rows scoring
           hot_vacancy_score+ plus strong roles at unreviewed companies), tier 2
           mid scores as one-liners, tier 3 every dropped vacancy as one line
-          with its drop reason, tier 4 carried-over/rollover lines from the run
+          with its skip reason, tier 4 carried-over/rollover lines from the run
           state. Tiers 1–3 are claim-first per message part: tier 1–2 rows
           stamp digest_sent_at and tier 3 rows stamp digest_dropped_at just
           before the part that renders them is sent (recorded in the state
           file's pending_claim so even a SIGKILL cannot lose them); a failed
           part releases only its own claims. Tier 4 is gated by the last-digest
           timestamp in the state file. So a double-fire repeats nothing.
-  poll  — long-poll getUpdates: button taps write vacancy.status
-          (liked/passed) to the DB and the keyboard is redrawn with a ✅ mark.
 
-Runs anywhere with Python + psycopg2. Typical setup: run `poll --loop` as a
-long-lived daemon (e.g. a systemd service or supervisor process) so taps are
-always captured, and run `send` from a scheduler / cron once a day. Only one
-process per bot token may call getUpdates at a time.
+The digest is READ-ONLY to the person receiving it: it carries no buttons and
+nothing listens for a tap. Nikita asked for the 👍/👎 buttons to be removed
+(2026-08-28), and verdicts are recorded on the dashboard instead. The bot
+therefore never calls getUpdates, and no long-lived poller process exists.
+
+Runs anywhere with Python + psycopg2. Typical setup: run `send` from a
+scheduler / cron once a day.
 
 Configuration (env vars, or the repo-root .env — auto-loaded, existing env wins):
   SUPABASE_DB_URL            — Postgres connection string (required)
   TELEGRAM_BOT_TOKEN         — bot token (required)
   TELEGRAM_CHAT_ID           — recipient chat id (required)
-  DIGEST_STATE_FILE          — file storing the getUpdates offset
-                               (default: ~/.jobsearch_digest_state.json)
+  DIGEST_STATE_FILE          — file storing the last-digest timestamp and the
+                               crash journal (default: ~/.jobsearch_digest_state.json)
 """
 
 import argparse
 import html
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -72,8 +74,6 @@ except Exception:
 SUMMARY_FALLBACK_CHARS = _DIGEST["summary_fallback_chars"]
 SUMMARY_MAX_CHARS = _DIGEST["summary_max_chars"]  # guard the Telegram message limit
 MESSAGE_MAX_CHARS = _DIGEST["message_max_chars"]
-CALLBACK_PREFIX = "v"
-ACTION_TO_STATUS = {"l": "liked", "p": "passed", "a": "applied"}
 
 # Product language: the digest speaks the ONE language chosen in the
 # profile's ## OUTPUT_LANGUAGE. Every user-facing string routes through _t(),
@@ -89,11 +89,6 @@ except Exception:  # pragma: no cover — same dir, effectively always importabl
 
     def _t(key, **fmt):
         return key
-
-
-def _status_label(status):
-    """Localized button/label text for a recorded status (liked/passed/applied)."""
-    return _t(f"digest_status_{status}")
 
 
 SELECT_FRESH_SQL = """
@@ -268,7 +263,7 @@ def get_config():
 
 def tg_call(token, method, payload, timeout=15, retries=2):
     """Call the Bot API. Short timeout + retries: one stuck call must not
-    block the callback queue (a button ack lives for ~15 seconds)."""
+    block a send for long."""
     url = f"https://api.telegram.org/bot{token}/{method}"
     data = json.dumps(payload).encode()
     last_err = None
@@ -373,7 +368,7 @@ def _org_title(row):
 
 def build_top_line(row, index):
     """Tier-1 entry: numbered bold line (+ a short summary line) with a link.
-    The number matches the entry's 👍/👎 keyboard row."""
+    The number is the entry's rank in the list, best score first."""
     org, title = _org_title(row)
     bits = [f"{index}. <b>{org}</b> — {title}"]
     if row.get("llm_score") is not None:
@@ -397,14 +392,54 @@ def build_mid_line(row):
     return line + _link_suffix(row)
 
 
+#: Stored reason -> plain words. The reason saved on the role stays technical
+#: ("company_title_filter — not in WFP - World Food Programme include list") so
+#: a debugger can tell which rule fired; the phone gets the meaning. Matching is
+#: by prefix, in this order; an unmapped reason is shown exactly as stored,
+#: which is how a new rule stays visible instead of silently reading wrong.
+_SKIP_REASON_PREFIXES = (
+    ("company_title_filter", "skip_wrong_kind"),
+    ("junk title:", "skip_junk_title"),
+    ("junk content:", "skip_junk_content"),
+    ("archived before", "skip_archived_before"),
+    ("no description after enrichment", "skip_no_description"),
+    ("a program or grant", "skip_not_a_job"),
+    ("test posting", "skip_test_posting"),
+)
+
+
+#: Location reasons carry a country name, so they are templates rather than
+#: fixed phrases: "US-only location", "excluded locations only (Canada, US)".
+_ONLY_LOCATION_RE = re.compile(r"^(.+?)-only location$", re.IGNORECASE)
+_EXCLUDED_LOCATIONS_RE = re.compile(r"^excluded locations? only \((.+)\)$", re.IGNORECASE)
+
+
+def plain_skip_reason(reason):
+    """The stored skip reason in words a person reads on a phone."""
+    text = (reason or "").strip()
+    m = _ONLY_LOCATION_RE.match(text)
+    if m:
+        out = _t("skip_only_location", place=m.group(1))
+        return text if out == "skip_only_location" else out
+    m = _EXCLUDED_LOCATIONS_RE.match(text)
+    if m:
+        out = _t("skip_excluded_locations", places=m.group(1))
+        return text if out == "skip_excluded_locations" else out
+    for prefix, key in _SKIP_REASON_PREFIXES:
+        if text.lower().startswith(prefix):
+            translated = _t(key)
+            return text if translated == key else translated
+    return text
+
+
 def build_dropped_line(row):
-    """Tier-3 entry: one line — title, company, the drop reason, link (AE2)."""
+    """Tier-3 entry: one line — title, company, why it was skipped, link (AE2)."""
     org, title = _org_title(row)
-    reason = html.escape(row.get("scoring_excluded_reason") or "")
+    reason = html.escape(plain_skip_reason(row.get("scoring_excluded_reason")))
     return f"• {title} — {org} — {_t('digest_dropped_prefix')} {reason}" + _link_suffix(row)
 
 
-# --- digest state file (offset + last-digest timestamp) ----------------------
+# --- digest state file (last-digest timestamp + crash journal) ---------------
 
 
 def read_state_file(path):
@@ -416,11 +451,9 @@ def read_state_file(path):
 
 
 def update_state_file(path, **fields):
-    """Merge ``fields`` into the state file — the poller's offset and the
-    sender's last_digest_at/pending_claim share the file. The read-merge-write
-    runs under an exclusive flock so the long-running poller and the nightly
-    sender cannot clobber each other's fields (best-effort on platforms
-    without fcntl)."""
+    """Merge ``fields`` into the state file (last_digest_at, pending_claim).
+    The read-merge-write runs under an exclusive flock so two senders cannot
+    clobber each other's fields (best-effort on platforms without fcntl)."""
     p = Path(path).expanduser()
     try:
         import fcntl
@@ -449,6 +482,8 @@ def update_state_file(path, **fields):
 #   * stages[vacancy_scoring|company_scoring].carried_over,
 #     stages[learning_review].rolled_over, stages[verdicts].pending_verdicts
 #     — the tier-4 lines.
+#   * top-level "degraded" — capability ids (firecrawl / exa / anthropic) the
+#     run could not use because a key was missing on the server.
 # The header's "dropped" and "still to score" are NOT read from here: they are
 # counted in the database, so a reader can check them against what tier 3 lists
 # and against the dashboard.
@@ -568,6 +603,12 @@ def build_header_lines(counts, deadlines_soon, run_state):
     # roles at unapproved companies are unscored and invisible everywhere else.
     if counts.get("parked"):
         lines.append(_t("digest_waiting_parked", n=counts["parked"]))
+    # Anything the night could not do for a missing key. run_daily records the
+    # capability id, not a sentence, so this message is in Nikita's language.
+    for cap in (run_state or {}).get("degraded") or []:
+        text = _t(f"digest_degraded_{cap}")
+        if text != f"digest_degraded_{cap}":  # unknown capability: stay silent
+            lines.append(text)
     if run_state and run_state.get("no_progress"):
         lines.append(_t("digest_no_progress", n=counts["targets"]))
     if deadlines_soon:
@@ -583,10 +624,10 @@ def build_tail_lines(run_state):
     what = []
     n = _int(_run_stage(run_state, "vacancy_scoring").get("carried_over"))
     if n:
-        what.append(_t("digest_carried_roles", n=n))
+        what.append(_t("digest_carried_role" if n == 1 else "digest_carried_roles", n=n))
     m = _int(_run_stage(run_state, "company_scoring").get("carried_over"))
     if m:
-        what.append(_t("digest_carried_companies", n=m))
+        what.append(_t("digest_carried_company" if m == 1 else "digest_carried_companies", n=m))
     if what:
         lines.append(_t("digest_carried_over", what=", ".join(what)))
     r = _int(_run_stage(run_state, "learning_review").get("rolled_over"))
@@ -605,7 +646,7 @@ PART_BREAK = "\x00PART_BREAK\x00"
 def assemble_digest(header_lines, top_rows, mid_rows, dropped_rows, tail_lines, dropped_total=None):
     """All blocks of the morning message, in tier order (R6). Blocks that
     render a database row are ``(text, row, tier)`` tuples so the sender can
-    claim, release and keyboard exactly the rows of each message part;
+    claim and release exactly the rows of each message part;
     text-only blocks stay plain strings. ``dropped_rows`` arrives pre-capped by
     the fetch; ``dropped_total`` (default: its length) drives the "+N more"
     tail."""
@@ -617,10 +658,10 @@ def assemble_digest(header_lines, top_rows, mid_rows, dropped_rows, tail_lines, 
         blocks.append(_t("digest_tier_top"))
         blocks.extend((build_top_line(r, i), r, "top") for i, r in enumerate(top_rows, 1))
     if mid_rows:
-        # Tier 2 opens a NEW message for the same reason tier 3 does: the
-        # tier-1 keyboard sits at the bottom of its message, and a message that
-        # ends on "Mid scores" lines puts the buttons under rows they do not
-        # act on. Tier 1 therefore always ends on its own numbered entries.
+        # One tier per message. It began as a keyboard fix; it survives the
+        # buttons because it is simply how the digest reads on a phone — the
+        # top matches arrive as their own message instead of scrolling away
+        # under a long list of mid scores and skipped roles.
         blocks.append(PART_BREAK)
         blocks.append(_t("digest_tier_mid"))
         blocks.extend((build_mid_line(r), r, "mid") for r in mid_rows)
@@ -678,48 +719,6 @@ def split_message(blocks, limit=None):
     return [p["text"] for p in split_message_parts(blocks, limit)]
 
 
-def build_digest_keyboard(rows, numbers=None):
-    """One 👍/👎 keyboard row per tier-1 entry, numbered like the entries.
-    ``numbers`` carries the global entry numbers when a split leaves only a
-    slice of tier 1 on this part — buttons must show the same numbers as the
-    rendered lines."""
-    if numbers is None:
-        numbers = range(1, len(rows) + 1)
-    return {
-        "inline_keyboard": [
-            [
-                {"text": f"👍 {i}", "callback_data": f"{CALLBACK_PREFIX}:{row['id']}:l"},
-                {"text": f"👎 {i}", "callback_data": f"{CALLBACK_PREFIX}:{row['id']}:p"},
-            ]
-            for i, row in zip(numbers, rows)
-        ]
-    }
-
-
-def rebuild_markup(existing, vac_id, chosen):
-    """The message's keyboard with ✅ on the chosen action of ``vac_id`` only.
-
-    The tiered digest puts several vacancies' button rows on one message, so a
-    tap must redraw from the keyboard the message already carries — rebuilding
-    a fresh single-row keyboard would wipe every other vacancy's buttons."""
-    rows = (existing or {}).get("inline_keyboard")
-    if not rows:
-        return build_keyboard(vac_id, chosen)
-    marked = []
-    for row in rows:
-        new_row = []
-        for btn in row:
-            text = btn.get("text", "")
-            if text.startswith("✅ "):
-                text = text[len("✅ ") :]
-            parsed = parse_callback(btn.get("callback_data"))
-            if parsed and parsed[0] == str(vac_id) and parsed[1] == chosen:
-                text = "✅ " + text
-            new_row.append({"text": text, "callback_data": btn.get("callback_data")})
-        marked.append(new_row)
-    return {"inline_keyboard": marked}
-
-
 def _deadline_or_last_seen_line(row):
     """A short 'why this is expiring' line for the alert."""
     dl = deadline_soon_label(row.get("deadline"))
@@ -765,62 +764,14 @@ def build_expiring_message(row):
     return text
 
 
-def build_expiring_keyboard(vac_id):
-    """👍 / 👎 / «уже подал» for an expiring-role alert. Reuses the v:<id>:<a>
-    callback format so the existing poll handler records the decision."""
-    return {
-        "inline_keyboard": [
-            [
-                {"text": _status_label("liked"), "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:l"},
-                {"text": _status_label("passed"), "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:p"},
-                {
-                    "text": _status_label("applied"),
-                    "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:a",
-                },
-            ]
-        ]
-    }
-
-
-def build_keyboard(vac_id, chosen=None):
-    """👍/👎 buttons; the chosen one gets a ✅ (tapping again flips the choice)."""
-    like = _status_label("liked")
-    pas = _status_label("passed")
-    if chosen == "liked":
-        like = "✅ " + like
-    elif chosen == "passed":
-        pas = "✅ " + pas
-    return {
-        "inline_keyboard": [
-            [
-                {"text": like, "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:l"},
-                {"text": pas, "callback_data": f"{CALLBACK_PREFIX}:{vac_id}:p"},
-            ]
-        ]
-    }
-
-
-def parse_callback(data):
-    """'v:<uuid>:l' -> (uuid, 'liked') | None when the format is foreign."""
-    parts = (data or "").split(":")
-    if len(parts) != 3 or parts[0] != CALLBACK_PREFIX:
-        return None
-    status = ACTION_TO_STATUS.get(parts[2])
-    if not status or not parts[1]:
-        return None
-    return parts[1], status
-
-
-# --- database ----------------------------------------------------------------
-
-
 def db_connect(db_url):
     # Documented exception to the DAL's "autocommit OFF — callers commit" rule
-    # (database_supabase.py): the digest poller opens its OWN short-lived
-    # psycopg2 connection, separate from the shared DAL singleton, and writes
-    # one button-response status at a time. autocommit=True is intentional here
-    # so each poll persists immediately; it does not touch the DAL connection
-    # and so cannot cause a silent rollback of DAL-staged writes.
+    # (database_supabase.py): the digest opens its OWN short-lived
+    # psycopg2 connection, separate from the shared DAL singleton, and stamps
+    # the rows of each message part as it sends them. autocommit=True is
+    # intentional here so every stamp persists immediately; it does not touch
+    # the DAL connection and so cannot cause a silent rollback of DAL-staged
+    # writes.
     #
     # Without a db_url (simple mode) the shared SQLite backend connection is
     # used instead; the mark_* helpers commit explicitly, which psycopg2
@@ -942,22 +893,6 @@ def unmark_dropped_many(conn, vac_ids):
     _stamp_many(conn, "digest_dropped_at = NULL", vac_ids)
 
 
-def set_status(conn, vac_id, status):
-    """Returns the title, or None when the vacancy isn't found."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """UPDATE vacancy SET status = %s, status_updated_at = now()
-               WHERE id = %s RETURNING title""",
-            (status, vac_id),
-        )
-        row = cur.fetchone()
-    conn.commit()
-    return row[0] if row else None
-
-
-# --- send mode ----------------------------------------------------------------
-
-
 def send_expiring_alerts(conn, token, chat_id, expiring_rows, dry_run=False):
     """Send one loud alert per freshly-expiring protected role. Returns the
     number sent. Each is claimed (mark_alerted) before sending so a parallel run
@@ -982,7 +917,6 @@ def send_expiring_alerts(conn, token, chat_id, expiring_rows, dry_run=False):
                     "text": build_expiring_message(row),
                     "parse_mode": "HTML",
                     "disable_web_page_preview": True,
-                    "reply_markup": build_expiring_keyboard(row["id"]),
                 },
             )
             sent += 1
@@ -1080,11 +1014,8 @@ def cmd_send(args):
     # released by the next run. A failed part releases only its own claims —
     # earlier parts were delivered and stay stamped, later parts were never
     # claimed (failure delays, never loses). Expiring deadlines ride the
-    # header's part (part 0). Tier-1 numbering is global across parts, and
-    # each part's keyboard carries the numbers of the entries it renders.
-    numbers = {row["id"]: i for i, row in enumerate(top_rows, 1)}
+    # header's part (part 0).
     for i, part in enumerate(parts):
-        part_top = [row for row, tier in part["rows"] if tier == "top"]
         claim_sent = [row["id"] for row, tier in part["rows"] if tier in ("top", "mid")]
         claim_dropped = [row["id"] for row, tier in part["rows"] if tier == "dropped"]
         claim_alerted = [row["id"] for row in expiring_rows] if i == 0 else []
@@ -1105,10 +1036,6 @@ def cmd_send(args):
             "parse_mode": "HTML",
             "disable_web_page_preview": True,
         }
-        if part_top:
-            payload["reply_markup"] = build_digest_keyboard(
-                part_top, [numbers[row["id"]] for row in part_top]
-            )
         try:
             tg_call(token, "sendMessage", payload)
         except Exception as e:
@@ -1136,114 +1063,6 @@ def cmd_send(args):
     )
 
 
-# --- poll mode ----------------------------------------------------------------
-
-
-def load_offset(state_file):
-    return read_state_file(state_file).get("offset")
-
-
-def save_offset(state_file, offset):
-    update_state_file(state_file, offset=offset)
-
-
-def handle_callback(conn, token, cb, allowed_user=None):
-    sender = str((cb.get("from") or {}).get("id", ""))
-    if allowed_user and sender != str(allowed_user):
-        tg_call(token, "answerCallbackQuery", {"callback_query_id": cb["id"]})
-        print(f"Tap from a foreign user {sender} — ignored", flush=True)
-        return
-    parsed = parse_callback(cb.get("data"))
-
-    # 1. Kill the spinner immediately — the ack expires in ~15 seconds.
-    ack = {"callback_query_id": cb["id"]}
-    if parsed:
-        ack["text"] = _t("digest_recorded", label=_status_label(parsed[1]))
-    try:
-        tg_call(token, "answerCallbackQuery", ack)
-    except RuntimeError as e:
-        print(f"WARN answerCallbackQuery: {e}", file=sys.stderr, flush=True)
-    if not parsed:
-        return
-
-    # 2. Write the decision to the DB.
-    vac_id, status = parsed
-    msg = cb.get("message") or {}
-    try:
-        title = set_status(conn, vac_id, status)
-    except Exception as e:
-        print(f"ERROR DB update {vac_id}: {e}", file=sys.stderr, flush=True)
-        if msg.get("chat"):
-            tg_call(
-                token,
-                "sendMessage",
-                {
-                    "chat_id": msg["chat"]["id"],
-                    "text": _t("digest_save_error"),
-                },
-            )
-        return
-
-    # 3. Mark the chosen button with a ✅ (an edit failure is not critical).
-    # Redraw from the keyboard the message already carries: the tiered digest
-    # puts several vacancies' rows on one message, and only the tapped row
-    # may change.
-    if title is not None and msg.get("message_id"):
-        try:
-            tg_call(
-                token,
-                "editMessageReplyMarkup",
-                {
-                    "chat_id": msg["chat"]["id"],
-                    "message_id": msg["message_id"],
-                    "reply_markup": rebuild_markup(msg.get("reply_markup"), vac_id, status),
-                },
-            )
-        except RuntimeError as e:
-            if "message is not modified" not in str(e):
-                print(f"WARN edit keyboard: {e}", file=sys.stderr, flush=True)
-    print(f"{status}: {title or vac_id} (tg msg {msg.get('message_id')})", flush=True)
-
-
-def cmd_poll(args):
-    token, db_url, chat_id = get_config()
-    conn = db_connect(db_url)
-    state_file = os.environ.get("DIGEST_STATE_FILE", DEFAULT_STATE_FILE)
-    offset = load_offset(state_file)
-    print(f"Poller started (offset={offset}, loop={args.loop})", flush=True)
-
-    while True:
-        try:
-            payload = {"timeout": args.timeout, "allowed_updates": ["callback_query"]}
-            if offset is not None:
-                payload["offset"] = offset
-            updates = tg_call(token, "getUpdates", payload, timeout=args.timeout + 15)
-            for upd in updates:
-                offset = upd["update_id"] + 1
-                cb = upd.get("callback_query")
-                if cb:
-                    try:
-                        handle_callback(conn, token, cb, allowed_user=chat_id)
-                    except Exception as e:
-                        print(f"ERROR callback: {e}", file=sys.stderr, flush=True)
-                save_offset(state_file, offset)
-        except Exception as e:
-            if "Unauthorized" in str(e) or "bot was blocked" in str(e):
-                sys.exit(f"FATAL: token is dead or the bot is blocked: {e}")
-            print(f"ERROR poll: {e}", file=sys.stderr, flush=True)
-            try:
-                conn.close()
-            except Exception:
-                pass
-            time.sleep(5)
-            try:
-                conn = db_connect(db_url)
-            except Exception as e2:
-                print(f"ERROR reconnect: {e2}", file=sys.stderr, flush=True)
-        if not args.loop:
-            break
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
@@ -1264,11 +1083,6 @@ def main():
     p_alert = sub.add_parser("alert", help="send only the loud expiring-role alerts")
     p_alert.add_argument("--dry-run", action="store_true")
     p_alert.set_defaults(func=cmd_alert)
-
-    p_poll = sub.add_parser("poll", help="listen for button taps")
-    p_poll.add_argument("--loop", action="store_true", help="run forever")
-    p_poll.add_argument("--timeout", type=int, default=50)
-    p_poll.set_defaults(func=cmd_poll)
 
     args = parser.parse_args()
     load_dotenv_fallback()

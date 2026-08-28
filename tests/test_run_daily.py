@@ -2141,3 +2141,85 @@ def test_dedup_stage_fails_loudly_on_a_bad_exit(rd, monkeypatch):
     state = rd._new_state(rd.Opts())
     kind, note = rd._h_dedup(state, rd._stage(state, "dedup"), rd.Opts())
     assert kind == "error" and "boom" in note
+
+
+# ---------------------------------------------------------------------------
+# A missing key must be loud (2026-08-27: EXA_API_KEY absent all night)
+# ---------------------------------------------------------------------------
+
+
+def test_missing_key_is_recorded_on_both_channels(rd, monkeypatch):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "x")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    state = rd._new_state(rd.Opts())
+
+    missing = rd._check_keys(state)
+
+    assert missing == ["exa"]
+    # the digest channel: a capability id, so the message can be translated
+    assert state["degraded"] == ["exa"]
+    # the report-card channel: a warning on the stage that will degrade
+    warning = next(w for w in state["warnings"] if w["stage"] == "company_scoring")
+    assert "could not search the web" in warning["message"]
+    assert "Add the Exa key on the server." in warning["message"]
+    assert not warning.get("blocking")  # the run still finishes
+
+
+def test_every_missing_key_is_recorded(rd, monkeypatch):
+    for name in ("EXA_API_KEY", "FIRECRAWL_API_KEY", "ANTHROPIC_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    state = rd._new_state(rd.Opts())
+
+    assert sorted(rd._check_keys(state)) == ["exa", "firecrawl"]
+    assert len(state["warnings"]) == 2
+
+
+def test_a_missing_anthropic_key_is_not_a_degradation(rd, monkeypatch):
+    """Nikita said twice on 2026-08-28 that he does not want that key
+    anywhere: screening and scoring run through subagents on his subscription,
+    and a key in the environment would move the night's spend onto per-token
+    billing. Its absence is the intended state, not something to report."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("EXA_API_KEY", "x")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "x")
+    state = rd._new_state(rd.Opts())
+
+    assert rd._check_keys(state) == []
+    assert "degraded" not in state
+    assert state["warnings"] == []
+    assert "ANTHROPIC_API_KEY" not in rd.DEGRADED_WITHOUT_KEY.values().__str__()
+
+
+def test_nothing_is_recorded_when_every_key_is_present(rd, monkeypatch):
+    for name in ("EXA_API_KEY", "FIRECRAWL_API_KEY"):
+        monkeypatch.setenv(name, "present")
+    state = rd._new_state(rd.Opts())
+
+    assert rd._check_keys(state) == []
+    assert "degraded" not in state
+    assert state["warnings"] == []
+
+
+def test_the_report_card_shows_what_did_not_happen(rd, monkeypatch, capsys):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "x")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    state = rd._new_state(rd.Opts())
+    rd._check_keys(state)
+    rd._stage(state, "company_scoring")["status"] = "done"
+
+    rd._print_stage_board(state, verdict=True)
+    out = capsys.readouterr().out
+    assert "OK-BUT" in out  # the stage finished, but not fully
+
+
+def test_the_warning_names_the_capability_not_the_variable(rd, monkeypatch):
+    for name in ("EXA_API_KEY", "FIRECRAWL_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    state = rd._new_state(rd.Opts())
+    rd._check_keys(state)
+
+    for w in state["warnings"]:
+        assert "_API_KEY" not in w["message"], w["message"]
+        assert "Add the" in w["message"] and "on the server." in w["message"]

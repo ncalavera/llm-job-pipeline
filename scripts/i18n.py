@@ -399,11 +399,17 @@ STRINGS: dict[str, dict[str, str]] = {
         # run_daily.py — end-of-run summary
         "summary_done": "✓ /jobs-new complete",
         "summary_new_vac": "{n} new vacancies saved this run",
+        # Said once per run, next to the two numbers it reconciles: the fetch
+        # counts vacancies, the filter and the scorer count roles.
+        "summary_unit_note": "one role can arrive as several vacancies — the same job listed in more than one place. Sources send vacancies; roles are what gets scored",
         "summary_companies": "{active} active companies, {candidates} candidate ({scored} scored, in Pending)",
         "summary_verdicts": "{scored_unseen} scored matches await your verdict; {liked} liked so far",
         "summary_publish": "publish: {note}",
         "summary_review_hint": "deeper review of liked roles: /jobs-review",
-        # telegram_digest.py — user-facing digest copy + buttons
+        # telegram_digest.py — user-facing digest copy. The 👍/👎 buttons were
+        # removed on Nikita's instruction (2026-08-28); digest_status_* and
+        # digest_recorded / digest_save_error are kept because the dashboard
+        # and the expiring-role path still name a recorded verdict.
         "digest_status_liked": "👍 Liked",
         "digest_status_passed": "👎 Passed",
         "digest_status_applied": "✅ Already applied",
@@ -418,18 +424,39 @@ STRINGS: dict[str, dict[str, str]] = {
         # telegram_digest.py — tiered morning digest (U3)
         "digest_run_header": "🌙 <b>Night run</b>: found {fetched} new roles, scored {scored}. In the queue now: {dropped} skipped (listed below), {unscored} still to score",
         "digest_waiting_parked": "↳ {n} more roles are waiting behind companies you have not approved yet",
+        # Something the night could not do because a key is missing on the
+        # server. Silence here cost a whole night of company research on
+        # 2026-08-27, so it goes on the phone, not only into a log.
+        "digest_degraded_firecrawl": "⚠️ Could not read job pages all night — roles arrived without a description. Add the Firecrawl key on the server.",
+        "digest_degraded_exa": "⚠️ Could not search the web about companies all night — they were judged on what was already stored. Add the Exa key on the server.",
         "digest_no_progress": "⚠️ scored 0 of {n} — the session made no progress",
         "digest_deadlines_week": "⏰ {n} deadlines this week",
-        "digest_tier_top": "🔥 <b>Top matches</b> — tap 👍 / 👎",
+        "digest_tier_top": "🔥 <b>Top matches</b>",
         "digest_tier_mid": "📊 <b>Mid scores</b>",
         "digest_tier_dropped": "🗑 <b>Skipped</b>",
         "digest_dropped_prefix": "skipped:",
+        # Plain wording for a skip reason. The reason STORED on the role stays
+        # technical, so a debugger can tell which rule fired; what reaches the
+        # phone says why in words. Anything unmapped shows as it is.
+        "skip_wrong_kind": "not the kind of role you look for",
+        "skip_junk_title": "the title is not a real role",
+        "skip_junk_content": "the page is not a job description",
+        "skip_archived_before": "you archived this one before",
+        "skip_no_description": "no description could be read",
+        "skip_not_a_job": "a programme or grant to apply to, not a job",
+        "skip_test_posting": "a test posting, not a real job",
+        # Location reasons carry a country name, so they need a template. The
+        # place itself stays as written — a country is a proper noun.
+        "skip_only_location": "only in {place}",
+        "skip_excluded_locations": "only in places you ruled out: {places}",
         "digest_dropped_more": "…+{n} more",
-        "digest_carried_over": "⏭ carried over to the next run (no progress): {what}",
-        "digest_carried_roles": "{n} role(s)",
-        "digest_carried_companies": "{n} company(ies)",
-        "digest_rolled_over": "📚 learning review rolled over: {n} verdict(s) still pending",
-        "digest_pending_verdicts": "📱 {n} scored match(es) await your verdict",
+        "digest_carried_over": "⏭ going first in the next run, because this one made no progress on them: {what}",
+        "digest_carried_role": "1 role",
+        "digest_carried_roles": "{n} roles",
+        "digest_carried_company": "1 company",
+        "digest_carried_companies": "{n} companies",
+        "digest_rolled_over": "📚 the learning review is still waiting for {n} verdicts you have not given yet",
+        "digest_pending_verdicts": "📱 {n} scored roles are waiting for your verdict on the dashboard",
         "digest_quiet": "😴 Quiet night — nothing new.",
     },
     # Russian — verbatim from the maintainer's prior dashboard build.
@@ -786,11 +813,12 @@ STRINGS: dict[str, dict[str, str]] = {
         # run_daily.py — end-of-run summary
         "summary_done": "✓ /jobs-new завершён",
         "summary_new_vac": "{n} новых вакансий сохранено за прогон",
+        "summary_unit_note": "одна роль может прийти несколькими вакансиями — та же работа, размещённая в разных местах. Источники присылают вакансии, а оцениваем мы роли",
         "summary_companies": "{active} активных компаний, {candidates} кандидатов ({scored} оценено, в Pending)",
         "summary_verdicts": "{scored_unseen} оценённых совпадений ждут вашего вердикта; {liked} в избранном",
         "summary_publish": "публикация: {note}",
         "summary_review_hint": "глубокий разбор избранного: /jobs-review",
-        # telegram_digest.py — дайджест и кнопки
+        # telegram_digest.py — дайджест
         "digest_status_liked": "👍 В избранное",
         "digest_status_passed": "👎 Отказ",
         "digest_status_applied": "✅ Уже подал",
@@ -805,18 +833,31 @@ STRINGS: dict[str, dict[str, str]] = {
         # telegram_digest.py — трёхъярусный утренний дайджест (U3)
         "digest_run_header": "🌙 <b>Ночной прогон</b>: нашёл {fetched} новых ролей, оценил {scored}. Сейчас в очереди: {dropped} отсеяно (список ниже), {unscored} ждут оценки",
         "digest_waiting_parked": "↳ и ещё {n} ролей ждут за компаниями, которые вы пока не одобрили",
+        "digest_degraded_firecrawl": "⚠️ Всю ночь не удавалось прочитать страницы вакансий — роли пришли без описания. Добавьте ключ Firecrawl на сервере.",
+        "digest_degraded_exa": "⚠️ Всю ночь не удавалось искать в сети о компаниях — их оценили по тому, что уже было сохранено. Добавьте ключ Exa на сервере.",
         "digest_no_progress": "⚠️ оценено 0 из {n} — сессия не продвинулась",
         "digest_deadlines_week": "⏰ дедлайнов на этой неделе: {n}",
-        "digest_tier_top": "🔥 <b>Лучшие совпадения</b> — жми 👍 / 👎",
+        "digest_tier_top": "🔥 <b>Лучшие совпадения</b>",
         "digest_tier_mid": "📊 <b>Средние оценки</b>",
         "digest_tier_dropped": "🗑 <b>Отсеяно</b>",
         "digest_dropped_prefix": "отсеяно:",
+        "skip_wrong_kind": "не тот тип роли",
+        "skip_junk_title": "в названии не настоящая роль",
+        "skip_junk_content": "на странице не описание работы",
+        "skip_archived_before": "вы уже убирали её в архив",
+        "skip_no_description": "описание прочитать не удалось",
+        "skip_not_a_job": "программа или грант, а не работа",
+        "skip_test_posting": "тестовая публикация, не настоящая работа",
+        "skip_only_location": "только здесь: {place}",
+        "skip_excluded_locations": "только там, куда вы не хотите: {places}",
         "digest_dropped_more": "…и ещё {n}",
-        "digest_carried_over": "⏭ перенесено на следующий прогон (без прогресса): {what}",
+        "digest_carried_over": "⏭ в следующий прогон пойдут первыми, потому что этот по ним не продвинулся — {what}",
+        "digest_carried_role": "ролей: {n}",
         "digest_carried_roles": "ролей: {n}",
+        "digest_carried_company": "компаний: {n}",
         "digest_carried_companies": "компаний: {n}",
-        "digest_rolled_over": "📚 разбор вердиктов перенесён: {n} вердикт(ов) ждут",
-        "digest_pending_verdicts": "📱 вердикта ждут {n} оценённых вакансий",
+        "digest_rolled_over": "📚 разбор вердиктов всё ещё ждёт {n} ваших решений",
+        "digest_pending_verdicts": "📱 {n} оценённых ролей ждут вашего решения на дашборде",
         "digest_quiet": "😴 Тихая ночь — ничего нового.",
     },
 }

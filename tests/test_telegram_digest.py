@@ -66,56 +66,6 @@ def test_vacancy_url_missing_locations():
     assert td.vacancy_url({"locations": [{"city": "X"}]}) is None
 
 
-def test_keyboard_callback_roundtrip():
-    kb = td.build_keyboard(ROW["id"])
-    like_btn, pass_btn = kb["inline_keyboard"][0]
-    assert td.parse_callback(like_btn["callback_data"]) == (ROW["id"], "liked")
-    assert td.parse_callback(pass_btn["callback_data"]) == (ROW["id"], "passed")
-    assert len(like_btn["callback_data"].encode()) <= 64  # Telegram limit
-
-
-def test_keyboard_marks_chosen():
-    kb = td.build_keyboard(ROW["id"], chosen="liked")
-    assert kb["inline_keyboard"][0][0]["text"].startswith("✅")
-    assert "✅" not in kb["inline_keyboard"][0][1]["text"]
-
-
-def test_parse_callback_rejects_garbage():
-    assert td.parse_callback(None) is None
-    assert td.parse_callback("") is None
-    assert td.parse_callback("x:y:z") is None
-    assert td.parse_callback("v:abc:q") is None  # unknown action
-    assert td.parse_callback("v::l") is None  # empty id
-    assert td.parse_callback("v:abc:l:extra") is None
-
-
-def test_digest_keyboard_one_row_per_top_vacancy():
-    rows = [dict(ROW), dict(ROW, id="99999999-2222-3333-4444-555555555555")]
-    kb = td.build_digest_keyboard(rows)
-    assert len(kb["inline_keyboard"]) == 2
-    for i, krow in enumerate(kb["inline_keyboard"], 1):
-        like, pas = krow
-        assert str(i) in like["text"] and "👍" in like["text"]
-        assert str(i) in pas["text"] and "👎" in pas["text"]
-        assert td.parse_callback(like["callback_data"])[1] == "liked"
-        assert td.parse_callback(pas["callback_data"])[1] == "passed"
-        assert len(like["callback_data"].encode()) <= 64
-
-
-def test_rebuild_markup_marks_only_the_tapped_row():
-    rows = [dict(ROW), dict(ROW, id="99999999-2222-3333-4444-555555555555")]
-    kb = td.build_digest_keyboard(rows)
-    marked = td.rebuild_markup(kb, rows[1]["id"], "passed")
-    assert "✅" not in marked["inline_keyboard"][0][0]["text"]
-    assert "✅" not in marked["inline_keyboard"][0][1]["text"]
-    assert "✅" not in marked["inline_keyboard"][1][0]["text"]
-    assert marked["inline_keyboard"][1][1]["text"].startswith("✅")
-    # Flipping the choice moves the mark instead of stacking a second one.
-    flipped = td.rebuild_markup(marked, rows[1]["id"], "liked")
-    assert flipped["inline_keyboard"][1][0]["text"].startswith("✅")
-    assert not flipped["inline_keyboard"][1][1]["text"].startswith("✅")
-
-
 def test_split_message_splits_at_line_boundaries_in_order():
     blocks = [f"line {i:03d}" for i in range(100)]
     parts = td.split_message(blocks, limit=200)
@@ -151,7 +101,7 @@ def test_digest_default_language_is_english():
     """With no override + the example (English) profile, copy is English."""
     line = td.build_top_line(dict(ROW), 1)
     assert "open →" in line
-    assert td.build_keyboard(ROW["id"])["inline_keyboard"][0][0]["text"] == "👍 Liked"
+    assert "Top matches" in td._t("digest_tier_top")
 
 
 def test_digest_switches_to_russian(monkeypatch):
@@ -164,29 +114,68 @@ def test_digest_switches_to_russian(monkeypatch):
     assert "Вот-вот пропадёт" in expiring
     assert "последний раз виден 2026-06-20" in expiring
 
-    kb = td.build_keyboard(ROW["id"])
-    assert kb["inline_keyboard"][0][0]["text"] == "👍 В избранное"
-    assert kb["inline_keyboard"][0][1]["text"] == "👎 Отказ"
 
-    # Buttons still carry the same callback contract — only the label changed.
-    assert td.parse_callback(kb["inline_keyboard"][0][0]["callback_data"]) == (
-        ROW["id"],
-        "liked",
+# ---------------------------------------------------------------------------
+# No buttons. Nikita asked for the 👍/👎 feature to be removed (2026-08-28);
+# nothing listens for a tap, so a button anywhere would be a dead control.
+# ---------------------------------------------------------------------------
+
+
+def test_the_bot_offers_no_buttons_at_all(denv):
+    _seed(denv.db, "Org A", "Top Role", score=80)
+    _seed(denv.db, "Org B", "Mid Role", score=45)
+    _seed(denv.db, "Org C", "Dropped Role", reason="US-only location")
+    td.cmd_send(_args())
+    payloads = [p for m, p in denv.calls if m == "sendMessage"]
+    assert payloads
+    for p in payloads:
+        assert "reply_markup" not in p
+
+
+def test_an_expiring_alert_carries_no_buttons(denv):
+    _seed(denv.db, "Org A", "Expiring Role", score=70, status="expiring")
+    td.cmd_alert(_args(dry_run=False))
+    for _, p in denv.calls:
+        assert "reply_markup" not in p
+
+
+def test_the_tap_handling_code_is_gone(denv):
+    """Not hidden behind a flag — removed. A dead code path that could be
+    re-enabled is how a stopped poller comes back."""
+    for name in (
+        "build_digest_keyboard",
+        "build_keyboard",
+        "build_expiring_keyboard",
+        "rebuild_markup",
+        "parse_callback",
+        "handle_callback",
+        "cmd_poll",
+        "set_status",
+        "_status_label",
+        "CALLBACK_PREFIX",
+        "ACTION_TO_STATUS",
+    ):
+        assert not hasattr(td, name), name
+
+
+def test_there_is_no_poll_subcommand():
+    import subprocess
+
+    script = Path(__file__).resolve().parent.parent / "scripts" / "telegram_digest.py"
+    res = subprocess.run(
+        [sys.executable, str(script), "poll"], capture_output=True, text=True
     )
+    assert res.returncode != 0
+    assert "invalid choice: 'poll'" in res.stderr
 
 
-def test_expiring_keyboard_has_three_actions_that_map():
-    kb = td.build_expiring_keyboard(ROW["id"])
-    btns = kb["inline_keyboard"][0]
-    assert len(btns) == 3
-    mapped = [td.parse_callback(b["callback_data"]) for b in btns]
-    assert mapped == [
-        (ROW["id"], "liked"),
-        (ROW["id"], "passed"),
-        (ROW["id"], "applied"),  # «уже подал» → applied
-    ]
-    for b in btns:
-        assert len(b["callback_data"].encode()) <= 64
+def test_the_tier_one_header_no_longer_asks_for_a_tap():
+    from i18n import STRINGS
+
+    for lang in ("en", "ru"):
+        header = STRINGS[lang]["digest_tier_top"]
+        assert "👍" not in header and "👎" not in header
+        assert "tap" not in header.lower() and "жми" not in header.lower()
 
 
 def test_expiring_alert_fires_once_per_role():
@@ -347,6 +336,7 @@ def _write_run_state(
     rolled_over=None,
     pending_verdicts=None,
     excluded_count=None,
+    degraded=None,
 ):
     """Fixture mirroring the run_daily.py state shape the digest reads.
 
@@ -390,6 +380,8 @@ def _write_run_state(
         state["counts"] = counts
     if no_progress:
         state["no_progress"] = True
+    if degraded is not None:
+        state["degraded"] = list(degraded)
     Path(path).write_text(json.dumps(state), encoding="utf-8")
 
 
@@ -408,7 +400,7 @@ def test_dropped_line_renders_reason_and_link(denv):
     )
     td.cmd_send(_args())
     body = "\n".join(_sent_texts(denv.calls))
-    assert "Program Manager — GiveWell — skipped: US-only location" in body
+    assert "Program Manager — GiveWell — skipped: only in US" in body
     assert 'href="https://example.test/givewell/pm"' in body
 
 
@@ -430,16 +422,12 @@ def test_tier_order_top_mid_dropped_carried(denv):
     i_top = body.index("Top Role")
     i_mid = body.index("Mid Role")
     i_drop = body.index("Dropped Role")
-    i_carried = body.index("carried over")
+    i_carried = body.index("going first in the next run")
     assert i_top < i_mid < i_drop < i_carried
-    # The top tier carries the like/pass buttons on the first message.
-    first_payload = [p for m, p in denv.calls if m == "sendMessage"][0]
-    cbs = [
-        b["callback_data"]
-        for row in first_payload["reply_markup"]["inline_keyboard"]
-        for b in row
-    ]
-    assert f"v:{top}:l" in cbs and f"v:{top}:p" in cbs
+    # The top tier leads, on its own message.
+    first_text = _sent_texts(denv.calls)[0]
+    assert "Top Role" in first_text
+    assert "Mid Role" not in first_text and "Dropped Role" not in first_text
 
 
 def test_header_counts_from_run_state(denv):
@@ -460,7 +448,7 @@ def test_header_counts_from_run_state(denv):
     assert "found 12 new roles, scored 5" in header
     assert "2 skipped (listed below), 1 still to score" in header
     # The carried-over batch keeps its own tier-4 line; it is not the pool.
-    assert "3 role(s)" in "\n".join(_sent_texts(denv.calls))
+    assert "3 roles" in "\n".join(_sent_texts(denv.calls))
 
 
 def test_header_names_the_backlog_parked_behind_unapproved_companies(denv):
@@ -531,15 +519,9 @@ def test_deadline_header_line_and_candidate_hot_in_tier1(denv):
     # …but the roles are stamped so the old alert path won't re-fire.
     assert _col(denv.db, e1, "expiring_alerted_at") is not None
     assert _col(denv.db, e2, "expiring_alerted_at") is not None
-    # The candidate-hot row joins tier 1 with buttons.
+    # The candidate-hot row joins tier 1.
     assert "Strong Role" in body
-    first_payload = [p for m, p in denv.calls if m == "sendMessage"][0]
-    cbs = [
-        b["callback_data"]
-        for row in first_payload["reply_markup"]["inline_keyboard"]
-        for b in row
-    ]
-    assert f"v:{hot}:l" in cbs
+    assert _col(denv.db, hot, "digest_sent_at") is not None
 
 
 def test_many_dropped_split_preserves_order_and_caps(denv, monkeypatch):
@@ -604,14 +586,15 @@ def test_second_send_same_morning_repeats_nothing(denv):
     _write_run_state(denv.run_state, vac_carried=2, excluded_count=1)
     td.cmd_send(_args())
     first = "\n".join(_sent_texts(denv.calls))
-    assert "Top Role" in first and "Dropped Role" in first and "carried over" in first
+    assert "Top Role" in first and "Dropped Role" in first
+    assert "going first in the next run" in first
     denv.calls.clear()
     td.cmd_send(_args())
     second = _sent_texts(denv.calls)
     assert len(second) == 1
     assert "Top Role" not in second[0]
     assert "Dropped Role" not in second[0]
-    assert "carried over" not in second[0]
+    assert "going first in the next run" not in second[0]
 
 
 def test_telegram_error_stops_and_exits_nonzero(denv, monkeypatch):
@@ -706,39 +689,18 @@ def _keyboard_numbers(payload):
     return [int(row[0]["text"].split()[-1]) for row in kb["inline_keyboard"]]
 
 
-def test_split_tier1_keyboard_lands_on_the_part_with_its_rows(denv, monkeypatch):
-    """#20: when tier 1 splits across parts, every part carries a keyboard for
-    exactly the entries it renders, and button numbers match the rendered
-    (global) entry numbers."""
-    monkeypatch.setattr(td, "MESSAGE_MAX_CHARS", 600)
-    _seed_five_top(denv.db)
-    td.cmd_send(_args())
-    payloads = [p for m, p in denv.calls if m == "sendMessage"]
-    assert len(payloads) >= 2
-    seen = []
-    for p in payloads:
-        assert _keyboard_numbers(p) == _entry_numbers(p["text"])
-        seen.extend(_entry_numbers(p["text"]))
-    assert seen == [1, 2, 3, 4, 5]
-
-
-def test_keyboard_never_lands_on_a_message_that_ends_in_dropped_lines(denv, monkeypatch):
-    """#22: tier 3 always opens its own message. Buttons belong under the
-    numbered entries they act on — never under 'dropped' rows they cannot
-    touch (the 2026-08-27 digest put them there)."""
+def test_skipped_roles_never_share_a_message_with_the_top_matches(denv, monkeypatch):
+    """#22: tier 3 always opens its own message. It began as a keyboard fix and
+    survives the buttons — the top matches must not scroll away under a long
+    list of skipped roles."""
     top = _seed(denv.db, "Org A", "Top Role", score=80)
     for i in range(3):
         _seed(denv.db, "Org X", f"Dropped {i}", reason="US-only location")
     td.cmd_send(_args())
-    payloads = [p for m, p in denv.calls if m == "sendMessage"]
-    assert len(payloads) == 2
-    with_kb = [p for p in payloads if p.get("reply_markup")]
-    assert len(with_kb) == 1
-    assert "skipped:" not in with_kb[0]["text"]
-    assert "Top Role" in with_kb[0]["text"]
-    # The skipped-roles message carries no buttons at all.
-    assert "skipped:" in payloads[1]["text"]
-    assert "reply_markup" not in payloads[1]
+    texts = _sent_texts(denv.calls)
+    assert len(texts) == 2
+    assert "Top Role" in texts[0] and "skipped:" not in texts[0]
+    assert "skipped:" in texts[1] and "Top Role" not in texts[1]
     # The rows of each part are still claimed by that part.
     assert _col(denv.db, top, "digest_sent_at") is not None
 
@@ -767,6 +729,8 @@ JARGON = (
 DIGEST_KEYS = (
     "digest_run_header",
     "digest_waiting_parked",
+    "digest_degraded_firecrawl",
+    "digest_degraded_exa",
     "digest_tier_dropped",
     "digest_dropped_prefix",
     "digest_no_progress",
@@ -785,9 +749,15 @@ def test_digest_strings_carry_no_internal_vocabulary():
                 assert word not in text, f"{lang}.{key} says {word!r}"
 
 
+#: Proper nouns that stay in Latin script in Russian too — transliterating a
+#: product name would make the instruction harder to act on, not easier.
+PRODUCT_NAMES = ("Firecrawl", "Exa", "Anthropic", "Telegram")
+
+
 def test_russian_digest_strings_are_actually_russian():
-    """No English loanwords or transliterated jargon: outside HTML tags and
-    {placeholders}, the Russian strings carry no Latin letters."""
+    """No English loanwords or transliterated jargon: outside HTML tags,
+    {placeholders} and product names, the Russian strings carry no Latin
+    letters."""
     import re
 
     from i18n import STRINGS
@@ -795,6 +765,8 @@ def test_russian_digest_strings_are_actually_russian():
     for key in DIGEST_KEYS:
         text = STRINGS["ru"][key]
         bare = re.sub(r"<[^>]+>|\{[^}]+\}", "", text)
+        for name in PRODUCT_NAMES:
+            bare = bare.replace(name, "")
         assert not re.search(r"[A-Za-z]", bare), f"ru.{key} has Latin letters: {bare!r}"
 
 
@@ -811,49 +783,82 @@ def test_both_languages_define_every_digest_string():
         ), key
 
 
-def test_keyboard_never_lands_on_a_message_that_ends_in_mid_scores(denv):
-    """Same rule as tier 3: a message whose tail is "Mid scores" lines must not
-    carry the tier-1 keyboard — those rows have no buttons of their own."""
+def test_a_missing_key_reaches_the_phone(denv):
+    """The 2026-08-27 defect: Exa failed every call all night and said so only
+    in a log line nobody reads at 02:00."""
+    _write_run_state(denv.run_state, counts={"new_vacancies": 3, "scored": 1}, degraded=["exa"])
+    td.cmd_send(_args())
+    header = _sent_texts(denv.calls)[0]
+    assert "Could not search the web about companies all night" in header
+    assert "Add the Exa key on the server." in header
+    assert "EXA_API_KEY" not in header  # the variable name is not his problem
+
+
+def test_every_missing_key_gets_its_own_line(denv):
+    _write_run_state(denv.run_state, degraded=["firecrawl", "exa"])
+    td.cmd_send(_args())
+    header = _sent_texts(denv.calls)[0]
+    assert header.count("⚠️") == 2
+    assert "Firecrawl key" in header and "Exa key" in header
+
+
+def test_a_missing_anthropic_key_is_never_reported(denv):
+    """Nikita said twice on 2026-08-28 that he does not want that key
+    anywhere — scoring runs on his subscription through subagents. Its absence
+    is the intended state, so it must never read as something to fix."""
+    _write_run_state(denv.run_state, degraded=["anthropic"])
+    td.cmd_send(_args())
+    header = _sent_texts(denv.calls)[0]
+    assert "Anthropic" not in header
+    assert "⚠️" not in header
+
+
+def test_a_capability_the_digest_does_not_know_is_passed_over(denv):
+    """An id added to run_daily before its message exists must not print a raw
+    key name on the phone."""
+    _write_run_state(denv.run_state, degraded=["something_new"])
+    td.cmd_send(_args())
+    header = _sent_texts(denv.calls)[0]
+    assert "digest_degraded" not in header and "something_new" not in header
+
+
+def test_nothing_is_said_when_every_key_is_present(denv):
+    _write_run_state(denv.run_state, counts={"new_vacancies": 3, "scored": 1})
+    td.cmd_send(_args())
+    assert "⚠️" not in _sent_texts(denv.calls)[0]
+
+
+def test_mid_scores_never_share_a_message_with_the_top_matches(denv):
+    """Same rule as tier 3, for the same reason."""
     top = _seed(denv.db, "Org A", "Top Role", score=80)
     _seed(denv.db, "Org B", "Mid One", score=48)
     _seed(denv.db, "Org C", "Mid Two", score=44)
     td.cmd_send(_args())
-    payloads = [p for m, p in denv.calls if m == "sendMessage"]
-    assert len(payloads) == 2
-    with_kb = [p for p in payloads if p.get("reply_markup")]
-    assert len(with_kb) == 1
-    assert "Mid One" not in with_kb[0]["text"] and "Mid Two" not in with_kb[0]["text"]
-    assert "Top Role" in with_kb[0]["text"]
-    assert "reply_markup" not in payloads[1]
+    texts = _sent_texts(denv.calls)
+    assert len(texts) == 2
+    assert "Top Role" in texts[0]
+    assert "Mid One" not in texts[0] and "Mid Two" not in texts[0]
     assert _col(denv.db, top, "digest_sent_at") is not None
 
 
 def test_every_tier_opens_its_own_message(denv):
-    """Tier 1 / 2 / 3 never share a message, so the keyboard message always
-    ends on the numbered entries it acts on."""
+    """Tier 1 / 2 / 3 never share a message: one subject per message."""
     _seed(denv.db, "Org A", "Top Role", score=80)
     _seed(denv.db, "Org B", "Mid Role", score=45)
     _seed(denv.db, "Org C", "Dropped Role", reason="US-only location")
     td.cmd_send(_args())
-    payloads = [p for m, p in denv.calls if m == "sendMessage"]
-    assert len(payloads) == 3
-    assert payloads[0].get("reply_markup") and "Top Role" in payloads[0]["text"]
-    assert "Mid Role" in payloads[1]["text"] and "reply_markup" not in payloads[1]
-    assert "Dropped Role" in payloads[2]["text"] and "reply_markup" not in payloads[2]
-    # Every message with a keyboard carries only tier-1 rows.
-    for p in payloads:
-        if p.get("reply_markup"):
-            assert "Mid scores" not in p["text"] and "Skipped" not in p["text"]
+    texts = _sent_texts(denv.calls)
+    assert len(texts) == 3
+    assert "Top Role" in texts[0]
+    assert "Mid Role" in texts[1] and "Top Role" not in texts[1]
+    assert "Dropped Role" in texts[2] and "Mid Role" not in texts[2]
 
 
 def test_part_break_does_not_split_a_digest_with_only_one_tier(denv):
-    """The break fires per tier: a night with tier 1 alone stays one message,
-    buttons included."""
+    """The break fires per tier: a night with tier 1 alone stays one message."""
     _seed(denv.db, "Org A", "Top Role", score=80)
     td.cmd_send(_args())
-    payloads = [p for m, p in denv.calls if m == "sendMessage"]
-    assert len(payloads) == 1
-    assert payloads[0].get("reply_markup")
+    assert len(_sent_texts(denv.calls)) == 1
 
 
 def test_part_break_renders_nothing_of_its_own(denv):
@@ -924,3 +929,89 @@ def test_stale_pending_claim_from_a_killed_run_is_released(denv):
     assert _col(denv.db, top, "digest_sent_at") is not None
     assert _col(denv.db, drop, "digest_dropped_at") is not None
     assert not json.loads(denv.state_file.read_text()).get("pending_claim")
+
+
+# ---------------------------------------------------------------------------
+# Skip reasons: technical in the database, plain on the phone
+# ---------------------------------------------------------------------------
+
+
+def test_a_rule_name_never_reaches_the_phone(denv):
+    """The stored reason names the rule so a debugger can trace it; the digest
+    says what it means. The 2026-08-27 digest showed the rule name itself."""
+    _seed(
+        denv.db,
+        "WFP",
+        "Conductor GS2",
+        reason="company_title_filter — not in WFP - World Food Programme include list",
+    )
+    td.cmd_send(_args())
+    body = "\n".join(_sent_texts(denv.calls))
+    assert "skipped: not the kind of role you look for" in body
+    assert "company_title_filter" not in body
+    assert "include list" not in body
+    # The database keeps the technical reason untouched.
+    cur = denv.db.get_conn().cursor()
+    cur.execute("SELECT scoring_excluded_reason FROM vacancy WHERE title = ?", ("Conductor GS2",))
+    stored = cur.fetchone()[0]
+    cur.close()
+    assert stored.startswith("company_title_filter")
+
+
+@pytest.mark.parametrize(
+    "stored,plain",
+    [
+        ("junk title: talent pool", "the title is not a real role"),
+        ("junk content: error page", "the page is not a job description"),
+        ("archived before", "you archived this one before"),
+        ("no description after enrichment", "no description could be read"),
+    ],
+)
+def test_every_stored_reason_has_plain_words(stored, plain):
+    assert td.plain_skip_reason(stored) == plain
+
+
+@pytest.mark.parametrize(
+    "stored,plain",
+    [
+        ("US-only location", "only in US"),
+        ("excluded locations only (Canada, US)", "only in places you ruled out: Canada, US"),
+    ],
+)
+def test_a_location_reason_keeps_its_place_name(stored, plain):
+    """A country is a proper noun: the sentence is translated, the place is not."""
+    assert td.plain_skip_reason(stored) == plain
+
+
+@pytest.mark.parametrize(
+    "stored,plain",
+    [
+        ("a program or grant to apply to, not a job", "a programme or grant to apply to, not a job"),
+        ("test posting, not a real job", "a test posting, not a real job"),
+    ],
+)
+def test_the_not_a_vacancy_reasons_are_translatable_too(stored, plain):
+    """Stored in English by the filter; the phone gets the digest's language."""
+    assert td.plain_skip_reason(stored) == plain
+
+
+def test_an_unmapped_reason_is_shown_as_stored():
+    """A rule added later must stay visible, not vanish behind a wrong phrase."""
+    assert td.plain_skip_reason("some brand new rule") == "some brand new rule"
+    assert td.plain_skip_reason(None) == ""
+
+
+def test_skip_reasons_are_russian_in_russian(monkeypatch):
+    monkeypatch.setenv("PRODUCT_LANGUAGE", "ru")
+    import importlib
+
+    import product_language
+
+    importlib.reload(product_language)
+    try:
+        assert td.plain_skip_reason("company_title_filter — not in X include list") == (
+            "не тот тип роли"
+        )
+    finally:
+        monkeypatch.delenv("PRODUCT_LANGUAGE", raising=False)
+        importlib.reload(product_language)

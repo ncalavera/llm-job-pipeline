@@ -120,6 +120,55 @@ STAGE_ORDER = [
 ]
 
 
+# Keys the run needs, and what quietly stops working without one. EXA_API_KEY
+# was absent from the forge .env on 2026-08-27: company evidence collection
+# failed every Exa call all night and said so only in a log line nobody reads at
+# 02:00. A missing key must reach the report card and the phone, not a log.
+#
+# Each entry: capability id -> (env var, the stage that degrades, the plain
+# sentence for the report card). The digest translates the capability id
+# through i18n instead of carrying this English text, so the Russian digest
+# stays Russian.
+DEGRADED_WITHOUT_KEY = {
+    "firecrawl": (
+        "FIRECRAWL_API_KEY",
+        "enrich",
+        "Job pages could not be read, so roles that arrived without a description "
+        "stayed empty. Add the Firecrawl key on the server.",
+    ),
+    "exa": (
+        "EXA_API_KEY",
+        "company_scoring",
+        "Company research could not search the web, so companies were judged on "
+        "what was already stored. Add the Exa key on the server.",
+    ),
+}
+# ANTHROPIC_API_KEY is deliberately NOT here. Nikita said twice on 2026-08-28
+# that he does not want the key anywhere: scoring and screening run through
+# subagents on his Claude subscription, and a key in the environment would
+# quietly move the night's spend onto per-token billing. Its absence is the
+# intended state — screen_candidates falls through to subagents on purpose —
+# so reporting it as degraded would be wrong.
+
+
+def _check_keys(state: dict) -> list[str]:
+    """Record every capability that will silently degrade for a missing key.
+
+    Runs once at preflight, BEFORE the stages that need the keys, so the run
+    knows what it cannot do while it can still say so. Writes both channels:
+    a warning (the report card) and the capability id (the digest).
+    """
+    missing = []
+    for cap, (env_name, stage, message) in DEGRADED_WITHOUT_KEY.items():
+        if os.environ.get(env_name):
+            continue
+        missing.append(cap)
+        _add_warning(state, stage, message)
+    if missing:
+        state["degraded"] = missing
+    return missing
+
+
 # Plain-language "about to" line for each stage, printed at its START so a
 # newcomer can tell what is happening without reading the code (STRATEGY
 # guardrail 4). The finish is reported by the existing per-stage note.
@@ -461,19 +510,29 @@ def _candidate_names_to_score(limit: int) -> list[str]:
     return names[:limit] if limit else names
 
 
-def _unscored_unseen() -> int:
-    from database_supabase import _scoring_excluded_supported
+def _waiting_to_score() -> dict:
+    """Roles waiting to be scored, by company status — the ONE shared
+    definition (scripts/unscored_pool.py), so this agrees with the filter
+    stage's note and the digest header instead of being a third answer.
 
-    # Rows the filter pass excluded from scoring (migration 0025) are not
-    # "awaiting scoring" — counting them would hold the scoring gate open for
-    # rows the scorer will never be offered. Column-guarded for pre-migration
-    # installs.
-    cond = ""
-    if _scoring_excluded_supported():
-        cond = " AND scoring_excluded_reason IS NULL"
-    return _scalar(
-        "SELECT count(*) FROM vacancy WHERE status = 'unseen' AND llm_score IS NULL" + cond
-    )
+    What it used to count differently: it missed the negative sentinel score
+    (awaiting scoring to every other reader), and it counted roles behind
+    unapproved and inactive companies as if the main pool would pick them up.
+    Degrades to zeros rather than crashing a run on a pre-migration install.
+    """
+    import unscored_pool
+
+    try:
+        from database_supabase import get_conn
+
+        conn = get_conn()
+        cur = conn.cursor()
+        try:
+            return unscored_pool.counts(cur)
+        finally:
+            cur.close()
+    except Exception:
+        return {"active": 0, "candidate": 0, "other": 0}
 
 
 def _scored_unseen() -> int:
@@ -1232,10 +1291,26 @@ def _h_preflight(state, entry, opts):
         state["first_run"] = True
         return "advance", "empty company table — first-run onboarding required"
     state["first_run"] = False
-    pending = _unscored_unseen()
+    waiting = _waiting_to_score()
     note = f"{n} companies tracked"
-    if pending:
-        note += f"; {pending} unscored vacancies from a prior run will be picked up in scoring"
+    if waiting["active"]:
+        note += (
+            f"; {_roles(waiting['active'])} from an earlier run "
+            f"{'is' if waiting['active'] == 1 else 'are'} still waiting to be scored"
+        )
+        if waiting["candidate"]:
+            note += (
+                f", and {waiting['candidate']} more "
+                f"{'sits' if waiting['candidate'] == 1 else 'sit'} behind a company you have "
+                "not approved yet"
+            )
+    missing = _check_keys(state)
+    if missing:
+        n = len(missing)
+        note += (
+            f"; {n} thing{'' if n == 1 else 's'} will not work tonight because a key is "
+            "missing on the server \u2014 the warnings under the report card say which"
+        )
     return "advance", note
 
 
@@ -2349,6 +2424,10 @@ def _print_summary(state: dict, opts: Opts) -> None:
     print(bar)
     if new is not None:
         print("  • " + t("summary_new_vac", n=new))
+        # Two units appear on this card — vacancies from the fetch, roles from
+        # the filter and the scorer. Say once what the difference is, so 144
+        # and 85 on adjacent lines cannot read as the same measurement.
+        print("    " + t("summary_unit_note"))
     print("  • " + t("summary_companies", active=active, candidates=candidates, scored=cand_scored))
     print("  • " + t("summary_verdicts", scored_unseen=scored_unseen, liked=liked))
     print("  • " + t("summary_publish", note=publish_note))

@@ -573,9 +573,13 @@ def classify_vacancies(db: dict = None) -> dict:
         if score is not None and score >= 0:
             continue
 
-        if vac.get("status", "unseen") in _PROTECTED_STATUSES:
-            continue
-
+        # Every sibling is classified, whatever Nikita decided about it. The
+        # grouping rules below answer "where does this role exist?", and a
+        # listing's location does not change because he liked or passed it.
+        # Skipping the decided ones made the strongest signal he can give —
+        # a role he LIKED in Berlin — the one that gave its New-York twin no
+        # protection, while a role he passed on did. Work is still filtered to
+        # the undecided rows afterwards (only_undecided / _exclusion_reason_map).
         title = vac.get("title", "")
         org = vac.get("org", "")
         has_url = bool(_get_vacancy_url(vac))
