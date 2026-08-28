@@ -292,3 +292,72 @@ def load_company_title_filters() -> dict[str, list[str]]:
     if not body:
         return {}
     return _parse_company_title_filters(body)
+
+
+# ---------------------------------------------------------------------------
+# Whole-company NEVER-FETCH list (## COMPANY_NEVER_FETCH)
+#
+# COMPANY_TITLE_FILTERS above keeps a company and narrows it to a few titles.
+# This section is the blunt version of the same idea: name a company here and
+# nothing from it is fetched or stored — without deleting it from the registry,
+# so its history, aliases and notes survive and the ban is one profile line to
+# undo. Unlisted companies are unaffected; a missing/empty section is off.
+# ---------------------------------------------------------------------------
+
+
+def _parse_company_never_fetch(body: str) -> list[str]:
+    """Parse a ``## COMPANY_NEVER_FETCH`` body into a list of company names.
+
+    Each entry is one bullet line ``- <company name>``. Names are trimmed and
+    de-duplicated, order preserved. A bullet still carrying the ``::`` of the
+    sibling section is malformed: it is skipped with a loud warning, never a
+    crash. Lines that are not bullets are prose and are ignored — but a section
+    that holds text and yields NO entry warns too, because that is a user who
+    forgot the dashes and would otherwise get a silently inactive ban list.
+    """
+    body = _HTML_COMMENT.sub("", body or "")
+    out: list[str] = []
+    saw_text = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        saw_text = True
+        m = _BULLET_LINE.match(stripped)
+        if m is None:
+            continue  # prose, not an intended entry.
+        company = m.group(1).strip()
+        if "::" in company:
+            _warn(
+                f"profile COMPANY_NEVER_FETCH entry '{stripped}' is malformed — this "
+                "section takes a bare company name, not ':: patterns' (that is "
+                "COMPANY_TITLE_FILTERS). Skipped (that company is STILL fetched)."
+            )
+            continue
+        if company not in out:
+            out.append(company)
+    if saw_text and not out:
+        _warn(
+            "profile COMPANY_NEVER_FETCH has text but no recognised entry — each "
+            "company needs its own bullet line, '- <company name>'. The section is "
+            "INACTIVE: every company is still fetched."
+        )
+    return out
+
+
+def load_company_never_fetch() -> list[str]:
+    """Return the companies the user never wants fetched, from the active profile.
+
+    A listed company is skipped whole at fetch time: no request, no stored row.
+    A missing/empty ``## COMPANY_NEVER_FETCH`` section → ``[]`` (feature off).
+    Never raises — a missing/broken profile yields ``[]`` so the pipeline still
+    runs out of the box.
+    """
+    try:
+        sections = _load_user_profile()
+    except Exception:
+        return []
+    body = sections.get("COMPANY_NEVER_FETCH")
+    if not body:
+        return []
+    return _parse_company_never_fetch(body)
