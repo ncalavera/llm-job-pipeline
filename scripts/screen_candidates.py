@@ -482,13 +482,18 @@ def write_summary(summary: dict, applied: bool, path: Path = SCREEN_SUMMARY_PATH
 
 def build_call_llm(model_tier: str):
     """Return a ``call_llm(system, user) -> str`` bound to the cheap model, or
-    ``None`` if no direct API key is configured (or the package is missing).
-    Returning None routes the run to the subagent (--local-style) path —
-    candidates stay kept until decisions come back via --save.
+    ``None`` — the SUPPORTED default — when no direct API key is configured.
 
-    The explicit ANTHROPIC_API_KEY check matters: the SDK client constructs
-    fine without a key and only fails per-request, which would burn one
-    fail-safe keep per candidate instead of cleanly deferring to subagents."""
+    ``None`` is not an error path and not a degradation. It routes screening to
+    the subagent (--local-style) path, where the agent already running the
+    pipeline does the judging on the user's subscription; candidates stay kept
+    until decisions come back via --save. Running with no key is the intended
+    setup: see AGENTS.md, "No direct-API key is a supported setup, not a
+    defect". Never report this branch to the user as a missing-key problem.
+
+    The explicit env check matters: the SDK client constructs fine without a
+    key and only fails per-request, which would burn one fail-safe keep per
+    candidate instead of cleanly taking the subagent route."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print(
             "  screen: screening runs in a Claude session, not a direct model call",
