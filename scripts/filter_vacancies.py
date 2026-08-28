@@ -551,6 +551,7 @@ def classify_vacancies(db: dict = None) -> dict:
     categories = {
         "delete_blacklist": [],
         "delete_company_title_filter": [],
+        "delete_not_a_vacancy": [],
         "delete_junk": [],
         "delete_rearchived": [],
         "delete_geo": [],
@@ -596,6 +597,20 @@ def classify_vacancies(db: dict = None) -> dict:
             vac["_filter_reason"] = ctf_reason
             categories["delete_company_title_filter"].append((vid, vac))
             continue
+
+        # Priority 1c: not a vacancy at all — a program, course, grant or
+        # directory listed beside jobs on the EA-ecosystem boards, or a
+        # recruiter's test posting. A row Nikita added HIMSELF (source_board
+        # "manual") is never touched: he tracks programmes and grants on the
+        # board on purpose, and this gate is only about what the sources push.
+        if vac.get("source_board") != "manual":
+            nv_reason = filters.not_a_vacancy_reason(
+                title, vac.get("full_description") or vac.get("snippet") or ""
+            )
+            if nv_reason:
+                vac["_not_vacancy_reason"] = nv_reason
+                categories["delete_not_a_vacancy"].append((vid, vac))
+                continue
 
         # Priority 2: content junk (reCAPTCHA, donation widgets, error pages)
         junk_reason = filters.is_content_junk(vac.get("full_description", ""))
@@ -659,6 +674,7 @@ _GROUP_REASON_CATEGORIES = frozenset(
     {
         "delete_blacklist",
         "delete_company_title_filter",
+        "delete_not_a_vacancy",
         "delete_junk",
         "delete_rearchived",
         "delete_stale_blind",
@@ -703,6 +719,14 @@ def _group_exclusion_reason(category: str, rep: dict) -> str | None:
             rep.get("_filter_reason")
             or filters.company_title_filter_reason(rep.get("org", ""), rep.get("title", ""))
             or "company title filter"
+        )
+    if category == "delete_not_a_vacancy":
+        return (
+            rep.get("_not_vacancy_reason")
+            or filters.not_a_vacancy_reason(
+                rep.get("title", ""), rep.get("full_description") or rep.get("snippet") or ""
+            )
+            or "not a job posting"
         )
     if category == "delete_junk":
         junk = rep.get("_junk_reason") or filters.is_content_junk(
@@ -875,6 +899,7 @@ def compute_stats(categories: dict) -> dict:
     delete_count = (
         len(categories["delete_blacklist"])
         + len(categories.get("delete_company_title_filter", []))
+        + len(categories.get("delete_not_a_vacancy", []))
         + len(categories.get("delete_junk", []))
         + len(categories.get("delete_rearchived", []))
         + len(categories.get("delete_geo", []))
@@ -900,6 +925,7 @@ def compute_stats(categories: dict) -> dict:
     delete_cats = [
         "delete_blacklist",
         "delete_company_title_filter",
+        "delete_not_a_vacancy",
         "delete_junk",
         "delete_rearchived",
         "delete_geo",
@@ -1655,6 +1681,7 @@ def main():
     for cat in [
         "delete_blacklist",
         "delete_company_title_filter",
+        "delete_not_a_vacancy",
         "delete_junk",
         "delete_rearchived",
         "delete_geo",
@@ -1731,6 +1758,7 @@ def main():
     for cat in [
         "delete_blacklist",
         "delete_company_title_filter",
+        "delete_not_a_vacancy",
         "delete_junk",
         "delete_rearchived",
         "delete_geo",
