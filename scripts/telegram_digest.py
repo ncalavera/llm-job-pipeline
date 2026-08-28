@@ -449,6 +449,8 @@ def update_state_file(path, **fields):
 #   * stages[vacancy_scoring|company_scoring].carried_over,
 #     stages[learning_review].rolled_over, stages[verdicts].pending_verdicts
 #     — the tier-4 lines.
+#   * top-level "degraded" — capability ids (firecrawl / exa / anthropic) the
+#     run could not use because a key was missing on the server.
 # The header's "dropped" and "still to score" are NOT read from here: they are
 # counted in the database, so a reader can check them against what tier 3 lists
 # and against the dashboard.
@@ -568,6 +570,12 @@ def build_header_lines(counts, deadlines_soon, run_state):
     # roles at unapproved companies are unscored and invisible everywhere else.
     if counts.get("parked"):
         lines.append(_t("digest_waiting_parked", n=counts["parked"]))
+    # Anything the night could not do for a missing key. run_daily records the
+    # capability id, not a sentence, so this message is in Nikita's language.
+    for cap in (run_state or {}).get("degraded") or []:
+        text = _t(f"digest_degraded_{cap}")
+        if text != f"digest_degraded_{cap}":  # unknown capability: stay silent
+            lines.append(text)
     if run_state and run_state.get("no_progress"):
         lines.append(_t("digest_no_progress", n=counts["targets"]))
     if deadlines_soon:

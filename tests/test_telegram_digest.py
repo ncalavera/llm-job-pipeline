@@ -347,6 +347,7 @@ def _write_run_state(
     rolled_over=None,
     pending_verdicts=None,
     excluded_count=None,
+    degraded=None,
 ):
     """Fixture mirroring the run_daily.py state shape the digest reads.
 
@@ -390,6 +391,8 @@ def _write_run_state(
         state["counts"] = counts
     if no_progress:
         state["no_progress"] = True
+    if degraded is not None:
+        state["degraded"] = list(degraded)
     Path(path).write_text(json.dumps(state), encoding="utf-8")
 
 
@@ -767,6 +770,9 @@ JARGON = (
 DIGEST_KEYS = (
     "digest_run_header",
     "digest_waiting_parked",
+    "digest_degraded_firecrawl",
+    "digest_degraded_exa",
+    "digest_degraded_anthropic",
     "digest_tier_dropped",
     "digest_dropped_prefix",
     "digest_no_progress",
@@ -785,9 +791,15 @@ def test_digest_strings_carry_no_internal_vocabulary():
                 assert word not in text, f"{lang}.{key} says {word!r}"
 
 
+#: Proper nouns that stay in Latin script in Russian too — transliterating a
+#: product name would make the instruction harder to act on, not easier.
+PRODUCT_NAMES = ("Firecrawl", "Exa", "Anthropic", "Telegram")
+
+
 def test_russian_digest_strings_are_actually_russian():
-    """No English loanwords or transliterated jargon: outside HTML tags and
-    {placeholders}, the Russian strings carry no Latin letters."""
+    """No English loanwords or transliterated jargon: outside HTML tags,
+    {placeholders} and product names, the Russian strings carry no Latin
+    letters."""
     import re
 
     from i18n import STRINGS
@@ -795,6 +807,8 @@ def test_russian_digest_strings_are_actually_russian():
     for key in DIGEST_KEYS:
         text = STRINGS["ru"][key]
         bare = re.sub(r"<[^>]+>|\{[^}]+\}", "", text)
+        for name in PRODUCT_NAMES:
+            bare = bare.replace(name, "")
         assert not re.search(r"[A-Za-z]", bare), f"ru.{key} has Latin letters: {bare!r}"
 
 
@@ -809,6 +823,40 @@ def test_both_languages_define_every_digest_string():
         assert set(re.findall(r"\{(\w+)\}", STRINGS["en"][key])) == set(
             re.findall(r"\{(\w+)\}", STRINGS["ru"][key])
         ), key
+
+
+def test_a_missing_key_reaches_the_phone(denv):
+    """The 2026-08-27 defect: Exa failed every call all night and said so only
+    in a log line nobody reads at 02:00."""
+    _write_run_state(denv.run_state, counts={"new_vacancies": 3, "scored": 1}, degraded=["exa"])
+    td.cmd_send(_args())
+    header = _sent_texts(denv.calls)[0]
+    assert "Could not search the web about companies all night" in header
+    assert "Add the Exa key on the server." in header
+    assert "EXA_API_KEY" not in header  # the variable name is not his problem
+
+
+def test_every_missing_key_gets_its_own_line(denv):
+    _write_run_state(denv.run_state, degraded=["firecrawl", "exa", "anthropic"])
+    td.cmd_send(_args())
+    header = _sent_texts(denv.calls)[0]
+    assert header.count("⚠️") == 3
+    assert "Firecrawl key" in header and "Exa key" in header and "Anthropic key" in header
+
+
+def test_a_capability_the_digest_does_not_know_is_passed_over(denv):
+    """An id added to run_daily before its message exists must not print a raw
+    key name on the phone."""
+    _write_run_state(denv.run_state, degraded=["something_new"])
+    td.cmd_send(_args())
+    header = _sent_texts(denv.calls)[0]
+    assert "digest_degraded" not in header and "something_new" not in header
+
+
+def test_nothing_is_said_when_every_key_is_present(denv):
+    _write_run_state(denv.run_state, counts={"new_vacancies": 3, "scored": 1})
+    td.cmd_send(_args())
+    assert "⚠️" not in _sent_texts(denv.calls)[0]
 
 
 def test_keyboard_never_lands_on_a_message_that_ends_in_mid_scores(denv):

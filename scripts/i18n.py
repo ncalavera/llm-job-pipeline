@@ -418,6 +418,12 @@ STRINGS: dict[str, dict[str, str]] = {
         # telegram_digest.py — tiered morning digest (U3)
         "digest_run_header": "🌙 <b>Night run</b>: found {fetched} new roles, scored {scored}. In the queue now: {dropped} skipped (listed below), {unscored} still to score",
         "digest_waiting_parked": "↳ {n} more roles are waiting behind companies you have not approved yet",
+        # Something the night could not do because a key is missing on the
+        # server. Silence here cost a whole night of company research on
+        # 2026-08-27, so it goes on the phone, not only into a log.
+        "digest_degraded_firecrawl": "⚠️ Could not read job pages all night — roles arrived without a description. Add the Firecrawl key on the server.",
+        "digest_degraded_exa": "⚠️ Could not search the web about companies all night — they were judged on what was already stored. Add the Exa key on the server.",
+        "digest_degraded_anthropic": "⚠️ Could not screen new companies with the cheap model — the run used the slower path. Add the Anthropic key on the server.",
         "digest_no_progress": "⚠️ scored 0 of {n} — the session made no progress",
         "digest_deadlines_week": "⏰ {n} deadlines this week",
         "digest_tier_top": "🔥 <b>Top matches</b> — tap 👍 / 👎",
@@ -805,6 +811,9 @@ STRINGS: dict[str, dict[str, str]] = {
         # telegram_digest.py — трёхъярусный утренний дайджест (U3)
         "digest_run_header": "🌙 <b>Ночной прогон</b>: нашёл {fetched} новых ролей, оценил {scored}. Сейчас в очереди: {dropped} отсеяно (список ниже), {unscored} ждут оценки",
         "digest_waiting_parked": "↳ и ещё {n} ролей ждут за компаниями, которые вы пока не одобрили",
+        "digest_degraded_firecrawl": "⚠️ Всю ночь не удавалось прочитать страницы вакансий — роли пришли без описания. Добавьте ключ Firecrawl на сервере.",
+        "digest_degraded_exa": "⚠️ Всю ночь не удавалось искать в сети о компаниях — их оценили по тому, что уже было сохранено. Добавьте ключ Exa на сервере.",
+        "digest_degraded_anthropic": "⚠️ Не удалось быстро отсмотреть новые компании — прогон пошёл медленным путём. Добавьте ключ Anthropic на сервере.",
         "digest_no_progress": "⚠️ оценено 0 из {n} — сессия не продвинулась",
         "digest_deadlines_week": "⏰ дедлайнов на этой неделе: {n}",
         "digest_tier_top": "🔥 <b>Лучшие совпадения</b> — жми 👍 / 👎",

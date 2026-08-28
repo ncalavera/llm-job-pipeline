@@ -120,6 +120,55 @@ STAGE_ORDER = [
 ]
 
 
+# Keys the run needs, and what quietly stops working without one. EXA_API_KEY
+# was absent from the forge .env on 2026-08-27: company evidence collection
+# failed every Exa call all night and said so only in a log line nobody reads at
+# 02:00. A missing key must reach the report card and the phone, not a log.
+#
+# Each entry: capability id -> (env var, the stage that degrades, the plain
+# sentence for the report card). The digest translates the capability id
+# through i18n instead of carrying this English text, so the Russian digest
+# stays Russian.
+DEGRADED_WITHOUT_KEY = {
+    "firecrawl": (
+        "FIRECRAWL_API_KEY",
+        "enrich",
+        "Job pages could not be read, so roles that arrived without a description "
+        "stayed empty. Add the Firecrawl key on the server.",
+    ),
+    "exa": (
+        "EXA_API_KEY",
+        "company_scoring",
+        "Company research could not search the web, so companies were judged on "
+        "what was already stored. Add the Exa key on the server.",
+    ),
+    "anthropic": (
+        "ANTHROPIC_API_KEY",
+        "company_scoring",
+        "New companies could not be screened by the cheap model, so the run used "
+        "the slower path. Add the Anthropic key on the server.",
+    ),
+}
+
+
+def _check_keys(state: dict) -> list[str]:
+    """Record every capability that will silently degrade for a missing key.
+
+    Runs once at preflight, BEFORE the stages that need the keys, so the run
+    knows what it cannot do while it can still say so. Writes both channels:
+    a warning (the report card) and the capability id (the digest).
+    """
+    missing = []
+    for cap, (env_name, stage, message) in DEGRADED_WITHOUT_KEY.items():
+        if os.environ.get(env_name):
+            continue
+        missing.append(cap)
+        _add_warning(state, stage, message)
+    if missing:
+        state["degraded"] = missing
+    return missing
+
+
 # Plain-language "about to" line for each stage, printed at its START so a
 # newcomer can tell what is happening without reading the code (STRATEGY
 # guardrail 4). The finish is reported by the existing per-stage note.
@@ -1236,6 +1285,13 @@ def _h_preflight(state, entry, opts):
     note = f"{n} companies tracked"
     if pending:
         note += f"; {pending} unscored vacancies from a prior run will be picked up in scoring"
+    missing = _check_keys(state)
+    if missing:
+        n = len(missing)
+        note += (
+            f"; {n} thing{'' if n == 1 else 's'} will not work tonight because a key is "
+            "missing on the server \u2014 the warnings under the report card say which"
+        )
     return "advance", note
 
 
