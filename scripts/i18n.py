@@ -403,7 +403,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "summary_verdicts": "{scored_unseen} scored matches await your verdict; {liked} liked so far",
         "summary_publish": "publish: {note}",
         "summary_review_hint": "deeper review of liked roles: /jobs-review",
-        # telegram_digest.py — user-facing digest copy + buttons
+        # telegram_digest.py — user-facing digest copy. The 👍/👎 buttons were
+        # removed on Nikita's instruction (2026-08-28); digest_status_* and
+        # digest_recorded / digest_save_error are kept because the dashboard
+        # and the expiring-role path still name a recorded verdict.
         "digest_status_liked": "👍 Liked",
         "digest_status_passed": "👎 Passed",
         "digest_status_applied": "✅ Already applied",
@@ -426,7 +429,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "digest_degraded_anthropic": "⚠️ Could not screen new companies with the cheap model — the run used the slower path. Add the Anthropic key on the server.",
         "digest_no_progress": "⚠️ scored 0 of {n} — the session made no progress",
         "digest_deadlines_week": "⏰ {n} deadlines this week",
-        "digest_tier_top": "🔥 <b>Top matches</b> — tap 👍 / 👎",
+        "digest_tier_top": "🔥 <b>Top matches</b>",
         "digest_tier_mid": "📊 <b>Mid scores</b>",
         "digest_tier_dropped": "🗑 <b>Skipped</b>",
         "digest_dropped_prefix": "skipped:",
@@ -796,7 +799,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "summary_verdicts": "{scored_unseen} оценённых совпадений ждут вашего вердикта; {liked} в избранном",
         "summary_publish": "публикация: {note}",
         "summary_review_hint": "глубокий разбор избранного: /jobs-review",
-        # telegram_digest.py — дайджест и кнопки
+        # telegram_digest.py — дайджест
         "digest_status_liked": "👍 В избранное",
         "digest_status_passed": "👎 Отказ",
         "digest_status_applied": "✅ Уже подал",
@@ -816,7 +819,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "digest_degraded_anthropic": "⚠️ Не удалось быстро отсмотреть новые компании — прогон пошёл медленным путём. Добавьте ключ Anthropic на сервере.",
         "digest_no_progress": "⚠️ оценено 0 из {n} — сессия не продвинулась",
         "digest_deadlines_week": "⏰ дедлайнов на этой неделе: {n}",
-        "digest_tier_top": "🔥 <b>Лучшие совпадения</b> — жми 👍 / 👎",
+        "digest_tier_top": "🔥 <b>Лучшие совпадения</b>",
         "digest_tier_mid": "📊 <b>Средние оценки</b>",
         "digest_tier_dropped": "🗑 <b>Отсеяно</b>",
         "digest_dropped_prefix": "отсеяно:",
