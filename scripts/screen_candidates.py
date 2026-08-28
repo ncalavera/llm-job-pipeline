@@ -482,18 +482,20 @@ def write_summary(summary: dict, applied: bool, path: Path = SCREEN_SUMMARY_PATH
 
 def build_call_llm(model_tier: str):
     """Return a ``call_llm(system, user) -> str`` bound to the cheap model, or
-    ``None`` if no direct API key is configured (or the package is missing).
-    Returning None routes the run to the subagent (--local-style) path —
-    candidates stay kept until decisions come back via --save.
+    ``None`` to screen with subagents instead.
 
-    The explicit ANTHROPIC_API_KEY check matters: the SDK client constructs
-    fine without a key and only fails per-request, which would burn one
-    fail-safe keep per candidate instead of cleanly deferring to subagents."""
+    Subagents are the NORMAL route, not a fallback: Nikita runs every LLM call
+    on his Claude subscription through headless sessions, and deliberately
+    keeps ANTHROPIC_API_KEY out of the environment so the night's spend cannot
+    slip onto per-token billing (2026-08-28). Returning None routes the run to
+    the subagent (--local-style) path — candidates stay kept until decisions
+    come back via --save.
+
+    The explicit key check still matters: the SDK client constructs fine
+    without a key and only fails per-request, which would burn one fail-safe
+    keep per candidate instead of cleanly handing over to subagents."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        print(
-            "  screen: ANTHROPIC_API_KEY unset — deferring to subagent screening",
-            file=sys.stderr,
-        )
+        print("  screen: screening with subagents", file=sys.stderr)
         return None
     try:
         import anthropic
