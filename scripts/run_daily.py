@@ -2424,6 +2424,10 @@ def _print_summary(state: dict, opts: Opts) -> None:
     print(bar)
     if new is not None:
         print("  • " + t("summary_new_vac", n=new))
+        # Two units appear on this card — vacancies from the fetch, roles from
+        # the filter and the scorer. Say once what the difference is, so 144
+        # and 85 on adjacent lines cannot read as the same measurement.
+        print("    " + t("summary_unit_note"))
     print("  • " + t("summary_companies", active=active, candidates=candidates, scored=cand_scored))
     print("  • " + t("summary_verdicts", scored_unseen=scored_unseen, liked=liked))
     print("  • " + t("summary_publish", note=publish_note))

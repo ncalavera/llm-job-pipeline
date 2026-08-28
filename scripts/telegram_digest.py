@@ -39,6 +39,7 @@ import argparse
 import html
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -391,10 +392,50 @@ def build_mid_line(row):
     return line + _link_suffix(row)
 
 
+#: Stored reason -> plain words. The reason saved on the role stays technical
+#: ("company_title_filter — not in WFP - World Food Programme include list") so
+#: a debugger can tell which rule fired; the phone gets the meaning. Matching is
+#: by prefix, in this order; an unmapped reason is shown exactly as stored,
+#: which is how a new rule stays visible instead of silently reading wrong.
+_SKIP_REASON_PREFIXES = (
+    ("company_title_filter", "skip_wrong_kind"),
+    ("junk title:", "skip_junk_title"),
+    ("junk content:", "skip_junk_content"),
+    ("archived before", "skip_archived_before"),
+    ("no description after enrichment", "skip_no_description"),
+    ("a program or grant", "skip_not_a_job"),
+    ("test posting", "skip_test_posting"),
+)
+
+
+#: Location reasons carry a country name, so they are templates rather than
+#: fixed phrases: "US-only location", "excluded locations only (Canada, US)".
+_ONLY_LOCATION_RE = re.compile(r"^(.+?)-only location$", re.IGNORECASE)
+_EXCLUDED_LOCATIONS_RE = re.compile(r"^excluded locations? only \((.+)\)$", re.IGNORECASE)
+
+
+def plain_skip_reason(reason):
+    """The stored skip reason in words a person reads on a phone."""
+    text = (reason or "").strip()
+    m = _ONLY_LOCATION_RE.match(text)
+    if m:
+        out = _t("skip_only_location", place=m.group(1))
+        return text if out == "skip_only_location" else out
+    m = _EXCLUDED_LOCATIONS_RE.match(text)
+    if m:
+        out = _t("skip_excluded_locations", places=m.group(1))
+        return text if out == "skip_excluded_locations" else out
+    for prefix, key in _SKIP_REASON_PREFIXES:
+        if text.lower().startswith(prefix):
+            translated = _t(key)
+            return text if translated == key else translated
+    return text
+
+
 def build_dropped_line(row):
-    """Tier-3 entry: one line — title, company, the drop reason, link (AE2)."""
+    """Tier-3 entry: one line — title, company, why it was skipped, link (AE2)."""
     org, title = _org_title(row)
-    reason = html.escape(row.get("scoring_excluded_reason") or "")
+    reason = html.escape(plain_skip_reason(row.get("scoring_excluded_reason")))
     return f"• {title} — {org} — {_t('digest_dropped_prefix')} {reason}" + _link_suffix(row)
 
 
@@ -583,10 +624,10 @@ def build_tail_lines(run_state):
     what = []
     n = _int(_run_stage(run_state, "vacancy_scoring").get("carried_over"))
     if n:
-        what.append(_t("digest_carried_roles", n=n))
+        what.append(_t("digest_carried_role" if n == 1 else "digest_carried_roles", n=n))
     m = _int(_run_stage(run_state, "company_scoring").get("carried_over"))
     if m:
-        what.append(_t("digest_carried_companies", n=m))
+        what.append(_t("digest_carried_company" if m == 1 else "digest_carried_companies", n=m))
     if what:
         lines.append(_t("digest_carried_over", what=", ".join(what)))
     r = _int(_run_stage(run_state, "learning_review").get("rolled_over"))

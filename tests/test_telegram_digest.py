@@ -400,7 +400,7 @@ def test_dropped_line_renders_reason_and_link(denv):
     )
     td.cmd_send(_args())
     body = "\n".join(_sent_texts(denv.calls))
-    assert "Program Manager — GiveWell — skipped: US-only location" in body
+    assert "Program Manager — GiveWell — skipped: only in US" in body
     assert 'href="https://example.test/givewell/pm"' in body
 
 
@@ -422,7 +422,7 @@ def test_tier_order_top_mid_dropped_carried(denv):
     i_top = body.index("Top Role")
     i_mid = body.index("Mid Role")
     i_drop = body.index("Dropped Role")
-    i_carried = body.index("carried over")
+    i_carried = body.index("going first in the next run")
     assert i_top < i_mid < i_drop < i_carried
     # The top tier leads, on its own message.
     first_text = _sent_texts(denv.calls)[0]
@@ -448,7 +448,7 @@ def test_header_counts_from_run_state(denv):
     assert "found 12 new roles, scored 5" in header
     assert "2 skipped (listed below), 1 still to score" in header
     # The carried-over batch keeps its own tier-4 line; it is not the pool.
-    assert "3 role(s)" in "\n".join(_sent_texts(denv.calls))
+    assert "3 roles" in "\n".join(_sent_texts(denv.calls))
 
 
 def test_header_names_the_backlog_parked_behind_unapproved_companies(denv):
@@ -586,14 +586,15 @@ def test_second_send_same_morning_repeats_nothing(denv):
     _write_run_state(denv.run_state, vac_carried=2, excluded_count=1)
     td.cmd_send(_args())
     first = "\n".join(_sent_texts(denv.calls))
-    assert "Top Role" in first and "Dropped Role" in first and "carried over" in first
+    assert "Top Role" in first and "Dropped Role" in first
+    assert "going first in the next run" in first
     denv.calls.clear()
     td.cmd_send(_args())
     second = _sent_texts(denv.calls)
     assert len(second) == 1
     assert "Top Role" not in second[0]
     assert "Dropped Role" not in second[0]
-    assert "carried over" not in second[0]
+    assert "going first in the next run" not in second[0]
 
 
 def test_telegram_error_stops_and_exits_nonzero(denv, monkeypatch):
@@ -928,3 +929,89 @@ def test_stale_pending_claim_from_a_killed_run_is_released(denv):
     assert _col(denv.db, top, "digest_sent_at") is not None
     assert _col(denv.db, drop, "digest_dropped_at") is not None
     assert not json.loads(denv.state_file.read_text()).get("pending_claim")
+
+
+# ---------------------------------------------------------------------------
+# Skip reasons: technical in the database, plain on the phone
+# ---------------------------------------------------------------------------
+
+
+def test_a_rule_name_never_reaches_the_phone(denv):
+    """The stored reason names the rule so a debugger can trace it; the digest
+    says what it means. The 2026-08-27 digest showed the rule name itself."""
+    _seed(
+        denv.db,
+        "WFP",
+        "Conductor GS2",
+        reason="company_title_filter — not in WFP - World Food Programme include list",
+    )
+    td.cmd_send(_args())
+    body = "\n".join(_sent_texts(denv.calls))
+    assert "skipped: not the kind of role you look for" in body
+    assert "company_title_filter" not in body
+    assert "include list" not in body
+    # The database keeps the technical reason untouched.
+    cur = denv.db.get_conn().cursor()
+    cur.execute("SELECT scoring_excluded_reason FROM vacancy WHERE title = ?", ("Conductor GS2",))
+    stored = cur.fetchone()[0]
+    cur.close()
+    assert stored.startswith("company_title_filter")
+
+
+@pytest.mark.parametrize(
+    "stored,plain",
+    [
+        ("junk title: talent pool", "the title is not a real role"),
+        ("junk content: error page", "the page is not a job description"),
+        ("archived before", "you archived this one before"),
+        ("no description after enrichment", "no description could be read"),
+    ],
+)
+def test_every_stored_reason_has_plain_words(stored, plain):
+    assert td.plain_skip_reason(stored) == plain
+
+
+@pytest.mark.parametrize(
+    "stored,plain",
+    [
+        ("US-only location", "only in US"),
+        ("excluded locations only (Canada, US)", "only in places you ruled out: Canada, US"),
+    ],
+)
+def test_a_location_reason_keeps_its_place_name(stored, plain):
+    """A country is a proper noun: the sentence is translated, the place is not."""
+    assert td.plain_skip_reason(stored) == plain
+
+
+@pytest.mark.parametrize(
+    "stored,plain",
+    [
+        ("a program or grant to apply to, not a job", "a programme or grant to apply to, not a job"),
+        ("test posting, not a real job", "a test posting, not a real job"),
+    ],
+)
+def test_the_not_a_vacancy_reasons_are_translatable_too(stored, plain):
+    """Stored in English by the filter; the phone gets the digest's language."""
+    assert td.plain_skip_reason(stored) == plain
+
+
+def test_an_unmapped_reason_is_shown_as_stored():
+    """A rule added later must stay visible, not vanish behind a wrong phrase."""
+    assert td.plain_skip_reason("some brand new rule") == "some brand new rule"
+    assert td.plain_skip_reason(None) == ""
+
+
+def test_skip_reasons_are_russian_in_russian(monkeypatch):
+    monkeypatch.setenv("PRODUCT_LANGUAGE", "ru")
+    import importlib
+
+    import product_language
+
+    importlib.reload(product_language)
+    try:
+        assert td.plain_skip_reason("company_title_filter — not in X include list") == (
+            "не тот тип роли"
+        )
+    finally:
+        monkeypatch.delenv("PRODUCT_LANGUAGE", raising=False)
+        importlib.reload(product_language)
