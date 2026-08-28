@@ -907,3 +907,83 @@ def test_a_real_role_at_the_same_company_still_goes_to_scoring(env):
 
     assert _reason(db, vid) is None
     assert vid in db.load_vacancies(unscored_only=True)
+
+
+# ---------------------------------------------------------------------------
+# CHARACTERISATION — which siblings shape a group's note.
+#
+# The location rule excludes a role only when EVERY member sits in an excluded
+# location. Which members count is therefore the whole question. These pin it.
+# ---------------------------------------------------------------------------
+
+
+def test_char_liked_sibling_in_a_kept_location(env):
+    """A role Nikita LIKED in Berlin, and its still-undecided New-York twin."""
+    db, fv = env
+    vid_liked = _seed(
+        db,
+        "LikedSiblingOrg",
+        "Program Manager",
+        dedup_hash="liked-de",
+        status="liked",
+        location="Berlin, Germany",
+    )
+    vid_unseen = _seed(
+        db,
+        "LikedSiblingOrg",
+        "Program Manager",
+        dedup_hash="liked-us",
+        location="New York, US only",
+    )
+
+    _run_pass(fv)
+
+    assert _reason(db, vid_liked) is None
+    # The strongest signal he can give must protect its twin, exactly as a
+    # 'passed' sibling does (test_char_mixed_location_group_...).
+    assert _reason(db, vid_unseen) is None
+    assert vid_unseen in db.load_vacancies(unscored_only=True)
+
+
+def test_char_applied_sibling_in_a_kept_location(env):
+    """Same for a role he has already applied to."""
+    db, fv = env
+    _seed(
+        db,
+        "AppliedSiblingOrg",
+        "Program Manager",
+        dedup_hash="applied-de",
+        status="applied",
+        location="Berlin, Germany",
+    )
+    vid_unseen = _seed(
+        db,
+        "AppliedSiblingOrg",
+        "Program Manager",
+        dedup_hash="applied-us",
+        location="New York, US only",
+    )
+
+    _run_pass(fv)
+
+    assert _reason(db, vid_unseen) is None
+
+
+def test_char_a_decided_sibling_is_still_never_counted_as_work(env):
+    """Context, not work: a decided sibling shapes the group and nothing else."""
+    db, fv = env
+    _seed(
+        db,
+        "ContextOnlyOrg",
+        "Program Manager",
+        dedup_hash="ctx-liked",
+        status="liked",
+        location="Berlin, Germany",
+    )
+    _seed(db, "ContextOnlyOrg", "Program Manager", dedup_hash="ctx-unseen")
+
+    all_cats = fv.classify_vacancies()
+    work = fv.only_undecided(all_cats)
+
+    assert fv.decided_count(all_cats) == 1
+    assert sum(len(v) for v in work.values()) == 1
