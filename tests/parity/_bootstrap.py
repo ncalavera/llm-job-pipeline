@@ -112,11 +112,10 @@ def bootstrap_sqlite(monkeypatch, tmp_path):
     # CREATE TABLE + indexes) and the psycopg2-compatible cursor.execute runs
     # only one statement at a time.
     #
-    # The list is DERIVED, not hand-written. It used to be a literal tuple
-    # ending at 0018, so migrations 0025 and 0026 (added later) never reached
-    # the SQLite side and this file silently made the cross-backend column
-    # diff fail on main. A list that must be edited by hand every time someone
-    # adds a migration will be forgotten again; globbing cannot be.
+    # The list is DERIVED, never hand-written. A literal tuple here goes stale
+    # the moment a migration is added and nobody edits it: the SQLite side then
+    # builds a database missing those columns, and the cross-backend column
+    # diff fails without naming the cause. Globbing cannot go stale.
     #
     # Files are applied in version order. The frozen baseline already declares
     # some of what the early migrations add (0003/0005), so a duplicate column
