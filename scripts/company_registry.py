@@ -29,7 +29,7 @@ _STRATEGY_REQUIRES_SLUG = {
     "bamboohr",
     "smartrecruiters",
 }
-_STRATEGY_REQUIRES_URL = {"firecrawl_scrape", "unops_widget"}
+_STRATEGY_REQUIRES_URL = {"firecrawl_scrape", "unops_widget", "oracle_hcm"}
 
 # ---------------------------------------------------------------------------
 # Company registry — built from Supabase (single source of truth)
@@ -135,8 +135,8 @@ def _build_companies_from_db() -> dict:
         if ats_config and isinstance(ats_config, dict):
             config.update(ats_config)
 
-        # firecrawl_scrape / unops_widget need 'url'; default to careers_url
-        if strategy in ("firecrawl_scrape", "unops_widget") and "url" not in config:
+        # firecrawl_scrape / unops_widget / oracle_hcm need 'url'; default to careers_url
+        if strategy in _STRATEGY_REQUIRES_URL and "url" not in config:
             config["url"] = config["careers_url"]
 
         companies[name] = config

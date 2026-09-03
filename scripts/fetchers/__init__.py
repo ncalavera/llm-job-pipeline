@@ -95,6 +95,12 @@ from fetchers.ats.successfactors import (
     _sf_job_detail,
 )
 from fetchers.ats.adp import fetch_adp_json, _adp_cid, _adp_location, _adp_job_url, _adp_snippet
+from fetchers.ats.oracle_hcm import (
+    fetch_oracle_hcm,
+    _oracle_config,
+    _oracle_location,
+    _oracle_description,
+)
 from fetchers.ats.amazon import fetch_amazon_jobs
 from fetchers.ats.apple import fetch_apple_jobs
 from fetchers.ats.unops import fetch_unops_widget, _fetch_unops_job_detail
