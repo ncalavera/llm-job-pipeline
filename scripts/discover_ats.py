@@ -155,6 +155,10 @@ ATS_PATTERNS = [
     (r"([a-z0-9_-]+)\.breezy\.hr", "breezy"),
     # JazzHR: {slug}.applytojob.com
     (r"([a-z0-9_-]+)\.applytojob\.com", "jazzhr"),
+    # Oracle HCM Recruiting Cloud: {pod}.fa.{dc}.oraclecloud.com/hcmUI/CandidateExperience
+    # The captured slug is the pod host, not a tenant id — the fetcher reads the
+    # site number out of the careers URL itself.
+    (r"([a-z0-9_-]+)\.fa\.[a-z0-9]+\.oraclecloud\.com/hcmui/candidateexperience", "oracle_hcm"),
 ]
 
 # Additional patterns only meaningful in HTML source (not in plain URLs)

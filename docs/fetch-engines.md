@@ -99,7 +99,7 @@ recipes read the network but write nothing to any real DB.
 
 ---
 
-## Company engines (`COMPANY_FETCHERS`, 16)
+## Company engines (`COMPANY_FETCHERS`, 17)
 
 ### `greenhouse` — Greenhouse boards API
 <!-- ENGINE: greenhouse -->
@@ -206,6 +206,14 @@ recipes read the network but write nothing to any real DB.
 - **Pagination & caps:** widget returns all open cards; detail loop paced at 0.3 s.
 - **Failure signatures:** expired postings are dropped by deadline; a gone job that 302s to `/careersmarketplace/Error` returns an empty description (guarded so the error page is never saved as a body). ≥400 on the widget → `error: http_<code>`.
 - **Debug:** `from fetchers.ats.unops import fetch_unops_widget; print(len(fetch_unops_widget("Example", "<widget-url>", fetch_descriptions=False)))`
+
+### `oracle_hcm` — Oracle HCM Recruiting Cloud REST API
+<!-- ENGINE: oracle_hcm -->
+- **Surface / auth:** `GET <host>/hcmRestApi/resources/latest/recruitingCEJobRequisitions?finder=findReqs;siteNumber="<SITE>",keyword="…",limit,offset` (paged search), then `recruitingCEJobRequisitionDetails?finder=ById;Id="<Id>",siteNumber="<SITE>"` per job. Public, no auth; the finder's inner quotes are literal (`%22`).
+- **Config keys:** `url` (req; defaults to `careers_url`) — any careers URL of the site, e.g. `https://estm.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs?keyword=accelerator%20lab`; host and site number are parsed from it. Opt (`ats_config`): `keyword`, which overrides the URL's own `?keyword=`.
+- **Pagination & caps:** `offset` in steps of 50 until `TotalJobsCount` is reached or a page comes back empty; hard cap 20 pages (1000 roles). Every listed job costs one detail GET, so a site without a keyword is expensive — UNDP lists hundreds.
+- **Failure signatures:** a url with no host or no `/sites/<SITE>` → prints and returns `[]` without a request. A search page ≥400 → `error: http_<code>`. A single detail failing is printed with its reason and detail, and that job falls back to its search-result fields (empty description) instead of killing the listing.
+- **Debug:** `from fetchers.ats.oracle_hcm import fetch_oracle_hcm; print(len(fetch_oracle_hcm("Example", {"url": "<careers-url>"})))`
 
 ### `amazon_jobs` — Amazon Jobs search API
 <!-- ENGINE: amazon_jobs -->

@@ -1,0 +1,33 @@
+{
+ "items": [
+  {
+   "TotalJobsCount": 3,
+   "requisitionList": [
+    {
+     "Id": "36148",
+     "Title": "Research Analyst [Open to internal and external applicants]",
+     "PostedDate": "2026-09-03",
+     "PostingEndDate": null,
+     "PrimaryLocation": "Bangkok, Thailand",
+     "PrimaryLocationCountry": "TH",
+     "WorkplaceType": "",
+     "ShortDescriptionStr": "Duties and Responsibilities",
+     "Department": null,
+     "secondaryLocations": []
+    },
+    {
+     "Id": "36505",
+     "Title": "Advisor on Gender Equality [Open to Tier 0, 1, and 2 candidates]",
+     "PostedDate": "2026-09-02",
+     "PostingEndDate": null,
+     "PrimaryLocation": "Madrid, Spain",
+     "PrimaryLocationCountry": "ES",
+     "WorkplaceType": "",
+     "ShortDescriptionStr": "Duties and Responsibilities",
+     "Department": null,
+     "secondaryLocations": []
+    }
+   ]
+  }
+ ]
+}
