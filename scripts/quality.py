@@ -180,11 +180,17 @@ _NAV_TOKEN_RE = re.compile(
     r"\b(?:home|about(?: us)?|contact(?: us)?|menu|login|log in|"
     r"sign in|sign up|register|careers|terms of (?:use|service)|"
     r"skip to (?:main )?content|toggle navigation|"
-    r"subscribe|newsletter|follow us)\b",
+    r"subscribe|newsletter|follow us|who we are|what we do|our impact|"
+    r"get involved|news cent(?:re|er))\b",
     re.IGNORECASE,
 )
 NAV_MAX_LEN = 600  # nav shells are short
 NAV_TOKEN_THRESHOLD = 6  # this many nav tokens in a short blob → it's chrome
+# Longer shells (a branded site header + footer, ~1K chars) carry fewer nav
+# tokens but ZERO job-description structure. That conjunction is the
+# discriminator: an 890-char UNDP header/footer dump once scored 55 on the
+# title alone because it was above NAV_MAX_LEN.
+NAV_LONG_TOKEN_THRESHOLD = 4
 
 
 def is_navigation_junk(text: str) -> bool:
@@ -196,9 +202,14 @@ def is_navigation_junk(text: str) -> bool:
     if not text:
         return False
     stripped = text.strip()
-    if len(stripped) > NAV_MAX_LEN:
-        return False
-    return len(_NAV_TOKEN_RE.findall(stripped)) >= NAV_TOKEN_THRESHOLD
+    nav_hits = _NAV_TOKEN_RE.findall(stripped)
+    if len(stripped) <= NAV_MAX_LEN:
+        return len(nav_hits) >= NAV_TOKEN_THRESHOLD
+    # Any length: several DISTINCT menu labels and no JD structure at all → a
+    # page shell. Distinct, so prose that repeats one word ("about impact")
+    # never counts as a menu.
+    distinct = {h.lower() for h in nav_hits}
+    return len(distinct) >= NAV_LONG_TOKEN_THRESHOLD and not _JD_STRUCTURE_RE.search(stripped)
 
 
 # ---------------------------------------------------------------------------
