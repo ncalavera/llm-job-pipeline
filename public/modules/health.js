@@ -77,11 +77,11 @@ function _boardName(b) {
 // Fetch-status codes are pipeline vocabulary; the user reads plain words
 // (design FINDING-005). The raw code stays in the tooltip.
 const FETCH_STATUS_LABELS = {
-  render_ok_zero: "fetches fine, finds 0 roles",
-  js_required: "site needs a browser to render",
-  no_data: "source returns nothing",
-  error: "fetch error",
-  ok: "ok",
+  render_ok_zero: T("health_status_render_ok_zero", "fetches fine, finds 0 roles"),
+  js_required: T("health_status_js_required", "site needs a browser to render"),
+  no_data: T("health_status_no_data", "source returns nothing"),
+  error: T("health_status_error", "fetch error"),
+  ok: T("health_status_ok", "ok"),
 };
 
 function _statusLabel(code) {
@@ -108,13 +108,10 @@ function _boardsBlock(boards) {
       // instead, never both.
       const dot = b.presumed_broken
         ? ""
-        : '<span class="health-dot" aria-hidden="true" title="fetching"></span>';
-      // relativeTime is called WITHOUT the T dictionary on purpose: the tab's
-      // copy is English, and the shared dictionary would localise the time
-      // string, so a Russian relative time could leak into an English label
-      // and read as a bug (design FINDING-003).
+        : '<span class="health-dot" aria-hidden="true" title="' +
+          escHtml(T("health_fetching", "fetching")) + '"></span>';
       const fetched = b.last_fetched
-        ? escHtml(relativeTime(b.last_fetched))
+        ? escHtml(relativeTime(b.last_fetched, T))
         : escHtml(T("health_never", "never"));
       const cf =
         b.consecutive_failures == null ? "—" : String(b.consecutive_failures);
@@ -170,7 +167,7 @@ function _companiesBlock(companies) {
             '">(' +
             escHtml(_statusLabel(c.fetch_status)) +
             (c.consecutive_failures
-              ? ", " + c.consecutive_failures + " fails"
+              ? ", " + escHtml(T("health_fail_count", "{n} fails").replace("{n}", c.consecutive_failures))
               : "") +
             ")</span></li>",
         )
@@ -240,7 +237,7 @@ function _learningBlock(l) {
     );
   }
   const last = l.last_review
-    ? escHtml(relativeTime(l.last_review))
+    ? escHtml(relativeTime(l.last_review, T))
     : escHtml(T("health_never_reviewed", "never reviewed"));
   return (
     '<ul class="health-stat-list">' +
@@ -309,7 +306,7 @@ function _plural(n, one, many) {
   return n === 1 ? one : many;
 }
 
-export function healthVerdict(d) {
+export function healthVerdict(d, t = T) {
   const boards = (d && d.boards) || [];
   const brokenBoards = boards.filter((b) => b.presumed_broken).length;
   const fetchingBoards = boards.length - brokenBoards;
@@ -319,18 +316,16 @@ export function healthVerdict(d) {
   const problems = [];
   if (brokenBoards) {
     problems.push(
-      brokenBoards +
-        " " +
-        _plural(brokenBoards, "board", "boards") +
-        " presumed broken",
+      t(_plural(brokenBoards, "health_broken_board", "health_broken_boards"),
+        "{n} " + _plural(brokenBoards, "board", "boards") + " presumed broken")
+        .replace("{n}", brokenBoards),
     );
   }
   if (failingCount) {
     problems.push(
-      failingCount +
-        " " +
-        _plural(failingCount, "company", "companies") +
-        " failing",
+      t(_plural(failingCount, "health_failing_company", "health_failing_companies"),
+        "{n} " + _plural(failingCount, "company", "companies") + " failing")
+        .replace("{n}", failingCount),
     );
   }
 
@@ -338,11 +333,9 @@ export function healthVerdict(d) {
     return {
       ok: true,
       text:
-        "All systems healthy — " +
-        fetchingBoards +
-        " " +
-        _plural(fetchingBoards, "board", "boards") +
-        " fetching, no failing companies",
+        t(_plural(fetchingBoards, "health_healthy_board", "health_healthy_boards"),
+          "All systems healthy — {n} " + _plural(fetchingBoards, "board", "boards") +
+          " fetching, no failing companies").replace("{n}", fetchingBoards),
     };
   }
   return { ok: false, text: problems.join(" · ") };
@@ -504,8 +497,8 @@ function _injectStylesOnce() {
     .health-verdict--ok{color:var(--q-good);background:var(--q-good-bg)}
     .health-verdict--warn{color:var(--q-weak);background:var(--q-weak-bg)}
     .health-verdict-dot{width:9px;height:9px;border-radius:50%;background:currentColor;flex:none}
-    .health-grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin-bottom:20px}
-    .health-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:14px 16px}
+    .health-grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr));margin-bottom:20px}
+    .health-card{min-width:0;overflow-x:auto;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:14px 16px}
     .health-card-title{margin:0 0 10px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;opacity:.7}
     .health-card--priority{border-left:3px solid var(--cobalt);padding-left:14px}
     .health-card-title--priority{opacity:1;color:var(--cobalt)}
