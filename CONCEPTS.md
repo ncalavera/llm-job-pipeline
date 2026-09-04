@@ -63,6 +63,14 @@ A second, genuinely distinct role that shares company and title with an already-
 ### Archived-hash tombstone
 A recorded dedup hash of an archived vacancy that blocks the same role from being re-saved as new on a later fetch. Tombstones are exact-hash only by contract: tombstoning a normalized (cross-variant) key would also block the live spelling of the role, silently skip its refresh, and get it swept as stale.
 
+## Mail watcher
+
+### Seed run
+The first run of the recruiter-mail watcher (`scripts/mail_watch.py`) when its state file carries no `seeded_at` marker: every listed message id is recorded as seen and nothing is sent, so enabling the watcher never replays old mail as alerts. Keyed on the marker, not on the file being absent — the failure counter also writes the file.
+
+### Seen set
+The watcher's persisted map of Gmail message id to arrival time, pruned after seven days. It replaces a time window because Gmail search has day-level granularity only; an id already in the set never alerts again, and an id whose Telegram send failed stays out of the set so the next run retries it.
+
 ## Applications
 
 ### Application dossier
