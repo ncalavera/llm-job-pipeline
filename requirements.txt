@@ -10,3 +10,9 @@ firecrawl-py>=2.0
 # (`score_companies.py --api`). The normal daily flow scores through your
 # coding agent's subagents (`--local`) and needs neither this package nor a key.
 anthropic>=0.40
+
+# Optional — only needed for the mail watcher (scripts/mail_watch.py):
+# Gmail polling for recruiter-mail Telegram alerts.
+google-api-python-client>=2.100
+google-auth>=2.20
+google-auth-httplib2>=0.2

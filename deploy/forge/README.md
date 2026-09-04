@@ -53,9 +53,53 @@ expired token shows up as the "login failure" alert in the morning message.
 | Token | Created |
 |---|---|
 | claude-token | (fill on install) |
+| gmail token (`~/Projects/tools/google-vibe-api/.secrets/token.json`) | (fill on install) |
 
 The Telegram bot token rotates the same way via BotFather (`/revoke`), landing
 in `.env`.
+
+## Mail watcher (recruiter mail → Telegram)
+
+`scripts/mail_watch.py` polls Gmail every 10 minutes (all incoming mail of
+the last two days, not only the inbox — filters archive most mail on arrival) and sends one Telegram
+message per incoming hiring email (recruiter, applications team, ATS
+platform). Rules, not a model, decide: sender domains and subject phrases in
+a small TOML file. Design: `docs/plans/2026-09-04-1340-feat-recruiter-mail-telegram-alert-plan.md`.
+
+Install (after the nightly run is in place):
+
+1. `uv pip install --python .venv/bin/python google-api-python-client google-auth`
+   (the venv has no pip of its own).
+2. The Gmail token comes from `google-vibe-api` on the laptop: copy only
+   `~/Projects/tools/google-vibe-api/.secrets/token.json` to the same path on
+   the server (directory 700, file 600). Nothing else from that checkout is
+   needed; the unit reads the file through `LoadCredential=`.
+3. `cp config/mail_watch_rules.example.toml /home/$USER/jobsearch/mail_watch_rules.toml`
+   (mode 600), then edit it: your own addresses in `own_addresses`, the
+   organisations you applied to in `org_domains`. One line per entry; no code
+   change, the next run picks it up.
+4. Substitute the user placeholder in both unit files (same `sed` as step 1
+   of the nightly install), copy them to `/etc/systemd/system/`,
+   `sudo systemctl daemon-reload`.
+5. Replay the last 90 days by hand and fix the rules until every real hiring
+   email shows a reason and no newsletter does:
+   `MAIL_WATCH_RULES=~/jobsearch/mail_watch_rules.toml .venv/bin/python scripts/mail_watch.py --dry-run --since-days 90`
+6. Seed: `sudo systemctl start jobsearch-mail-watch.service`. The first run
+   with no state file records the current inbox and sends nothing.
+7. Enable: `sudo systemctl enable --now jobsearch-mail-watch.timer`.
+
+Runbook:
+
+| Sign | Meaning | First move |
+|---|---|---|
+| No alerts for a day while hiring mail arrived | timer stopped, or the rules miss the sender | `systemctl list-timers jobsearch-mail-watch*`, `journalctl -u jobsearch-mail-watch -n 30`; add the domain to the rules |
+| "mail watcher is failing (N runs in a row)" | three consecutive runs failed; the message carries the error | `journalctl -u jobsearch-mail-watch -n 30` |
+| "... failing" with `invalid_grant` or 401 | Gmail token expired or revoked | re-authorise `google-vibe-api` on the laptop, copy `token.json` to the server (mode 600), note the date in the token table |
+| "rules file ... missing keys" or a TOML parse error | a hand edit broke the rules file | fix the file; every run until then counts as failed |
+
+State: `/home/$USER/jobsearch/mail_watch_state.json` — seen message ids with
+their dates (pruned after 7 days), failure counter, last error. Delete the
+file to re-seed; do not delete it to "re-send", that sends nothing.
 
 ## Database user
 

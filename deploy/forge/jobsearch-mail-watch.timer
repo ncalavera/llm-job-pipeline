@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll Gmail for recruiter mail every 10 minutes
+
+[Timer]
+OnCalendar=*:0/10
+# A missed tick is not worth catching up: the next one lists the same mail.
+Persistent=false
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target

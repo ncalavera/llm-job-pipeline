@@ -1,0 +1,66 @@
+# Rules for scripts/mail_watch.py — copy to ~/jobsearch/mail_watch_rules.toml
+# on the server and add your own organisations. One line per entry; no code
+# change needed. Matching order: own_addresses (never) → exclude_domains
+# (never) → platform_domains / org_domains (alert) → subject_phrases (alert).
+# A domain rule matches the exact domain and any subdomain.
+
+# Your own addresses: your replies in a thread never alert.
+own_addresses = ["you@example.com"]
+
+# Applicant-tracking platforms that send on behalf of employers.
+platform_domains = [
+  "ashbyhq.com",
+  "greenhouse.io",
+  "greenhouse-mail.io",
+  "lever.co",
+  "pageuppeople.com",
+  "pinpoint.email",
+  "pinpointhq.com",
+  "formstack.com",
+  "workable.com",
+  "smartrecruiters.com",
+  "myworkday.com",
+  "myworkdayjobs.com",
+  "bamboohr.com",
+  "recruitee.com",
+  "teamtailor.com",
+  "successfactors.com",
+  "jobvite.com",
+  "breezy.hr",
+  "icims.com",
+]
+
+# Organisations you applied to, and their recruiters. Personal — keep the real
+# list on the server, not in git.
+org_domains = []
+
+# Subject phrases that mark hiring mail from a sender not listed above.
+subject_phrases = [
+  "your application",
+  "application received",
+  "application update",
+  "application outcome",
+  "application status",
+  "thanks for applying",
+  "thank you for applying",
+  "thank you for your application",
+  "interview",
+  "next steps",
+  "candidate",
+  "screening",
+  "work trial",
+  "test task",
+  "offer",
+]
+
+# Newsletters and notification senders that never alert, even with a hiring
+# phrase in the subject. Only universal job boards ship here; add your own
+# sector newsletters on the server. A full address (e.g. "team@board.org")
+# excludes one sender only, so the rest of that domain still alerts.
+exclude_domains = [
+  "linkedin.com",
+  "indeed.com",
+  "github.com",
+  "glassdoor.com",
+  "welcometothejungle.com",
+]
