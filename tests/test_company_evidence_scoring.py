@@ -104,7 +104,7 @@ def test_payload_built_from_evidence_no_warning(sc):
     assert "Nova Harbor is a climate-data nonprofit" in payloads[0]["user_msg"]
     assert "companies have NO" not in stderr  # the degradation warning must be absent
     assert "strategy.md" not in stderr
-    assert "## STRATEGY CONTEXT" not in payloads[0]["system_prompt"]
+    assert "{strategy_context}" not in payloads[0]["system_prompt"]
     import prompts
 
     profile = prompts._load_user_profile()

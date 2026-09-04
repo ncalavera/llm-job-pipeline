@@ -325,7 +325,7 @@ def _build_user_msg(
 # evidence cap), which this module does; caching is intentionally not wired.
 def _get_system_prompt() -> str:
     """Use the profile-rendered prompt, unescaping its JSON example braces."""
-    return COMPANY_SCORING_PROMPT.format()
+    return COMPANY_SCORING_PROMPT.format(strategy_context="")
 
 
 # ---------------------------------------------------------------------------

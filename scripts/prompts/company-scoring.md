@@ -14,6 +14,10 @@ IMPORTANT: Write text fields in {{OUTPUT_LANGUAGE}}. This is for the candidate's
 
 {{EXCLUDE_PATTERNS}}
 
+## STRATEGY CONTEXT
+
+{strategy_context}
+
 ## TASK
 
 Return (1) structured company info (`about`) and (2) a WANT assessment (`mission_fit`).
