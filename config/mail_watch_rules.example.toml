@@ -54,15 +54,13 @@ subject_phrases = [
 ]
 
 # Newsletters and notification senders that never alert, even with a hiring
-# phrase in the subject. A full address excludes one sender only, so the rest
-# of that domain (e.g. 80,000 Hours advising) still alerts.
+# phrase in the subject. Only universal job boards ship here; add your own
+# sector newsletters on the server. A full address (e.g. "team@board.org")
+# excludes one sender only, so the rest of that domain still alerts.
 exclude_domains = [
   "linkedin.com",
   "indeed.com",
   "github.com",
-  "team@80000hours.org",
-  "devex.com",
-  "probablygood.org",
   "glassdoor.com",
   "welcometothejungle.com",
 ]

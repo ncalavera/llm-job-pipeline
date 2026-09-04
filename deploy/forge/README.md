@@ -70,10 +70,10 @@ Install (after the nightly run is in place):
 
 1. `uv pip install --python .venv/bin/python google-api-python-client google-auth`
    (the venv has no pip of its own).
-2. The Gmail token comes from `google-vibe-api` on the laptop: copy the whole
-   `~/Projects/tools/google-vibe-api` checkout (with `.secrets/`, mode 700,
-   files 600) to the same path on the server. The unit reads
-   `.secrets/token.json` through `LoadCredential=`.
+2. The Gmail token comes from `google-vibe-api` on the laptop: copy only
+   `~/Projects/tools/google-vibe-api/.secrets/token.json` to the same path on
+   the server (directory 700, file 600). Nothing else from that checkout is
+   needed; the unit reads the file through `LoadCredential=`.
 3. `cp config/mail_watch_rules.example.toml /home/$USER/jobsearch/mail_watch_rules.toml`
    (mode 600), then edit it: your own addresses in `own_addresses`, the
    organisations you applied to in `org_domains`. One line per entry; no code

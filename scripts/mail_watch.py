@@ -45,6 +45,7 @@ SNIPPET_CHARS = 300
 BATCH_SIZE = 20  # ponytail: Gmail 429s on bigger/faster batches; tune here
 BATCH_RETRIES = 3
 BATCH_BACKOFF_S = 2
+HTTP_TIMEOUT_S = 30
 ESCALATE_AFTER = 3
 ESCALATE_EVERY_S = 6 * 3600
 RULE_KEYS = ("own_addresses", "platform_domains", "org_domains", "subject_phrases", "exclude_domains")
@@ -68,10 +69,11 @@ def log(msg: str) -> None:
 
 def load_rules(path) -> dict:
     p = Path(path).expanduser()
-    if not p.exists():
-        raise FileNotFoundError(f"rules file not found: {p}")
-    with open(p, "rb") as fh:
-        data = tomllib.load(fh)
+    try:
+        with open(p, "rb") as fh:
+            data = tomllib.load(fh)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"rules file not found: {p}") from None
     missing = [k for k in RULE_KEYS if k not in data]
     if missing:
         raise KeyError(f"rules file {p} missing keys: {', '.join(missing)}")
@@ -106,13 +108,19 @@ def classify(from_header: str, subject: str, rules: dict) -> str | None:
 
 
 def gmail_service(token_path):
+    """Build the Gmail client from the token file. Side effect: registers the
+    token's secret values with mask(), so every later log line redacts them."""
     from google.oauth2.credentials import Credentials
+    from google_auth_httplib2 import AuthorizedHttp
     from googleapiclient.discovery import build
+    from httplib2 import Http
 
     info = json.loads(Path(token_path).expanduser().read_text())
     _extra_secrets.extend(v for k in ("token", "refresh_token", "client_secret") if (v := info.get(k)) and len(v) >= 6)
     creds = Credentials.from_authorized_user_info(info)
-    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+    # Explicit socket timeout: a hung Gmail call must fail inside the run, not
+    # sit until systemd's TimeoutStartSec kills it without a counted failure.
+    return build("gmail", "v1", http=AuthorizedHttp(creds, http=Http(timeout=HTTP_TIMEOUT_S)), cache_discovery=False)
 
 
 def fetch_new(service, seen: dict, query: str = QUERY, replay: bool = False) -> list[dict]:
@@ -197,7 +205,7 @@ def telegram_send(text: str) -> None:
     token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat:
         raise RuntimeError("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing")
-    tg_call(token, "sendMessage", {"chat_id": chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True})
+    tg_call(token, "sendMessage", {"chat_id": chat, "text": mask(text), "parse_mode": "HTML", "disable_web_page_preview": True})
 
 
 # --- run ---------------------------------------------------------------------
@@ -205,24 +213,27 @@ def telegram_send(text: str) -> None:
 
 def _load_state(state_path) -> dict | None:
     """None when the file is absent (seed mode); raises on a corrupt file."""
-    p = Path(state_path).expanduser()
-    if not p.exists():
+    try:
+        return json.loads(Path(state_path).expanduser().read_text())
+    except FileNotFoundError:
         return None
-    return json.loads(p.read_text())
 
 
-def run_once(rules: dict, state_path, service, send, dry_run: bool = False, since_days: int | None = None, now=None, query: str = QUERY) -> dict:
+def replay(rules: dict, service, since_days: int) -> int:
+    """Diagnostic: print every message of the last N days with its reason.
+    Reads no state, sends nothing. Returns the number listed."""
+    metas = fetch_new(service, {}, query=f"newer_than:{since_days}d -in:spam -in:trash", replay=True)
+    for m in metas:
+        reason = classify(m["from"], m["subject"], rules) or "no match"
+        print(f"{reason:24} | {m['from'][:50]:50} | {m['subject'][:70]}")
+    return len(metas)
+
+
+def run_once(rules: dict, state_path, service, send, dry_run: bool = False, now=None, query: str = QUERY) -> dict:
     now = now or time.time()
-    if since_days:
-        metas = fetch_new(service, {}, query=f"newer_than:{since_days}d -in:spam -in:trash", replay=True)
-        for m in metas:
-            reason = classify(m["from"], m["subject"], rules) or "no match"
-            print(f"{reason:24} | {m['from'][:50]:50} | {m['subject'][:70]}")
-        return {"listed": len(metas)}
-
     state = _load_state(state_path)
-    seed = state is None
     state = state or {}
+    seed = "seeded_at" not in state  # a state file holding only failure fields is still unseeded
     seen = {k: v for k, v in state.get("seen", {}).items() if now * 1000 - v < SEEN_TTL_S * 1000}
     metas = fetch_new(service, seen, query=query)
 
@@ -290,7 +301,10 @@ def main(argv=None) -> int:
     try:
         rules = load_rules(os.environ.get("MAIL_WATCH_RULES", DEFAULT_RULES))
         service = gmail_service(os.environ.get("GMAIL_TOKEN_FILE", DEFAULT_TOKEN_FILE))
-        run_once(rules, state_path, service, telegram_send, dry_run=args.dry_run, since_days=args.since_days, query=args.query)
+        if args.since_days:
+            replay(rules, service, args.since_days)
+        else:
+            run_once(rules, state_path, service, telegram_send, dry_run=args.dry_run, query=args.query)
         if not args.dry_run:
             update_state_file(state_path, consecutive_failures=0)
         return 0

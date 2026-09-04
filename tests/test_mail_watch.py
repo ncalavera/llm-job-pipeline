@@ -11,11 +11,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import mail_watch as mw  # noqa: E402
 
 RULES = {
-    "own_addresses": ["ndsolovev@gmail.com"],
+    "own_addresses": ["me@example.com"],
     "platform_domains": ["ashbyhq.com", "pageuppeople.com"],
-    "org_domains": ["outcapped.com"],
+    "org_domains": ["acme.example"],
     "subject_phrases": ["thanks for applying", "next steps", "candidate"],
-    "exclude_domains": ["github.com", "team@80000hours.org"],
+    "exclude_domains": ["github.com", "team@board.example"],
 }
 
 
@@ -23,7 +23,7 @@ RULES = {
 
 
 def test_org_domain_matches_without_phrase():
-    assert mw.classify("Maca <maca@outcapped.com>", "Re: Career Bootcamp Lead", RULES) == "org_domain"
+    assert mw.classify("Ann <recruiter@acme.example>", "Re: Ops Lead role", RULES) == "org_domain"
 
 
 def test_excluded_sender_with_phrase_is_none():
@@ -31,7 +31,7 @@ def test_excluded_sender_with_phrase_is_none():
 
 
 def test_own_address_is_none():
-    assert mw.classify("Nikita <ndsolovev@gmail.com>", "Re: ... Next steps", RULES) is None
+    assert mw.classify("Me <me@example.com>", "Re: ... Next steps", RULES) is None
 
 
 def test_subdomain_matches_platform():
@@ -43,16 +43,16 @@ def test_phrase_only_matches():
 
 
 def test_exclusion_beats_phrase():
-    assert mw.classify("team@80000hours.org", "88 new roles for candidates", RULES) is None
+    assert mw.classify("team@board.example", "88 new roles for candidates", RULES) is None
 
 
 def test_excluded_address_only_excludes_that_sender():
-    assert mw.classify("team@80000hours.org", "Here are your next steps", RULES) is None
-    assert mw.classify("advising@80000hours.org", "Here are your next steps", RULES) == "subject:next steps"
+    assert mw.classify("team@board.example", "Here are your next steps", RULES) is None
+    assert mw.classify("advising@board.example", "Here are your next steps", RULES) == "subject:next steps"
 
 
 def test_display_name_spoof_is_none():
-    assert mw.classify('"CEA Recruiting outcapped.com" <spam@evil.example>', "hello", RULES) is None
+    assert mw.classify('"Acme Recruiting acme.example" <spam@evil.example>', "hello", RULES) is None
 
 
 def test_similar_domain_does_not_match():
@@ -154,8 +154,8 @@ def msg(i, frm, subject, **kw):
     return {"id": i, "from": frm, "subject": subject, **kw}
 
 
-MATCH = msg("m1", "Maca <maca@outcapped.com>", "Re: Career Bootcamp Lead | CEA - Next steps", snippet="Hi Nikita, <b>test</b> & more")
-NOISE = msg("n1", "team@80000hours.org", "88 new roles")
+MATCH = msg("m1", "Ann <recruiter@acme.example>", "Re: Ops Lead | Acme - Next steps", snippet="Hi there, <b>test</b> & more")
+NOISE = msg("n1", "team@board.example", "88 new roles")
 PLAIN = msg("p1", "friend@example.org", "lunch?")
 
 
@@ -182,7 +182,7 @@ def test_match_sends_once_with_content(state):
     mw.run_once(RULES, state, FakeService([MATCH]), sends.append)
     assert len(sends) == 1
     text = sends[0]
-    assert "maca@outcapped.com" in text and "Next steps" in text
+    assert "recruiter@acme.example" in text and "Next steps" in text
     assert "https://mail.google.com/mail/u/0/#inbox/t-m1" in text
     assert "&lt;b&gt;test&lt;/b&gt; &amp; more" in text  # snippet escaped
     assert "m1" in json.loads(state.read_text())["seen"]
@@ -251,8 +251,8 @@ def test_corrupt_state_fails_and_sends_nothing(state):
 def test_replay_lists_pages_and_ignores_seen(state, capsys):
     seeded(state, ["m1", "n1"])
     svc = FakeService([MATCH, NOISE, PLAIN], page_size=2)
-    r = mw.run_once(RULES, state, svc, lambda t: None, dry_run=True, since_days=90)
-    assert r["listed"] == 3
+    assert mw.replay(RULES, svc, 90) == 3
+    assert state.read_text()  # untouched
     assert svc.queries[0] == "newer_than:90d -in:spam -in:trash"
     out = capsys.readouterr().out
     assert "org_domain" in out and "no match" in out
@@ -351,4 +351,50 @@ def test_batch_retries_429_then_succeeds(monkeypatch):
     monkeypatch.setattr(mw.time, "sleep", lambda s: None)
     metas = mw.fetch_new(Flaky([MATCH, PLAIN]), {})
     assert calls["n"] == 2 and {m["id"] for m in metas} == {"m1", "p1"}
-    assert next(m for m in metas if m["id"] == "m1")["subject"].startswith("Re: Career")
+    assert next(m for m in metas if m["id"] == "m1")["subject"].startswith("Re: Ops Lead")
+
+
+def test_failed_first_run_still_seeds_next_success(state):
+    """A failure before any seed leaves a state file with only a counter; the
+    next successful run must still seed, not alert on old mail."""
+    mw.record_failure(state, "boom", lambda t: None, now=1000)
+    sends = []
+    r = mw.run_once(RULES, state, FakeService([MATCH]), sends.append)
+    assert r["seed"] and sends == []
+
+
+def test_batch_non_retryable_error_raises(monkeypatch):
+    class Err(Exception):
+        status_code = 404
+
+    class Broken(FakeService):
+        def new_batch_http_request(self, callback):
+            class B(_Batch):
+                def execute(self):
+                    for rid, req in self.items:
+                        self.cb(rid, None, Err("404"))
+
+            return B(callback)
+
+    monkeypatch.setattr(mw.time, "sleep", lambda s: None)
+    with pytest.raises(Err):
+        mw.fetch_new(Broken([MATCH]), {})
+
+
+def test_escalation_send_failure_does_not_raise(state):
+    def boom(text):
+        raise RuntimeError("telegram down")
+
+    for i in range(3):
+        mw.record_failure(state, "e", boom, now=1000 + i)
+    st = mw.read_state_file(state)
+    assert st["consecutive_failures"] == 3 and "last_escalation_at" not in st
+
+
+def test_error_text_decodes_bytes_content():
+    class E(Exception):
+        content = b'{"error":"invalid_grant"}' + b"x" * 1000
+
+    out = mw._error_text(E("<HttpError 401>"))
+    assert out.startswith("E: <HttpError 401>") and '{"error":"invalid_grant"}' in out and "b'" not in out
+    assert len(out) < 700
