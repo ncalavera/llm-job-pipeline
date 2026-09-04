@@ -48,7 +48,13 @@ BATCH_BACKOFF_S = 2
 HTTP_TIMEOUT_S = 30
 ESCALATE_AFTER = 3
 ESCALATE_EVERY_S = 6 * 3600
-RULE_KEYS = ("own_addresses", "platform_domains", "org_domains", "subject_phrases", "exclude_domains")
+RULE_KEYS = (
+    "own_addresses",
+    "platform_domains",
+    "org_domains",
+    "subject_phrases",
+    "exclude_domains",
+)
 
 _extra_secrets: list[str] = []
 
@@ -116,11 +122,18 @@ def gmail_service(token_path):
     from httplib2 import Http
 
     info = json.loads(Path(token_path).expanduser().read_text())
-    _extra_secrets.extend(v for k in ("token", "refresh_token", "client_secret") if (v := info.get(k)) and len(v) >= 6)
+    _extra_secrets.extend(
+        v for k in ("token", "refresh_token", "client_secret") if (v := info.get(k)) and len(v) >= 6
+    )
     creds = Credentials.from_authorized_user_info(info)
     # Explicit socket timeout: a hung Gmail call must fail inside the run, not
     # sit until systemd's TimeoutStartSec kills it without a counted failure.
-    return build("gmail", "v1", http=AuthorizedHttp(creds, http=Http(timeout=HTTP_TIMEOUT_S)), cache_discovery=False)
+    return build(
+        "gmail",
+        "v1",
+        http=AuthorizedHttp(creds, http=Http(timeout=HTTP_TIMEOUT_S)),
+        cache_discovery=False,
+    )
 
 
 def fetch_new(service, seen: dict, query: str = QUERY, replay: bool = False) -> list[dict]:
@@ -129,7 +142,12 @@ def fetch_new(service, seen: dict, query: str = QUERY, replay: bool = False) -> 
     small batches (BATCH_SIZE) with backoff on 429."""
     ids, token = [], None
     while True:
-        resp = service.users().messages().list(userId="me", q=query, maxResults=100, pageToken=token).execute()
+        resp = (
+            service.users()
+            .messages()
+            .list(userId="me", q=query, maxResults=100, pageToken=token)
+            .execute()
+        )
         ids += [m["id"] for m in resp.get("messages", [])]
         token = resp.get("nextPageToken")
         if not token:
@@ -142,7 +160,9 @@ def fetch_new(service, seen: dict, query: str = QUERY, replay: bool = False) -> 
         results = _get_batch(service, chunk)
         for i in chunk:
             m = results.get(i) or {}
-            headers = {h["name"].lower(): h["value"] for h in m.get("payload", {}).get("headers", [])}
+            headers = {
+                h["name"].lower(): h["value"] for h in m.get("payload", {}).get("headers", [])
+            }
             out.append(
                 {
                     "id": i,
@@ -173,13 +193,17 @@ def _get_batch(service, ids: list[str]) -> dict:
         batch = service.new_batch_http_request(callback=_cb)
         for i in pending:
             batch.add(
-                service.users().messages().get(userId="me", id=i, format="metadata", metadataHeaders=["From", "Subject"]),
+                service.users()
+                .messages()
+                .get(userId="me", id=i, format="metadata", metadataHeaders=["From", "Subject"]),
                 request_id=i,
             )
         batch.execute()
         if not errors:
             return results
-        retryable = [i for i, e in errors.items() if getattr(e, "status_code", None) in (429, 500, 503)]
+        retryable = [
+            i for i, e in errors.items() if getattr(e, "status_code", None) in (429, 500, 503)
+        ]
         if len(retryable) < len(errors) or attempt == BATCH_RETRIES:
             raise next(iter(errors.values()))
         pending = retryable
@@ -205,7 +229,16 @@ def telegram_send(text: str) -> None:
     token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat:
         raise RuntimeError("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing")
-    tg_call(token, "sendMessage", {"chat_id": chat, "text": mask(text), "parse_mode": "HTML", "disable_web_page_preview": True})
+    tg_call(
+        token,
+        "sendMessage",
+        {
+            "chat_id": chat,
+            "text": mask(text),
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        },
+    )
 
 
 # --- run ---------------------------------------------------------------------
@@ -222,14 +255,18 @@ def _load_state(state_path) -> dict | None:
 def replay(rules: dict, service, since_days: int) -> int:
     """Diagnostic: print every message of the last N days with its reason.
     Reads no state, sends nothing. Returns the number listed."""
-    metas = fetch_new(service, {}, query=f"newer_than:{since_days}d -in:spam -in:trash", replay=True)
+    metas = fetch_new(
+        service, {}, query=f"newer_than:{since_days}d -in:spam -in:trash", replay=True
+    )
     for m in metas:
         reason = classify(m["from"], m["subject"], rules) or "no match"
         print(f"{reason:24} | {m['from'][:50]:50} | {m['subject'][:70]}")
     return len(metas)
 
 
-def run_once(rules: dict, state_path, service, send, dry_run: bool = False, now=None, query: str = QUERY) -> dict:
+def run_once(
+    rules: dict, state_path, service, send, dry_run: bool = False, now=None, query: str = QUERY
+) -> dict:
     now = now or time.time()
     state = _load_state(state_path)
     state = state or {}
@@ -252,7 +289,9 @@ def run_once(rules: dict, state_path, service, send, dry_run: bool = False, now=
             if sent >= MAX_SENDS_PER_RUN:
                 continue  # stays unseen; goes out next run
             if dry_run:
-                print(f"would send: id={m['id']} reason={reason} | {m['from'][:50]} | {m['subject'][:70]}")
+                print(
+                    f"would send: id={m['id']} reason={reason} | {m['from'][:50]} | {m['subject'][:70]}"
+                )
             else:
                 send(build_message(m, reason))
                 seen[m["id"]] = m["internalDate"]
@@ -276,7 +315,9 @@ def record_failure(state_path, err: str, send, now=None) -> None:
     fields = {"consecutive_failures": n, "last_error": mask(err)[:500]}
     if n >= ESCALATE_AFTER and (not last or now - last >= ESCALATE_EVERY_S):
         try:
-            send(f"⚠️ mail watcher is failing ({n} runs in a row)\n<code>{html.escape(mask(err)[:800])}</code>")
+            send(
+                f"⚠️ mail watcher is failing ({n} runs in a row)\n<code>{html.escape(mask(err)[:800])}</code>"
+            )
             fields["last_escalation_at"] = now
         except Exception as e:  # Telegram itself is down: the journal carries it
             log(f"escalation send failed: {e.__class__.__name__}: {e}")
@@ -290,7 +331,9 @@ def _error_text(e: BaseException) -> str:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--since-days", type=int, help="replay the last N days (dry-run only)")
     ap.add_argument("--query", default=QUERY, help=f"Gmail query for one poll (default: {QUERY})")
@@ -304,7 +347,9 @@ def main(argv=None) -> int:
         if args.since_days:
             replay(rules, service, args.since_days)
         else:
-            run_once(rules, state_path, service, telegram_send, dry_run=args.dry_run, query=args.query)
+            run_once(
+                rules, state_path, service, telegram_send, dry_run=args.dry_run, query=args.query
+            )
         if not args.dry_run:
             update_state_file(state_path, consecutive_failures=0)
         return 0

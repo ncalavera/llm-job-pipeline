@@ -27,7 +27,12 @@ def test_org_domain_matches_without_phrase():
 
 
 def test_excluded_sender_with_phrase_is_none():
-    assert mw.classify("GitHub <noreply@github.com>", "A third-party OAuth application has been added", RULES) is None
+    assert (
+        mw.classify(
+            "GitHub <noreply@github.com>", "A third-party OAuth application has been added", RULES
+        )
+        is None
+    )
 
 
 def test_own_address_is_none():
@@ -35,11 +40,17 @@ def test_own_address_is_none():
 
 
 def test_subdomain_matches_platform():
-    assert mw.classify("HRTeam-671@mail.pageuppeople.com", "Application outcome", RULES) == "platform_domain"
+    assert (
+        mw.classify("HRTeam-671@mail.pageuppeople.com", "Application outcome", RULES)
+        == "platform_domain"
+    )
 
 
 def test_phrase_only_matches():
-    assert mw.classify("hr@unknown-startup.io", "Thanks for applying to Unknown", RULES) == "subject:thanks for applying"
+    assert (
+        mw.classify("hr@unknown-startup.io", "Thanks for applying to Unknown", RULES)
+        == "subject:thanks for applying"
+    )
 
 
 def test_exclusion_beats_phrase():
@@ -48,7 +59,10 @@ def test_exclusion_beats_phrase():
 
 def test_excluded_address_only_excludes_that_sender():
     assert mw.classify("team@board.example", "Here are your next steps", RULES) is None
-    assert mw.classify("advising@board.example", "Here are your next steps", RULES) == "subject:next steps"
+    assert (
+        mw.classify("advising@board.example", "Here are your next steps", RULES)
+        == "subject:next steps"
+    )
 
 
 def test_display_name_spoof_is_none():
@@ -77,13 +91,15 @@ def test_load_rules_missing_file_names_path(tmp_path):
 
 def test_load_rules_missing_key_names_key(tmp_path):
     p = tmp_path / "r.toml"
-    p.write_text('own_addresses=[]\nplatform_domains=[]\norg_domains=[]\nsubject_phrases=[]\n')
+    p.write_text("own_addresses=[]\nplatform_domains=[]\norg_domains=[]\nsubject_phrases=[]\n")
     with pytest.raises(KeyError, match="exclude_domains"):
         mw.load_rules(p)
 
 
 def test_example_rules_file_loads():
-    rules = mw.load_rules(Path(__file__).resolve().parent.parent / "config" / "mail_watch_rules.example.toml")
+    rules = mw.load_rules(
+        Path(__file__).resolve().parent.parent / "config" / "mail_watch_rules.example.toml"
+    )
     assert "greenhouse.io" in rules["platform_domains"]
     assert rules["org_domains"] == []
 
@@ -122,7 +138,12 @@ class FakeService:
                 "threadId": m.get("threadId", "t-" + id),
                 "internalDate": str(m.get("internalDate", 1_700_000_000_000)),
                 "snippet": m.get("snippet", ""),
-                "payload": {"headers": [{"name": "From", "value": m["from"]}, {"name": "Subject", "value": m["subject"]}]},
+                "payload": {
+                    "headers": [
+                        {"name": "From", "value": m["from"]},
+                        {"name": "Subject", "value": m["subject"]},
+                    ]
+                },
             }
         )
 
@@ -154,7 +175,12 @@ def msg(i, frm, subject, **kw):
     return {"id": i, "from": frm, "subject": subject, **kw}
 
 
-MATCH = msg("m1", "Ann <recruiter@acme.example>", "Re: Ops Lead | Acme - Next steps", snippet="Hi there, <b>test</b> & more")
+MATCH = msg(
+    "m1",
+    "Ann <recruiter@acme.example>",
+    "Re: Ops Lead | Acme - Next steps",
+    snippet="Hi there, <b>test</b> & more",
+)
 NOISE = msg("n1", "team@board.example", "88 new roles")
 PLAIN = msg("p1", "friend@example.org", "lunch?")
 
@@ -165,7 +191,9 @@ def state(tmp_path):
 
 
 def seeded(state, ids=()):
-    state.write_text(json.dumps({"seen": {i: int(time.time() * 1000) for i in ids}, "seeded_at": 1}))
+    state.write_text(
+        json.dumps({"seen": {i: int(time.time() * 1000) for i in ids}, "seeded_at": 1})
+    )
     return state
 
 
@@ -226,7 +254,11 @@ def test_two_matches_two_sends(state):
 
 def test_prune_old_seen(state):
     now = 1_800_000_000
-    state.write_text(json.dumps({"seen": {"old": (now - 8 * 86400) * 1000, "new": (now - 86400) * 1000}, "seeded_at": 1}))
+    state.write_text(
+        json.dumps(
+            {"seen": {"old": (now - 8 * 86400) * 1000, "new": (now - 86400) * 1000}, "seeded_at": 1}
+        )
+    )
     mw.run_once(RULES, state, FakeService([]), lambda t: None, now=now)
     assert set(json.loads(state.read_text())["seen"]) == {"new"}
 
@@ -234,7 +266,10 @@ def test_prune_old_seen(state):
 def test_send_cap_leaves_rest_unseen(state):
     seeded(state)
     sends = []
-    many = [msg(f"a{i}", "no-reply@ashbyhq.com", "hi", internalDate=1_700_000_000_000 + i) for i in range(25)]
+    many = [
+        msg(f"a{i}", "no-reply@ashbyhq.com", "hi", internalDate=1_700_000_000_000 + i)
+        for i in range(25)
+    ]
     r = mw.run_once(RULES, state, FakeService(many), sends.append)
     assert len(sends) == 20 and r["matched"] == 25
     assert len(json.loads(state.read_text())["seen"]) == 20
@@ -396,5 +431,9 @@ def test_error_text_decodes_bytes_content():
         content = b'{"error":"invalid_grant"}' + b"x" * 1000
 
     out = mw._error_text(E("<HttpError 401>"))
-    assert out.startswith("E: <HttpError 401>") and '{"error":"invalid_grant"}' in out and "b'" not in out
+    assert (
+        out.startswith("E: <HttpError 401>")
+        and '{"error":"invalid_grant"}' in out
+        and "b'" not in out
+    )
     assert len(out) < 700
