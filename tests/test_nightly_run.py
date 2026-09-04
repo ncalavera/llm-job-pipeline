@@ -1041,7 +1041,9 @@ def test_dry_run_prints_the_dispatch_table_with_masked_commands(nr, capsys):
         assert action in out
     assert "--dangerously-skip-permissions" in out
     assert "--disallowed-tools WebFetch,WebSearch" in out
-    assert "--setting-sources project,local" in out  # user settings (shared with the Mac) never load
+    assert (
+        "--setting-sources project,local" in out
+    )  # user settings (shared with the Mac) never load
     # The orchestrator model is the configured setting, never a hardcoded name.
     assert f"--model {scoring_settings.scoring_model()}" in out
     # One session line per phase, phase as the prompt's third argument.
