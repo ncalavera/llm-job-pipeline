@@ -159,11 +159,14 @@ def test_cmd_save_accepts_flat_documented_shape(sqlite_dal, monkeypatch):
     db = sqlite_dal
     vid = _seed_one_vacancy(db)
 
-    # Stub out the dashboard regeneration (writes files / needs report assets).
+    # Saving a chunk persists scores without rebuilding the full dashboard.
+    from unittest.mock import Mock
+
+    regenerate = Mock()
     monkeypatch.setitem(
         sys.modules,
         "report",
-        types.SimpleNamespace(generate_dashboard=lambda *a, **k: None),
+        types.SimpleNamespace(generate_dashboard=regenerate),
     )
 
     # The documented FLAT payload — no payload_kind, no nested score_data.
@@ -191,6 +194,7 @@ def test_cmd_save_accepts_flat_documented_shape(sqlite_dal, monkeypatch):
     assert saved["llm_score"] == 78
     assert saved["llm_summary"].strip().startswith("A")
     assert saved["llm_hard_requirements"] == ["5y community leadership"]
+    regenerate.assert_not_called()
 
 
 def test_cmd_save_still_accepts_strict_nested_shape(sqlite_dal, monkeypatch):

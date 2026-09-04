@@ -2223,3 +2223,42 @@ def test_the_warning_names_the_capability_not_the_variable(rd, monkeypatch):
     for w in state["warnings"]:
         assert "_API_KEY" not in w["message"], w["message"]
         assert "Add the" in w["message"] and "on the server." in w["message"]
+
+
+def test_parked_verdict_gate_rechecks_unseen_rows_before_publishing(rd, monkeypatch):
+    opts = rd.Opts()
+    state = rd._new_state(opts)
+    state["cursor"] = rd.STAGE_ORDER.index("verdicts")
+    remaining = [5]
+    published = []
+    monkeypatch.setattr(rd, "_scored_unseen", lambda: remaining[0])
+    monkeypatch.setitem(rd.HANDLERS, "digest", lambda *a: ("skip", "attended"))
+    monkeypatch.setitem(
+        rd.HANDLERS, "publish", lambda *a: (published.append(True) or "advance", "published")
+    )
+    assert rd.drive(state, opts) == rd.EXIT_GATE
+    for n in (5, 3):
+        remaining[0] = n
+        state = rd._load_state()
+        assert rd.drive(state, opts) == rd.EXIT_GATE
+        assert rd._stage(state, "verdicts")["gate"]["count"] == n
+        assert not published
+    remaining[0] = 0
+    assert rd.drive(rd._load_state(), opts) == rd.EXIT_DONE
+    assert published == [True]
+
+
+def test_verdict_count_excludes_unscored_sentinels_and_keeps_zero(rd, monkeypatch):
+    import sqlite3
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE vacancy (status TEXT, llm_score REAL)")
+    conn.executemany(
+        "INSERT INTO vacancy VALUES (?, ?)",
+        [("unseen", None), ("unseen", -1), ("unseen", 0), ("unseen", 75), ("liked", 80)],
+    )
+    monkeypatch.setattr(rd, "_scalar", lambda sql: conn.execute(sql).fetchone()[0])
+    assert rd._scored_unseen() == 2
+    conn.execute("UPDATE vacancy SET status = 'skipped' WHERE llm_score >= 0")
+    assert rd._h_verdicts({}, {"emitted": True}, rd.Opts())[0] == "advance"
+    conn.close()

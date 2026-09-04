@@ -142,7 +142,7 @@ def _resolve_uid(prefix: str, vacancies: dict) -> str | None:
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
-        print(f"Prefix '{prefix}' is ambiguous — {len(matches)} matches.")
+        print(f"Prefix '{prefix}' is ambiguous — at least {len(matches)} matches.")
     return None
 
 
@@ -254,6 +254,8 @@ def cmd_show(args):
         light=False,
         include_candidate_companies=True,
         include_inactive_companies=True,
+        id_prefix=args.id,
+        limit=2,
     )
     uid = _resolve_uid(args.id, vacancies)
     if not uid:
@@ -308,6 +310,8 @@ def cmd_mark(args):
         light=True,
         include_candidate_companies=True,
         include_inactive_companies=True,
+        id_prefix=args.id,
+        limit=2,
     )
     uid = _resolve_uid(args.id, vacancies)
     if not uid:
@@ -324,6 +328,8 @@ def cmd_open(args):
         light=False,
         include_candidate_companies=True,
         include_inactive_companies=True,
+        id_prefix=args.id,
+        limit=2,
     )
     uid = _resolve_uid(args.id, vacancies)
     if not uid:

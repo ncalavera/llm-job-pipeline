@@ -143,3 +143,31 @@ def test_parser_exposes_mark_subcommand(vac):
 def test_valid_statuses_contract(vac):
     """The CLI's accepted statuses cover the apply workflow vocabulary."""
     assert {"unseen", "liked", "passed", "to_apply", "applied"} <= vac.mod.VALID_STATUSES
+
+
+@pytest.mark.parametrize("command", ["show", "mark", "open"])
+def test_single_vacancy_commands_filter_before_loading_descriptions(vac, monkeypatch, command):
+    vid = _seed(vac.dal)
+    _seed(vac.dal, "Programme Manager")
+    original = vac.mod.load_vacancies
+    loaded = []
+
+    def load(**kwargs):
+        rows = original(**kwargs)
+        loaded.extend(rows)
+        return rows
+
+    monkeypatch.setattr(vac.mod, "load_vacancies", load)
+    monkeypatch.setattr(vac.mod.subprocess, "run", lambda *a, **kw: None)
+    getattr(vac.mod, f"cmd_{command}")(types.SimpleNamespace(id=vid[:8], full=True, status="liked"))
+    assert loaded == [vid], "single-vacancy commands must not load unrelated rows"
+
+
+def test_id_prefix_is_literal_and_ambiguous_prefix_never_marks(vac):
+    vid = _seed(vac.dal)
+    assert list(vac.dal.load_vacancies(id_prefix=vid[:8])) == [vid]
+    assert vac.dal.load_vacancies(id_prefix="%") == {}
+    _seed(vac.dal, "Programme Manager")
+    with pytest.raises(SystemExit):
+        vac.mod.cmd_mark(types.SimpleNamespace(id="", status="liked"))
+    assert set(vac.dal.get_vacancy_statuses().values()) == {"unseen"}

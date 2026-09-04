@@ -17,8 +17,8 @@ personal), not in ``config/defaults.toml``:
     escalated to the strong model. Re-calibrated on a 102-role three-tier
     backtest (2026-07-06): the lowest role the strong model rated >=60 screened
     at 56 on the cheap model, so the default (40) keeps every strong-model true
-    positive with a ~16-point margin; raising it saves more but narrows the
-    margin (50 leaves only 6 points on the measured data).
+    positive in that sample. The ~16-point gap is smaller than observed
+    per-item variance (25–30 points), so it does not guarantee recall.
   - ``max_per_run`` — a spike-day SAFETY NET, not the primary lever. A quiet day
     scores 20-30 vacancies; a burst day (hundreds of new roles at once) must not
     silently burn the plan. When a run has no explicit ``--limit``, scoring stops
@@ -87,8 +87,9 @@ def _default_max_per_run() -> int:
 # LOWEST role the strong model rated >=60 screened at 56 on the cheap model — so
 # the old 50 floor left only a 6-point margin, not the 20 the original golden-set
 # calibration suggested. A 40 floor keeps zero strong-model true positives below
-# the cut with a ~16-point margin, at the cost of escalating ~66% of a realistic
-# day (vs ~50% at the old floor).
+# the cut in that sample, at the cost of escalating ~66% of a realistic
+# day (vs ~50% at the old floor). The ~16-point gap is smaller than observed
+# per-item variance (25–30 points); this is not a guarantee of recall.
 DEFAULT_SCREEN_MODEL = "haiku"
 DEFAULT_ESCALATION_THRESHOLD = 40
 

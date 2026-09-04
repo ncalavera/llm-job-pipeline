@@ -57,7 +57,7 @@ the scorer. The loop:
    stdout: a list of vacancies, each item carrying its own `system_prompt`,
    `user_msg` and `member_ids`.
 2. For EACH vacancy independently (never batch several into one request —
-   batching causes systematic over-scoring), evaluate `system_prompt` +
+   batching is untested here), evaluate `system_prompt` +
    `user_msg` with the model tier from your profile's `## VOLUME` settings and
    produce the JSON object the prompt requests (score, reasoning, tags,
    hard_requirements, short_summary).

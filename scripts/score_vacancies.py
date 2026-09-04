@@ -257,7 +257,10 @@ def _load_and_dedup(
     for key, members in role_groups.items():
         rep = max(
             members,
-            key=lambda m: len(m.get("full_description") or m.get("snippet") or ""),
+            key=lambda m: (
+                bool((m.get("full_description") or "").strip()),
+                len(m.get("full_description") or m.get("snippet") or ""),
+            ),
         )
         # Compute desc up-front so blacklist can check description-level kills.
         desc = rep.get("full_description") or rep.get("snippet") or ""
@@ -288,9 +291,22 @@ def _load_and_dedup(
         # the save-time quality gate (quality.clean_description): it also drops a
         # junk row already persisted before that gate could catch it (a 5.7K-char
         # UNICEF listing page full of jQuery once scored 55 on the title alone).
-        if not desc.strip() or quality.is_boilerplate_junk(desc):
+        snippet_only = (
+            not (rep.get("full_description") or "").strip()
+            and not quality._JD_STRUCTURE_RE.search(desc)
+            and not any(
+                loc.get("url") for member in members for loc in (member.get("locations") or [])
+            )
+        )
+        if not desc.strip() or quality.is_boilerplate_junk(desc) or snippet_only:
             stats["blind"] += 1
-            reason = "no description" if not desc.strip() else "boilerplate/no real content"
+            reason = (
+                "no description"
+                if not desc.strip()
+                else "snippet_only"
+                if snippet_only
+                else "boilerplate/no real content"
+            )
             print(
                 f"  [BLIND SKIP] {rep['org']:25s} {rep['title'][:50]} ({reason})",
                 file=sys.stderr,
@@ -704,11 +720,8 @@ def cmd_save(args):
     else:
         archive_vacancies()  # prints the "paused" notice; no-op without --archive
 
-    # Regenerate dashboard so ticker and stats reflect new scores
-    from report import generate_dashboard
-
-    generate_dashboard()
-    print("Dashboard regenerated.")
+    # The driver publishes once after scoring and verdicts, not per chunk.
+    print("Scores saved. Refresh with --resume or scripts/fetch_vacancies.py --report-only.")
 
 
 # ---------------------------------------------------------------------------
