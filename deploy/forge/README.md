@@ -60,14 +60,16 @@ in `.env`.
 
 ## Mail watcher (recruiter mail → Telegram)
 
-`scripts/mail_watch.py` polls Gmail every 10 minutes and sends one Telegram
+`scripts/mail_watch.py` polls Gmail every 10 minutes (all incoming mail of
+the last two days, not only the inbox — filters archive most mail on arrival) and sends one Telegram
 message per incoming hiring email (recruiter, applications team, ATS
 platform). Rules, not a model, decide: sender domains and subject phrases in
 a small TOML file. Design: `docs/plans/2026-09-04-1340-feat-recruiter-mail-telegram-alert-plan.md`.
 
 Install (after the nightly run is in place):
 
-1. `.venv/bin/pip install google-api-python-client google-auth`.
+1. `uv pip install --python .venv/bin/python google-api-python-client google-auth`
+   (the venv has no pip of its own).
 2. The Gmail token comes from `google-vibe-api` on the laptop: copy the whole
    `~/Projects/tools/google-vibe-api` checkout (with `.secrets/`, mode 700,
    files 600) to the same path on the server. The unit reads

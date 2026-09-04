@@ -258,6 +258,15 @@ def test_replay_lists_pages_and_ignores_seen(state, capsys):
     assert "org_domain" in out and "no match" in out
 
 
+def test_default_query_is_all_incoming_mail(state):
+    seeded(state)
+    svc = FakeService([])
+    mw.run_once(RULES, state, svc, lambda t: None)
+    assert svc.queries == ["newer_than:2d -in:sent -in:spam -in:trash -in:draft"]
+    mw.run_once(RULES, state, svc, lambda t: None, query="newer_than:7d")
+    assert svc.queries[-1] == "newer_than:7d"
+
+
 def test_dry_run_prints_and_writes_nothing(state, capsys):
     seeded(state)
     before = state.read_text()

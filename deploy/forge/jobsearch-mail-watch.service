@@ -22,6 +22,8 @@ ExecStart=/home/jobsearch/Projects/personal/llm-job-pipeline/.venv/bin/python sc
 TimeoutStartSec=5min
 ProtectSystem=strict
 ReadWritePaths=/home/jobsearch/jobsearch
+# The state file holds message ids only, but keep it private like the rest of ~/jobsearch.
+UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes
 # Journal lines carry counts, message ids and match reasons only — never

@@ -1,7 +1,7 @@
 """Gmail watcher: one Telegram alert per incoming hiring email.
 
 Runs every 10 minutes on the server (deploy/forge/jobsearch-mail-watch.timer).
-Each run lists recent inbox mail, drops ids already in the state file, matches
+Each run lists mail of the last two days, drops ids already in the state file, matches
 the rest against a small TOML rules file (sender domains + subject phrases),
 sends one Telegram message per match, and records every id as seen. Rules,
 not a model, decide; polling, not Gmail push — both settled in the plan.
@@ -14,6 +14,8 @@ Usage:
   mail_watch.py --dry-run       print what would be sent, write nothing
   mail_watch.py --dry-run --since-days 90
                                 replay all mail of the last N days with reasons
+  mail_watch.py --query "newer_than:7d -in:sent"
+                                poll with another Gmail query (live tests)
 """
 
 from __future__ import annotations
@@ -35,7 +37,8 @@ from telegram_digest import read_state_file, tg_call, update_state_file  # noqa:
 DEFAULT_TOKEN_FILE = "~/Projects/tools/google-vibe-api/.secrets/token.json"
 DEFAULT_RULES = "~/jobsearch/mail_watch_rules.toml"
 DEFAULT_STATE = "~/jobsearch/mail_watch_state.json"
-QUERY = "in:inbox newer_than:2d"
+# All incoming mail, not in:inbox — Gmail filters archive most mail on arrival.
+QUERY = "newer_than:2d -in:sent -in:spam -in:trash -in:draft"
 SEEN_TTL_S = 7 * 86400
 MAX_SENDS_PER_RUN = 20
 SNIPPET_CHARS = 300
@@ -208,7 +211,7 @@ def _load_state(state_path) -> dict | None:
     return json.loads(p.read_text())
 
 
-def run_once(rules: dict, state_path, service, send, dry_run: bool = False, since_days: int | None = None, now=None) -> dict:
+def run_once(rules: dict, state_path, service, send, dry_run: bool = False, since_days: int | None = None, now=None, query: str = QUERY) -> dict:
     now = now or time.time()
     if since_days:
         metas = fetch_new(service, {}, query=f"newer_than:{since_days}d -in:spam -in:trash", replay=True)
@@ -221,7 +224,7 @@ def run_once(rules: dict, state_path, service, send, dry_run: bool = False, sinc
     seed = state is None
     state = state or {}
     seen = {k: v for k, v in state.get("seen", {}).items() if now * 1000 - v < SEEN_TTL_S * 1000}
-    metas = fetch_new(service, seen)
+    metas = fetch_new(service, seen, query=query)
 
     if seed:
         seen.update({m["id"]: m["internalDate"] for m in metas})
@@ -279,6 +282,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--since-days", type=int, help="replay the last N days (dry-run only)")
+    ap.add_argument("--query", default=QUERY, help=f"Gmail query for one poll (default: {QUERY})")
     args = ap.parse_args(argv)
     if args.since_days and not args.dry_run:
         ap.error("--since-days requires --dry-run")
@@ -286,7 +290,7 @@ def main(argv=None) -> int:
     try:
         rules = load_rules(os.environ.get("MAIL_WATCH_RULES", DEFAULT_RULES))
         service = gmail_service(os.environ.get("GMAIL_TOKEN_FILE", DEFAULT_TOKEN_FILE))
-        run_once(rules, state_path, service, telegram_send, dry_run=args.dry_run, since_days=args.since_days)
+        run_once(rules, state_path, service, telegram_send, dry_run=args.dry_run, since_days=args.since_days, query=args.query)
         if not args.dry_run:
             update_state_file(state_path, consecutive_failures=0)
         return 0
