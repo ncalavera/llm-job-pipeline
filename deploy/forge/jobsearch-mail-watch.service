@@ -1,0 +1,30 @@
+[Unit]
+Description=Gmail watcher: one Telegram alert per incoming recruiter email
+Documentation=file:///home/jobsearch/Projects/personal/llm-job-pipeline/deploy/forge/README.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=jobsearch
+WorkingDirectory=/home/jobsearch/Projects/personal/llm-job-pipeline
+# KEY=value lines: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (shared with the nightly run). Mode 600.
+EnvironmentFile=/home/jobsearch/jobsearch/.env
+Environment=MAIL_WATCH_STATE_FILE=/home/jobsearch/jobsearch/mail_watch_state.json
+Environment=MAIL_WATCH_RULES=/home/jobsearch/jobsearch/mail_watch_rules.toml
+# The Gmail token is a credential FILE, never an Environment= value. The service
+# reads a private read-only copy taken at start, so a CLI refresh that rewrites
+# token.json mid-run is never half-read.
+LoadCredential=gmail-token:/home/jobsearch/Projects/tools/google-vibe-api/.secrets/token.json
+Environment=GMAIL_TOKEN_FILE=%d/gmail-token
+ExecStart=/home/jobsearch/Projects/personal/llm-job-pipeline/.venv/bin/python scripts/mail_watch.py
+# One poll is a few API calls; anything longer is stuck.
+TimeoutStartSec=5min
+ProtectSystem=strict
+ReadWritePaths=/home/jobsearch/jobsearch
+NoNewPrivileges=yes
+PrivateTmp=yes
+# Journal lines carry counts, message ids and match reasons only — never
+# sender, subject or snippet. Mail content goes to Telegram alone.
+StandardOutput=journal
+StandardError=journal
