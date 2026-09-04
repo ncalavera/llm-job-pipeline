@@ -221,6 +221,10 @@ def _claude_cmd(action: str, night_dir, cfg: dict, phase: str) -> list[str]:
         "--model",
         _orchestrator_model(),
         "--dangerously-skip-permissions",
+        # Repo settings only: the user settings.json is shared with the Mac through
+        # the wiki, and a Mac-only hook there blocked every Bash call on 2026-09-03.
+        "--setting-sources",
+        "project,local",
         # No web tools in the night session: posting text is stranger-written,
         # and a fetch/search tool is the only way a hijacked session could send
         # anything out. Writes are fenced by .claude/hooks/night-write-fence.py.
