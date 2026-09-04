@@ -189,7 +189,7 @@ At the end of the session, ask three calibration questions (one at a time):
 If the user provides feedback:
 - Proposed scoring prompt changes → show exact diff, ask for confirmation before editing.
 - New blacklist patterns → show them, ask for confirmation before editing `scripts/config.py`.
-- Strategy updates → propose updating `strategy.md`, ask for confirmation.
+- Candidate-preference updates → propose updating `config/user_profile.md`, ask for confirmation.
 
 ### Auto-archive note
 

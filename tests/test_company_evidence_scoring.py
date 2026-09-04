@@ -103,6 +103,13 @@ def test_payload_built_from_evidence_no_warning(sc):
     assert len(payloads) == 1
     assert "Nova Harbor is a climate-data nonprofit" in payloads[0]["user_msg"]
     assert "companies have NO" not in stderr  # the degradation warning must be absent
+    assert "strategy.md" not in stderr
+    assert "{strategy_context}" not in payloads[0]["system_prompt"]
+    import prompts
+
+    profile = prompts._load_user_profile()
+    for key in ("USER_PROFILE", "TARGET_ROLES", "EXCLUDE_PATTERNS"):
+        assert profile[key] in payloads[0]["system_prompt"]
 
 
 def test_missing_evidence_triggers_loud_warning(sc, monkeypatch):
