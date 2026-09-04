@@ -536,7 +536,7 @@ def _waiting_to_score() -> dict:
 
 
 def _scored_unseen() -> int:
-    return _scalar("SELECT count(*) FROM vacancy WHERE status = 'unseen' AND llm_score IS NOT NULL")
+    return _scalar("SELECT count(*) FROM vacancy WHERE status = 'unseen' AND llm_score >= 0")
 
 
 def _unscored_company_ids(target_ids: list[str]) -> set[str]:
@@ -1175,8 +1175,8 @@ def _vacancy_gate_text(
     return (
         head + "\n\n"
         "Each entry in the payload file carries its own system_prompt + user_msg\n"
-        "and the real DB member_ids. CRITICAL: 1 vacancy = 1 subagent (batching\n"
-        "over-scores by +20-50). Run at most 5 subagents at a time (rolling waves).\n\n"
+        "and the real DB member_ids. CRITICAL: 1 vacancy = 1 subagent. Batching\n"
+        "is untested here. Run at most 5 subagents at a time (rolling waves).\n\n"
         "Save results incrementally (each --save commits, so an interrupt keeps\n"
         f'finished work) — pass --scored-by "{model}" so the score\'s provenance is\n'
         "recorded (a kept-cheap score must never look identical to a confirmed one):\n"
@@ -2022,8 +2022,6 @@ def _h_vacancy_scoring(state, entry, opts):
 
 
 def _h_verdicts(state, entry, opts):
-    if entry.get("emitted"):
-        return "advance", "verdicts captured (or skipped) — continuing to publish"
     n = _scored_unseen()
     if n == 0:
         return "advance", "no freshly scored matches to review"
@@ -2081,9 +2079,8 @@ def _h_digest(state, entry, opts):
 
 def _h_publish(state, entry, opts):
     # Warn-only: the gate detects a dirty run but never withholds the refresh.
-    # Skipping here never protected anything — score --save already regenerated
-    # the live snapshot before this stage runs — so the site stays fresh and the
-    # dirt is reported loudly on the stage note instead.
+    # Scores are committed incrementally; this stage refreshes the snapshot
+    # once after verdicts and reports any dirt loudly on its stage note.
     _allowed, reasons = check_publish_gate(state)
     if opts.no_publish:
         if reasons:

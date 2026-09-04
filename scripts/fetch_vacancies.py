@@ -226,14 +226,23 @@ def _load_enrichment_tiers() -> dict[str, str]:
 
     Returns dict: canonical_name → tier_letter (or missing key if no data).
     """
-    from database_supabase import load_all_enrichment
+    from database_supabase import close_conn, get_company_fitness_map
 
-    enrichment = load_all_enrichment()
+    try:
+        enrichment = get_company_fitness_map()
+    except Exception as exc:
+        # This optional read precedes fetch writes. Discard an aborted/dropped
+        # connection so the next source can reconnect and use the default TTL.
+        close_conn()
+        print(
+            f"  WARNING: enrichment tiers unavailable ({type(exc).__name__}); using default TTLs.",
+            file=sys.stderr,
+        )
+        return {}
 
     tiers: dict[str, str] = {}
     for name, data in enrichment.items():
-        mission = data.get("mission_fit", {})
-        alignment = mission.get("alignment_score")
+        alignment = data.get("alignment_score")
         if alignment is None:
             continue
         composite = alignment

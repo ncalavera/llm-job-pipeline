@@ -27,7 +27,7 @@ Scoring reuses the pipeline's own contract — no LLM call happens in Python, th
 orchestrating agent is the scorer (see AGENTS.md):
   1. ``emit``    prints one scoring payload per vacancy to stdout.
   2. the agent scores EACH payload independently (one request per vacancy —
-     batching is banned repo-wide, it over-scores) and collects [{id, score}].
+     batching is untested here and remains disallowed) and collects [{id, score}].
   3. ``measure`` reads those scores from stdin and prints the agreement number,
      precision/recall at the score threshold, and the disagreement list. It also
      persists a small summary (agreement_pct, set size/version, threshold,

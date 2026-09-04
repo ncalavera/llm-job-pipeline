@@ -36,7 +36,7 @@ the interactive habits of `/jobs-new`.
    and has none of the project dependencies.
 3. **Spawn only the `night-scorer` agent type.** One payload file = one
    `night-scorer` subagent. No other agent type, ever. At most **5 subagents
-   at a time** (rolling waves). 1 item = 1 subagent — batching over-scores.
+   at a time** (rolling waves). 1 item = 1 subagent — batching is untested here.
 4. **File in, file out.** Each subagent reads its own payload
    `<night_dir>/score_in/NNN.json` and writes its one result to
    `<night_dir>/score_out/NNN.json` (same NNN). Subagents have Read and Write

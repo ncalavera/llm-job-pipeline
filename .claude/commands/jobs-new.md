@@ -141,7 +141,7 @@ then the strong model re-scores only the finalists. The driver walks you through
 two gates in order, each printing per-vacancy payloads to
 `vacancies/score_vacancies_payload.json` (already capped for the day). For **each**
 vacancy in either gate, run **one** subagent with the payload's `system_prompt` +
-`user_msg`. **Critical: 1 vacancy = 1 subagent** — batching over-scores by +20–50.
+`user_msg`. **Critical: 1 vacancy = 1 subagent** — batching is untested here.
 At most **5 subagents at a time**. Save incrementally with the flat fields
 (`member_ids`, `score`, `reasoning`, `tags`, `hard_requirements`, `short_summary`):
 
@@ -168,6 +168,8 @@ gate, `--resume`; the driver re-checks and re-prompts only for anything still
 unscored, then reports "screened N, escalated M, kept-cheap K". Pure-fit scoring:
 the prompt judges role fit only — geography/visa were handled in the filter stage,
 so a great role in the wrong place still scores high.
+
+Saved chunks commit scores without rebuilding the dashboard; the publish stage refreshes it once after verdicts.
 
 ### Verdicts (quick daily triage)
 List the freshly scored, still-unseen vacancies (highest score first) and, for

@@ -64,7 +64,7 @@ python3 scripts/golden_set.py stats
 ## 2. Score the set (the scoring contract)
 
 Same rule as `/jobs-new`: **one vacancy = one request** — never batch (batching
-over-scores by +20-50). Emit the payloads, score EACH independently with your
+is untested here). Emit the payloads, score EACH independently with your
 profile's scoring model, and collect `[{"id": ..., "score": ...}]`:
 
 ```bash

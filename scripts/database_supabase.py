@@ -1305,6 +1305,7 @@ def _scoring_excluded_supported() -> bool:
 def load_vacancies(
     *,
     company_name=None,
+    id_prefix=None,
     status=None,
     status_exclude=None,
     unscored_only=False,
@@ -1329,6 +1330,7 @@ def load_vacancies(
     include_scoring_excluded=True → with unscored_only, ALSO return rows the
     filter pass excluded from scoring (scoring_excluded_reason set) — used by
     the filter pass itself so it can re-decide and clear stale reasons.
+    id_prefix → match a literal vacancy ID prefix in SQL before loading rows.
     light=True → drop full_description from the SELECT (saves ~8 KB/row).
     """
     conn = get_conn()
@@ -1347,6 +1349,10 @@ def load_vacancies(
             params.append(score_floor_any_company)
         else:
             conditions.append(company_cond)
+
+    if id_prefix is not None:
+        conditions.append("substr(CAST(v.id AS TEXT), 1, %s) = %s")
+        params.extend([len(id_prefix), id_prefix])
 
     if company_name:
         canonical = resolve_canonical_name(company_name)

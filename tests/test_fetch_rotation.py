@@ -110,3 +110,44 @@ def test_engaged_statuses_exclude_negative_decisions():
     }
     assert "passed" not in fv.ENGAGED_STATUSES
     assert "skipped" not in fv.ENGAGED_STATUSES
+
+
+def test_enrichment_tiers_use_lightweight_scores_and_recover_connection(monkeypatch):
+    import database_supabase as db
+    from unittest.mock import MagicMock
+
+    conn = MagicMock()
+    cur = conn.cursor.return_value
+    scores = [
+        ("Top", 65, "active"),
+        ("Good", 50, "candidate"),
+        ("Middle", 35, "active"),
+        ("Low", 0, "active"),
+        ("Unscored", None, "active"),
+    ]
+
+    def rows():
+        if "mission_fit" in cur.execute.call_args.args[0]:
+            return [
+                {
+                    "canonical_name": name,
+                    "alignment_score": score,
+                    "mission_fit": {"alignment_score": score},
+                    "about": {},
+                    "enriched_at": None,
+                }
+                for name, score, _status in scores
+            ]
+        return scores
+
+    cur.fetchall.side_effect = rows
+    monkeypatch.setattr(db, "get_conn", lambda: conn)
+    assert fv._load_enrichment_tiers() == {"Top": "S", "Good": "A", "Middle": "B", "Low": "C"}
+    sql = cur.execute.call_args.args[0]
+    assert "about" not in sql and "mission_fit" not in sql
+
+    close = MagicMock()
+    monkeypatch.setattr(db, "close_conn", close)
+    cur.execute.side_effect = OSError("connection lost")
+    assert fv._load_enrichment_tiers() == {}
+    close.assert_called_once()

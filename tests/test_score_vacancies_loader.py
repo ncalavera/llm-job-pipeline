@@ -159,3 +159,49 @@ def test_unattended_is_a_cli_flag_on_the_scorer(env):
     assert args.unattended is True
     args = sv.build_parser().parse_args(["--local"])
     assert args.unattended is False
+
+
+@pytest.mark.parametrize(
+    "snippet,url,expected",
+    [
+        ("A portfolio of the projects delivered with our partners. " * 4, "", False),
+        (
+            "A portfolio of the projects delivered with our partners. " * 4,
+            "https://example.test/job",
+            True,
+        ),
+        ("Responsibilities: coordinate partners. How to apply: send your CV.", "", True),
+    ],
+)
+def test_snippet_only_without_a_link_or_job_structure_is_not_scored(env, snippet, url, expected):
+    db, sv = env
+    vid = _seed(db, "Example Studio", "Programme Manager", desc="")
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE vacancy SET snippet = ?, locations = ? WHERE id = ?",
+        (snippet, json.dumps([{"url": url}]), vid),
+    )
+    conn.commit()
+    cur.close()
+    roles = _role_keys(sv)
+    assert (("Example Studio", "Programme Manager") in roles) is expected
+
+
+def test_real_description_beats_longer_linkless_snippet_in_duplicate_role(env):
+    db, sv = env
+    body = "Responsibilities: coordinate the community programme."
+    real = _seed(db, "Example Studio", "Programme Manager", desc=body)
+    snippet = _seed(db, "Example Studio", "Other title before merge", desc="")
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE vacancy SET title = ?, snippet = ?, locations = '[]' WHERE id = ?",
+        ("Programme Manager", "A portfolio of projects delivered with partners. " * 8, snippet),
+    )
+    cur.execute("UPDATE vacancy SET locations = '[]' WHERE id = ?", (real,))
+    conn.commit()
+    cur.close()
+    roles, _, _ = sv._load_and_dedup(include_candidates=False)
+    assert len(roles) == 1
+    assert roles[0][1]["full_description"] == body

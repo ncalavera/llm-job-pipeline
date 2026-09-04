@@ -88,7 +88,7 @@ passes:
    plan, Opus on a bigger one). Everything below the floor keeps its cheap score.
 
 Both passes keep the invariant: **one vacancy = one request**. Batching several
-into one prompt systematically over-scores by +20–50 (STRATEGY guardrail 6), so
+into one prompt is untested here (STRATEGY guardrail 6), so
 it is never done. Each score records its provenance in `vacancy.scored_by`, so
 the dashboard can distinguish a cheap screen score from a confirmed one.
 
@@ -98,15 +98,17 @@ The gate is a warn-only detector, not a blocker: `publish` always refreshes the
 dashboard, and a dirty run — a crashed stage, a blocking warning, or a single
 org losing a large share of its live roles to gone-from-source archival (the
 signature of a truncated fetch) — is flagged loudly on the publish note and the
-report card instead of being withheld. (Skipping never protected anything: the
-scoring stage's `--save` already regenerates the live snapshot before `publish`
-runs, so the site is kept fresh and the operator is warned.) In full mode
+report card instead of being withheld. Scoring `--save` commits each chunk
+without rebuilding the snapshot; `publish` refreshes it once after verdicts. In full mode
 publish refreshes the hosted dashboard snapshot (a browser refresh, no
 redeploy); in simple mode it rewrites the local `public/data.js`. Both go
 through the same driver — no mode branching. (`vercel --prod` is only ever for
 dashboard *code* changes.)
 
 ## Health & observability
+
+Scores are durable after each save; snapshot freshness changes at the publish
+stage. An attended resume rechecks outstanding verdicts before advancing.
 
 Two read-only surfaces answer "does the pipeline work as intended?" without
 reading logs:
