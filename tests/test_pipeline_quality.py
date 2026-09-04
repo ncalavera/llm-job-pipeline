@@ -950,3 +950,39 @@ class TestEnrichMainWritesGatedText:
         assert len(cur.executed) == 1
         _, params = cur.executed[0]
         assert params[0] == FULL_JD.strip()
+
+
+@pytest.mark.parametrize("job_content", ["", '<div id="job-content"></div>'])
+def test_pageup_listing_never_becomes_a_job_description(monkeypatch, job_content):
+    from types import SimpleNamespace
+    import enrich_blind_vacancies as ebv
+
+    html = "<html><nav>" + SCRIPT_CHROME_PAGE + "</nav>" + job_content + "</html>"
+    monkeypatch.setattr(
+        ebv.requests,
+        "get",
+        lambda *a, **kw: SimpleNamespace(
+            status_code=200, url="https://jobs.unicef.org/en-us/listing/", text=html
+        ),
+    )
+    assert ebv._fetch_description(None, "https://jobs.unicef.org/en-us/job/123") == ""
+
+
+@pytest.mark.parametrize("quote", ['"', "'"])
+def test_pageup_extracts_only_real_job_container(monkeypatch, quote):
+    from types import SimpleNamespace
+    import enrich_blind_vacancies as ebv
+
+    body = "Responsibilities: support our community programme and coordinate partners. " * 5
+    html = (
+        f"<html><div id={quote}job-content{quote}><p>{body}</p></div>"
+        '<nav>Browse all jobs</nav><script>jQuery("navigation");</script></html>'
+    )
+    monkeypatch.setattr(
+        ebv.requests,
+        "get",
+        lambda *a, **kw: SimpleNamespace(
+            status_code=200, url="https://jobs.unicef.org/en-us/job/123", text=html
+        ),
+    )
+    assert ebv._fetch_description(None, "https://jobs.unicef.org/en-us/job/123") == body.strip()

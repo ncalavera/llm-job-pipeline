@@ -24,9 +24,10 @@ from urllib.parse import urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import requests
+from bs4 import BeautifulSoup
 
 from config import get_firecrawl_client
-from fetchers import _fetch_unops_job_detail, _html_to_markdown, _html_to_text, _LOCAL_UA
+from fetchers import _fetch_unops_job_detail, _LOCAL_UA
 from quality import (
     _COOKIE_BANNER_RE,
     COOKIE_MIN_REMAINDER,
@@ -48,7 +49,7 @@ from filter_vacancies import _all_locations_excluded
 def _fetch_pageup_detail(url: str) -> str:
     """PageUp (jobs.unicef.org) detail pages are server-rendered — plain GET.
 
-    Gone jobs redirect to the listing with ?jobnotfound=true; return "" so the
+    Gone jobs may redirect to a listing without any jobnotfound marker; return "" so the
     listing page never gets saved as a description. The JD lives in
     <div id="job-content"> — extracting it directly skips the cookie banner
     and nav chrome entirely (html2text on the full page chokes on PageUp's
@@ -61,16 +62,11 @@ def _fetch_pageup_detail(url: str) -> str:
         html = resp.text
     except Exception:
         return ""
-    if len(html) < 2000:
+    content = BeautifulSoup(html, "html.parser").find(id="job-content")
+    if content is None:
         return ""
-    start = html.find('id="job-content"')
-    if start != -1:
-        end = html.find("<script", start)
-        block = html[start:end] if end != -1 else html[start:]
-        text = _html_to_text("<div " + block + "</div>")
-        if len(text) > 200:
-            return text
-    return _extract_text_from_markdown(_html_to_markdown(html))
+    text = content.get_text(" ", strip=True)
+    return text if len(text) > 200 else ""
 
 
 # host → zero-cost fetcher (Firecrawl is never tried for these hosts: the

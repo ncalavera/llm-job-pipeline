@@ -8,7 +8,6 @@ Usage:
 
 import argparse
 import json
-import re
 import subprocess
 import sys
 import time
@@ -93,17 +92,6 @@ _PLACEHOLDER_VALUES = {
     "none",
 }
 
-# Strategy sections to extract from strategy.md
-_STRATEGY_SECTIONS = [
-    "## Core Identity",
-    "## Red Flags",
-    "## Dream Job Letter",
-    "## Three-Tier Classification",
-    "## Key Strengths",
-    "## MPA/MPP Application Strategy",
-]
-
-
 # ---------------------------------------------------------------------------
 # Inline utilities
 # ---------------------------------------------------------------------------
@@ -143,7 +131,6 @@ def _get_main_repo_root() -> Path:
 
 _MAIN_ROOT = _get_main_repo_root()
 SCRAPE_CACHE_PATH = _MAIN_ROOT / ".firecrawl" / "scrape_cache.json"
-STRATEGY_PATH = _MAIN_ROOT / "strategy.md"
 
 # Source priority for company_evidence assembly (lowest index = shown first)
 # Allowlist AND display order. Perplexity is deliberately excluded — it returns
@@ -161,23 +148,6 @@ _EVIDENCE_SOURCE_ORDER = ["website", "careers", "manual_url", "exa", "exa_office
 from settings import scoring as _scoring_settings  # noqa: E402
 
 _EVIDENCE_TOTAL_CAP = _scoring_settings()["company_evidence_char_cap"]
-
-
-def _load_strategy_context() -> str:
-    """Load relevant sections from strategy.md for scoring prompt."""
-    if not STRATEGY_PATH.exists():
-        return ""
-    text = STRATEGY_PATH.read_text(encoding="utf-8")
-    sections = []
-    for header in _STRATEGY_SECTIONS:
-        pattern = re.compile(
-            rf"({re.escape(header)}.*?)(?=\n---|\n## |\Z)",
-            re.DOTALL,
-        )
-        m = pattern.search(text)
-        if m:
-            sections.append(m.group(1).strip())
-    return "\n\n".join(sections)
 
 
 def _load_scrape_cache() -> dict[str, tuple[str, str]]:
@@ -288,7 +258,7 @@ def _build_csv_context(company: dict) -> str:
 
 
 def _build_user_msg(
-    company: dict, scrape_cache: dict, strategy_context: str, evidence_map: dict | None = None
+    company: dict, scrape_cache: dict, evidence_map: dict | None = None
 ) -> str | None:
     """Build user message — identical for all backends.
 
@@ -337,7 +307,7 @@ def _build_user_msg(
 
 
 # ---------------------------------------------------------------------------
-# System prompt (with strategy context injected)
+# System prompt (candidate context already injected by prompts.py)
 # ---------------------------------------------------------------------------
 
 
@@ -354,11 +324,8 @@ def _build_user_msg(
 # tokens anyway. So the real cost lever is fewer input tokens (slimmer prompt +
 # evidence cap), which this module does; caching is intentionally not wired.
 def _get_system_prompt() -> str:
-    """Build system prompt with strategy context."""
-    strategy = _load_strategy_context()
-    if not strategy:
-        print("WARNING: strategy.md not found or empty", file=sys.stderr)
-    return COMPANY_SCORING_PROMPT.format(strategy_context=strategy)
+    """Use the profile-rendered prompt, unescaping its JSON example braces."""
+    return COMPANY_SCORING_PROMPT.format()
 
 
 # ---------------------------------------------------------------------------
@@ -558,12 +525,11 @@ def cmd_local(args):
         json.dump([], _real_stdout, ensure_ascii=False)
         return
 
-    strategy_context = _load_strategy_context()
     output = []
     skipped = 0
     no_evidence: list[str] = []  # scored, but only via the legacy scrape-cache fallback
     for c in companies:
-        user_msg = _build_user_msg(c, scrape_cache, strategy_context, evidence_map)
+        user_msg = _build_user_msg(c, scrape_cache, evidence_map)
         if user_msg is None:
             skipped += 1
             continue
@@ -826,7 +792,6 @@ def cmd_api(args):
     scrape_cache = _load_scrape_cache()
     evidence_map = _load_company_evidence_map([c["id"] for c in companies])
     system_prompt = _get_system_prompt()
-    strategy_context = _load_strategy_context()
 
     if not companies:
         print("No companies to score.")
@@ -843,7 +808,7 @@ def cmd_api(args):
 
     for i, c in enumerate(companies, 1):
         name = c["canonical_name"]
-        user_msg = _build_user_msg(c, scrape_cache, strategy_context, evidence_map)
+        user_msg = _build_user_msg(c, scrape_cache, evidence_map)
         if user_msg is None:
             print(f"  [{i}/{len(companies)}] {name:40s} SKIP: no evidence or scrape cache")
             continue
