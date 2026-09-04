@@ -88,3 +88,16 @@ test("missing/empty payload → healthy with zero boards", () => {
     "All systems healthy — 0 boards fetching, no failing companies",
   );
 });
+
+test("verdict uses translated count templates", () => {
+  const translate = (key) => ({
+    health_broken_boards: "broken: {n}",
+    health_failing_company: "failed: {n}",
+    health_healthy_board: "healthy: {n}",
+  })[key];
+  assert.equal(healthVerdict({
+    boards: [{ presumed_broken: true }, { presumed_broken: true }],
+    companies: { failing: [{}] },
+  }, translate).text, "broken: 2 · failed: 1");
+  assert.equal(healthVerdict({ boards: [{}] }, translate).text, "healthy: 1");
+});

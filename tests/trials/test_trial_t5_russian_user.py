@@ -13,6 +13,9 @@ product has no missing translation that would silently fall back to English.
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import trial_harness as h
 
 RU_PROFILE = "## OUTPUT_LANGUAGE\n\nRussian\n\n## TARGET_ROLES\n\n- Product Designer, UX Designer\n"
@@ -57,3 +60,20 @@ def test_russian_product_has_no_missing_translation(monkeypatch, tmp_path):
         assert i18n.STRINGS["ru"][key] != i18n.STRINGS["en"][key], (
             f"{key} not translated to Russian"
         )
+
+
+def test_health_and_recovery_controls_have_bundled_translations():
+    """Fallback-only labels must not be invisible to the EN/RU parity check."""
+    import i18n
+
+    public = Path(__file__).resolve().parents[2] / "public"
+    text = (public / "modules/health.js").read_text()
+    keys = set(re.findall(r'"(health_[a-z_]+)"', text))
+    keys.update(
+        re.findall(
+            r'data-i18n="((?:health_|tab_health)[^"]*)"', (public / "index.html").read_text()
+        )
+    )
+    keys.update(("archive_restore", "triage_source_link"))
+    for lang, strings in i18n.STRINGS.items():
+        assert not keys - strings.keys(), f"{lang} missing {sorted(keys - strings.keys())}"
