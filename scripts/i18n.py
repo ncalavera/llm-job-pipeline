@@ -503,6 +503,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "digest_carried_companies": "{n} companies",
         "digest_rolled_over": "📚 the learning review is still waiting for {n} verdicts you have not given yet",
         "digest_pending_verdicts": "📱 {n} scored roles are waiting for your verdict on the dashboard",
+        "digest_screening_prepared": "🗂 {n} roles prepared for screening (facts with quotes, no score); {failed} could not be prepared",
         "digest_quiet": "😴 Quiet night — nothing new.",
     },
     # Russian — verbatim from the maintainer's prior dashboard build.
@@ -950,6 +951,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "digest_carried_companies": "компаний: {n}",
         "digest_rolled_over": "📚 разбор вердиктов всё ещё ждёт {n} ваших решений",
         "digest_pending_verdicts": "📱 {n} оценённых ролей ждут вашего решения на дашборде",
+        "digest_screening_prepared": "🗂 {n} ролей подготовлено к скринингу (факты с цитатами, без оценки); не удалось подготовить: {failed}",
         "digest_quiet": "😴 Тихая ночь — ничего нового.",
     },
 }

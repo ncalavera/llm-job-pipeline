@@ -5,10 +5,11 @@ description: Headless nightly scoring session. Invoked by scripts/nightly_run.py
 # /jobs-night — one scoring gate, unattended
 
 Arguments: `$ARGUMENTS` = `<gate> <night_dir> <phase>` where `<gate>` is one of
-`screen_companies | score_companies | score_vacancies`, `<night_dir>` is
-this night's private directory (`vacancies/nightly/<date>/`), and `<phase>`
-names the pass inside the gate (`screen | escalate` for `score_vacancies`,
-`screen` for `screen_companies`, `score` for `score_companies`).
+`screen_companies | score_companies | score_vacancies | prepare_screening`,
+`<night_dir>` is this night's private directory (`vacancies/nightly/<date>/`),
+and `<phase>` names the pass inside the gate (`screen | escalate` for
+`score_vacancies`, `screen` for `screen_companies`, `score` for
+`score_companies`, `prepare` for `prepare_screening`).
 
 This is the NIGHT variant of the `/jobs-new` gate protocol. The pipeline
 orchestration already ran in `scripts/run_daily.py --unattended`; your only job
@@ -95,6 +96,21 @@ Result file — ONE flat JSON object:
 Pure-fit scoring: judge role fit only — geography/visa were handled by the
 filter stage. Save with the `score_vacancies.py` line from override 5; the
 `--scored-by` model is the same resolved model every subagent used.
+
+### prepare_screening
+
+Screening preparation: extraction with quotes plus a profile
+comparison — NO score. 1 vacancy = 1 subagent. The result is exactly the JSON
+object the payload's `system_prompt` defines (`id`, `posting_facts`,
+`profile_comparison`, `unknowns`), with the payload's `id` copied verbatim:
+
+```json
+{"id": "<from the payload>", "posting_facts": {...}, "profile_comparison": [...], "unknowns": [...]}
+```
+
+Every quote must be a sentence copied character for character from the
+posting; Python rejects a result whose quote is not in the posting and stores
+it as failed with the reason. Python saves with `prepare_screening.py`.
 
 ### score_companies
 

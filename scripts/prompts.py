@@ -259,6 +259,8 @@ CUSTOM_BOOST_FIELD = _profile.get("CUSTOM_BOOST_FIELD", "").strip() or "career_n
 CUSTOM_BOOST_KEYS = tuple(dict.fromkeys([CUSTOM_BOOST_FIELD, "mpa_narrative_boost"]))
 
 VACANCY_SCORING_PROMPT = _render(_load_template("vacancy-scoring.md"), _profile)
+# Screening preparation: extraction + profile comparison, no score.
+VACANCY_SCREENING_PROMPT = _render(_load_template("vacancy-screening.md"), _profile)
 COMPANY_SCORING_PROMPT = _render(_load_template("company-scoring.md"), _profile)
 
 # Vacancy scoring is strictly independent of company scoring (KTD4): the role's

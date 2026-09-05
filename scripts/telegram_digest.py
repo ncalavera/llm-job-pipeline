@@ -636,6 +636,12 @@ def build_tail_lines(run_state):
     p = _int(_run_stage(run_state, "verdicts").get("pending_verdicts"))
     if p:
         lines.append(_t("digest_pending_verdicts", n=p))
+    # Screening preparation: processing counts, kept apart from the
+    # human queue above — a prepared role is ready to screen, not a verdict owed.
+    prep = _run_stage(run_state, "screening_prep")
+    ready, failed = _int(prep.get("prepared")), _int(prep.get("failed"))
+    if ready or failed:
+        lines.append(_t("digest_screening_prepared", n=ready, failed=failed))
     return lines
 
 

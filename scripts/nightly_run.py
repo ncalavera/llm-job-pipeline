@@ -112,6 +112,15 @@ GATES = {
         "firecrawl": False,
         "phases": ("screen", "escalate"),
     },
+    # Screening preparation: extraction + profile comparison per
+    # vacancy, no score. Same file-in/file-out session; the strong model.
+    "prepare_screening": {
+        "payload": "prepare_screening_payload.json",
+        "save_script": "prepare_screening.py",
+        "limit_key": "vacancy_gate_minutes",
+        "firecrawl": False,
+        "phases": ("prepare",),
+    },
 }
 
 # Environment a Claude child is allowed to inherit (KTD3). Everything else —
@@ -270,7 +279,7 @@ def _claude_env(firecrawl: bool, night_dir=None) -> dict:
 def _save_extra(action: str) -> list[str]:
     """Extra save-command flags per gate: the vacancy save records provenance
     with the night's scoring model (R16: never --archive, never a status)."""
-    if action != "score_vacancies":
+    if action not in ("score_vacancies", "prepare_screening"):
         return []
     try:
         from scoring_settings import scoring_model
@@ -278,7 +287,8 @@ def _save_extra(action: str) -> list[str]:
         model = scoring_model()
     except Exception:
         model = "opus"
-    return ["--scored-by", model]
+    flag = "--prepared-by" if action == "prepare_screening" else "--scored-by"
+    return [flag, model]
 
 
 class _Ctx:

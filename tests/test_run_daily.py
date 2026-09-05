@@ -49,6 +49,7 @@ def test_stage_order_is_the_documented_sequence(rd):
         "filter",
         "company_scoring",
         "vacancy_scoring",
+        "screening_prep",
         "verdicts",
         "digest",
         "publish",
@@ -1554,6 +1555,60 @@ def test_unattended_verdicts_advance_and_record_the_count(rd, monkeypatch):
     assert kind == "advance"
     assert entry["pending_verdicts"] == 5
     assert "5" in note
+
+
+def test_screening_prep_is_skipped_on_an_attended_run(rd):
+    state = rd._new_state(rd.Opts())
+    kind, note = rd._h_screening_prep(state, rd._stage(state, "screening_prep"), rd.Opts())
+    assert kind == "skip" and "night" in note
+
+
+def test_unattended_screening_prep_emits_the_prepare_gate(rd, monkeypatch, tmp_path):
+    """the night run hands the cohort to a prepare_screening gate
+    (one subagent per role, no score) and records the target ids."""
+    import json
+    import subprocess
+
+    monkeypatch.setattr(rd, "SCREEN_PREP_PAYLOAD_PATH", tmp_path / "prep.json")
+    payload = [{"id": "a1", "org": "Org", "title": "Role", "system_prompt": "s", "user_msg": "u"}]
+
+    def fake_capture(cmd, opts):
+        assert "prepare_screening.py" in cmd[1] and "--local" in cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
+
+    monkeypatch.setattr(rd, "_run_capture", fake_capture)
+    opts = rd.Opts(unattended=True)
+    state = rd._new_state(opts)
+    entry = rd._stage(state, "screening_prep")
+    kind, info = rd._h_screening_prep(state, entry, opts)
+    assert kind == "gate"
+    assert info["action"] == "prepare_screening" and info["phase"] == "prepare"
+    assert info["count"] == 1 and entry["target_ids"] == ["a1"]
+    assert json.loads((tmp_path / "prep.json").read_text()) == payload
+
+
+def test_unattended_screening_prep_carries_over_when_nothing_progressed(rd, monkeypatch, tmp_path):
+    """Re-entry with no new ready row: advance with the carry-over note,
+    never stall — and the digest counts are recorded on the stage."""
+    monkeypatch.setattr(rd, "SCREEN_PREP_PAYLOAD_PATH", tmp_path / "prep.json")
+    monkeypatch.setattr(
+        rd, "_screening_states", lambda ids: {"a1": "ready", "b2": None, "c3": "failed"}
+    )
+    rd._write_payload(tmp_path / "prep.json", [{"id": "b2"}, {"id": "c3"}])
+    opts = rd.Opts(unattended=True)
+    state = rd._new_state(opts)
+    entry = rd._stage(state, "screening_prep")
+    entry.update({"emitted": True, "target_ids": ["a1", "b2", "c3"]})
+    entry["unattended_progress"] = {"prepare": 3}
+    # Progress since the emission (3 -> 1 outstanding): re-emit the remainder.
+    kind, info = rd._h_screening_prep(state, entry, opts)
+    assert kind == "gate" and info["count"] == 1
+    assert rd._read_payload(tmp_path / "prep.json") == [{"id": "b2"}]
+    assert entry["prepared"] == 1 and entry["failed"] == 1
+    # No progress on the next re-entry: carry over.
+    kind, note = rd._h_screening_prep(state, entry, opts)
+    assert kind == "advance" and "carried" not in note and entry["carried_over"] == 1
+    assert "1 of 3" in note
 
 
 def test_attended_verdicts_still_gate(rd, monkeypatch):

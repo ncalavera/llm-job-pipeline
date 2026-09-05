@@ -174,6 +174,14 @@ _VOLUME_DEFAULTS = {
 }
 
 
+def screening() -> dict:
+    """The [screening] dials: ``pilot_limit`` — roles prepared per
+    night. Non-positive / non-numeric falls back to 50; never raises."""
+    sec = _section("screening")
+    limit = int(_num(sec, "pilot_limit", 50))
+    return {"pilot_limit": limit if limit > 0 else 50}
+
+
 def volume() -> dict:
     """The [volume] dials with neutral fallbacks. Never raises.
 
