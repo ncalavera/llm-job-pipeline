@@ -107,6 +107,11 @@ dashboard *code* changes.)
 
 ## Health & observability
 
+Nightly scoring agents have file-only tools, restricted payload/result paths,
+no shell/MCP tools and no database/provider credentials. Python chooses the
+model, saves completed files every five seconds and sweeps after exit/timeout.
+Malformed results are skipped independently.
+
 Scores are durable after each save; snapshot freshness changes at the publish
 stage. An attended resume rechecks outstanding verdicts before advancing.
 
