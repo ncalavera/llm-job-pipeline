@@ -8,7 +8,9 @@ SQLite DB. No model, no network, invented orgs only.
 import importlib
 import json
 import sys
+import textwrap
 import uuid
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -194,7 +196,11 @@ def env(tmp_path, monkeypatch):
     db.close_conn()
 
 
-def _seed(db, vac_id, desc=POSTING, company_status="candidate"):
+def _days_ago(n):
+    return (date.today() - timedelta(days=n)).isoformat()
+
+
+def _seed(db, vac_id, desc=POSTING, company_status="candidate", first_seen=None, score=None):
     conn = db.get_conn()
     cur = conn.cursor()
     cid = str(uuid.uuid4())
@@ -204,11 +210,39 @@ def _seed(db, vac_id, desc=POSTING, company_status="candidate"):
     )
     cur.execute(
         "INSERT INTO vacancy (id, dedup_hash, company_id, title, full_description, status, "
-        "first_seen, last_seen) VALUES (%s, %s, %s, %s, %s, 'unseen', '2026-01-01', '2026-01-01')",
-        (vac_id, f"h-{vac_id}", cid, "Programme Manager", desc),
+        "first_seen, last_seen, llm_score) VALUES (%s, %s, %s, %s, %s, 'unseen', %s, %s, %s)",
+        (vac_id, f"h-{vac_id}", cid, "Programme Manager", desc, first_seen or _days_ago(0),
+         _days_ago(0), score),
     )
     conn.commit()
     cur.close()
+
+
+def _set_state(db, vac_id, state, fp):
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE vacancy SET screening_state = %s, screening_fingerprint = %s WHERE id = %s",
+        (state, fp, vac_id),
+    )
+    conn.commit()
+    cur.close()
+
+
+def _local_ids(ps, capsys, limit=None, pilot=False):
+    from types import SimpleNamespace
+
+    ps.cmd_local(SimpleNamespace(limit=limit, pilot=pilot))
+    return [p["id"] for p in json.loads(capsys.readouterr().out)]
+
+
+def _override(monkeypatch, tmp_path, body):
+    import settings
+
+    path = tmp_path / "override.toml"
+    path.write_text(textwrap.dedent(body), encoding="utf-8")
+    monkeypatch.setenv("DEFAULTS_TOML_PATH", str(path))
+    settings.clear_cache()
 
 
 def test_save_writes_ready_and_failed_rows_and_never_a_status(env, tmp_path):
@@ -249,19 +283,92 @@ def test_local_pool_excludes_inactive_and_prepared_rows(env, capsys):
     _seed(db, a, company_status="candidate")
     _seed(db, b, company_status="inactive")
     _seed(db, c, company_status="active")
-    conn = db.get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        "UPDATE vacancy SET screening_state = 'ready', screening_fingerprint = %s WHERE id = %s",
-        (ps.fingerprint(POSTING), c),
-    )
-    conn.commit()
-    cur.close()
+    _set_state(db, c, "ready", ps.fingerprint(POSTING))
 
-    class Args:
-        limit = 10
+    from types import SimpleNamespace
 
-    ps.cmd_local(Args)
+    ps.cmd_local(SimpleNamespace(limit=10, pilot=False))
     out = json.loads(capsys.readouterr().out)
     assert [p["id"] for p in out] == [a]
     assert out[0]["payload_kind"] == "screening" and "Fluent Spanish" in out[0]["user_msg"]
+
+
+# ---------------------------------------------------------------------------
+# Cohort window, order and caps (U2)
+# ---------------------------------------------------------------------------
+
+
+def test_pool_is_the_last_14_days_oldest_first(env, capsys):
+    db, ps = env
+    d3, d10, d20 = (str(uuid.uuid4()) for _ in range(3))
+    _seed(db, d3, first_seen=_days_ago(3))
+    _seed(db, d10, first_seen=_days_ago(10))
+    _seed(db, d20, first_seen=_days_ago(20))
+    assert _local_ids(ps, capsys) == [d10, d3]
+
+
+def test_nightly_limit_keeps_the_oldest_within_the_window(env, capsys):
+    db, ps = env
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cid = str(uuid.uuid4())
+    cur.execute(
+        "INSERT INTO company (id, canonical_name, status) VALUES (%s, %s, %s)",
+        (cid, "Org Bulk", "active"),
+    )
+    rows = [(str(uuid.uuid4()), _days_ago(i % 13)) for i in range(450)]
+    for vid, seen in rows:
+        cur.execute(
+            "INSERT INTO vacancy (id, dedup_hash, company_id, title, full_description, status, "
+            "first_seen, last_seen) VALUES (%s, %s, %s, %s, %s, 'unseen', %s, %s)",
+            (vid, f"h-{vid}", cid, "Programme Manager", POSTING, seen, seen),
+        )
+    conn.commit()
+    cur.close()
+    expected = [vid for vid, seen in sorted(rows, key=lambda r: (r[1], r[0]))][:400]
+    assert _local_ids(ps, capsys) == expected
+
+
+def test_ready_unchanged_is_skipped_but_changed_posting_and_failed_return(env, capsys):
+    db, ps = env
+    same, changed, failed = (str(uuid.uuid4()) for _ in range(3))
+    _seed(db, same, first_seen=_days_ago(1))
+    _seed(db, changed, first_seen=_days_ago(2))
+    _seed(db, failed, first_seen=_days_ago(3))
+    _set_state(db, same, "ready", ps.fingerprint(POSTING))
+    _set_state(db, changed, "ready", ps.fingerprint(POSTING + "\nNow with a car allowance."))
+    _set_state(db, failed, "failed", ps.fingerprint(POSTING))
+    assert _local_ids(ps, capsys) == [failed, changed]
+
+
+def test_pilot_keeps_round_robin_and_pilot_limit(env, capsys, monkeypatch, tmp_path):
+    db, ps = env
+    _override(monkeypatch, tmp_path, """
+        [screening]
+        pilot_limit = 2
+        window_days = 14
+        nightly_limit = 400
+    """)
+    low = [str(uuid.uuid4()) for _ in range(3)]
+    for i, vid in enumerate(low):
+        _seed(db, vid, first_seen=_days_ago(10 - i), score=5, company_status="active")
+    high = str(uuid.uuid4())
+    _seed(db, high, first_seen=_days_ago(1), score=40, company_status="active")
+    # Oldest first would take two low-band roles; the pilot touches both strata.
+    assert _local_ids(ps, capsys, pilot=True) == [low[0], high]
+    assert _local_ids(ps, capsys) == low + [high]
+
+
+def test_screening_settings_read_window_and_limit_from_an_override_file(monkeypatch, tmp_path):
+    import settings
+
+    assert settings.screening() == {"pilot_limit": 50, "window_days": 14, "nightly_limit": 400}
+    _override(monkeypatch, tmp_path, """
+        [screening]
+        window_days = 7
+        nightly_limit = 600
+    """)
+    try:
+        assert settings.screening() == {"pilot_limit": 50, "window_days": 7, "nightly_limit": 600}
+    finally:
+        settings.clear_cache()

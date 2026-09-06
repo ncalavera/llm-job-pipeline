@@ -647,12 +647,15 @@ paused_until = ""
 
 # ===========================================================================
 # Screening preparation — the nightly per-vacancy extraction that
-# feeds the evidence-based screening inbox. Runs after vacancy scoring; the
-# pilot cap bounds how many undecided roles one night prepares. Roles are
-# picked round-robin across score band × company status so the pilot cohort
-# stays mixed; unchanged prepared roles are never re-sent.
+# feeds the evidence-based screening inbox. Runs after vacancy scoring. Only
+# undecided roles first seen within window_days are prepared, oldest first,
+# up to nightly_limit per night; unchanged prepared roles are never re-sent.
+# With --pilot the roles are picked round-robin across score band × company
+# status instead, capped at pilot_limit, so a pilot cohort stays mixed.
 # ===========================================================================
 [screening]
+window_days = 14
+nightly_limit = 400
 pilot_limit = 50
 
 # ===========================================================================
