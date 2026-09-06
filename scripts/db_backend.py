@@ -602,6 +602,8 @@ _PIPELINE_ENTRYPOINTS = frozenset(
         "find_company_urls.py",
         "learning.py",
         "migrate.py",
+        # Writes since migration 0027: the nightly screening preparation result.
+        "prepare_screening.py",
         "run_daily.py",
         "score_companies.py",
         "score_vacancies.py",

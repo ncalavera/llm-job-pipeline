@@ -372,3 +372,11 @@ def test_screening_settings_read_window_and_limit_from_an_override_file(monkeypa
         assert settings.screening() == {"pilot_limit": 50, "window_days": 7, "nightly_limit": 600}
     finally:
         settings.clear_cache()
+
+
+def test_prepare_screening_is_a_recognized_prod_writer():
+    """The night save sweep runs prepare_screening.py --save against prod; the
+    prod-write guard must know the script (2026-09-06 live slice: ProdWriteBlocked)."""
+    import db_backend
+
+    assert "prepare_screening.py" in db_backend._PIPELINE_ENTRYPOINTS
