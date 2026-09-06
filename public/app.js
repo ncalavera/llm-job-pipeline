@@ -70,6 +70,7 @@ import {
 import { renderToday, todayAction, openTodayRow } from "./modules/today.js";
 import { initStats, renderStats } from "./modules/stats.js";
 import { initArchive, renderArchive } from "./modules/archive.js";
+import { renderScreen } from "./modules/screen.js";
 import { initReports, renderReports } from "./modules/reports.js";
 import { initContacts, renderContacts } from "./modules/contacts.js";
 import { initBoards, renderBoards, toggleBoard } from "./modules/boards.js";
@@ -355,6 +356,7 @@ on("render", () => {
   if (state.currentMode === "health") renderHealth();
   if (state.currentMode === "reports") renderReports();
   if (state.currentMode === "contacts") renderContacts();
+  if (state.currentMode === "screen") renderScreen();
   if (state.currentProfileSlug) renderProfileForSlug(state.currentProfileSlug);
   if (state.currentVacancyId) renderVacancyDetail(state.currentVacancyId);
 });
@@ -405,6 +407,7 @@ on("sync", () => {
 var LEAF_SECTION_ID = {
   today: "todaySection",
   catalog: "catalogSection",
+  screen: "screenSection",
   companies: "companiesSection",
   pipeline: "pipelineSection",
   stats: "statsSection",
@@ -614,6 +617,9 @@ function applyRouteFromUrl() {
       cp.classList.add("active");
     }
     setNavActiveSection(sectionForMode("company"));
+  } else if (route.mode && LEAF_SECTION_ID[route.mode]) {
+    // ?mode=<leaf> (the digest's "ready to screen" link) — open that leaf.
+    switchMode(route.mode);
   } else {
     // Bare URL — drop any overlay, reveal the current leaf list (no re-render).
     clearCompanyOverlay();
@@ -637,6 +643,14 @@ function switchMode(mode) {
   if (isVacancyView(mode)) state.vacancyView = mode;
   var section = sectionForMode(mode);
 
+  // A ?mode= landing param (the digest's inbox link) names one leaf; once the
+  // user moves to another, drop it so back/forward and reload follow the user.
+  var url = new URL(window.location);
+  if (url.searchParams.get("mode") && url.searchParams.get("mode") !== mode) {
+    url.searchParams.delete("mode");
+    history.replaceState({}, "", url);
+  }
+
   // DOM section per leaf mode (each is a sibling under .container).
   Object.keys(LEAF_SECTION_ID).forEach(function (leaf) {
     var el = document.getElementById(LEAF_SECTION_ID[leaf]);
@@ -653,6 +667,7 @@ function switchMode(mode) {
   // leaf. Every other section (Triage included) is a single leaf with none.
   var subBtns = {
     catalog: "navSubBrowse",
+    screen: "navSubScreen",
     stats: "navSubGeo",
     archive: "navSubArchive",
   };
@@ -667,6 +682,7 @@ function switchMode(mode) {
   if (subNav) subNav.classList.toggle("active", section === "vacancies");
   var vsubBtns = {
     catalog: "vsubBrowse",
+    screen: "vsubScreen",
     stats: "vsubGeo",
     archive: "vsubArchive",
   };
@@ -698,6 +714,8 @@ function switchMode(mode) {
     initStats();
   } else if (mode === "archive") {
     initArchive();
+  } else if (mode === "screen") {
+    renderScreen();
   } else if (mode === "boards") {
     initBoards();
   } else if (mode === "health") {
@@ -1115,6 +1133,8 @@ function initDefault() {
       cp.classList.add("active");
     }
     setNavActiveSection(sectionForMode("company"));
+  } else if (route.mode && LEAF_SECTION_ID[route.mode]) {
+    switchMode(route.mode);
   } else {
     switchMode(state.currentMode);
   }

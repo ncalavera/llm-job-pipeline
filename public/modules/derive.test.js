@@ -823,3 +823,79 @@ test("boardYield: a board with no shipped roles is simply absent (renders no-dat
 test("boardYield: empty group set → empty map, never a crash", () => {
   assert.deepEqual(boardYield([], yieldOpts({})), {});
 });
+
+// --- Screen view (bulk screening inbox): lists and groups --------------------
+
+import { screenLists, screenGroups, SCREEN_GROUP_KEYS } from "./derive.js";
+
+const ready = (id, extra) =>
+  Object.assign({ id, screening_state: "ready", screening: null }, extra);
+
+test("screenLists: ready roles split by status; an unprepared role lands in no list", () => {
+  const roles = [
+    ready("a"),
+    ready("b"),
+    ready("c"),
+    { id: "d", screening_state: null },
+  ];
+  const status = { a: "unseen", b: "liked", c: "passed", d: "unseen" };
+  const lists = screenLists(roles, (g) => status[g.id]);
+  assert.deepEqual([...lists.toScreen], ["a"]);
+  assert.deepEqual([...lists.kept], ["b"]);
+  assert.deepEqual([...lists.putAside], ["c"]);
+});
+
+test("screenLists: a failed role is in no list", () => {
+  const lists = screenLists([{ id: "f", screening_state: "failed" }], () => "unseen");
+  assert.equal(lists.toScreen.size + lists.kept.size + lists.putAside.size, 0);
+});
+
+test("screenGroups: a role with a Spanish requirement and an onsite constraint is in both groups and once in All", () => {
+  const roles = [
+    ready("a", {
+      screening: {
+        posting_facts: {
+          work_mode: "onsite",
+          seniority: "unknown",
+          requirements: [
+            { kind: "language", value: "Spanish C1", strength: "required", quote: "Spanish C1 required." },
+          ],
+        },
+        profile_comparison: [],
+        unknowns: [],
+      },
+    }),
+    ready("b", {
+      screening: {
+        posting_facts: { work_mode: "remote", seniority: "senior", requirements: [] },
+        unknowns: ["eligible countries not stated"],
+      },
+    }),
+  ];
+  const g = screenGroups(roles);
+  assert.deepEqual(SCREEN_GROUP_KEYS, ["language", "onsite", "seniority", "unclear", "all"]);
+  assert.deepEqual([...g.language], ["a"]);
+  assert.deepEqual([...g.onsite], ["a"]);
+  assert.deepEqual([...g.seniority], ["b"]);
+  assert.deepEqual([...g.unclear], ["b"]);
+  assert.deepEqual([...g.all], ["a", "b"]);
+});
+
+test("screenGroups: a location or authorisation requirement also counts as an onsite/location constraint", () => {
+  const roles = [
+    ready("a", {
+      screening: {
+        posting_facts: {
+          requirements: [{ kind: "authorisation", value: "UK right to work", strength: "required", quote: "" }],
+        },
+      },
+    }),
+  ];
+  assert.deepEqual([...screenGroups(roles).onsite], ["a"]);
+});
+
+test("screenGroups: a ready role with no screening facts sits only in All", () => {
+  const g = screenGroups([ready("z")]);
+  assert.equal(g.language.size + g.onsite.size + g.seniority.size + g.unclear.size, 0);
+  assert.deepEqual([...g.all], ["z"]);
+});

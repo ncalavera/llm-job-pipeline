@@ -475,6 +475,24 @@ export function updateStatus(canonId, memberIds, newStatus) {
 }
 
 /**
+ * Write a status into dbData for the given ids WITHOUT emitting
+ * 'statusChanged'. The Screen view's bulk actions use this: they await their
+ * own /api/save per row so a failed row can revert, and the fire-and-forget
+ * save the 'statusChanged' subscriber in api.js would add on top must not
+ * race that. Returns the previous status per id that existed in dbData.
+ */
+export function setStatusLocal(ids, status) {
+  const previous = {};
+  for (const mid of ids) {
+    if (!state.dbData[mid]) continue;
+    previous[mid] = state.dbData[mid].status;
+    state.dbData[mid].status = status;
+    state.dbData[mid]._optimistic = Date.now();
+  }
+  return previous;
+}
+
+/**
  * Merge remote statuses into dbData, respecting optimistic flag.
  * Entries with _optimistic < 5 seconds old are NOT overwritten.
  * Returns count of changed entries.
