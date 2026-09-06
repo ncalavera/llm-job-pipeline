@@ -12,9 +12,11 @@ not excluded by the filter pass, at active or candidate companies — company
 approval is not a prerequisite. Inactive companies stay out of the pilot until
 their veto provenance is reviewed (ticket U3). A role already prepared for the
 same posting + prompt + profile is never re-sent; a changed posting or profile
-invalidates the stored result. The cohort is filled round-robin across
-score band × company status so the pilot stays mixed, capped at
-``[screening] pilot_limit`` (or ``--limit``).
+invalidates the stored result. Only roles first seen within
+``[screening] window_days`` are considered, oldest first, capped at
+``nightly_limit`` (or ``--limit``). With ``--pilot`` the cohort is instead
+filled round-robin across score band × company status so a pilot stays
+mixed, capped at ``pilot_limit``.
 
 Saving (``--save``): every result is validated — known id, allowed enums,
 every quote present in the posting text — before it is written. A result that
@@ -28,7 +30,7 @@ import hashlib
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -175,13 +177,16 @@ def eligible(row: dict) -> bool:
     return True
 
 
-def load_pool() -> list[dict]:
-    """Undecided, filter-kept roles at active or candidate companies, with the
-    columns selection and payload building need. Light on purpose: the
-    description is the only large column."""
+def load_pool(window_days: int) -> list[dict]:
+    """Undecided, filter-kept roles at active or candidate companies, first
+    seen within ``window_days``, oldest first, with the columns selection and
+    payload building need. Light on purpose: the description is the only large
+    column. ``first_seen`` is an ISO date on both backends, so a string cutoff
+    compares correctly without dialect branching."""
     from database_supabase import get_conn
     from db_backend import RealDictCursor
 
+    cutoff = (date.today() - timedelta(days=window_days)).isoformat()
     cur = get_conn().cursor(cursor_factory=RealDictCursor)
     cur.execute(
         """
@@ -193,7 +198,10 @@ def load_pool() -> list[dict]:
           AND v.scoring_excluded_reason IS NULL
           AND c.status IN ('active', 'candidate')
           AND v.full_description IS NOT NULL
-        """
+          AND v.first_seen >= %s
+        ORDER BY v.first_seen, v.id
+        """,
+        (cutoff,),
     )
     rows = [dict(r) for r in cur.fetchall()]
     cur.close()
@@ -229,9 +237,14 @@ def build_payload(row: dict) -> dict:
 
 
 def cmd_local(args) -> None:
-    limit = args.limit or settings.screening()["pilot_limit"]
-    pool = [r for r in load_pool() if eligible(r)]
-    cohort = pick_cohort(pool, limit)
+    cfg = settings.screening()
+    pool = [r for r in load_pool(cfg["window_days"]) if eligible(r)]
+    if args.pilot:
+        limit = args.limit or cfg["pilot_limit"]
+        cohort = pick_cohort(pool, limit)
+    else:
+        limit = args.limit or cfg["nightly_limit"]
+        cohort = pool[:limit]
     print(
         f"Screening prep: {len(pool)} role(s) waiting, preparing {len(cohort)} (cap {limit})",
         file=sys.stderr,
@@ -406,7 +419,12 @@ def main() -> None:
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--local", action="store_true", help="payload JSON → stdout (default)")
     mode.add_argument("--save", action="store_true", help="results → DB")
-    p.add_argument("--limit", type=int, help="override [screening] pilot_limit")
+    p.add_argument("--limit", type=int, help="override [screening] nightly_limit / pilot_limit")
+    p.add_argument(
+        "--pilot",
+        action="store_true",
+        help="round-robin across score band × company status, capped at pilot_limit",
+    )
     p.add_argument("--prepared-by", help="with --save: model tier that prepared this batch")
     p.add_argument("--files", nargs="+", help="with --save: one result file per role")
     args = p.parse_args()

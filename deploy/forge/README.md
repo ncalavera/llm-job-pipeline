@@ -101,6 +101,35 @@ State: `/home/$USER/jobsearch/mail_watch_state.json` — seen message ids with
 their dates (pruned after 7 days), failure counter, last error. Delete the
 file to re-seed; do not delete it to "re-send", that sends nothing.
 
+## Night sizing
+
+The shipped `[nightly]` defaults size a scoring-only night:
+`max_items_per_night` 120 (one budget shared by every gate, spent by scoring
+first), `vacancy_gate_minutes` 120 and `run_deadline_minutes` 225. Screening
+preparation (`[screening] nightly_limit`, 400 roles over `window_days` 14)
+runs after scoring inside the same budget and deadline, so the defaults
+starve it. Raise them on the server only, never in the tracked file:
+
+1. Copy `config/defaults.toml` to `/home/$USER/jobsearch/defaults.toml` and
+   edit `[nightly]`: `max_items_per_night = 600`; `vacancy_gate_minutes` and
+   `run_deadline_minutes` from the live slice (minutes per role × cohort ÷
+   concurrency, plus 20 percent).
+2. Add `DEFAULTS_TOML_PATH=/home/$USER/jobsearch/defaults.toml` to
+   `/home/$USER/jobsearch/.env` (the unit's `EnvironmentFile`). The loader
+   reads that file INSTEAD of the checkout's copy — it is a full replacement,
+   not a merge — so re-copy it after every pull that touches `defaults.toml`.
+3. Raise the unit's hard ceiling to match the new deadline with a drop-in,
+   `sudo systemctl edit jobsearch-nightly.service`:
+
+   ```ini
+   [Service]
+   TimeoutStartSec=5h30m
+   ```
+
+   then `sudo systemctl daemon-reload`. Start time plus ceiling must stay
+   before the 03:35 UTC database backup: from the 22:00 UTC timer that is
+   5h30m at most; a run started by hand later in the evening gets less.
+
 ## Database user
 
 The night session runs with the `jobsearch_app` role. Its grants are the real

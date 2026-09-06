@@ -174,12 +174,24 @@ _VOLUME_DEFAULTS = {
 }
 
 
+_SCREENING_DEFAULTS = {
+    "pilot_limit": 50,
+    "window_days": 14,
+    "nightly_limit": 400,
+}
+
+
 def screening() -> dict:
-    """The [screening] dials: ``pilot_limit`` — roles prepared per
-    night. Non-positive / non-numeric falls back to 50; never raises."""
+    """The [screening] dials: ``window_days`` — only roles first seen this
+    many days back are prepared; ``nightly_limit`` — roles prepared per night,
+    oldest first; ``pilot_limit`` — the ``--pilot`` round-robin cap.
+    Non-positive / non-numeric falls back to the default; never raises."""
     sec = _section("screening")
-    limit = int(_num(sec, "pilot_limit", 50))
-    return {"pilot_limit": limit if limit > 0 else 50}
+    out = {}
+    for key, default in _SCREENING_DEFAULTS.items():
+        val = int(_num(sec, key, default))
+        out[key] = val if val > 0 else default
+    return out
 
 
 def volume() -> dict:
