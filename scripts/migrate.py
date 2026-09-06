@@ -524,9 +524,7 @@ def cmd_baseline() -> int:
         for version, label, path in to_mark:
             want_tables, want_columns = _objects_a_migration_creates(path)
             missing_t = sorted(want_tables - have_tables)
-            missing_c = sorted(
-                f"{t}.{c}" for (t, c) in want_columns if (t, c) not in have_columns
-            )
+            missing_c = sorted(f"{t}.{c}" for (t, c) in want_columns if (t, c) not in have_columns)
             if missing_t or missing_c:
                 problems.append((version, label, missing_t + missing_c))
 

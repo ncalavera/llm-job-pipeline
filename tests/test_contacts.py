@@ -108,7 +108,7 @@ def test_every_extracted_channel_is_in_the_shared_vocabulary(db):
     ],
 )
 def test_group_names_normalise_to_one_form(db, raw, expected):
-    """"EA Russian" and "ea-russian" are one list, not two — and identity is
+    """ "EA Russian" and "ea-russian" are one list, not two — and identity is
     keyed on the group, so two spellings would silently split it."""
     assert db.normalise_group(raw) == expected
 
