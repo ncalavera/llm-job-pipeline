@@ -149,11 +149,10 @@ def _count_screening_processing() -> dict:
     if not _vacancy_has_column("screening_state"):
         return {"unprepared": 0, "failed": 0}
     window_days = int(settings.screening().get("window_days", 14))
-    cutoff = (date.today() - timedelta(days=window_days)).isoformat()
     states = [
         r.get("screening_state")
-        for r in prepare_screening.load_pool()
-        if prepare_screening.eligible(r) and str(r.get("first_seen") or "")[:10] >= cutoff
+        for r in prepare_screening.load_pool(window_days)
+        if prepare_screening.eligible(r)
     ]
     return {"unprepared": states.count(None), "failed": states.count("failed")}
 
