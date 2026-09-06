@@ -32,14 +32,29 @@ def main() -> int:
     tool = data.get("tool_name", "")
     tool_input = data["tool_input"]
     if tool in ("Agent", "Task"):
-        allowed = {"description", "prompt", "subagent_type", "model", "run_in_background", "name", "max_turns"}
+        allowed = {
+            "description",
+            "prompt",
+            "subagent_type",
+            "model",
+            "run_in_background",
+            "name",
+            "max_turns",
+        }
         if tool_input.get("subagent_type") == "night-scorer" and not tool_input.keys() - allowed:
             return 0
         print("night-write-fence: only night-scorer may be spawned", file=sys.stderr)
         return 2
     if tool in ("TaskOutput", "TaskStop"):
         return 0
-    if not isinstance(tool, str) or tool not in ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob"):
+    if not isinstance(tool, str) or tool not in (
+        "Read",
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "NotebookEdit",
+        "Glob",
+    ):
         print("night-write-fence: tool unavailable in scoring session", file=sys.stderr)
         return 2
     raw = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
@@ -64,7 +79,11 @@ def main() -> int:
         if target in (inputs, allowed_dir):
             return 0
     elif tool == "Read":
-        if target in (allowed_file, night_dir / "session.json") or inputs in target.parents or allowed_dir in target.parents:
+        if (
+            target in (allowed_file, night_dir / "session.json")
+            or inputs in target.parents
+            or allowed_dir in target.parents
+        ):
             return 0
     elif target == allowed_file or allowed_dir in target.parents:
         return 0

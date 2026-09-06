@@ -77,12 +77,24 @@ def test_night_session_env_has_paths_without_database_credentials(tmp_path):
 
 def test_rejects_shell_secret_reads_and_other_agents(tmp_path):
     assert _run({"command": "id"}, tmp_path, "Bash").returncode == 2
-    assert _run({"file_path": str(Path.home() / ".ssh/id_ed25519")}, tmp_path, "Read").returncode == 2
+    assert (
+        _run({"file_path": str(Path.home() / ".ssh/id_ed25519")}, tmp_path, "Read").returncode == 2
+    )
     assert _run({"subagent_type": "general-purpose"}, tmp_path, "Agent").returncode == 2
     assert _run({"subagent_type": "night-scorer"}, tmp_path, "Agent").returncode == 0
-    assert _run({"path": str(tmp_path / "score_in"), "pattern": "../../*"}, tmp_path, "Glob").returncode == 2
-    assert _run({"file_path": str(tmp_path / "score_in/001.json")}, tmp_path, "Read").returncode == 0
-    assert _run({"path": str(tmp_path / "score_in"), "pattern": "*.json"}, tmp_path, "Glob").returncode == 0
+    assert (
+        _run(
+            {"path": str(tmp_path / "score_in"), "pattern": "../../*"}, tmp_path, "Glob"
+        ).returncode
+        == 2
+    )
+    assert (
+        _run({"file_path": str(tmp_path / "score_in/001.json")}, tmp_path, "Read").returncode == 0
+    )
+    assert (
+        _run({"path": str(tmp_path / "score_in"), "pattern": "*.json"}, tmp_path, "Glob").returncode
+        == 0
+    )
 
 
 def test_rejects_symlink_to_secret(tmp_path):
@@ -94,9 +106,21 @@ def test_rejects_symlink_to_secret(tmp_path):
 
 
 def test_rejects_agent_context_overrides_and_malformed_hook_input(tmp_path):
-    for field, value in [('isolation', 'worktree'), ('resume', 'other-session'), ('cwd', '/'), ('permission_mode', 'bypassPermissions')]:
-        assert _run({'subagent_type': 'night-scorer', field: value}, tmp_path, 'Agent').returncode == 2
-    for payload in [[], {'tool_name': 'Write', 'tool_input': 'bad'}]:
-        result = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(payload), text=True, capture_output=True,
-            env={**os.environ, 'NIGHTLY_NIGHT_DIR': str(tmp_path)})
+    for field, value in [
+        ("isolation", "worktree"),
+        ("resume", "other-session"),
+        ("cwd", "/"),
+        ("permission_mode", "bypassPermissions"),
+    ]:
+        assert (
+            _run({"subagent_type": "night-scorer", field: value}, tmp_path, "Agent").returncode == 2
+        )
+    for payload in [[], {"tool_name": "Write", "tool_input": "bad"}]:
+        result = subprocess.run(
+            [sys.executable, str(HOOK)],
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+            env={**os.environ, "NIGHTLY_NIGHT_DIR": str(tmp_path)},
+        )
         assert result.returncode == 2
