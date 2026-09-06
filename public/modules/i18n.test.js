@@ -67,3 +67,10 @@ test("getLanguage: an unknown stored value is ignored, default wins", () => {
   _store = { dashboard_lang: "zz" };
   assert.equal(getLanguage(), "ru");
 });
+
+test("T: a key shipped with the browser code resolves in the language active at load (ru here), and a baked string wins", async () => {
+  const { T } = await import("./i18n.js");
+  assert.equal(T("screen_keep", "x"), "Оставить");
+  assert.equal(T("x", "fallback"), "ru");
+  assert.equal(T("nope", "fallback"), "fallback");
+});

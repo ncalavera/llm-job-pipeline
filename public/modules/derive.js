@@ -425,3 +425,76 @@ export function selectTodayRoles(groups, opts) {
     working,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Screen view (bulk screening inbox, DHA-603). The payload ships raw screening
+// facts per role; lists and groups derive here, never on the server.
+// ---------------------------------------------------------------------------
+
+/**
+ * Split the ready roles into the three inbox lists by live status. A role is
+ * in a list only when its screening is ready; an unprepared or failed role is
+ * in none. `getStatus(g)` is injected so this stays DOM-free.
+ * @returns {{toScreen: Set, kept: Set, putAside: Set}} canonical id sets
+ */
+export function screenLists(roles, getStatus) {
+  const toScreen = new Set();
+  const kept = new Set();
+  const putAside = new Set();
+  for (const g of roles) {
+    if (!g || g.screening_state !== "ready") continue;
+    const status = getStatus(g);
+    if (status === "unseen") toScreen.add(g.id);
+    else if (status === "liked") kept.add(g.id);
+    else if (status === "passed") putAside.add(g.id);
+  }
+  return { toScreen, kept, putAside };
+}
+
+// The fixed group vocabulary, in chooser order. Overlap is allowed: one role
+// can sit in several groups; each group is a Set so a list counts it once.
+export const SCREEN_GROUP_KEYS = [
+  "language",
+  "onsite",
+  "seniority",
+  "unclear",
+  "all",
+];
+
+/** Requirements array of a role's screening facts, always an array. */
+export function screenRequirements(g) {
+  const facts = g && g.screening && g.screening.posting_facts;
+  return facts && Array.isArray(facts.requirements) ? facts.requirements : [];
+}
+
+/**
+ * Group the ready roles by validated facts:
+ *   language  – any requirement of kind "language"
+ *   onsite    – work_mode onsite, or a requirement of kind location/authorisation
+ *   seniority – seniority stated (not null / "unknown")
+ *   unclear   – unknowns present
+ *   all       – every role given
+ * @returns {Object<string, Set>} group key → canonical id set
+ */
+export function screenGroups(roles) {
+  const out = {};
+  for (const k of SCREEN_GROUP_KEYS) out[k] = new Set();
+  for (const g of roles) {
+    if (!g) continue;
+    const s = g.screening || {};
+    const facts = s.posting_facts || {};
+    const reqs = screenRequirements(g).filter(Boolean);
+    const mode = String(facts.work_mode || "").toLowerCase();
+    if (reqs.some((r) => r.kind === "language")) out.language.add(g.id);
+    if (
+      /on.?site/.test(mode) ||
+      reqs.some((r) => r.kind === "location" || r.kind === "authorisation")
+    )
+      out.onsite.add(g.id);
+    if (facts.seniority && String(facts.seniority).toLowerCase() !== "unknown")
+      out.seniority.add(g.id);
+    if (Array.isArray(s.unknowns) && s.unknowns.length) out.unclear.add(g.id);
+    out.all.add(g.id);
+  }
+  return out;
+}

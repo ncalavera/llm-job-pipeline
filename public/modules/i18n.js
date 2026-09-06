@@ -62,9 +62,83 @@ export function setLanguage(lang) {
 
 const STRINGS = (ALL && ALL[getLanguage()]) || (config && config.i18n) || {};
 
+// Strings that ship with the browser code, not with the baked snapshot: the
+// Screen view (bulk screening inbox) lives on the dashboard line, whose
+// snapshot is written by a different branch. A baked string still wins.
+const LOCAL = {
+  en: {
+    screen_tab: "Screen",
+    screen_title: "Make one decision about several roles.",
+    screen_list_to_screen: "To screen",
+    screen_list_kept: "Kept",
+    screen_list_aside: "Put aside",
+    screen_group_language: "A language requirement",
+    screen_group_onsite: "Onsite or location constraint",
+    screen_group_seniority: "Seniority stated",
+    screen_group_unclear: "Eligibility unclear",
+    screen_group_all: "All remaining roles",
+    screen_group_hint: "Groups filter the To screen list only.",
+    screen_required: "Required",
+    screen_preferred: "Preferred",
+    screen_unknown: "Unknown",
+    screen_evidence: "Read posting evidence",
+    screen_no_quote: "no quote",
+    screen_profile_notes: "Compared with your profile",
+    screen_empty: "No roles left in this list.",
+    screen_processing: "Not prepared yet: {unprepared} · Failed: {failed}",
+    screen_selected: "{n} selected",
+    screen_select_all: "Select all",
+    screen_clear: "Clear selection",
+    screen_keep: "Keep",
+    screen_put_aside: "Put aside",
+    screen_undo: "Undo",
+    screen_saved: "{n} of {m} saved",
+    screen_undone: "{n} of {m} restored",
+    screen_loading: "Loading statuses…",
+    screen_open: "Open",
+  },
+  ru: {
+    screen_tab: "Отбор",
+    screen_title: "Одно решение сразу о нескольких вакансиях.",
+    screen_list_to_screen: "На отбор",
+    screen_list_kept: "Оставлены",
+    screen_list_aside: "Отложены",
+    screen_group_language: "Требование к языку",
+    screen_group_onsite: "Офис или ограничение по месту",
+    screen_group_seniority: "Указан уровень",
+    screen_group_unclear: "Непонятно, подхожу ли",
+    screen_group_all: "Все оставшиеся вакансии",
+    screen_group_hint: "Группы фильтруют только список «На отбор».",
+    screen_required: "Обязательно",
+    screen_preferred: "Желательно",
+    screen_unknown: "Неясно",
+    screen_evidence: "Цитаты из вакансии",
+    screen_no_quote: "нет цитаты",
+    screen_profile_notes: "Сравнение с профилем",
+    screen_empty: "В этом списке вакансий не осталось.",
+    screen_processing: "Ещё не подготовлено: {unprepared} · Ошибка: {failed}",
+    screen_selected: "Выбрано: {n}",
+    screen_select_all: "Выбрать все",
+    screen_clear: "Снять выбор",
+    screen_keep: "Оставить",
+    screen_put_aside: "Отложить",
+    screen_undo: "Отменить",
+    screen_saved: "Сохранено {n} из {m}",
+    screen_undone: "Восстановлено {n} из {m}",
+    screen_loading: "Загружаем статусы…",
+    screen_open: "Открыть",
+  },
+};
+const LOCAL_STRINGS = LOCAL[getLanguage()] || LOCAL.en;
+
+function has(table, key) {
+  return Object.prototype.hasOwnProperty.call(table, key);
+}
+
 /** Translate a stable key. Returns the baked string, else the fallback. */
 export function T(key, fallback) {
-  if (Object.prototype.hasOwnProperty.call(STRINGS, key)) return STRINGS[key];
+  if (has(STRINGS, key)) return STRINGS[key];
+  if (has(LOCAL_STRINGS, key)) return LOCAL_STRINGS[key];
   return fallback !== undefined ? fallback : key;
 }
 
@@ -77,9 +151,8 @@ export function applyI18n() {
   // Text content.
   document.querySelectorAll("[data-i18n]").forEach(function (el) {
     var key = el.getAttribute("data-i18n");
-    if (Object.prototype.hasOwnProperty.call(STRINGS, key)) {
-      el.textContent = STRINGS[key];
-    }
+    var text = T(key, null);
+    if (text !== null) el.textContent = text;
   });
 
   // Placeholders (search inputs).
