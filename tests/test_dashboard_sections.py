@@ -255,3 +255,152 @@ def test_generated_data_js_carries_section_payloads(tmp_path, monkeypatch):
     ]
     # learning is present as a key (None when nothing is pending).
     assert "learning" in payload
+
+
+# ---------------------------------------------------------------------------
+# Screening payload (bulk-screening inbox, U3): raw fields, ready roles always
+# shipped, processing counts over tonight's cohort
+# ---------------------------------------------------------------------------
+
+_MIGRATIONS = REPO / "sql" / "migrations"
+_POSTING = "We are hiring a Programme Manager. Fluent Spanish is required. " * 8
+_SCREENING = {
+    "posting_facts": {"duties": "Runs programmes.", "requirements": []},
+    "profile_comparison": [],
+    "unknowns": ["salary"],
+}
+
+
+def _screening_db(tmp_path, monkeypatch):
+    import sqlite3
+
+    _force_sqlite(monkeypatch, tmp_path / "jobsearch.db")
+    import database_supabase as db
+
+    db.get_conn().commit()  # baseline schema is created on first connect
+    raw = sqlite3.connect(tmp_path / "jobsearch.db")
+    for name in ("0025_add_vacancy_scoring_excluded_reason", "0027_add_vacancy_screening"):
+        raw.executescript((_MIGRATIONS / f"{name}.sqlite.sql").read_text(encoding="utf-8"))
+    raw.commit()
+    raw.close()
+    return db
+
+
+def _seed_role(db, vac_id, *, score, status, first_seen, state=None, screening=None):
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id FROM company WHERE canonical_name = %s",
+        ("Acme",),
+    )
+    row = cur.fetchone()
+    if row:
+        cid = row[0]
+    else:
+        cid = "c-acme"
+        cur.execute(
+            "INSERT INTO company (id, canonical_name, status) VALUES (%s, %s, 'active')",
+            (cid, "Acme"),
+        )
+    cur.execute(
+        "INSERT INTO vacancy (id, dedup_hash, company_id, title, full_description, llm_score, "
+        "status, first_seen, last_seen, screening_state, screening) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        (
+            vac_id,
+            f"h-{vac_id}",
+            cid,
+            f"Role {vac_id}",
+            _POSTING,
+            score,
+            status,
+            first_seen,
+            first_seen,
+            state,
+            json.dumps(screening) if screening is not None else None,
+        ),
+    )
+    conn.commit()
+    cur.close()
+
+
+def _payload(monkeypatch):
+    import report.data_prep as data_prep
+
+    return importlib.reload(data_prep).prepare_report_data()
+
+
+def test_ready_role_ships_at_any_score_and_status(tmp_path, monkeypatch):
+    """R6: a prepared role survives the score floor and a Put-aside decision."""
+    from datetime import date
+
+    db = _screening_db(tmp_path, monkeypatch)
+    today = date.today().isoformat()
+    _seed_role(db, "low-unseen", score=12, status="unseen", first_seen=today, state="ready")
+    _seed_role(db, "low-passed", score=12, status="passed", first_seen=today, state="ready")
+    _seed_role(db, "low-plain", score=12, status="unseen", first_seen=today)
+
+    ids = {g["id"] for g in _payload(monkeypatch)["groups"]}
+    assert {"low-unseen", "low-passed"} <= ids
+    assert "low-plain" not in ids
+
+
+def test_screening_json_round_trips_raw(tmp_path, monkeypatch):
+    """R5: the stored screening object ships unchanged, with its state and
+    prepared_at as raw fields — the browser derives the groups."""
+    from datetime import date
+
+    db = _screening_db(tmp_path, monkeypatch)
+    _seed_role(
+        db,
+        "ready",
+        score=70,
+        status="unseen",
+        first_seen=date.today().isoformat(),
+        state="ready",
+        screening=_SCREENING,
+    )
+    _seed_role(db, "plain", score=70, status="unseen", first_seen=date.today().isoformat())
+
+    by_id = {g["id"]: g for g in _payload(monkeypatch)["groups"]}
+    assert by_id["ready"]["screening"] == _SCREENING
+    assert by_id["ready"]["screening_state"] == "ready"
+    assert by_id["ready"]["screening_prepared_at"] == ""
+    assert by_id["plain"]["screening"] is None
+    assert by_id["plain"]["screening_state"] is None
+
+
+def test_processing_counts_cover_tonights_cohort_only(tmp_path, monkeypatch):
+    """R12: unprepared and failed roles inside the 14-day cohort are counted
+    (not shipped); an unprepared role older than the window is neither."""
+    from datetime import date, timedelta
+
+    db = _screening_db(tmp_path, monkeypatch)
+    today = date.today()
+    fresh = (today - timedelta(days=2)).isoformat()
+    stale = (today - timedelta(days=30)).isoformat()
+    _seed_role(db, "unprep-fresh", score=12, status="unseen", first_seen=fresh)
+    _seed_role(db, "failed-fresh", score=12, status="unseen", first_seen=fresh, state="failed")
+    _seed_role(db, "unprep-stale", score=12, status="unseen", first_seen=stale)
+
+    data = _payload(monkeypatch)
+    assert {g["id"] for g in data["groups"]} == set()
+    assert data["stats"]["screening_processing"] == {"unprepared": 1, "failed": 1}
+
+
+def test_screening_prepared_at_datetime_becomes_iso_text():
+    """Postgres returns timestamptz as datetime; the snapshot is json.dumps'd
+    (2026-09-06 live publish: 'Object of type datetime is not JSON serializable')."""
+    from datetime import datetime, timezone
+    import json
+    import database_supabase as ds
+
+    row = {
+        "id": "x",
+        "company_id": "c",
+        "screening_prepared_at": datetime(2026, 9, 6, 17, 51, tzinfo=timezone.utc),
+    }
+    vac = ds._row_to_vacancy(dict(row)) if hasattr(ds, "_row_to_vacancy") else None
+    assert vac is not None
+    json.dumps(vac["screening_prepared_at"])
+    assert vac["screening_prepared_at"].startswith("2026-09-06T17:51")

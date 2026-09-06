@@ -28,9 +28,9 @@ Survival rules (R4, R12, R15):
 
 Privacy (R17, KTD3): all night output lives in ``vacancies/nightly/<date>/``
 (mode 700, pruned after seven days) — never in the system journal. Each Claude
-child gets a from-scratch environment (PATH, HOME, the database URL, the
-Claude token; FIRECRAWL_API_KEY only for the company gates). ``TELEGRAM_*``
-never enters a Claude session.
+child gets only PATH, HOME and its Claude token. Database and provider
+credentials remain in the deterministic wrapper. The model has file-only
+tools and cannot run a shell, load MCP tools or read outside the night inputs.
 
 Test seams: ``NIGHTLY_DRIVER_CMD`` / ``NIGHTLY_CLAUDE_BIN`` (shlex-split)
 replace the real driver / ``claude`` binary with fakes.
@@ -85,11 +85,10 @@ RATE_LIMIT_MARGIN_S = 45
 # OTHER gate action is the driver's own unattended business (U2) — the wrapper
 # just resumes. ``payload`` names the driver's gate payload file under
 # vacancies/; ``save_script`` is the idempotent save entrypoint the defensive
-# sweep re-runs over score_out/ after the session (the session already saves
-# per wave; the sweep only catches work written but unsaved by a dead session).
+# Python wrapper runs over score_out/ periodically and again after exit.
 # ``phases`` lists the phase values the driver can emit for the gate — the
-# session gets the live one as its third argument and picks the subagent model
-# tier for it (--dry-run prints one session line per phase).
+# session gets the live one as its third argument; Python picks its model
+# tier before launch (--dry-run prints one session line per phase).
 GATES = {
     "screen_companies": {
         "payload": "screen_companies_payload.json",
@@ -112,10 +111,19 @@ GATES = {
         "firecrawl": False,
         "phases": ("screen", "escalate"),
     },
+    # Screening preparation: extraction + profile comparison per
+    # vacancy, no score. Same file-in/file-out session; the strong model.
+    "prepare_screening": {
+        "payload": "prepare_screening_payload.json",
+        "save_script": "prepare_screening.py",
+        "limit_key": "vacancy_gate_minutes",
+        "firecrawl": False,
+        "phases": ("prepare",),
+    },
 }
 
 # Environment a Claude child is allowed to inherit (KTD3). Everything else —
-# TELEGRAM_* above all — is dropped. FIRECRAWL_API_KEY is added per gate.
+# Database, Telegram and provider credentials stay in the Python wrapper.
 # ANTHROPIC_API_KEY is deliberately NOT here: the night scores on Nikita's
 # Claude subscription through the headless login, and Claude Code prefers an
 # API key whenever it finds one — inheriting it would silently move the whole
@@ -125,8 +133,6 @@ GATES = {
 _CHILD_ENV_ALLOWLIST = (
     "PATH",
     "HOME",
-    "SUPABASE_DB_URL",
-    "JOBSEARCH_DB_PATH",
     "CLAUDE_CODE_OAUTH_TOKEN",
 )
 
@@ -220,16 +226,23 @@ def _claude_cmd(action: str, night_dir, cfg: dict, phase: str) -> list[str]:
         f"/jobs-night {action} {night_dir} {phase}",
         "--model",
         _orchestrator_model(),
-        "--dangerously-skip-permissions",
+        "--permission-mode",
+        "dontAsk",
+        "--tools",
+        "Read,Write,Glob,Agent,TaskOutput,TaskStop",
+        "--allowed-tools",
+        "Read,Write,Glob,Agent(night-scorer),TaskOutput,TaskStop",
+        "--strict-mcp-config",
+        "--mcp-config",
+        '{"mcpServers":{}}',
         # Repo settings only: the user settings.json is shared with the Mac through
         # the wiki, and a Mac-only hook there blocked every Bash call on 2026-09-03.
         "--setting-sources",
         "project,local",
-        # No web tools in the night session: posting text is stranger-written,
-        # and a fetch/search tool is the only way a hijacked session could send
-        # anything out. Writes are fenced by .claude/hooks/night-write-fence.py.
+        # Scoring needs no shell, MCP, database or provider access. Python saves
+        # results; the hook restricts file access and the permitted agent type.
         "--disallowed-tools",
-        "WebFetch,WebSearch",
+        "Bash,PowerShell,WebFetch,WebSearch,Edit,NotebookEdit",
         "--max-turns",
         str(cfg["max_turns"]),
         "--output-format",
@@ -240,19 +253,10 @@ def _claude_cmd(action: str, night_dir, cfg: dict, phase: str) -> list[str]:
 
 def _claude_env(firecrawl: bool, night_dir=None) -> dict:
     env = {k: os.environ[k] for k in _CHILD_ENV_ALLOWLIST if os.environ.get(k)}
-    # The interpreter the session must use for its per-wave saves. A bare
-    # ``python3`` is the SYSTEM interpreter, which has none of the project
-    # dependencies (psycopg2) — its saves fail and only the wrapper's
-    # end-of-session sweep lands the work, so a session that dies mid-way
-    # loses every finished wave. sys.executable is whatever runs the wrapper
-    # (the venv under systemd), so the session saves with the same one.
-    env["NIGHTLY_PYTHON"] = sys.executable
     if night_dir is not None:
         # Arms .claude/hooks/night-write-fence.py: Write/Edit only under
         # <night_dir>/score_out/ (and scoring_log.md) for this child.
         env["NIGHTLY_NIGHT_DIR"] = str(Path(night_dir).resolve())
-    if firecrawl and os.environ.get("FIRECRAWL_API_KEY"):
-        env["FIRECRAWL_API_KEY"] = os.environ["FIRECRAWL_API_KEY"]
     # Under systemd the token arrives as a credential FILE (LoadCredential=,
     # KTD7 — `systemctl show` would reveal an Environment= value). It is read
     # here and exported only into the Claude child, never into our own env.
@@ -267,18 +271,23 @@ def _claude_env(firecrawl: bool, night_dir=None) -> dict:
     return env
 
 
-def _save_extra(action: str) -> list[str]:
+def _save_extra(action: str, model: str | None = None) -> list[str]:
     """Extra save-command flags per gate: the vacancy save records provenance
     with the night's scoring model (R16: never --archive, never a status)."""
-    if action != "score_vacancies":
+    if action not in ("score_vacancies", "prepare_screening"):
         return []
+    # The flag is chosen by action first: prepare_screening.py only accepts
+    # --prepared-by, and the sweep always passes the session model.
+    flag = "--prepared-by" if action == "prepare_screening" else "--scored-by"
+    if model is not None:
+        return [flag, model]
     try:
         from scoring_settings import scoring_model
 
         model = scoring_model()
     except Exception:
         model = "opus"
-    return ["--scored-by", model]
+    return [flag, model]
 
 
 class _Ctx:
@@ -601,32 +610,37 @@ def _prune_old_nights(ctx: _Ctx) -> None:
             ctx.log(f"pruned night directory {child.name} (seven-day retention, R17)")
 
 
-def _save_cmd(action: str, files: list[str]) -> list[str]:
+def _save_cmd(action: str, files: list[str], model: str | None = None) -> list[str]:
     """The idempotent save command for a gate — one builder for the real sweep
     and --dry-run, so the printed command can never drift from the real one."""
     spec = GATES[action]
     return (
         [sys.executable, str(SCRIPTS_DIR / spec["save_script"]), "--save"]
-        + _save_extra(action)
+        + _save_extra(action, model)
         + ["--files"]
         + files
     )
 
 
-def _sweep_save(ctx: _Ctx, action: str, out_files: list[Path]) -> None:
-    """Defensive re-save of every score_out file. The session saves per wave;
-    this sweep only catches results written by a session that died before its
-    own --save. Saves are idempotent, and --files names and skips a malformed
+def _sweep_save(ctx: _Ctx, action: str, out_files: list[Path], timeout: float = 30) -> bool:
+    """Persist score_out using Python authority, never agent tools.
+    A final sweep also catches results written before timeout/exit. Saves are idempotent, and --files names and skips a malformed
     file so the rest still land (BUG-5). Best-effort: a sweep failure is
     logged, never fatal — the driver re-prompts for whatever is missing."""
-    cmd = _save_cmd(action, [str(f) for f in out_files])
+    session_config = ctx.night_dir / "session.json"
+    model = json.loads(session_config.read_text())["model"] if session_config.exists() else None
+    cmd = _save_cmd(action, [str(f) for f in out_files], model)
     ctx.log("save sweep: " + " ".join(cmd))
     try:
-        res = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True)
+        res = subprocess.run(
+            cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=max(0.1, timeout)
+        )
         tail = (res.stdout or res.stderr or "").strip()[-300:]
         ctx.log(f"save sweep exited {res.returncode}: {tail}")
+        return res.returncode == 0
     except Exception as exc:
         ctx.log(f"save sweep failed: {type(exc).__name__}: {exc}")
+        return False
 
 
 def _run_session(ctx: _Ctx, action: str, phase: str) -> None:
@@ -658,6 +672,17 @@ def _run_session(ctx: _Ctx, action: str, phase: str) -> None:
             json.dumps(item, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
+    import scoring_settings
+
+    model_fn = (
+        scoring_settings.company_screen_model
+        if action == "screen_companies"
+        else scoring_settings.screen_model
+        if action == "score_vacancies" and phase == "screen"
+        else scoring_settings.scoring_model
+    )
+    (ctx.night_dir / "session.json").write_text(json.dumps({"model": model_fn()}), encoding="utf-8")
+
     budget = min(
         float(ctx.cfg[spec["limit_key"]]) * 60.0,
         (ctx.deadline - datetime.now()).total_seconds(),
@@ -682,7 +707,21 @@ def _run_session(ctx: _Ctx, action: str, phase: str) -> None:
         )
         _CHILD = proc
         try:
-            rc = proc.wait(timeout=budget)
+            saved = set()
+            while True:
+                remaining = budget - (time.monotonic() - started)
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(cmd, budget)
+                try:
+                    rc = proc.wait(timeout=min(5.0, remaining))
+                    break
+                except subprocess.TimeoutExpired:
+                    ready, _ = _split_results(sorted(score_out.glob("*.json")))
+                    pending = [path for path in ready if path not in saved]
+                    if pending:
+                        save_budget = min(10.0, max(0.1, budget - (time.monotonic() - started)))
+                        if _sweep_save(ctx, action, pending, timeout=save_budget):
+                            saved.update(pending)
         except subprocess.TimeoutExpired:
             timed_out = True
             proc.terminate()

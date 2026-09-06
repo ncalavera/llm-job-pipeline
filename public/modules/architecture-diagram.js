@@ -15,6 +15,10 @@
 export const ARCHITECTURE_OVERVIEW = `flowchart LR
     SRC[Job boards +<br/>company career sites] -->|fetch daily| DB[(Database)]
     DB --> SCORE[Filter +<br/>AI scoring]
+    SCORE --> N[File-only night scorers]
+    N -->|screening + score results<br/>polled and saved by Python| DB
+    SCORE --> SCR[Dashboard Screen view<br/>bulk keep / put aside]
+    SCR -->|/api/save per row| DB
     SCORE --> YOU[Dashboard / Telegram<br/>you triage]
     YOU -->|likes & passes| LEARN[Learning loop]
     LEARN -->|tunes filters| DB
@@ -22,6 +26,7 @@ export const ARCHITECTURE_OVERVIEW = `flowchart LR
 
     style DB fill:#1E40AF,color:#fff
     style SCORE fill:#065F46,color:#fff
+    style SCR fill:#7C2D12,color:#fff
     style YOU fill:#7C2D12,color:#fff
     style LEARN fill:#4C1D95,color:#fff
     style OBS fill:#0F766E,color:#fff
@@ -35,10 +40,12 @@ export const ARCHITECTURE_DETAILS = [
     V[validate profile] --> P[preflight DB check] --> LR2[learning review]
     LR2 --> F[fetch: career sites + boards] --> EN[enrich blind roles]
     EN --> FI[filter junk] --> CS[company scoring] --> VS[vacancy scoring<br/>cheap screen, then strong model]
-    VS --> VD[your verdicts] --> PU[publish snapshot once]
+    VS --> SP[screening prep<br/>facts + quotes, no score, night only]
+    SP --> VD[your verdicts] --> PU[publish snapshot once]
 
     style F fill:#1E40AF,color:#fff
     style VS fill:#065F46,color:#fff
+    style SP fill:#065F46,color:#fff
     style VD fill:#7C2D12,color:#fff
 `,
   },

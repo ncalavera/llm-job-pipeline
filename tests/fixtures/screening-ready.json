@@ -1,0 +1,11 @@
+{
+  "_comment": "Shared predicate fixture (KTD5): ready to screen = status unseen AND screening_state ready AND company status not inactive. Python (tests/test_telegram_digest.py) and JS (public/modules/derive.test.js) must both select exactly expected_ready_ids.",
+  "expected_ready_ids": ["ready-1", "ready-2", "ready-3"],
+  "roles": [
+    {"id": "ready-1", "org": "Org Ready A", "title": "Policy Analyst", "status": "unseen", "screening_state": "ready", "company_status": "active"},
+    {"id": "ready-2", "org": "Org Ready B", "title": "Research Manager", "status": "unseen", "screening_state": "ready", "company_status": "candidate"},
+    {"id": "ready-3", "org": "Org Ready C", "title": "Programme Lead", "status": "unseen", "screening_state": "ready", "company_status": "active"},
+    {"id": "liked-1", "org": "Org Liked", "title": "Operations Lead", "status": "liked", "screening_state": "ready", "company_status": "active"},
+    {"id": "failed-1", "org": "Org Failed", "title": "Data Lead", "status": "unseen", "screening_state": "failed", "company_status": "active"}
+  ]
+}

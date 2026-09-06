@@ -329,6 +329,10 @@ def _persist_dashboard(vacancy_data: dict) -> None:
     """
     import db_backend
 
+    # One line per publish: the snapshot grows with the screening JSON of every
+    # prepared role, and its size was unmeasured before the bulk-screening inbox.
+    size = len(json.dumps(vacancy_data, ensure_ascii=False).encode("utf-8"))
+    print(f"  Dashboard payload: {size:,} bytes, {len(vacancy_data.get('groups', []))} roles")
     if db_backend.IS_SQLITE:
         _write_data_js(vacancy_data)
     else:

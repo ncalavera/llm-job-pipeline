@@ -69,11 +69,13 @@ except Exception:
         "summary_fallback_chars": 600,
         "summary_max_chars": 1500,
         "message_max_chars": 4000,
+        "dashboard_base_url": "",
     }
 
 SUMMARY_FALLBACK_CHARS = _DIGEST["summary_fallback_chars"]
 SUMMARY_MAX_CHARS = _DIGEST["summary_max_chars"]  # guard the Telegram message limit
 MESSAGE_MAX_CHARS = _DIGEST["message_max_chars"]
+DASHBOARD_BASE_URL = os.environ.get("DASHBOARD_BASE_URL", _DIGEST["dashboard_base_url"]).rstrip("/")
 
 # Product language: the digest speaks the ONE language chosen in the
 # profile's ## OUTPUT_LANGUAGE. Every user-facing string routes through _t(),
@@ -125,6 +127,17 @@ WHERE c.status = 'candidate'
   AND v.status NOT IN ('passed', 'skipped', 'archived')
 ORDER BY v.llm_score DESC, v.created_at DESC
 LIMIT %s
+"""
+
+# Ready to screen (KTD5): the one predicate the dashboard's To screen shares —
+# no score floor, no tier, no digest_sent_at stamp, so nothing above fits.
+SELECT_READY_TO_SCREEN_SQL = """
+SELECT v.id
+FROM vacancy v
+JOIN company c ON v.company_id = c.id
+WHERE v.status = 'unseen'
+  AND v.screening_state = 'ready'
+  AND c.status != 'inactive'
 """
 
 # Tier 2: mid scores — one line each (title, company, score, link), stamped
@@ -616,11 +629,17 @@ def build_header_lines(counts, deadlines_soon, run_state):
     return lines
 
 
-def build_tail_lines(run_state):
-    """Tier 4: carried-over / rolled-over / pending-verdict one-liners."""
-    if not run_state:
-        return []
+def build_tail_lines(run_state, ready_to_screen=0):
+    """Tier 4: the roles waiting in the screening inbox (R13), then the
+    carried-over / rolled-over / pending-verdict one-liners."""
     lines = []
+    if ready_to_screen:
+        text = _t("digest_ready_to_screen", n=ready_to_screen)
+        if DASHBOARD_BASE_URL:
+            text = f'<a href="{DASHBOARD_BASE_URL}/?mode=screen">{text}</a>'
+        lines.append(text)
+    if not run_state:
+        return lines
     what = []
     n = _int(_run_stage(run_state, "vacancy_scoring").get("carried_over"))
     if n:
@@ -636,6 +655,12 @@ def build_tail_lines(run_state):
     p = _int(_run_stage(run_state, "verdicts").get("pending_verdicts"))
     if p:
         lines.append(_t("digest_pending_verdicts", n=p))
+    # Screening preparation: processing counts, kept apart from the
+    # human queue above — a prepared role is ready to screen, not a verdict owed.
+    prep = _run_stage(run_state, "screening_prep")
+    ready, failed = _int(prep.get("prepared")), _int(prep.get("failed"))
+    if ready or failed:
+        lines.append(_t("digest_screening_prepared", n=ready, failed=failed))
     return lines
 
 
@@ -812,6 +837,12 @@ def fetch_mid(conn, min_score, max_score):
     with _dict_cursor(conn) as cur:
         cur.execute(SELECT_MID_SQL, (min_score, max_score))
         return [dict(r) for r in cur.fetchall()]
+
+
+def fetch_ready_to_screen(conn):
+    with _dict_cursor(conn) as cur:
+        cur.execute(SELECT_READY_TO_SCREEN_SQL)
+        return len(cur.fetchall())
 
 
 def fetch_dropped(conn):
@@ -993,7 +1024,7 @@ def cmd_send(args):
 
     counts = gather_counts(conn, run_state, since, dropped_total)
     header = build_header_lines(counts, len(expiring_rows), run_state)
-    tail = build_tail_lines(run_state)
+    tail = build_tail_lines(run_state, fetch_ready_to_screen(conn))
     blocks = assemble_digest(header, top_rows, mid_rows, dropped_rows, tail, dropped_total)
     parts = split_message_parts(blocks)
 

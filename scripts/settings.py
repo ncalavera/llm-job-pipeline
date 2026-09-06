@@ -174,6 +174,26 @@ _VOLUME_DEFAULTS = {
 }
 
 
+_SCREENING_DEFAULTS = {
+    "pilot_limit": 50,
+    "window_days": 14,
+    "nightly_limit": 400,
+}
+
+
+def screening() -> dict:
+    """The [screening] dials: ``window_days`` — only roles first seen this
+    many days back are prepared; ``nightly_limit`` — roles prepared per night,
+    oldest first; ``pilot_limit`` — the ``--pilot`` round-robin cap.
+    Non-positive / non-numeric falls back to the default; never raises."""
+    sec = _section("screening")
+    out = {}
+    for key, default in _SCREENING_DEFAULTS.items():
+        val = int(_num(sec, key, default))
+        out[key] = val if val > 0 else default
+    return out
+
+
 def volume() -> dict:
     """The [volume] dials with neutral fallbacks. Never raises.
 
@@ -342,6 +362,7 @@ def digest() -> dict:
         "summary_fallback_chars": int(_num(sec, "summary_fallback_chars", 600)),
         "summary_max_chars": int(_num(sec, "summary_max_chars", 1500)),
         "message_max_chars": int(_num(sec, "message_max_chars", 4000)),
+        "dashboard_base_url": str(sec.get("dashboard_base_url", "")).rstrip("/"),
     }
 
 

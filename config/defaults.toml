@@ -646,6 +646,19 @@ max_turns = 250
 paused_until = ""
 
 # ===========================================================================
+# Screening preparation — the nightly per-vacancy extraction that
+# feeds the evidence-based screening inbox. Runs after vacancy scoring. Only
+# undecided roles first seen within window_days are prepared, oldest first,
+# up to nightly_limit per night; unchanged prepared roles are never re-sent.
+# With --pilot the roles are picked round-robin across score band × company
+# status instead, capped at pilot_limit, so a pilot cohort stays mixed.
+# ===========================================================================
+[screening]
+window_days = 14
+nightly_limit = 400
+pilot_limit = 50
+
+# ===========================================================================
 # Telegram digest — defaults for the optional daily digest. Env vars still win
 # (DIGEST_HOT_SCORE, DIGEST_DEADLINE_SOON_DAYS, DIGEST_LIMIT, DIGEST_MIN_SCORE).
 # ===========================================================================
@@ -662,6 +675,10 @@ dropped_max_lines = 25
 summary_fallback_chars = 600
 summary_max_chars = 1500
 message_max_chars = 4000
+# Public dashboard base URL for the "N roles ready to screen" link, without a
+# trailing slash (forge: "https://jobs.nikitasolovev.com"). Empty = no link.
+# Env DASHBOARD_BASE_URL overrides this.
+dashboard_base_url = ""
 
 # ===========================================================================
 # Job board aggregators — OPT-IN via the JOB_BOARDS env var (default: none).

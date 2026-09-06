@@ -66,8 +66,9 @@ not in a runbook and not in anyone's head (STRATEGY guardrail 4).
 | 7 | `filter` | AUTO | Quality report, dedup, geo buckets, gone-from-source archive. Never auto-deletes silently. |
 | 8 | `company_scoring` | GATE | WANT-score new candidate companies (1 company = 1 subagent). |
 | 9 | `vacancy_scoring` | GATE | Two-pass per-vacancy scoring (see below). |
-| 10 | `verdicts` | GATE | Show top fresh matches; capture like / pass / to_apply, each committed immediately. |
-| 11 | `publish` | AUTO | Always publish; warn loudly on a dirty run (see the publish gate). |
+| 10 | `screening_prep` | GATE | Night-only: one subagent read per undecided role extracts quoted facts and a profile comparison — no score, no status. Attended runs skip it. |
+| 11 | `verdicts` | GATE | Show top fresh matches; capture like / pass / to_apply, each committed immediately. |
+| 12 | `publish` | AUTO | Always publish; warn loudly on a dirty run (see the publish gate). |
 
 Exit codes the runbook branches on: `0` done, `10` gate, `20` abort
 (bad profile / DB outage — fix, do not retry blindly), `30` stage error
@@ -107,6 +108,11 @@ dashboard *code* changes.)
 
 ## Health & observability
 
+Nightly scoring agents have file-only tools, restricted payload/result paths,
+no shell/MCP tools and no database/provider credentials. Python chooses the
+model, saves completed files every five seconds and sweeps after exit/timeout.
+Malformed results are skipped independently.
+
 Scores are durable after each save; snapshot freshness changes at the publish
 stage. An attended resume rechecks outstanding verdicts before advancing.
 
@@ -117,7 +123,13 @@ reading logs:
   table (`OK / OK-BUT / PARTIAL / FAILED / SKIPPED`) rendered from
   `run_state.json`. `PARTIAL` is a stage that advanced the run but left its own
   work undone — a scoring session that stopped early and carried the remainder
-  over; its note says how many of how many.
+  over; its note says how many of how many. The `screening_prep` stage reports
+  ready / failed counts (`vacancy.screening_state`); the morning digest repeats
+  them as a processing line, separate from the human queue. A second digest
+  line, "N roles ready to screen", links to `?mode=screen` and shares one SQL
+  predicate (`status = 'unseen'`, `screening_state = 'ready'`, company not
+  `inactive`) with the Screen view's To screen list, so the two counts never
+  drift apart.
 - **Health tab** (dashboard) — `public/modules/health.js` renders four blocks
   from the live `api/health-detail.js` endpoint (read-only, no LLM spend):
   - **Boards** — per enabled board: freshness, failure streak, vacancy count,
@@ -141,6 +153,21 @@ reading logs:
   source string in `public/modules/architecture-diagram.js`, rendered on the
   Health tab (Mermaid lazy-loaded from a CDN on first open) and kept in sync
   with this document. **Any change to the pipeline's shape updates both.**
+
+### Screening inbox data
+
+`screening_prep` writes four columns on `vacancy`: `screening` (the prepared
+role's facts JSON — see [`CONCEPTS.md`](../CONCEPTS.md)), `screening_state`
+(`ready` or `failed`), `screening_prepared_at`, and `screening_fingerprint`
+(posting + prompt + profile, so an unchanged role is never re-prepared). The
+dashboard snapshot ships `screening`, `screening_state` and
+`screening_prepared_at` as raw per-role fields — no pre-baked group, the
+browser derives lists and groups — plus a run-level `stats.screening_processing`
+count (prepared / failed against the night's cohort). The Screen view
+(`public/modules/screen.js`, `?mode=screen` on the self-hosted dashboard)
+reads these fields to build To screen / Kept / Put aside lists; bulk Keep and
+Put aside write back through `/api/save` per row, same as every other status
+change.
 
 ## Two backends
 

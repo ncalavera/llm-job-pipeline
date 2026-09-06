@@ -70,8 +70,9 @@ and asks you only for the things it can't do itself.
   vacancies at not-yet-reviewed companies get rescued and flagged hot, so you
   approve companies with evidence in front of you.
 - **Triage:** dashboard (Today, Vacancies, Companies, Applications, Boards,
-  Settings sections), `/jobs-review` terminal CLI, or a daily Telegram digest
-  with 👍/👎 buttons that write statuses straight back to the database.
+  Settings sections, plus a Screen view on the self-hosted dashboard for bulk
+  screening undecided roles), `/jobs-review` terminal CLI, or a daily Telegram
+  digest with 👍/👎 buttons that write statuses straight back to the database.
 
 ## Flow
 

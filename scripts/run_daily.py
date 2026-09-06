@@ -52,6 +52,7 @@ STATE_PATH = PROJECT_ROOT / "vacancies" / "run_state.json"
 FETCH_STATS_PATH = PROJECT_ROOT / "vacancies" / "fetch_stats.json"
 VAC_PAYLOAD_PATH = PROJECT_ROOT / "vacancies" / "score_vacancies_payload.json"
 CO_PAYLOAD_PATH = PROJECT_ROOT / "vacancies" / "score_companies_payload.json"
+SCREEN_PREP_PAYLOAD_PATH = PROJECT_ROOT / "vacancies" / "prepare_screening_payload.json"
 LEARNING_PAYLOAD_PATH = PROJECT_ROOT / "vacancies" / "learning_review.json"
 # Written by screen_candidates.py (keep the paths in sync with its constants):
 # the payload feeds the no-API-key subagent screen gate; the summary is the
@@ -113,6 +114,7 @@ STAGE_ORDER = [
     "filter",  # AUTO  — quality report; never auto-deletes
     "company_scoring",  # GATE  — WANT-score new candidate companies
     "vacancy_scoring",  # GATE  — per-vacancy subagent scoring (1 vac = 1 agent)
+    "screening_prep",  # GATE  — night-only: extraction + profile comparison
     "verdicts",  # GATE  — show top matches, capture like/pass
     "digest",  # AUTO  — tiered morning Telegram message (before publish, KTD5:
     #                     a dashboard refresh failure can never cost the digest)
@@ -183,6 +185,7 @@ STAGE_ABOUT = {
     "filter": "quality-filtering the freshly fetched roles",
     "company_scoring": "WANT-scoring new candidate companies",
     "vacancy_scoring": "scoring new roles (cheap screen, then strong finalists)",
+    "screening_prep": "preparing undecided roles for evidence-based screening",
     "verdicts": "collecting your like / pass verdicts",
     "digest": "sending the tiered morning digest to Telegram",
     "publish": "publishing the dashboard (warns if the run was not clean)",
@@ -199,6 +202,7 @@ def _gate_preview(action: str | None, count) -> str:
         "screen_companies": f"relevance-screen {n} new company(ies) with cheap subagents",
         "score_companies": f"WANT-score {n} candidate company(ies)",
         "score_vacancies": f"score {n} role(s)",
+        "prepare_screening": f"prepare {n} role(s) for screening (facts + quotes, no score)",
         "verdicts": f"give a like / pass verdict on {n} role(s)",
     }.get(action, f"complete a {action} task")
 
@@ -2021,6 +2025,104 @@ def _h_vacancy_scoring(state, entry, opts):
     )
 
 
+def _screening_states(target_ids: list[str]) -> dict[str, str | None]:
+    """``{vacancy id: screening_state}`` for ``target_ids`` (NULL = never written)."""
+    from db_conn import get_conn
+
+    if not target_ids:
+        return {}
+    cur = get_conn().cursor()
+    cur.execute(
+        "SELECT id, screening_state FROM vacancy WHERE id = ANY(%s::uuid[])",
+        (list(target_ids),),
+    )
+    states = {str(r[0]): r[1] for r in cur.fetchall()}
+    cur.close()
+    return {vid: states.get(vid) for vid in target_ids}
+
+
+def _h_screening_prep(state, entry, opts):
+    """Screening preparation: one subagent read per undecided role,
+    producing quoted facts and a profile comparison — no score, no status.
+    Night-only: the attended run skips it (run ``prepare_screening.py`` by hand
+    or wait for the night). Same emit / resume / carry-over shape as the
+    scoring gates, keyed on ``screening_state = 'ready'``."""
+    if not opts.unattended:
+        return "skip", "screening prep is a night-run stage (prepare_screening.py --local by hand)"
+    if not entry.get("emitted"):
+        res = _run_capture(_py("prepare_screening.py") + ["--local"], opts)
+        if res.returncode != 0:
+            return (
+                "error",
+                f"prepare_screening --local exited {res.returncode}: {res.stderr[-400:]}",
+            )
+        if res.stderr.strip():
+            print(res.stderr.strip(), file=sys.stderr, flush=True)
+        try:
+            payloads = _extract_json(res.stdout or "[]")
+        except Exception:
+            return "error", "prepare_screening --local did not emit valid JSON"
+        if not payloads:
+            return "advance", "no undecided roles waiting for screening prep"
+        _write_payload(SCREEN_PREP_PAYLOAD_PATH, payloads)
+        entry["target_ids"] = [str(p["id"]) for p in payloads]
+        _unattended_scoring_gate(entry, "prepare", len(entry["target_ids"]))
+        return "gate", {
+            "action": "prepare_screening",
+            "phase": "prepare",
+            "count": len(payloads),
+            "payload_path": str(SCREEN_PREP_PAYLOAD_PATH),
+            "instructions": f"Prepare {len(payloads)} role(s) for screening.",
+        }
+
+    target_ids = entry.get("target_ids", [])
+    states = _screening_states(target_ids)
+    counts = {
+        "ready": sum(s == "ready" for s in states.values()),
+        "failed": sum(s == "failed" for s in states.values()),
+    }
+    entry["prepared"] = counts["ready"]
+    entry["failed"] = counts["failed"]
+    # A 'failed' row is a finished attempt (stored with its reason, retried on
+    # a later night once the posting or prompt changes) — only never-written
+    # rows are still outstanding tonight.
+    remaining_ids = {vid for vid, s in states.items() if s is None}
+    if remaining_ids:
+        remaining = [
+            p for p in _read_payload(SCREEN_PREP_PAYLOAD_PATH) if str(p.get("id")) in remaining_ids
+        ]
+        if not remaining:
+            return "error", (
+                f"screening payload {SCREEN_PREP_PAYLOAD_PATH} is missing or unreadable, but "
+                f"{len(remaining_ids)} role(s) are still unprepared. Re-run: --new or --resume "
+                "with the payload restored."
+            )
+        carried = _carry_over(
+            opts,
+            entry,
+            "prepare",
+            len(remaining_ids),
+            f"screening prep stopped early — {len(remaining_ids)} of {len(target_ids)} "
+            f"role(s) still unprepared ({counts['ready']} ready, {counts['failed']} failed); "
+            "they go first next night",
+        )
+        if carried:
+            return carried
+        _write_payload(SCREEN_PREP_PAYLOAD_PATH, remaining)
+        return "gate", {
+            "action": "prepare_screening",
+            "phase": "prepare",
+            "count": len(remaining),
+            "payload_path": str(SCREEN_PREP_PAYLOAD_PATH),
+            "instructions": f"Prepare {len(remaining)} role(s) for screening.",
+        }
+    return (
+        "advance",
+        f"screening prep complete — {counts['ready']} role(s) ready, {counts['failed']} failed "
+        "(stored with the reason, retried when the posting or prompt changes)",
+    )
+
+
 def _h_verdicts(state, entry, opts):
     n = _scored_unseen()
     if n == 0:
@@ -2110,6 +2212,7 @@ HANDLERS = {
     "filter": _h_filter,
     "company_scoring": _h_company_scoring,
     "vacancy_scoring": _h_vacancy_scoring,
+    "screening_prep": _h_screening_prep,
     "verdicts": _h_verdicts,
     "digest": _h_digest,
     "publish": _h_publish,
@@ -2124,7 +2227,12 @@ HANDLERS = {
 # scoring with a headless session and resuming. Every OTHER gate must be
 # answered inside its handler; one that reaches drive() anyway has no
 # unattended answer and aborts instead of waiting for a human (R15).
-UNATTENDED_EMITTABLE_GATES = {"screen_companies", "score_companies", "score_vacancies"}
+UNATTENDED_EMITTABLE_GATES = {
+    "screen_companies",
+    "score_companies",
+    "score_vacancies",
+    "prepare_screening",
+}
 
 
 def _safe_int(value) -> int | None:
@@ -2152,6 +2260,13 @@ def _run_counts(state: dict) -> dict:
         tids = _stage(state, "company_scoring").get("target_ids")
         if tids is not None:
             counts["companies_scored"] = len(tids)
+    except Exception:
+        pass
+    try:
+        prep = _stage(state, "screening_prep")
+        if prep.get("prepared") is not None:
+            counts["screening_ready"] = _safe_int(prep.get("prepared"))
+            counts["screening_failed"] = _safe_int(prep.get("failed")) or 0
     except Exception:
         pass
     return counts

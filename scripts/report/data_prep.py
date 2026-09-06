@@ -129,6 +129,33 @@ def compute_latency_metrics(conn=None) -> dict:
     }
 
 
+def _count_screening_processing() -> dict:
+    """Tonight's screening cohort that is not on the board yet: rows with no
+    ``screening_state`` and rows whose preparation ``failed``.
+
+    Same run-level exception as ``unscored_count``: these rows are NOT shipped in
+    ``groups`` (below the floor, unprepared), so the browser cannot derive the
+    count. The cohort predicate is prepare_screening's own (``load_pool`` +
+    ``eligible``) plus the ``[screening] window_days`` first_seen cut, so the
+    processing line and the night agree on who is "in tonight's cohort".
+    """
+
+    from database_supabase import _vacancy_has_column
+    import prepare_screening
+    import settings
+
+    # Migration-only columns (0027): a pre-migration install has no cohort.
+    if not _vacancy_has_column("screening_state"):
+        return {"unprepared": 0, "failed": 0}
+    window_days = int(settings.screening()["window_days"])
+    states = [
+        r.get("screening_state")
+        for r in prepare_screening.load_pool(window_days)
+        if prepare_screening.eligible(r)
+    ]
+    return {"unprepared": states.count(None), "failed": states.count("failed")}
+
+
 def _count_unscored(all_vacs: dict) -> int:
     """Count vacancies that are genuinely awaiting scoring.
 
@@ -403,6 +430,14 @@ def _build_group(
         # small "applied · <status>" block; the full section is a later ticket.
         # Projected to the display shape — artifact values and notes stay private.
         "application": _project_application((applications_by_vac or {}).get(v.get("id"))),
+        # RAW screening facts (migration 0027): the stored JSON object as the
+        # night prepared it (posting_facts / profile_comparison / unknowns), its
+        # state ("ready" | "failed" | None) and when it was prepared. The Screen
+        # view DERIVES its lists and groups from these in the browser — no
+        # pre-baked group ships (STRATEGY guardrail 9).
+        "screening": v.get("screening"),
+        "screening_state": v.get("screening_state"),
+        "screening_prepared_at": v.get("screening_prepared_at") or "",
     }
 
 
@@ -487,12 +522,19 @@ def prepare_report_data(db: dict = None) -> dict:
     # keeping every one of them shipped the whole rejected pile back onto the
     # board (a bulk pass of 190 roles reappeared in the list immediately).
     # Below the floor they are history, not work; the Archive tab still has them.
+    #
+    # A role the night PREPARED for screening (screening_state = 'ready') ships
+    # at any status and any score: the Screen view keeps a Kept / Put aside row
+    # visible after the decision, and the quoted evidence outranks the number.
     vacancies = [
         v
         for v in all_vacs.values()
-        if v.get("llm_score") is not None
-        and v.get("llm_score", -1) >= 0
-        and (v.get("status") in _ACTIVE_STATUSES or v.get("llm_score", -1) >= CATALOG_MIN_SCORE)
+        if v.get("screening_state") == "ready"
+        or (
+            v.get("llm_score") is not None
+            and v.get("llm_score", -1) >= 0
+            and (v.get("status") in _ACTIVE_STATUSES or v.get("llm_score", -1) >= CATALOG_MIN_SCORE)
+        )
     ]
     # Fetched-but-not-yet-scored vacancies (rows NOT shipped in `groups`) — the one
     # count the browser can't derive from the raw payload; see the docstring.
@@ -524,9 +566,12 @@ def prepare_report_data(db: dict = None) -> dict:
     return {
         "groups": groups,
         "org_colors": org_colors,
-        # Only the non-derivable run-level fact ships; every other dashboard number
-        # is derived in the browser from `groups` (KISS derivation, phase 2).
-        "stats": {"unscored_count": unscored_count},
+        # Only non-derivable run-level facts ship (rows NOT in `groups`); every
+        # other dashboard number is derived in the browser (KISS derivation).
+        "stats": {
+            "unscored_count": unscored_count,
+            "screening_processing": _count_screening_processing(),
+        },
     }
 
 

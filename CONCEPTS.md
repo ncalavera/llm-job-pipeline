@@ -2,7 +2,25 @@
 
 Shared domain vocabulary for this project — entities, named processes, and status concepts with project-specific meaning. Seeded with core domain vocabulary, then accretes as ce-compound and ce-compound-refresh process learnings; direct edits are fine. Glossary only, not a spec or catch-all.
 
+## Screening preparation
+
+### Prepared role
+An undecided vacancy the night run has read once with the strong model and stored as structured facts: duties, seniority, contract, location, and a list of requirements, each with its strength (required / preferred / unknown) and one sentence quoted verbatim from the posting, plus a comparison of each requirement with the profile (match / possible conflict / unknown). No score is produced and no status is written; the user screens on the evidence. Stored on the vacancy row (`screening`, state `ready` or `failed`) with a fingerprint of posting + prompt + profile, so an unchanged role is never re-prepared and a changed posting or profile invalidates the result.
+*Avoid:* screened (that is the user's action, not the machine's).
+
+### Failed preparation
+A prepared-role attempt the save layer rejected — a quote not found in the posting, a value outside the contract's vocabulary, or a subagent that could not read the payload. Stored with its reason so it stays visible and retryable; never fabricated to fill a field.
+
 ## Vacancy triage
+
+### Screening inbox
+The dashboard's Screen view (`?mode=screen`): three lists — To screen, Kept, Put aside — built in the browser from prepared roles' raw `screening` fields, grouped by a fixed vocabulary (language requirement, onsite or location constraint, seniority stated, eligibility unclear, all remaining). Lets the user act on many roles at once instead of opening each one; distinct from Triage, which is a one-at-a-time flow over already-liked roles.
+
+### Keep
+The Screening inbox's bulk action that sets status `liked` on every selected To screen row, one `/api/save` call per row. Moves the role from To screen to the Liked basket, same status as liking a role anywhere else in the dashboard.
+
+### Put aside
+The Screening inbox's bulk action that sets status `passed` on every selected To screen row. Distinct from a considered pass elsewhere in the dashboard only in how it was reached — in bulk, on evidence, without opening the role.
 
 ### Triage
 The review flow where the user turns liked vacancies into decisions — apply, research, network, or skip. Runs on the dashboard's Triage board (and a thin terminal equivalent); each decision is recorded as a stored vacancy status.
