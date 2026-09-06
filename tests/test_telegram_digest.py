@@ -21,6 +21,8 @@ import telegram_digest as td
 _MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "sql" / "migrations"
 MIGRATION_0020 = _MIGRATIONS_DIR / "0025_add_vacancy_scoring_excluded_reason.sqlite.sql"
 MIGRATION_0021 = _MIGRATIONS_DIR / "0026_add_vacancy_digest_dropped_at.sqlite.sql"
+MIGRATION_0027 = _MIGRATIONS_DIR / "0027_add_vacancy_screening.sqlite.sql"
+SCREENING_READY_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "screening-ready.json"
 
 
 ROW = {
@@ -242,6 +244,7 @@ def denv(tmp_path, monkeypatch):
     cur.execute(MIGRATION_0020.read_text(encoding="utf-8"))
     cur.execute(MIGRATION_0021.read_text(encoding="utf-8"))
     conn.commit()
+    conn._conn.executescript(MIGRATION_0027.read_text(encoding="utf-8"))
     cur.close()
 
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
@@ -734,6 +737,7 @@ DIGEST_KEYS = (
     "digest_no_progress",
     "digest_tier_top",
     "digest_tier_mid",
+    "digest_ready_to_screen",
 )
 
 
@@ -1016,3 +1020,56 @@ def test_skip_reasons_are_russian_in_russian(monkeypatch):
     finally:
         monkeypatch.delenv("PRODUCT_LANGUAGE", raising=False)
         importlib.reload(product_language)
+
+
+# ---------------------------------------------------------------------------
+# Ready-to-screen line (R13, KTD5): one predicate shared with the dashboard
+# ---------------------------------------------------------------------------
+
+
+def _seed_screening_fixture(db):
+    """Load tests/fixtures/screening-ready.json; return its expected ready ids."""
+    fx = json.loads(SCREENING_READY_FIXTURE.read_text(encoding="utf-8"))
+    conn = db.get_conn()
+    cur = conn.cursor()
+    for role in fx["roles"]:
+        vac_id = _seed(db, role["org"], role["title"], company_status=role["company_status"], status=role["status"])
+        cur.execute(
+            "UPDATE vacancy SET id = ?, screening_state = ? WHERE id = ?",
+            (role["id"], role["screening_state"], vac_id),
+        )
+    cur.close()
+    conn.commit()
+    return set(fx["expected_ready_ids"])
+
+
+def test_ready_to_screen_sql_selects_exactly_the_fixture_ready_set(denv):
+    expected = _seed_screening_fixture(denv.db)
+    cur = denv.db.get_conn().cursor()
+    cur.execute(td.SELECT_READY_TO_SCREEN_SQL)
+    assert {r[0] for r in cur.fetchall()} == expected
+    cur.close()
+
+
+def test_digest_says_how_many_roles_are_ready_to_screen(denv, monkeypatch):
+    monkeypatch.setattr(td, "DASHBOARD_BASE_URL", "https://jobs.example.test")
+    _seed_screening_fixture(denv.db)
+    td.cmd_send(_args())
+    body = "\n".join(_sent_texts(denv.calls))
+    assert "3 roles ready to screen" in body
+    assert 'href="https://jobs.example.test/?mode=screen"' in body
+
+
+def test_no_ready_line_when_nothing_is_ready(denv):
+    _seed(denv.db, "Org A", "Top Role", score=80)
+    td.cmd_send(_args())
+    assert "ready to screen" not in "\n".join(_sent_texts(denv.calls))
+
+
+def test_ready_line_carries_no_link_without_a_dashboard_base_url(denv, monkeypatch):
+    monkeypatch.setattr(td, "DASHBOARD_BASE_URL", "")
+    _seed_screening_fixture(denv.db)
+    td.cmd_send(_args())
+    body = "\n".join(_sent_texts(denv.calls))
+    assert "3 roles ready to screen" in body
+    assert "mode=screen" not in body

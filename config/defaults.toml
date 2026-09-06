@@ -672,6 +672,10 @@ dropped_max_lines = 25
 summary_fallback_chars = 600
 summary_max_chars = 1500
 message_max_chars = 4000
+# Public dashboard base URL for the "N roles ready to screen" link, without a
+# trailing slash (forge: "https://jobs.nikitasolovev.com"). Empty = no link.
+# Env DASHBOARD_BASE_URL overrides this.
+dashboard_base_url = ""
 
 # ===========================================================================
 # Job board aggregators — OPT-IN via the JOB_BOARDS env var (default: none).
