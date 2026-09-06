@@ -139,7 +139,6 @@ def _count_screening_processing() -> dict:
     ``eligible``) plus the ``[screening] window_days`` first_seen cut, so the
     processing line and the night agree on who is "in tonight's cohort".
     """
-    from datetime import timedelta
 
     from database_supabase import _vacancy_has_column
     import prepare_screening
@@ -148,7 +147,7 @@ def _count_screening_processing() -> dict:
     # Migration-only columns (0027): a pre-migration install has no cohort.
     if not _vacancy_has_column("screening_state"):
         return {"unprepared": 0, "failed": 0}
-    window_days = int(settings.screening().get("window_days", 14))
+    window_days = int(settings.screening()["window_days"])
     states = [
         r.get("screening_state")
         for r in prepare_screening.load_pool(window_days)
