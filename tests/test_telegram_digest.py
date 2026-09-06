@@ -1033,7 +1033,13 @@ def _seed_screening_fixture(db):
     conn = db.get_conn()
     cur = conn.cursor()
     for role in fx["roles"]:
-        vac_id = _seed(db, role["org"], role["title"], company_status=role["company_status"], status=role["status"])
+        vac_id = _seed(
+            db,
+            role["org"],
+            role["title"],
+            company_status=role["company_status"],
+            status=role["status"],
+        )
         cur.execute(
             "UPDATE vacancy SET id = ?, screening_state = ? WHERE id = ?",
             (role["id"], role["screening_state"], vac_id),

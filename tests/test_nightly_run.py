@@ -1120,7 +1120,9 @@ def test_no_pause_configured_runs(nr, monkeypatch):
 
 
 def test_wrapper_saves_results_while_file_only_agent_is_still_running(nr):
-    nr.set_steps([{"exit": 10, "action": "score_vacancies", "payload": _vac_payload(1)}, {"exit": 0}])
+    nr.set_steps(
+        [{"exit": 10, "action": "score_vacancies", "payload": _vac_payload(1)}, {"exit": 0}]
+    )
     nr.set_mode("score_slow")
     assert nr.mod.run_night() == 0
     # One periodic save before the child exits, then the idempotent final sweep.
@@ -1131,9 +1133,20 @@ def test_wrapper_saves_results_while_file_only_agent_is_still_running(nr):
 
 def test_python_saver_preserves_the_actual_phase_model(nr, monkeypatch):
     import scoring_settings
+
     monkeypatch.setattr(scoring_settings, "screen_model", lambda: "haiku")
     monkeypatch.setattr(scoring_settings, "scoring_model", lambda: "opus")
-    nr.set_steps([{"exit": 10, "action": "score_vacancies", "phase": "screen", "payload": _vac_payload(1)}, {"exit": 0}])
+    nr.set_steps(
+        [
+            {
+                "exit": 10,
+                "action": "score_vacancies",
+                "phase": "screen",
+                "payload": _vac_payload(1),
+            },
+            {"exit": 0},
+        ]
+    )
     assert nr.mod.run_night() == 0
     assert "--scored-by haiku" in nr.wrapper_log()
     assert "--scored-by opus" not in nr.wrapper_log()
@@ -1141,17 +1154,20 @@ def test_python_saver_preserves_the_actual_phase_model(nr, monkeypatch):
 
 def test_save_timeout_is_bounded_and_failed_results_remain_retryable(nr, monkeypatch):
     import settings
+
     night = nr.night_dir()
     night.mkdir(parents=True)
     ctx = nr.mod._Ctx(settings.nightly(), night, datetime.now() + timedelta(hours=1))
     calls = []
+
     def stalled(cmd, **kwargs):
-        calls.append(kwargs['timeout'])
-        raise subprocess.TimeoutExpired(cmd, kwargs['timeout'])
-    monkeypatch.setattr(nr.mod.subprocess, 'run', stalled)
-    assert nr.mod._sweep_save(ctx, 'score_vacancies', [], timeout=0.25) is False
+        calls.append(kwargs["timeout"])
+        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+
+    monkeypatch.setattr(nr.mod.subprocess, "run", stalled)
+    assert nr.mod._sweep_save(ctx, "score_vacancies", [], timeout=0.25) is False
     assert calls == [0.25]
-    assert 'TimeoutExpired' in nr.wrapper_log()
+    assert "TimeoutExpired" in nr.wrapper_log()
 
 
 def test_save_cmd_uses_prepared_by_for_screening_with_and_without_model():

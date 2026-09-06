@@ -395,7 +395,11 @@ def test_screening_prepared_at_datetime_becomes_iso_text():
     import json
     import database_supabase as ds
 
-    row = {"id": "x", "company_id": "c", "screening_prepared_at": datetime(2026, 9, 6, 17, 51, tzinfo=timezone.utc)}
+    row = {
+        "id": "x",
+        "company_id": "c",
+        "screening_prepared_at": datetime(2026, 9, 6, 17, 51, tzinfo=timezone.utc),
+    }
     vac = ds._row_to_vacancy(dict(row)) if hasattr(ds, "_row_to_vacancy") else None
     assert vac is not None
     json.dumps(vac["screening_prepared_at"])

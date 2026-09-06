@@ -211,8 +211,16 @@ def _seed(db, vac_id, desc=POSTING, company_status="candidate", first_seen=None,
     cur.execute(
         "INSERT INTO vacancy (id, dedup_hash, company_id, title, full_description, status, "
         "first_seen, last_seen, llm_score) VALUES (%s, %s, %s, %s, %s, 'unseen', %s, %s, %s)",
-        (vac_id, f"h-{vac_id}", cid, "Programme Manager", desc, first_seen or _days_ago(0),
-         _days_ago(0), score),
+        (
+            vac_id,
+            f"h-{vac_id}",
+            cid,
+            "Programme Manager",
+            desc,
+            first_seen or _days_ago(0),
+            _days_ago(0),
+            score,
+        ),
     )
     conn.commit()
     cur.close()
@@ -343,12 +351,16 @@ def test_ready_unchanged_is_skipped_but_changed_posting_and_failed_return(env, c
 
 def test_pilot_keeps_round_robin_and_pilot_limit(env, capsys, monkeypatch, tmp_path):
     db, ps = env
-    _override(monkeypatch, tmp_path, """
+    _override(
+        monkeypatch,
+        tmp_path,
+        """
         [screening]
         pilot_limit = 2
         window_days = 14
         nightly_limit = 400
-    """)
+    """,
+    )
     low = [str(uuid.uuid4()) for _ in range(3)]
     for i, vid in enumerate(low):
         _seed(db, vid, first_seen=_days_ago(10 - i), score=5, company_status="active")
@@ -363,11 +375,15 @@ def test_screening_settings_read_window_and_limit_from_an_override_file(monkeypa
     import settings
 
     assert settings.screening() == {"pilot_limit": 50, "window_days": 14, "nightly_limit": 400}
-    _override(monkeypatch, tmp_path, """
+    _override(
+        monkeypatch,
+        tmp_path,
+        """
         [screening]
         window_days = 7
         nightly_limit = 600
-    """)
+    """,
+    )
     try:
         assert settings.screening() == {"pilot_limit": 50, "window_days": 7, "nightly_limit": 600}
     finally:

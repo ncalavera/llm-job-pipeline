@@ -226,11 +226,15 @@ def _claude_cmd(action: str, night_dir, cfg: dict, phase: str) -> list[str]:
         f"/jobs-night {action} {night_dir} {phase}",
         "--model",
         _orchestrator_model(),
-        "--permission-mode", "dontAsk",
-        "--tools", "Read,Write,Glob,Agent,TaskOutput,TaskStop",
-        "--allowed-tools", "Read,Write,Glob,Agent(night-scorer),TaskOutput,TaskStop",
+        "--permission-mode",
+        "dontAsk",
+        "--tools",
+        "Read,Write,Glob,Agent,TaskOutput,TaskStop",
+        "--allowed-tools",
+        "Read,Write,Glob,Agent(night-scorer),TaskOutput,TaskStop",
         "--strict-mcp-config",
-        "--mcp-config", '{"mcpServers":{}}',
+        "--mcp-config",
+        '{"mcpServers":{}}',
         # Repo settings only: the user settings.json is shared with the Mac through
         # the wiki, and a Mac-only hook there blocked every Bash call on 2026-09-03.
         "--setting-sources",
@@ -628,7 +632,9 @@ def _sweep_save(ctx: _Ctx, action: str, out_files: list[Path], timeout: float = 
     cmd = _save_cmd(action, [str(f) for f in out_files], model)
     ctx.log("save sweep: " + " ".join(cmd))
     try:
-        res = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=max(0.1, timeout))
+        res = subprocess.run(
+            cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=max(0.1, timeout)
+        )
         tail = (res.stdout or res.stderr or "").strip()[-300:]
         ctx.log(f"save sweep exited {res.returncode}: {tail}")
         return res.returncode == 0
@@ -669,13 +675,13 @@ def _run_session(ctx: _Ctx, action: str, phase: str) -> None:
     import scoring_settings
 
     model_fn = (
-        scoring_settings.company_screen_model if action == "screen_companies"
-        else scoring_settings.screen_model if action == "score_vacancies" and phase == "screen"
+        scoring_settings.company_screen_model
+        if action == "screen_companies"
+        else scoring_settings.screen_model
+        if action == "score_vacancies" and phase == "screen"
         else scoring_settings.scoring_model
     )
-    (ctx.night_dir / "session.json").write_text(
-        json.dumps({"model": model_fn()}), encoding="utf-8"
-    )
+    (ctx.night_dir / "session.json").write_text(json.dumps({"model": model_fn()}), encoding="utf-8")
 
     budget = min(
         float(ctx.cfg[spec["limit_key"]]) * 60.0,
