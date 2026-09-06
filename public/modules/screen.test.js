@@ -50,6 +50,7 @@ function fakeIo(db, members, failFor) {
       db[mid] = status;
       return prev;
     },
+    current: (mid) => db[mid],
     save: async (mid, status) => {
       saved.push([mid, status]);
       return !(failFor && failFor.has(mid));
@@ -272,4 +273,27 @@ test("the row head is a 44px checkbox target with the title, org, location, fact
 
 test("an empty list renders No roles left in this list.", () => {
   assert.match(screenListHtml([], { t }), /No roles left in this list\./);
+});
+
+
+test("undo leaves a decision made after the bulk action untouched", async () => {
+  const db = { a: "unseen", b: "unseen" };
+  const io = fakeIo(db, {});
+  await bulkSet(["a", "b"], "liked", io);
+  db.a = "applied"; // the user moved on before pressing Undo
+  const r = await undoLast(io);
+  assert.equal(db.a, "applied");
+  assert.equal(db.b, "unseen");
+  assert.equal(r.restored, 1);
+  assert.equal(r.total, 2);
+});
+
+test("a failing member save re-saves the member that had landed", async () => {
+  const db = { a: "unseen", a2: "unseen" };
+  const io = fakeIo(db, { a: ["a", "a2"] }, new Set(["a2"]));
+  const r = await bulkSet(["a"], "liked", io);
+  assert.equal(r.saved, 0);
+  assert.deepEqual(db, { a: "unseen", a2: "unseen" });
+  // forward saves for both members, then one compensating save for the member that landed
+  assert.deepEqual(io.saved, [["a", "liked"], ["a2", "liked"], ["a", "unseen"]]);
 });

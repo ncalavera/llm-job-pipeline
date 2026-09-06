@@ -617,7 +617,7 @@ function applyRouteFromUrl() {
       cp.classList.add("active");
     }
     setNavActiveSection(sectionForMode("company"));
-  } else if (route.mode && LEAF_SECTION_ID[route.mode]) {
+  } else if (route.mode && Object.prototype.hasOwnProperty.call(LEAF_SECTION_ID, route.mode)) {
     // ?mode=<leaf> (the digest's "ready to screen" link) — open that leaf.
     switchMode(route.mode);
   } else {
@@ -1133,7 +1133,7 @@ function initDefault() {
       cp.classList.add("active");
     }
     setNavActiveSection(sectionForMode("company"));
-  } else if (route.mode && LEAF_SECTION_ID[route.mode]) {
+  } else if (route.mode && Object.prototype.hasOwnProperty.call(LEAF_SECTION_ID, route.mode)) {
     switchMode(route.mode);
   } else {
     switchMode(state.currentMode);

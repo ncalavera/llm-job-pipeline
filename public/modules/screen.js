@@ -24,7 +24,7 @@ import {
   scheduleRender,
 } from "./state.js";
 import { saveToServer } from "./api.js";
-import { escHtml } from "./helpers.js";
+import { escHtml, showToastText } from "./helpers.js";
 import { T } from "./i18n.js";
 import {
   screenLists,
@@ -104,9 +104,11 @@ const liveIo = {
   members: (id) => {
     const g = groupsById.get(id);
     const ids = [id].concat((g && g.member_ids) || []);
-    return ids.filter((mid, i) => state.dbData[mid] && ids.indexOf(mid) === i);
+    const seen = new Set();
+    return ids.filter((mid) => state.dbData[mid] && !seen.has(mid) && seen.add(mid));
   },
   set: (mid, status) => setStatusLocal([mid], status)[mid],
+  current: (mid) => state.dbData[mid] && state.dbData[mid].status,
   save: saveToServer,
 };
 
@@ -152,7 +154,11 @@ export async function undoLast(io) {
   if (!op) return null;
   let restored = 0;
   for (const row of op.rows) {
-    const ok = await writeRow(row.member_ids, (mid) => row.previous[mid], io);
+    // Only members still carrying this operation's status are restored; a
+    // decision made after the bulk action (say, "applied") is never overwritten.
+    const still = row.member_ids.filter((mid) => io.current(mid) === op.status);
+    if (!still.length) continue;
+    const ok = await writeRow(still, (mid) => row.previous[mid], io);
     if (ok) restored++;
   }
   return { restored, total: op.rows.length };
@@ -454,18 +460,9 @@ function processingHtml(t) {
 
 let wired = false;
 let lastVisible = [];
-let toastTimer = null;
 
 function toast(text, cls) {
-  const el = document.querySelector(".toast");
-  if (!el) return;
-  el.className = "toast toast-" + cls;
-  el.textContent = text;
-  requestAnimationFrame(() =>
-    requestAnimationFrame(() => el.classList.add("visible")),
-  );
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove("visible"), 2500);
+  showToastText(text, cls, 2500);
 }
 
 export function renderScreen() {
