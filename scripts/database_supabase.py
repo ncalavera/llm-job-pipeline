@@ -1431,7 +1431,7 @@ def _row_to_vacancy(row) -> dict:
     for df in ("first_seen", "last_seen", "deadline"):
         if isinstance(vac.get(df), date):
             vac[df] = vac[df].isoformat()
-    for df in ("status_updated_at", "created_at", "updated_at", "llm_scored_at"):
+    for df in ("status_updated_at", "created_at", "updated_at", "llm_scored_at", "screening_prepared_at"):
         if isinstance(vac.get(df), datetime):
             vac[df] = vac[df].isoformat()
     # screening (migration 0027) is jsonb on Postgres (a dict) but TEXT on SQLite.

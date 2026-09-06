@@ -386,3 +386,17 @@ def test_processing_counts_cover_tonights_cohort_only(tmp_path, monkeypatch):
     data = _payload(monkeypatch)
     assert {g["id"] for g in data["groups"]} == set()
     assert data["stats"]["screening_processing"] == {"unprepared": 1, "failed": 1}
+
+
+def test_screening_prepared_at_datetime_becomes_iso_text():
+    """Postgres returns timestamptz as datetime; the snapshot is json.dumps'd
+    (2026-09-06 live publish: 'Object of type datetime is not JSON serializable')."""
+    from datetime import datetime, timezone
+    import json
+    import database_supabase as ds
+
+    row = {"id": "x", "company_id": "c", "screening_prepared_at": datetime(2026, 9, 6, 17, 51, tzinfo=timezone.utc)}
+    vac = ds._row_to_vacancy(dict(row)) if hasattr(ds, "_row_to_vacancy") else None
+    assert vac is not None
+    json.dumps(vac["screening_prepared_at"])
+    assert vac["screening_prepared_at"].startswith("2026-09-06T17:51")
