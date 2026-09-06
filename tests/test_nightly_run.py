@@ -1152,3 +1152,16 @@ def test_save_timeout_is_bounded_and_failed_results_remain_retryable(nr, monkeyp
     assert nr.mod._sweep_save(ctx, 'score_vacancies', [], timeout=0.25) is False
     assert calls == [0.25]
     assert 'TimeoutExpired' in nr.wrapper_log()
+
+
+def test_save_cmd_uses_prepared_by_for_screening_with_and_without_model():
+    """prepare_screening.py only accepts --prepared-by; the sweep always passes a model."""
+    import nightly_run as nr
+
+    with_model = nr._save_cmd("prepare_screening", ["a.json"], "opus")
+    assert "--prepared-by" in with_model and "--scored-by" not in with_model
+    assert with_model[with_model.index("--prepared-by") + 1] == "opus"
+    without = nr._save_cmd("prepare_screening", ["a.json"], None)
+    assert "--prepared-by" in without and "--scored-by" not in without
+    scored = nr._save_cmd("score_vacancies", ["a.json"], "opus")
+    assert "--scored-by" in scored and "--prepared-by" not in scored

@@ -272,15 +272,17 @@ def _save_extra(action: str, model: str | None = None) -> list[str]:
     with the night's scoring model (R16: never --archive, never a status)."""
     if action not in ("score_vacancies", "prepare_screening"):
         return []
+    # The flag is chosen by action first: prepare_screening.py only accepts
+    # --prepared-by, and the sweep always passes the session model.
+    flag = "--prepared-by" if action == "prepare_screening" else "--scored-by"
     if model is not None:
-        return ["--scored-by", model]
+        return [flag, model]
     try:
         from scoring_settings import scoring_model
 
         model = scoring_model()
     except Exception:
         model = "opus"
-    flag = "--prepared-by" if action == "prepare_screening" else "--scored-by"
     return [flag, model]
 
 
