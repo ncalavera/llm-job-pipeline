@@ -6133,7 +6133,7 @@ body::after {
   --scr-accent: var(--cobalt);
 }
 .scr-group--unclear {
-  --scr-accent: var(--amber);
+  --scr-accent: #c026d3; /* magenta: far from the onsite coral, so the dots read apart */
 }
 .scr-group--all {
   --scr-accent: var(--pine);
@@ -6352,6 +6352,29 @@ body::after {
   }
   .scr-footer .scr-btn {
     padding: 8px 10px;
+    white-space: nowrap;
+  }
+}
+
+/* Phone: the group chips scroll sideways in one row so the first role card
+   sits near the fold instead of 900px down (Screen view, UX critic 2026-09-06). */
+@media (max-width: 640px) {
+  .scr-groups {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+    margin-left: -16px;
+    margin-right: -16px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .scr-groups::-webkit-scrollbar {
+    display: none;
+  }
+  .scr-group {
+    flex: 0 0 auto;
     white-space: nowrap;
   }
 }
