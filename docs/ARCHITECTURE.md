@@ -125,7 +125,11 @@ reading logs:
   work undone — a scoring session that stopped early and carried the remainder
   over; its note says how many of how many. The `screening_prep` stage reports
   ready / failed counts (`vacancy.screening_state`); the morning digest repeats
-  them as a processing line, separate from the human queue.
+  them as a processing line, separate from the human queue. A second digest
+  line, "N roles ready to screen", links to `?mode=screen` and shares one SQL
+  predicate (`status = 'unseen'`, `screening_state = 'ready'`, company not
+  `inactive`) with the Screen view's To screen list, so the two counts never
+  drift apart.
 - **Health tab** (dashboard) — `public/modules/health.js` renders four blocks
   from the live `api/health-detail.js` endpoint (read-only, no LLM spend):
   - **Boards** — per enabled board: freshness, failure streak, vacancy count,
@@ -149,6 +153,21 @@ reading logs:
   source string in `public/modules/architecture-diagram.js`, rendered on the
   Health tab (Mermaid lazy-loaded from a CDN on first open) and kept in sync
   with this document. **Any change to the pipeline's shape updates both.**
+
+### Screening inbox data
+
+`screening_prep` writes four columns on `vacancy`: `screening` (the prepared
+role's facts JSON — see [`CONCEPTS.md`](../CONCEPTS.md)), `screening_state`
+(`ready` or `failed`), `screening_prepared_at`, and `screening_fingerprint`
+(posting + prompt + profile, so an unchanged role is never re-prepared). The
+dashboard snapshot ships `screening`, `screening_state` and
+`screening_prepared_at` as raw per-role fields — no pre-baked group, the
+browser derives lists and groups — plus a run-level `stats.screening_processing`
+count (prepared / failed against the night's cohort). The Screen view
+(`public/modules/screen.js`, `?mode=screen` on the self-hosted dashboard)
+reads these fields to build To screen / Kept / Put aside lists; bulk Keep and
+Put aside write back through `/api/save` per row, same as every other status
+change.
 
 ## Two backends
 

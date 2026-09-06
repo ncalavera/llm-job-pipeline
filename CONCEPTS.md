@@ -13,6 +13,15 @@ A prepared-role attempt the save layer rejected — a quote not found in the pos
 
 ## Vacancy triage
 
+### Screening inbox
+The dashboard's Screen view (`?mode=screen`): three lists — To screen, Kept, Put aside — built in the browser from prepared roles' raw `screening` fields, grouped by a fixed vocabulary (language requirement, onsite or location constraint, seniority stated, eligibility unclear, all remaining). Lets the user act on many roles at once instead of opening each one; distinct from Triage, which is a one-at-a-time flow over already-liked roles.
+
+### Keep
+The Screening inbox's bulk action that sets status `liked` on every selected To screen row, one `/api/save` call per row. Moves the role from To screen to the Liked basket, same status as liking a role anywhere else in the dashboard.
+
+### Put aside
+The Screening inbox's bulk action that sets status `passed` on every selected To screen row. Distinct from a considered pass elsewhere in the dashboard only in how it was reached — in bulk, on evidence, without opening the role.
+
 ### Triage
 The review flow where the user turns liked vacancies into decisions — apply, research, network, or skip. Runs on the dashboard's Triage board (and a thin terminal equivalent); each decision is recorded as a stored vacancy status.
 
