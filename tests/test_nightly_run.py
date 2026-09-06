@@ -124,6 +124,10 @@ FAKE_CLAUDE = textwrap.dedent(
     if mode == "score_all":
         for n in ins:
             write(n, json.dumps(result(n)))
+    elif mode == "score_slow":
+        for n in ins:
+            write(n, json.dumps(result(n)))
+        time.sleep(5.2)
     elif mode == "score_half":
         for n in ins[: max(1, len(ins) // 2)]:
             write(n, json.dumps(result(n)))
@@ -639,9 +643,10 @@ def test_both_company_gates_use_their_own_save_command(nr, monkeypatch):
     assert "screen_candidates.py --save --files" in log
     assert "score_companies.py --save --files" in log
     assert "gate trip 2/8" in log
-    # FIRECRAWL_API_KEY reaches the COMPANY gates' sessions (KTD3).
+    # Credentials remain in the trusted Python stages.
     env = json.loads((nr.night_dir() / "claude_env-screen_companies.json").read_text())
-    assert env.get("FIRECRAWL_API_KEY") == "fc-secret-key"
+    assert "FIRECRAWL_API_KEY" not in env
+    assert "SUPABASE_DB_URL" not in env
 
 
 def test_gate_phase_reaches_the_session_prompt(nr):
@@ -1039,8 +1044,11 @@ def test_dry_run_prints_the_dispatch_table_with_masked_commands(nr, capsys):
     out = capsys.readouterr().out
     for action in ("screen_companies", "score_companies", "score_vacancies"):
         assert action in out
-    assert "--dangerously-skip-permissions" in out
-    assert "--disallowed-tools WebFetch,WebSearch" in out
+    assert "--dangerously-skip-permissions" not in out
+    assert "--permission-mode dontAsk" in out
+    assert "--tools Read,Write,Glob,Agent,TaskOutput,TaskStop" in out
+    assert "--strict-mcp-config" in out
+    assert "--disallowed-tools Bash,PowerShell,WebFetch,WebSearch,Edit,NotebookEdit" in out
     assert (
         "--setting-sources project,local" in out
     )  # user settings (shared with the Mac) never load
@@ -1109,3 +1117,38 @@ def test_no_pause_configured_runs(nr, monkeypatch):
     nr.set_steps([{"exit": 0}])
     assert nr.mod.run_night() == 0
     assert nr.driver_calls()
+
+
+def test_wrapper_saves_results_while_file_only_agent_is_still_running(nr):
+    nr.set_steps([{"exit": 10, "action": "score_vacancies", "payload": _vac_payload(1)}, {"exit": 0}])
+    nr.set_mode("score_slow")
+    assert nr.mod.run_night() == 0
+    # One periodic save before the child exits, then the idempotent final sweep.
+    assert nr.wrapper_log().count("save sweep:") == 2
+    config = json.loads((nr.night_dir() / "session.json").read_text())
+    assert config["model"]
+
+
+def test_python_saver_preserves_the_actual_phase_model(nr, monkeypatch):
+    import scoring_settings
+    monkeypatch.setattr(scoring_settings, "screen_model", lambda: "haiku")
+    monkeypatch.setattr(scoring_settings, "scoring_model", lambda: "opus")
+    nr.set_steps([{"exit": 10, "action": "score_vacancies", "phase": "screen", "payload": _vac_payload(1)}, {"exit": 0}])
+    assert nr.mod.run_night() == 0
+    assert "--scored-by haiku" in nr.wrapper_log()
+    assert "--scored-by opus" not in nr.wrapper_log()
+
+
+def test_save_timeout_is_bounded_and_failed_results_remain_retryable(nr, monkeypatch):
+    import settings
+    night = nr.night_dir()
+    night.mkdir(parents=True)
+    ctx = nr.mod._Ctx(settings.nightly(), night, datetime.now() + timedelta(hours=1))
+    calls = []
+    def stalled(cmd, **kwargs):
+        calls.append(kwargs['timeout'])
+        raise subprocess.TimeoutExpired(cmd, kwargs['timeout'])
+    monkeypatch.setattr(nr.mod.subprocess, 'run', stalled)
+    assert nr.mod._sweep_save(ctx, 'score_vacancies', [], timeout=0.25) is False
+    assert calls == [0.25]
+    assert 'TimeoutExpired' in nr.wrapper_log()

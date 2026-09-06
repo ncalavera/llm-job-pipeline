@@ -15,6 +15,8 @@
 export const ARCHITECTURE_OVERVIEW = `flowchart LR
     SRC[Job boards +<br/>company career sites] -->|fetch daily| DB[(Database)]
     DB --> SCORE[Filter +<br/>AI scoring]
+    SCORE --> N[File-only night scorers]
+    N -->|results polled and saved by Python| DB
     SCORE --> YOU[Dashboard / Telegram<br/>you triage]
     YOU -->|likes & passes| LEARN[Learning loop]
     LEARN -->|tunes filters| DB

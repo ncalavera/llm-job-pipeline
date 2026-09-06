@@ -22,42 +22,27 @@ the interactive habits of `/jobs-new`.
 1. **Never ask a question.** There is no human. If something is ambiguous,
    take the safe direction (skip the item, record it failed in the log) and
    keep going.
-2. **Subagent model comes from settings, per gate and phase.** Pick the
-   settings function for THIS session's `<gate>` + `<phase>`:
-   - `score_vacancies` + `screen` → `screen_model()` (the cheap first pass)
-   - `score_vacancies` + `escalate` → `scoring_model()` (the strong re-score)
-   - `screen_companies` + `screen` → `company_screen_model()`
-   - `score_companies` + `score` → `scoring_model()`
-   Resolve it ONCE:
-   `"$NIGHTLY_PYTHON" -c "import sys;sys.path.insert(0,'scripts');from scoring_settings import <function>;print(<function>())"`
-   and pass that model to EVERY scoring subagent. Do not hardcode a model name.
-   `$NIGHTLY_PYTHON` is exported by the wrapper and points at the
-   interpreter that runs the pipeline (the venv). Use it for EVERY shell
-   command in this session — a bare `python3` is the system interpreter
-   and has none of the project dependencies.
+2. **Subagent model comes from the wrapper.** Read `<night_dir>/session.json`
+   once and pass its `model` to EVERY scoring subagent. Python resolved
+   `screen_model()`, `scoring_model()` or `company_screen_model()` for this
+   gate and phase before starting you. Never use a shell to discover it.
 3. **Spawn only the `night-scorer` agent type.** One payload file = one
    `night-scorer` subagent. No other agent type, ever. At most **5 subagents
    at a time** (rolling waves). 1 item = 1 subagent — batching is untested here.
 4. **File in, file out.** Each subagent reads its own payload
    `<night_dir>/score_in/NNN.json` and writes its one result to
    `<night_dir>/score_out/NNN.json` (same NNN). Subagents have Read and Write
-   only — you (the orchestrator) run every shell command.
-5. **Save after EVERY wave of five, never once at the end** (a dead session
-   must not lose finished work). Always the `--files` form — a malformed file
-   is named and skipped, the rest still save:
-   - `score_vacancies` gate:
-     `"$NIGHTLY_PYTHON" scripts/score_vacancies.py --save --scored-by "<model>" --files <night_dir>/score_out/<wave files>`
-   - `score_companies` gate:
-     `"$NIGHTLY_PYTHON" scripts/score_companies.py --save --files <night_dir>/score_out/<wave files>`
-   - `screen_companies` gate:
-     `"$NIGHTLY_PYTHON" scripts/screen_candidates.py --save --files <night_dir>/score_out/<wave files>`
+   only. Neither you nor a subagent has shell, database or network tools.
+5. **Write each result immediately.** The Python wrapper saves completed JSON
+   files while you work and performs a final sweep when you stop or time out.
+   Never run a save command yourself. A malformed file is skipped independently.
 6. **Log after every wave.** Append one line per wave to
-   `<night_dir>/scoring_log.md`: time, gate, items in the wave, saved count,
+   `<night_dir>/scoring_log.md`: time, gate, items in the wave, written count,
    failures with their NNN. Findings and anomalies go HERE, not to an issue
    tracker.
 7. **Never resume the driver.** The wrapper owns the driver loop: it runs
    `--resume` itself after your session ends. When every score_in item is
-   saved or recorded failed in the log, finish the End-of-session step below
+   written or recorded failed in the log, finish the End-of-session step below
    and STOP.
 
 ## Forbidden — these end the session as a failure if you do them
@@ -73,11 +58,11 @@ the interactive habits of `/jobs-new`.
 
 ## Gate protocol
 
-Common to every gate: list `<night_dir>/score_in/*.json`. Each payload file
+Common to every gate: use Glob with path `<night_dir>/score_in` and pattern `*.json`. Each payload file
 carries its own `system_prompt` + `user_msg` and the real DB ids. Give each
 `night-scorer` subagent (model from override 2): the payload path, the exact
 result path `<night_dir>/score_out/NNN.json`, and the result shape for the
-gate (below). Run waves of 5: spawn, wait, save the wave (override 5), log the
+gate (below). Run waves of 5: spawn, wait, write results (override 5), log the
 wave (override 6), next wave. A subagent that returns garbage or writes no
 file: record it failed in the log and move on — the driver re-prompts for
 whatever is missing tomorrow.
@@ -94,7 +79,7 @@ Result file — ONE flat JSON object:
 ```
 
 Pure-fit scoring: judge role fit only — geography/visa were handled by the
-filter stage. Save with the `score_vacancies.py` line from override 5; the
+filter stage. Python saves with `score_vacancies.py`; the
 `--scored-by` model is the same resolved model every subagent used.
 
 ### prepare_screening
@@ -123,7 +108,7 @@ with the payload's `id`):
 {"id": "<from the payload>", "enrichment": { ...the subagent's scoring JSON... }}
 ```
 
-Save with the `score_companies.py` line from override 5. Scored companies land
+Python saves with `score_companies.py` after you write results. Scored companies land
 in Pending for the human's morning review — you never approve or reject one.
 
 ### screen_companies
@@ -137,10 +122,10 @@ name alone → keep. 1 company = 1 subagent. Result file — ONE JSON object:
 {"id": "<from the payload>", "keep": true, "reason": "<one short sentence>"}
 ```
 
-Save with the `screen_candidates.py` line from override 5. An unanswered
+Python saves with `screen_candidates.py` after you write results. An unanswered
 company stays kept — the safe direction.
 
 ## End of session
 
-After the last wave is saved and logged, append a final `scoring_log.md`
-line: items total, saved, failed. Then stop — the wrapper resumes the driver.
+After the last wave is written and logged, append a final `scoring_log.md`
+line: items total, written, failed. Then stop — the wrapper resumes the driver.
