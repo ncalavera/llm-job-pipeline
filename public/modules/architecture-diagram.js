@@ -16,8 +16,8 @@ export const ARCHITECTURE_OVERVIEW = `flowchart LR
     SRC[Job boards +<br/>company career sites] -->|fetch daily| DB[(Database)]
     DB --> SCORE[Filter +<br/>AI scoring]
     SCORE --> YOU[Dashboard / Telegram<br/>you triage]
-    YOU -->|likes & passes| LEARN[Learning loop]
-    LEARN -->|tunes filters| DB
+    YOU -->|decisions + optional reasons| LEARN[Learning review]
+    LEARN -->|user-approved changes only| DB
     DB --> OBS[Health tab +<br/>run report card]
 
     style DB fill:#1E40AF,color:#fff

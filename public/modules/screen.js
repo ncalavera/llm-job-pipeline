@@ -16,6 +16,7 @@
 
 import {
   state,
+  API_BASE,
   groups,
   groupsById,
   stats,
@@ -26,11 +27,11 @@ import {
 import { saveToServer } from "./api.js";
 import { escHtml, showToastText } from "./helpers.js";
 import { T } from "./i18n.js";
+import { reviewBatches, batchConcern } from "./screen-batches.js";
 import {
   screenLists,
   screenGroups,
   screenRequirements,
-  SCREEN_ACTIVITIES,
   screenMatches,
   screenMatchRequirements,
   screenDateFacts,
@@ -42,6 +43,12 @@ import {
 // ---------------------------------------------------------------------------
 
 export const view = {
+  batch: null,
+  reason: "",
+  feedback: null,
+  feedbackState: "",
+  notes: null,
+  notesError: false,
   list: "toScreen", // "toScreen" | "kept" | "putAside"
   group: "all", // one of SCREEN_GROUP_KEYS; filters the To screen list only
   filters: {},
@@ -61,6 +68,7 @@ export function setList(name) {
   if (view.list === name) return;
   view.list = name;
   view.page = 0;
+  view.reason = "";
   view.selected.clear();
 }
 
@@ -130,6 +138,85 @@ export function screenModel(
     pages,
     unclassified: cohort.filter((g) => !g.screening?.work_profile).length,
   };
+}
+
+export const REVIEW_SIZE = 5;
+
+export function reviewModel(roles, getStatus) {
+  const lists = screenLists(roles, getStatus);
+  const batches = reviewBatches(roles, getStatus);
+  if (view.list === "toScreen" && !batches.some((b) => b.key === view.batch)) {
+    view.batch = batches[0]?.key || null;
+    view.page = 0;
+  }
+  const batch = batches.find((b) => b.key === view.batch);
+  const matching =
+    view.list === "toScreen"
+      ? batch?.roles || []
+      : roles.filter((g) => lists[view.list].has(g.id));
+  const pages = Math.max(1, Math.ceil(matching.length / REVIEW_SIZE));
+  view.page = Math.min(view.page, pages - 1);
+  const rows = matching.slice(
+    view.page * REVIEW_SIZE,
+    (view.page + 1) * REVIEW_SIZE,
+  );
+  const visibleIds = rows.map((g) => g.id);
+  for (const id of view.selected)
+    if (!visibleIds.includes(id)) view.selected.delete(id);
+  return {
+    lists,
+    batches,
+    batch,
+    rows,
+    visibleIds,
+    pages,
+    total: matching.length,
+  };
+}
+
+export function feedbackFor(op, reason, groupLabel, id) {
+  const text = String(reason || "").trim();
+  if (!op?.rows?.length || !text) return null;
+  return {
+    id,
+    vacancy_ids: [...new Set(op.rows.flatMap((r) => r.member_ids))],
+    decision: op.status,
+    reason: text,
+    group_label: groupLabel,
+  };
+}
+
+let recoveredFeedback = false;
+function persistFeedback() {
+  try {
+    if (view.feedback)
+      localStorage.setItem(
+        "screen-pending-feedback",
+        JSON.stringify(view.feedback),
+      );
+    else localStorage.removeItem("screen-pending-feedback");
+  } catch {
+    /* The visible retry remains available if browser storage is blocked. */
+  }
+}
+async function saveReviewFeedback() {
+  if (!view.feedback) return;
+  persistFeedback();
+  view.feedbackState = "saving";
+  try {
+    const response = await fetch(API_BASE + "/api/screening-feedback", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(view.feedback),
+    });
+    if (!response.ok) throw new Error("Feedback save failed");
+    view.feedback = null;
+    view.feedbackState = "saved";
+    persistFeedback();
+  } catch {
+    view.feedbackState = "failed";
+  }
 }
 
 /** "{n} of {m}" → values. */
@@ -393,20 +480,24 @@ export function screenRowHtml(g, opts) {
     escHtml(org) +
     (loc ? " · " + escHtml(loc) : "") +
     "</div>" +
-    (seen ? '<div class="scr-work">' + escHtml(seen) + "</div>" : "") +
+    (!o.compact && seen
+      ? '<div class="scr-work">' + escHtml(seen) + "</div>"
+      : "") +
     (expiry ? '<div class="scr-expired">' + escHtml(expiry) + "</div>" : "") +
     (fact ? '<div class="scr-row-fact">' + escHtml(fact) + "</div>" : "") +
-    '<div class="scr-work">' +
-    escHtml(
-      [
-        activities,
-        facts.seniority && flowLabel(facts.seniority, t),
-        facts.work_mode && flowLabel(facts.work_mode, t),
-      ]
-        .filter(Boolean)
-        .join(" · "),
-    ) +
-    "</div>" +
+    (o.compact
+      ? '<div class="scr-concern">' + escHtml(batchConcern(g, t)) + "</div>"
+      : '<div class="scr-work">' +
+        escHtml(
+          [
+            activities,
+            facts.seniority && flowLabel(facts.seniority, t),
+            facts.work_mode && flowLabel(facts.work_mode, t),
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        ) +
+        "</div>") +
     (relevant.length
       ? '<div class="scr-badges">' +
         relevant.map((r) => requirementBadgeHtml(r, t)).join("") +
@@ -469,12 +560,12 @@ export function screenFooterHtml(o) {
     ) +
     "</button>" +
     '<button type="button" class="scr-btn scr-btn--keep" id="scrKeep"' +
-    dis(off || none || o.list === "kept") +
+    dis(off || o.decisionBlocked || none || o.list === "kept") +
     ">" +
     escHtml(t("screen_keep", "Keep")) +
     "</button>" +
     '<button type="button" class="scr-btn scr-btn--aside" id="scrAside"' +
-    dis(off || none || o.list === "putAside") +
+    dis(off || o.decisionBlocked || none || o.list === "putAside") +
     ">" +
     escHtml(t("screen_put_aside", "Put aside")) +
     "</button>" +
@@ -586,175 +677,6 @@ function flowLabel(value, t) {
   return t(key, SCREEN_FLOW_TEXT[key] || String(value).replaceAll("_", " "));
 }
 
-function filtersHtml(roles, t) {
-  const label = (key) => t(key, SCREEN_FLOW_TEXT[key]);
-  const select = (key, title, values) =>
-    "<label>" +
-    escHtml(label(title)) +
-    '<select data-filter="' +
-    key +
-    '"><option value="">' +
-    escHtml(label("screen_all_values")) +
-    "</option>" +
-    values
-      .map(
-        (value) =>
-          '<option value="' +
-          escHtml(value) +
-          '"' +
-          (view.filters[key] === value ? " selected" : "") +
-          ">" +
-          escHtml(
-            key === "deadline" && value === "open"
-              ? label("screen_no_passed_deadline")
-              : key === "technical" && value === "specialist"
-                ? label("screen_technical_specialist")
-                : flowLabel(value, t),
-          ) +
-          "</option>",
-      )
-      .join("") +
-    "</select></label>";
-  const input = (key, title) =>
-    "<label>" +
-    escHtml(label(title)) +
-    '<input type="search" data-filter="' +
-    key +
-    '" value="' +
-    escHtml(view.filters[key] || "") +
-    '"></label>';
-  const questionKeys = {
-    screen_enjoy: ["activity", "purpose"],
-    screen_take: [
-      "age",
-      "deadline",
-      "workMode",
-      "kind",
-      "strength",
-      "requirementText",
-      "finding",
-    ],
-    screen_do: ["technical", "seniority"],
-  };
-  const fieldset = (title, content) => {
-    const active = questionKeys[title].filter(
-      (key) => view.filters[key],
-    ).length;
-    return (
-      '<details class="scr-question" data-question="' +
-      title +
-      '"' +
-      (view.filterOpen.has(title) ? " open" : "") +
-      "><summary>" +
-      escHtml(label(title)) +
-      (active ? ' <span class="scr-count">' + active + "</span>" : "") +
-      '</summary><div class="scr-question-fields">' +
-      content +
-      "</div></details>"
-    );
-  };
-  const seniorities = [
-    ...new Set(
-      roles.map((g) => g.screening?.posting_facts?.seniority || "unknown"),
-    ),
-  ].sort();
-  return (
-    '<fieldset class="scr-filters"' +
-    (view.busy ? " disabled" : "") +
-    ">" +
-    fieldset(
-      "screen_enjoy",
-      select("activity", "screen_activity", [
-        ...SCREEN_ACTIVITIES,
-        "unknown",
-        "unclassified",
-      ]) +
-        select("purpose", "screen_purpose", [
-          "direct_impact",
-          "enabling_impact",
-          "commercial",
-          "unknown",
-        ]),
-    ) +
-    fieldset(
-      "screen_take",
-      select("age", "screen_age", ["last7", "last14", "last30", "older30"]) +
-        select("deadline", "screen_deadline_filter", [
-          "open",
-          "expired",
-          "unknown",
-        ]) +
-        select("workMode", "screen_work_mode", [
-          "remote",
-          "hybrid",
-          "onsite",
-          "unknown",
-        ]) +
-        select("kind", "screen_requirement_kind", [
-          "language",
-          "location",
-          "authorisation",
-          "skill",
-          "domain",
-          "experience",
-          "education",
-          "other",
-        ]) +
-        select("strength", "screen_strength_filter", [
-          "required",
-          "preferred",
-          "unknown",
-        ]) +
-        input("requirementText", "screen_requirement_text") +
-        select("finding", "screen_finding", [
-          "match",
-          "possible_conflict",
-          "unknown",
-        ]),
-    ) +
-    fieldset(
-      "screen_do",
-      select("technical", "screen_technical", [
-        "coordination",
-        "practical",
-        "specialist",
-        "unknown",
-      ]) + select("seniority", "screen_seniority_filter", seniorities),
-    ) +
-    input("search", "screen_search") +
-    '<button type="button" class="scr-btn" id="scrClearFilters">' +
-    escHtml(label("screen_clear_filters")) +
-    "</button></fieldset>"
-  );
-}
-
-function pageHtml(model, t) {
-  return (
-    '<nav class="scr-pagination" aria-label="' +
-    escHtml(t("screen_batches", "Screening batches")) +
-    '"><button class="scr-btn" data-page="' +
-    (view.page - 1) +
-    '"' +
-    (view.busy || view.page === 0 ? " disabled" : "") +
-    ">" +
-    escHtml(t("screen_previous", "Previous")) +
-    "</button><span>" +
-    escHtml(
-      fill(t("screen_page", "Page {n} of {m}"), {
-        n: view.page + 1,
-        m: model.pages,
-      }),
-    ) +
-    '</span><button class="scr-btn" data-page="' +
-    (view.page + 1) +
-    '"' +
-    (view.busy || view.page + 1 >= model.pages ? " disabled" : "") +
-    ">" +
-    escHtml(t("screen_next", "Next batch")) +
-    "</button></nav>"
-  );
-}
-
 function processingHtml(t) {
   const p = stats && stats.screening_processing;
   if (!p) return "";
@@ -787,91 +709,234 @@ function toast(text, cls) {
   showToastText(text, cls, 2500);
 }
 
+function notesHtml() {
+  if (!view.notes) return "";
+  return (
+    '<div class="scr-review-notes">' +
+    (view.notes.length
+      ? view.notes
+          .map(
+            (n) =>
+              "<article><strong>" +
+              escHtml(n.group_label) +
+              " · " +
+              escHtml(
+                n.decision === "liked"
+                  ? T("screen_keep", "Keep")
+                  : T("screen_put_aside", "Put aside"),
+              ) +
+              "</strong><p>" +
+              escHtml(n.reason) +
+              "</p><small>" +
+              escHtml(
+                n.status === "reviewed"
+                  ? T("screen_note_reviewed", "Reviewed by AI")
+                  : T("screen_note_pending", "Waiting for AI review"),
+              ) +
+              "</small>" +
+              (n.review_outcome
+                ? "<p>" + escHtml(n.review_outcome) + "</p>"
+                : "") +
+              "</article>",
+          )
+          .join("")
+      : "<p>" +
+        escHtml(T("screen_no_notes", "No review notes yet.")) +
+        "</p>") +
+    "</div>"
+  );
+}
+
 export function renderScreen() {
   const el = document.getElementById("screenSection");
   if (!el) return;
-  const model = screenModel(groups, getGroupStatus);
+  if (!recoveredFeedback) {
+    recoveredFeedback = true;
+    try {
+      const pending = JSON.parse(
+        localStorage.getItem("screen-pending-feedback") || "null",
+      );
+      if (
+        pending?.id &&
+        Array.isArray(pending.vacancy_ids) &&
+        typeof pending.reason === "string"
+      ) {
+        view.feedback = pending;
+        view.feedbackState = "failed";
+      }
+    } catch {
+      /* No stored draft to recover. */
+    }
+  }
+  const model = reviewModel(groups, getGroupStatus);
   lastVisible = model.visibleIds;
-  const rows = model.visibleIds.map((id) => groupsById.get(id)).filter(Boolean);
+  const label = model.batch?.label || "All reviewed";
+  const pendingFeedback = view.feedbackState === "failed";
+  const dis = view.busy ? " disabled" : "";
   el.innerHTML =
     '<div class="scr-head"><h2 class="scr-title">' +
-    escHtml(T("screen_flow_title", SCREEN_FLOW_TEXT.screen_flow_title)) +
-    "</h2>" +
-    processingHtml(T) +
-    "</div>" +
+    escHtml(T("screen_review_title", "Review a few roles together")) +
+    "</h2></div>" +
     tabsHtml(model.lists, T) +
-    filtersHtml(groups, T) +
+    '<div class="scr-review-layout">' +
+    (view.list === "toScreen"
+      ? '<nav class="scr-batch-nav" aria-label="Job functions">' +
+        model.batches
+          .map(
+            (b) =>
+              '<button type="button" class="scr-batch" data-batch="' +
+              escHtml(b.key) +
+              '" aria-pressed="' +
+              (view.batch === b.key) +
+              '"' +
+              dis +
+              "><strong>" +
+              escHtml(T("screen_batch_" + b.key, b.label)) +
+              "</strong><span>" +
+              b.roles.length +
+              " " +
+              escHtml(T("screen_roles", "roles")) +
+              "</span></button>",
+          )
+          .join("") +
+        "</nav>"
+      : "") +
+    '<section class="scr-review-sheet"><h3>' +
+    escHtml(
+      view.list === "toScreen"
+        ? T("screen_batch_" + model.batch?.key, label)
+        : T(LIST_KEYS[view.list], view.list),
+    ) +
+    "</h3>" +
     '<p class="scr-hint">' +
-    escHtml(T("screen_filter_hint", SCREEN_FLOW_TEXT.screen_filter_hint)) +
+    escHtml(
+      view.list === "toScreen"
+        ? T(
+            "screen_batch_reason_" + model.batch?.key,
+            model.batch?.reason || "Nothing waiting in this list.",
+          )
+        : T("screen_recover_hint", "Your decisions are reversible."),
+    ) +
     "</p>" +
-    '<p class="scr-hint">' +
+    '<p class="scr-matches" tabindex="-1">' +
     escHtml(
       fill(
         T(
-          "screen_work_availability",
-          SCREEN_FLOW_TEXT.screen_work_availability,
+          "screen_batch_showing",
+          "Showing {start}–{end} of {total} in this group",
         ),
-        { n: model.unclassified },
+        {
+          start: model.total ? view.page * REVIEW_SIZE + 1 : 0,
+          end: Math.min((view.page + 1) * REVIEW_SIZE, model.total),
+          total: model.total,
+        },
       ),
     ) +
     "</p>" +
-    '<p class="scr-matches" role="status" tabindex="-1">' +
-    escHtml(
-      fill(T("screen_matches", SCREEN_FLOW_TEXT.screen_matches), {
-        n: model.matchingIds.length,
-        m: model.lists[view.list].size,
-      }),
-    ) +
-    "</p>" +
-    pageHtml(model, T) +
     '<div class="scr-list">' +
-    screenListHtml(rows, { t: T }) +
+    (model.rows.length
+      ? model.rows
+          .map((g) =>
+            screenRowHtml(g, {
+              t: T,
+              compact: true,
+              checked: view.selected.has(g.id),
+              open: view.open.has(g.id),
+            }),
+          )
+          .join("")
+      : "<p>" +
+        escHtml(T("screen_empty", "No roles left in this list.")) +
+        "</p>") +
     "</div>" +
-    pageHtml(model, T) +
-    '<p class="scr-notice" role="status" aria-live="polite">' +
+    '<div class="scr-pagination"><button class="scr-btn" data-page="' +
+    (view.page - 1) +
+    '"' +
+    (view.page === 0 || view.busy ? " disabled" : "") +
+    ">" +
+    escHtml(T("screen_previous", "Previous")) +
+    '</button><button class="scr-btn" data-page="' +
+    ((view.page + 1) % model.pages) +
+    '"' +
+    (model.pages === 1 || view.busy ? " disabled" : "") +
+    ">" +
+    escHtml(T("screen_review_later", "Review later · next few")) +
+    "</button></div>" +
+    '<label class="scr-reason">' +
+    escHtml(
+      T(
+        "screen_reason_label",
+        "Why? Optional — saved with your next decision.",
+      ),
+    ) +
+    '<textarea id="scrReason" maxlength="4000" rows="2"' +
+    dis +
+    ">" +
+    escHtml(view.reason) +
+    "</textarea></label>" +
+    '<p class="scr-feedback-state" role="status">' +
+    (pendingFeedback
+      ? escHtml(
+          T(
+            "screen_feedback_failed",
+            "Your job decisions were saved, but your reason was not. Retry before another decision.",
+          ),
+        ) +
+        ' <button class="scr-btn" id="scrRetryFeedback">' +
+        escHtml(T("screen_retry", "Retry")) +
+        "</button>"
+      : view.feedbackState === "saved"
+        ? escHtml(
+            T(
+              "screen_feedback_saved",
+              "Reason saved · waiting for AI review. No preference changed.",
+            ),
+          )
+        : "") +
+    "</p>" +
+    '<p class="scr-notice" role="status">' +
     escHtml(view.notice) +
     "</p>" +
     screenFooterHtml({
       t: T,
       selected: view.selected.size,
-      visible: rows.length,
+      visible: model.rows.length,
       list: view.list,
       loaded: state.statusesLoaded,
       busy: view.busy,
+      decisionBlocked: pendingFeedback,
       canUndo: history.length > 0,
-    });
+    }) +
+    "</section></div>" +
+    '<details class="scr-preparation"><summary>' +
+    escHtml(T("screen_preparation", "Preparation status")) +
+    "</summary>" +
+    processingHtml(T) +
+    "</details>" +
+    '<button class="scr-btn" id="scrLoadNotes">' +
+    escHtml(T("screen_past_notes", "Past review notes")) +
+    "</button>" +
+    (view.notesError
+      ? '<p role="alert">' +
+        escHtml(
+          T("screen_notes_failed", "Could not load review notes. Try again."),
+        ) +
+        "</p>"
+      : "") +
+    notesHtml();
   if (!wired) {
     el.addEventListener("click", onClick);
     el.addEventListener("keydown", onKeydown);
     el.addEventListener("toggle", onToggle, true);
-    el.addEventListener("change", onFilterChange);
     el.addEventListener("input", (e) => {
-      if (e.target.matches("input[data-filter]")) onFilterChange(e);
+      if (e.target.id === "scrReason") view.reason = e.target.value;
     });
     wired = true;
   }
 }
 
-function onFilterChange(e) {
-  const key = e.target.getAttribute("data-filter");
-  if (!key || view.busy || (view.filters[key] || "") === e.target.value) return;
-  const start = e.target.selectionStart;
-  const end = e.target.selectionEnd;
-  setFilter(key, e.target.value);
-  renderScreen();
-  const control = document.querySelector('[data-filter="' + key + '"]');
-  control?.focus();
-  if (start != null) control?.setSelectionRange(start, end);
-}
-
 function onToggle(e) {
   if (!e.target.isConnected) return;
-  const question = e.target?.getAttribute("data-question");
-  if (question) {
-    if (e.target.open) view.filterOpen.add(question);
-    else view.filterOpen.delete(question);
-    return;
-  }
   const id = e.target && e.target.getAttribute("data-evidence");
   if (!id) return;
   if (e.target.open) view.open.add(id);
@@ -892,7 +957,38 @@ function onClick(e) {
   const t = e.target;
   const hit = (sel) => t.closest && t.closest(sel);
   let el;
-  if ((el = hit("[data-page]"))) {
+  if (hit("#scrLoadNotes")) {
+    view.busy = true;
+    renderScreen();
+    fetch(API_BASE + "/api/screening-feedback", { credentials: "same-origin" })
+      .then(async (r) => {
+        if (!r.ok) throw new Error("notes");
+        const data = await r.json();
+        if (!Array.isArray(data.items)) throw new Error("notes");
+        view.notes = data.items;
+        view.notesError = false;
+      })
+      .catch(() => {
+        view.notesError = true;
+      })
+      .finally(() => {
+        view.busy = false;
+        renderScreen();
+      });
+  } else if (hit("#scrRetryFeedback")) {
+    view.busy = true;
+    renderScreen();
+    saveReviewFeedback().finally(() => {
+      view.busy = false;
+      renderScreen();
+    });
+  } else if ((el = hit("[data-batch]"))) {
+    view.batch = el.getAttribute("data-batch");
+    view.reason = "";
+    setPage(0);
+    renderScreen();
+  } else if ((el = hit("[data-page]"))) {
+    view.reason = "";
     setPage(Number(el.getAttribute("data-page")));
     renderScreen();
     const row =
@@ -900,10 +996,6 @@ function onClick(e) {
       document.querySelector("#screenSection .scr-matches");
     row?.focus({ preventScroll: true });
     row?.scrollIntoView({ block: "start" });
-  } else if (hit("#scrClearFilters")) {
-    view.filters = {};
-    setFilter("search", "");
-    renderScreen();
   } else if ((el = hit("[data-toggle]"))) {
     e.preventDefault();
     toggleSelected(el.getAttribute("data-toggle"));
@@ -933,12 +1025,38 @@ function onClick(e) {
 }
 
 async function runBulk(status) {
-  if (view.busy || !state.statusesLoaded) return;
+  if (view.busy || view.feedback || !state.statusesLoaded) return;
   const ids = lastVisible.filter((id) => view.selected.has(id));
   if (!ids.length) return;
   view.busy = true;
   renderScreen();
-  const r = await bulkSet(ids, status);
+  const groupLabel =
+    view.list === "toScreen"
+      ? reviewModel(groups, getGroupStatus).batch?.label || "Other roles"
+      : T(LIST_KEYS[view.list], view.list);
+  let r;
+  try {
+    r = await bulkSet(ids, status);
+    const note = feedbackFor(
+      r.op,
+      view.reason,
+      groupLabel,
+      crypto.randomUUID(),
+    );
+    if (note) {
+      view.feedback = note;
+      await saveReviewFeedback();
+    }
+    if (r.saved) view.reason = "";
+  } catch {
+    view.notice = T(
+      "screen_save_failed",
+      "Could not finish saving. Check the list before retrying.",
+    );
+    view.busy = false;
+    renderScreen();
+    return;
+  }
   view.busy = false;
   view.selected.clear();
   view.notice = fill(T("screen_saved", "{n} of {m} saved"), {

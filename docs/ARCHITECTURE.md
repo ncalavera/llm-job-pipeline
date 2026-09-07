@@ -236,3 +236,20 @@ The core needs only `requests`, `beautifulsoup4` and `python-dateutil`
 - **`anthropic`** — only for `score_companies.py --api`, the direct-SDK scoring
   path. The normal daily flow scores through your coding agent's subagents
   (`--local`), which needs no API key and no `anthropic` package.
+
+
+### Functional screening review and feedback
+
+The Screen view groups ready undecided roles by function from posting facts and titles,
+showing five at a time. Existing profile comparison evidence orders rows inside each
+function (explicit matches before unknowns, required possible conflicts last); it is
+not a new fit score. Unknown functions remain accessible. No score floor or automatic
+personal exclusion is introduced. Keep/Put aside use the existing status path.
+
+An optional reason is saved after successful status writes to `screening_feedback`
+(migration0028), with the exact successful member IDs and an idempotency key.
+Failed reasons remain retryable, including after refresh when browser storage works.
+GET/POST `/api/screening-feedback` share the dashboard authentication boundary.
+Agents read pending feedback and current statuses before proposing any preference
+change. Reviewed feedback records an outcome and session; no automatic consumer or
+preference mutation is enabled. See [review-feedback.md](review-feedback.md).

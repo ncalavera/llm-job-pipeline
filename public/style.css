@@ -6464,3 +6464,101 @@ body::after {
   font-weight: 600;
   margin-top: 5px;
 }
+
+/* Small functional review groups: one working sheet, details on demand. */
+.scr-review-layout {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 20px;
+  margin-top: 20px;
+  align-items: start;
+}
+.scr-batch-nav {
+  display: grid;
+  gap: 8px;
+}
+.scr-batch {
+  text-align: left;
+  font: inherit;
+  min-height: 70px;
+  padding: 14px;
+  background: var(--card);
+  color: var(--sky-text);
+  border: 1px solid var(--border, #d4d4d4);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.scr-batch strong,
+.scr-batch span {
+  display: block;
+}
+.scr-batch span {
+  font-size: 13px;
+  margin-top: 6px;
+}
+.scr-batch[aria-pressed="true"] {
+  border-color: var(--cobalt);
+  background: color-mix(in srgb, var(--cobalt) 9%, var(--card));
+}
+.scr-batch:focus-visible,
+.scr-reason textarea:focus-visible {
+  outline: 3px solid var(--cobalt);
+  outline-offset: 3px;
+}
+.scr-review-sheet {
+  min-width: 0;
+  padding: 20px;
+  border-radius: 16px;
+  background: var(--card);
+}
+.scr-review-sheet h3 {
+  margin: 0;
+  font-size: 22px;
+}
+.scr-reason {
+  display: grid;
+  gap: 8px;
+  margin: 20px 0 0;
+  font-size: 14px;
+}
+.scr-reason textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font: inherit;
+  padding: 10px;
+  border: 1px solid var(--border, #bbb);
+  border-radius: 8px;
+  color: inherit;
+  background: var(--card);
+}
+.scr-concern {
+  font-size: 13px;
+  margin-top: 8px;
+  color: var(--muted, #625e56);
+}
+.scr-review-sheet .scr-footer {
+  position: static;
+  flex-wrap: wrap;
+}
+.scr-preparation {
+  margin-top: 24px;
+  font-size: 13px;
+}
+@media (max-width: 700px) {
+  .scr-review-layout {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .scr-batch-nav {
+    display: flex;
+    overflow-x: auto;
+    padding: 3px 3px 8px;
+  }
+  .scr-batch {
+    flex: 0 0 155px;
+  }
+  .scr-review-sheet {
+    padding: 12px;
+  }
+}

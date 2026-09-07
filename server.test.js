@@ -787,25 +787,35 @@ const REPORT_ROW = {
 test("GET /api/reports lists reports newest first, with an excerpt not a body", () => {
   // The list must stay one cheap response however long the library gets: a
   // hundred full reports would be megabytes, and the list shows none of it.
-  return withStubDb([["FROM report ORDER BY updated_at DESC", [REPORT_ROW]]], async () => {
-    const res = await call({ url: "/api/reports" });
-    assert.equal(res.statusCode, 200);
-    const { reports } = JSON.parse(res.body);
-    assert.equal(reports.length, 1);
-    assert.equal(reports[0].slug, "ea-funding-2026");
-    assert.equal(reports[0].excerpt, "Three funders matter here.");
-    assert.equal(reports[0].body_md, undefined, "the list leaked a full body");
-  });
+  return withStubDb(
+    [["FROM report ORDER BY updated_at DESC", [REPORT_ROW]]],
+    async () => {
+      const res = await call({ url: "/api/reports" });
+      assert.equal(res.statusCode, 200);
+      const { reports } = JSON.parse(res.body);
+      assert.equal(reports.length, 1);
+      assert.equal(reports[0].slug, "ea-funding-2026");
+      assert.equal(reports[0].excerpt, "Three funders matter here.");
+      assert.equal(
+        reports[0].body_md,
+        undefined,
+        "the list leaked a full body",
+      );
+    },
+  );
 });
 
 test("GET /api/reports/<slug> returns the full report", () => {
-  return withStubDb([["FROM report WHERE slug = $1", [REPORT_ROW]]], async (seen) => {
-    const res = await call({ url: "/api/reports/ea-funding-2026" });
-    assert.equal(res.statusCode, 200);
-    const { report } = JSON.parse(res.body);
-    assert.equal(report.body_md, REPORT_ROW.body_md);
-    assert.deepEqual(seen[0].params, ["ea-funding-2026"]);
-  });
+  return withStubDb(
+    [["FROM report WHERE slug = $1", [REPORT_ROW]]],
+    async (seen) => {
+      const res = await call({ url: "/api/reports/ea-funding-2026" });
+      assert.equal(res.statusCode, 200);
+      const { report } = JSON.parse(res.body);
+      assert.equal(report.body_md, REPORT_ROW.body_md);
+      assert.deepEqual(seen[0].params, ["ea-funding-2026"]);
+    },
+  );
 });
 
 test("GET /api/reports/<slug> answers 404 for a report that is not there", () => {
@@ -921,7 +931,9 @@ test("REPORT_KINDS mirrors scripts/statuses.py", () => {
   // accepted on one side and refused on the other is a write that fails only
   // for some reports.
   const py = readFileSync(join(ROOT, "scripts/statuses.py"), "utf8");
-  const block = py.match(/^REPORT_KINDS: tuple\[str, \.\.\.\] = \(([\s\S]*?)\n\)/m);
+  const block = py.match(
+    /^REPORT_KINDS: tuple\[str, \.\.\.\] = \(([\s\S]*?)\n\)/m,
+  );
   assert.ok(block, "REPORT_KINDS not found in scripts/statuses.py");
   const pyKinds = [...block[1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
   assert.deepEqual([...REPORT_KINDS].sort(), pyKinds.sort());
@@ -964,7 +976,10 @@ test("the excerpt collapses the newlines a markdown file is full of", () => {
 // --- Slug routing ----------------------------------------------------------
 
 test("the detail route reads the slug out of the path", () => {
-  assert.equal(reportSlugFromPath("/api/reports/ea-funding-2026"), "ea-funding-2026");
+  assert.equal(
+    reportSlugFromPath("/api/reports/ea-funding-2026"),
+    "ea-funding-2026",
+  );
   assert.equal(reportSlugFromPath("/api/reports/a%20b"), "a b");
 });
 
@@ -1008,12 +1023,15 @@ test("the excerpt skips a fenced diagram and finds the real prose", () => {
 });
 
 test("the excerpt skips headings at any depth, not only the title", () => {
-  const excerpt = reportExcerpt("# Title\n\n## Section\n\n### Deeper\n\nReal prose.");
+  const excerpt = reportExcerpt(
+    "# Title\n\n## Section\n\n### Deeper\n\nReal prose.",
+  );
   assert.equal(excerpt, "Real prose.");
 });
 
 test("the excerpt skips horizontal rules and table rows", () => {
-  const body = "# T\n\n---\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nThe sentence.";
+  const body =
+    "# T\n\n---\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nThe sentence.";
   assert.equal(reportExcerpt(body), "The sentence.");
 });
 
@@ -1022,17 +1040,17 @@ test("the excerpt strips inline markers that would show as literal characters", 
   const excerpt = reportExcerpt(
     "# T\n\n**Date:** 2026-07-06. See [the notes](https://example.org) and `run.py`.",
   );
-  assert.equal(
-    excerpt,
-    "Date: 2026-07-06. See the notes and run.py.",
-  );
+  assert.equal(excerpt, "Date: 2026-07-06. See the notes and run.py.");
   assert.ok(!excerpt.includes("*"));
   assert.ok(!excerpt.includes("`"));
   assert.ok(!excerpt.includes("https://"));
 });
 
 test("the excerpt drops list and quote markers but keeps the text", () => {
-  assert.equal(reportExcerpt("# T\n\n- First point\n- Second point"), "First point Second point");
+  assert.equal(
+    reportExcerpt("# T\n\n- First point\n- Second point"),
+    "First point Second point",
+  );
   assert.equal(reportExcerpt("# T\n\n1. Step one"), "Step one");
   assert.equal(reportExcerpt("# T\n\n> A quotation."), "A quotation.");
 });
@@ -1040,4 +1058,167 @@ test("the excerpt drops list and quote markers but keeps the text", () => {
 test("a report that is nothing but a diagram yields an empty excerpt", () => {
   // Empty is honest. A row of box-drawing characters is not.
   assert.equal(reportExcerpt("# T\n\n```\n┌──┐\n└──┘\n```"), "");
+});
+
+// Feedback exercises the actual HTTP handler, including retries after a response
+// is lost; it must never write vacancy statuses or turn a reason into a rule.
+test("screening feedback validates input before touching the database", async () => {
+  const valid = {
+    id: "00000000-0000-4000-8000-000000000001",
+    vacancy_ids: ["00000000-0000-4000-8000-000000000002"],
+    decision: "liked",
+    reason: "Build systems",
+    group_label: "Operations",
+  };
+  await withStubDb([], async (seen) => {
+    for (const body of [
+      null,
+      {},
+      { ...valid, id: "bad" },
+      { ...valid, vacancy_ids: [] },
+      { ...valid, vacancy_ids: ["bad"] },
+      { ...valid, vacancy_ids: [...valid.vacancy_ids, ...valid.vacancy_ids] },
+      { ...valid, vacancy_ids: Array(101).fill(valid.vacancy_ids[0]) },
+      { ...valid, decision: "applied" },
+      { ...valid, reason: " " },
+      { ...valid, reason: "x".repeat(4001) },
+      { ...valid, group_label: "x".repeat(201) },
+    ]) {
+      const res = await call({
+        url: "/api/screening-feedback",
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      assert.equal(res.statusCode, 400);
+    }
+    assert.equal(seen.length, 0);
+  });
+});
+
+test("screening feedback stores once, preserves exact reason, and rejects conflicting retries", async () => {
+  const body = {
+    id: "00000000-0000-4000-8000-000000000001",
+    vacancy_ids: ["00000000-0000-4000-8000-000000000002"],
+    decision: "passed",
+    reason: "  Required experience is missing.\nNot a permanent exclusion.  ",
+    group_label: "Operations",
+  };
+  await withStubDb([], async () => {
+    const records = new Map();
+    const seen = [];
+    setPool({
+      async query(sql, params) {
+        seen.push(sql);
+        if (sql.includes("INSERT INTO screening_feedback")) {
+          assert.match(sql, /ON CONFLICT \(id\) DO NOTHING/);
+          assert.match(sql, /FROM vacancy WHERE id = ANY/);
+          const [id, ids, decision, reason, group_label, checkedIds, count] =
+            params;
+          assert.deepEqual(JSON.parse(ids), checkedIds);
+          assert.equal(count, checkedIds.length);
+          if (!records.has(id))
+            records.set(id, {
+              id,
+              vacancy_ids: JSON.parse(ids),
+              decision,
+              reason,
+              group_label,
+              status: "pending",
+              created_at: "2026-01-01T00:00:00Z",
+              reviewed_at: null,
+              review_outcome: null,
+              review_session: null,
+            });
+          return { rows: [] };
+        }
+        assert.match(sql, /SELECT \* FROM screening_feedback/);
+        return {
+          rows: params
+            ? [records.get(params[0])].filter(Boolean)
+            : [...records.values()],
+        };
+      },
+    });
+    for (let i = 0; i < 2; i++) {
+      const res = await call({
+        url: "/api/screening-feedback",
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      assert.equal(res.statusCode, 200);
+      assert.equal(JSON.parse(res.body).item.reason, body.reason);
+      assert.equal(JSON.parse(res.body).item.status, "pending");
+    }
+    assert.equal(records.size, 1);
+    const conflict = await call({
+      url: "/api/screening-feedback",
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: { ...body, reason: "Different reason" },
+    });
+    assert.equal(conflict.statusCode, 409);
+    assert.equal(records.get(body.id).reason, body.reason);
+    const list = await call({ url: "/api/screening-feedback" });
+    assert.equal(JSON.parse(list.body).items.length, 1);
+    assert.equal(list.headers["Cache-Control"], "no-store");
+    assert.equal(list.headers["Access-Control-Allow-Origin"], undefined);
+    assert.match(seen.at(-1), /ORDER BY created_at DESC, id DESC LIMIT 100/);
+    assert.ok(seen.every((sql) => !/UPDATE vacancy|user_profile/.test(sql)));
+  });
+});
+
+test("screening feedback reports unknown vacancies and database failures", async () => {
+  const body = {
+    id: "00000000-0000-4000-8000-000000000001",
+    vacancy_ids: ["00000000-0000-4000-8000-000000000002"],
+    decision: "liked",
+    reason: "Useful experience",
+    group_label: "Product",
+  };
+  await withStubDb(
+    [
+      ["INSERT INTO screening_feedback", []],
+      ["SELECT * FROM screening_feedback", []],
+    ],
+    async () => {
+      const res = await call({
+        url: "/api/screening-feedback",
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      assert.equal(res.statusCode, 404);
+    },
+  );
+  await withStubDb(
+    [["INSERT INTO screening_feedback", new Error("private database detail")]],
+    async () => {
+      const res = await call({
+        url: "/api/screening-feedback",
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      assert.equal(res.statusCode, 500);
+      assert.deepEqual(JSON.parse(res.body), { error: "Database error" });
+    },
+  );
+});
+
+test("feedback rejects cross-origin simple form requests before touching the database", async () => {
+  await withStubDb([], async (seen) => {
+    const res = await call({
+      url: "/api/screening-feedback",
+      method: "POST",
+      headers: {
+        origin: "https://foreign.example",
+        "content-type": "text/plain",
+      },
+      body: {},
+    });
+    assert.equal(res.statusCode, 415);
+    assert.equal(seen.length, 0);
+  });
 });

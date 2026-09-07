@@ -415,3 +415,63 @@ test("technical specialist evidence has a technical label, distinct from special
     /Specialist technical expertise<blockquote>Own production architecture/,
   );
 });
+
+const { reviewModel, REVIEW_SIZE, feedbackFor } = await import("./screen.js");
+test("functional review shows five roles and only selection from the current batch survives", () => {
+  view.batch = "product";
+  view.list = "toScreen";
+  view.page = 0;
+  view.selected.clear();
+  const roles = Array.from({ length: 7 }, (_, i) => ({
+    ...lang("p" + i),
+    title: "Product Manager " + i,
+  }));
+  roles.push({ ...lang("ops"), title: "Head of Operations" });
+  let m = reviewModel(roles, () => "unseen");
+  assert.equal(m.rows.length, REVIEW_SIZE);
+  toggleSelectAll(m.visibleIds);
+  view.batch = "operations";
+  view.page = 0;
+  m = reviewModel(roles, () => "unseen");
+  assert.deepEqual(m.visibleIds, ["ops"]);
+  assert.equal(view.selected.size, 0);
+  m = reviewModel(roles, (g) => (g.id === "ops" ? "declined" : "unseen"));
+  assert(!m.visibleIds.includes("ops"));
+  assert.equal(m.batch.key, "product");
+});
+test("feedback refers only to successfully saved members and never creates a preference", () => {
+  const op = { status: "passed", rows: [{ id: "a", member_ids: ["a", "a2"] }] };
+  assert.deepEqual(
+    feedbackFor(op, "  Location does not work  ", "Product", "note-id"),
+    {
+      id: "note-id",
+      vacancy_ids: ["a", "a2"],
+      decision: "passed",
+      reason: "Location does not work",
+      group_label: "Product",
+    },
+  );
+  assert.equal(feedbackFor(null, "reason", "Product", "id"), null);
+  assert.equal(feedbackFor(op, "   ", "Product", "id"), null);
+});
+test("kept and put-aside pages remain navigable after the screening inbox is empty", () => {
+  const roles = Array.from({ length: 8 }, (_, i) => ({
+    ...lang("k" + i),
+    title: "Product Manager " + i,
+  }));
+  for (const [list, status] of [
+    ["kept", "liked"],
+    ["putAside", "passed"],
+  ]) {
+    view.list = list;
+    view.batch = null;
+    view.page = 1;
+    view.selected.clear();
+    const m = reviewModel(roles, () => status);
+    assert.equal(view.page, 1);
+    assert.equal(m.rows.length, 3);
+    assert.equal(m.visibleIds[0], "k5");
+  }
+  view.list = "toScreen";
+  view.page = 0;
+});

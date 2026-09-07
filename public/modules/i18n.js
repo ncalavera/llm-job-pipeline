@@ -240,6 +240,44 @@ LOCAL.ru = {
   screen_work_evidence: "Почему так описана работа",
   screen_more_requirements: "Ещё требований: {n}",
 };
+Object.assign(LOCAL.ru, {
+  screen_check_requirement: "Проверить требование",
+  screen_check_conflict: "Проверить возможное несоответствие",
+  screen_check_fit: "Соответствие профилю стоит проверить",
+  screen_check_location: "Проверить место работы и остальные требования",
+  screen_past_notes: "История причин",
+  screen_note_reviewed: "Разобрано с ИИ",
+  screen_note_pending: "Ожидает разбора с ИИ",
+  screen_no_notes: "Причин пока нет.",
+  screen_notes_failed: "Не удалось загрузить причины. Попробуйте ещё раз.",
+  screen_review_title: "Разберём несколько вакансий вместе",
+  screen_batch_product: "Продукт",
+  screen_batch_operations: "Операции и управление",
+  screen_batch_research: "Исследования",
+  screen_batch_programmes: "Программы и проекты",
+  screen_batch_partnerships: "Фандрайзинг и партнёрства",
+  screen_batch_other: "Другие роли",
+  screen_batch_reason_product: "Управление и развитие продуктов",
+  screen_batch_reason_operations:
+    "Операционная работа и координация организации",
+  screen_batch_reason_research: "Исследования, анализ и оценка",
+  screen_batch_reason_programmes: "Реализация программ и проектов",
+  screen_batch_reason_partnerships: "Фандрайзинг и внешние партнёрства",
+  screen_batch_reason_other: "Характер работы стоит уточнить",
+  screen_roles: "вакансий",
+  screen_recover_hint: "Решение можно изменить.",
+  screen_batch_showing: "Показаны {start}–{end} из {total} в этой группе",
+  screen_review_later: "Позже · следующие",
+  screen_reason_label: "Почему? Необязательно — сохраним вместе с решением.",
+  screen_feedback_failed:
+    "Решения сохранены, но причина — нет. Повторите сохранение причины.",
+  screen_feedback_saved:
+    "Причина сохранена · ожидает разбора с ИИ. Предпочтения не изменены.",
+  screen_retry: "Повторить",
+  screen_preparation: "Подготовка вакансий",
+  screen_save_failed:
+    "Не удалось завершить сохранение. Проверьте список перед повтором.",
+});
 const LOCAL_STRINGS = { ...LOCAL.en, ...(LOCAL[getLanguage()] || {}) };
 
 function has(table, key) {

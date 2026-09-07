@@ -202,13 +202,13 @@ export function isNotModified(ifNoneMatch, etag) {
 
 /** Same-origin PII readers (/api/vacancies, /api/companies): no CORS header,
  * no-store. Returns true when the preamble already answered. */
-function piiPreamble(req, res, label) {
+function piiPreamble(req, res, label, method = "GET") {
   res.setHeader("Cache-Control", "no-store");
   if (req.method === "OPTIONS") {
     sendEmpty(res, 204);
     return true;
   }
-  if (req.method !== "GET") {
+  if (req.method !== method) {
     sendJson(res, 405, { error: "Method not allowed" });
     return true;
   }
@@ -477,6 +477,96 @@ async function handleSave(req, res) {
     return sendJson(res, 200, { ok: true, ts: new Date().toISOString() });
   } catch (err) {
     logError("save", err, reqMeta(req, { id, status }));
+    return sendJson(res, 500, { error: "Database error" });
+  }
+}
+
+// Feedback is an append-only account of a decision, not a preference change.
+const FEEDBACK_UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function handleScreeningFeedback(req, res) {
+  if (
+    piiPreamble(
+      req,
+      res,
+      "screening-feedback",
+      req.method === "GET" ? "GET" : "POST",
+    )
+  )
+    return;
+  // A foreign site must not submit a simple form request using cached login.
+  if (
+    req.method === "POST" &&
+    String(req.headers["content-type"] || "")
+      .split(";")[0]
+      .trim()
+      .toLowerCase() !== "application/json"
+  ) {
+    return sendJson(res, 415, { error: "Expected application/json" });
+  }
+  try {
+    if (req.method === "GET") {
+      const { rows } = await getPool().query(
+        "SELECT * FROM screening_feedback ORDER BY created_at DESC, id DESC LIMIT 100",
+      );
+      return sendJson(res, 200, { items: rows });
+    }
+    const body = await readJsonBody(req);
+    const { id, vacancy_ids, decision, reason, group_label } = body || {};
+    if (
+      typeof id !== "string" ||
+      !FEEDBACK_UUID.test(id) ||
+      !Array.isArray(vacancy_ids) ||
+      vacancy_ids.length < 1 ||
+      vacancy_ids.length > 100 ||
+      vacancy_ids.some(
+        (v) => typeof v !== "string" || !FEEDBACK_UUID.test(v),
+      ) ||
+      !["liked", "passed"].includes(decision) ||
+      typeof reason !== "string" ||
+      !reason.trim() ||
+      reason.length > 4000 ||
+      typeof group_label !== "string" ||
+      group_label.length > 200
+    ) {
+      return sendJson(res, 400, { error: "Invalid screening feedback" });
+    }
+    const ids = vacancy_ids.map((v) => v.toLowerCase());
+    if (new Set(ids).size !== ids.length) {
+      return sendJson(res, 400, { error: "Duplicate vacancy IDs" });
+    }
+    // A retry cannot change the original payload. Check existing IDs at insert
+    // time, but preserve historical feedback even if a vacancy is later removed.
+    await getPool().query(
+      `INSERT INTO screening_feedback (id, vacancy_ids, decision, reason, group_label)
+       SELECT $1::uuid, $2::jsonb, $3, $4, $5
+       WHERE (SELECT count(*) FROM vacancy WHERE id = ANY($6::uuid[])) = $7
+       ON CONFLICT (id) DO NOTHING`,
+      [id, JSON.stringify(ids), decision, reason, group_label, ids, ids.length],
+    );
+    const { rows } = await getPool().query(
+      "SELECT * FROM screening_feedback WHERE id = $1::uuid",
+      [id],
+    );
+    const item = rows[0];
+    if (!item) return sendJson(res, 404, { error: "Vacancy not found" });
+    if (
+      JSON.stringify(item.vacancy_ids) !== JSON.stringify(ids) ||
+      item.decision !== decision ||
+      item.reason !== reason ||
+      item.group_label !== group_label
+    ) {
+      return sendJson(res, 409, {
+        error: "Feedback ID already used for a different decision",
+      });
+    }
+    return sendJson(res, 200, { ok: true, item });
+  } catch (err) {
+    // Do not include reasons or database error details: those can contain private text.
+    console.error("screening-feedback: database request failed", {
+      code: err.code,
+    });
     return sendJson(res, 500, { error: "Database error" });
   }
 }
@@ -969,13 +1059,7 @@ async function handleStatic(req, res, pathname) {
 // What kind of reading a stored report is. Twin of statuses.REPORT_KINDS and
 // the SQL CHECK on report.kind; an unrecognised kind would silently create a
 // group of one in the list, which reads as a broken grouping, not a typo.
-export const REPORT_KINDS = [
-  "research",
-  "grant",
-  "company",
-  "sector",
-  "other",
-];
+export const REPORT_KINDS = ["research", "grant", "company", "sector", "other"];
 
 // How much of a report the list view carries. Enough to tell two reports apart
 // at a glance, small enough that a hundred of them are still one cheap
@@ -1026,7 +1110,9 @@ export function reportExcerpt(bodyMd, limit = REPORT_EXCERPT_CHARS) {
   if (flat.length <= limit) return flat;
   const cut = flat.slice(0, limit);
   const lastSpace = cut.lastIndexOf(" ");
-  return (lastSpace > limit * 0.6 ? cut.slice(0, lastSpace) : cut).trim() + "\u2026";
+  return (
+    (lastSpace > limit * 0.6 ? cut.slice(0, lastSpace) : cut).trim() + "\u2026"
+  );
 }
 
 /** Drop the markers that only mean something once rendered. The excerpt lands
@@ -1349,7 +1435,8 @@ async function handleContactStatus(req, res) {
       "UPDATE contact SET status = $1, status_at = now(), updated_at = now() WHERE id = $2",
       [status, id],
     );
-    if (!rowCount) return sendJson(res, 404, { error: "Contact not found", id });
+    if (!rowCount)
+      return sendJson(res, 404, { error: "Contact not found", id });
     return sendJson(res, 200, { ok: true, id, status });
   } catch (err) {
     logError("contacts", err, reqMeta(req, { id, status }));
@@ -1361,6 +1448,7 @@ const API_ROUTES = {
   "/api/vacancies": handleVacancies,
   "/api/companies": handleCompanies,
   "/api/save": handleSave,
+  "/api/screening-feedback": handleScreeningFeedback,
   "/api/statuses": handleStatuses,
   "/api/company-review": handleCompanyReview,
   "/api/company-statuses": handleCompanyStatuses,
