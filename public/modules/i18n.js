@@ -97,39 +97,8 @@ const LOCAL = {
     screen_loading: "Loading statuses…",
     screen_open: "Open",
   },
-  ru: {
-    screen_tab: "Отбор",
-    screen_title: "Одно решение сразу о нескольких вакансиях.",
-    screen_list_to_screen: "На отбор",
-    screen_list_kept: "Оставлены",
-    screen_list_aside: "Отложены",
-    screen_group_language: "Требование к языку",
-    screen_group_onsite: "Офис или ограничение по месту",
-    screen_group_seniority: "Указан уровень",
-    screen_group_unclear: "Непонятно, подхожу ли",
-    screen_group_all: "Все оставшиеся вакансии",
-    screen_group_hint: "Группы фильтруют только список «На отбор».",
-    screen_required: "Обязательно",
-    screen_preferred: "Желательно",
-    screen_unknown: "Неясно",
-    screen_evidence: "Цитаты из вакансии",
-    screen_no_quote: "нет цитаты",
-    screen_profile_notes: "Сравнение с профилем",
-    screen_empty: "В этом списке вакансий не осталось.",
-    screen_processing: "Ещё не подготовлено: {unprepared} · Ошибка: {failed}",
-    screen_selected: "Выбрано: {n}",
-    screen_select_all: "Выбрать все",
-    screen_clear: "Снять выбор",
-    screen_keep: "Оставить",
-    screen_put_aside: "Отложить",
-    screen_undo: "Отменить",
-    screen_saved: "Сохранено {n} из {m}",
-    screen_undone: "Восстановлено {n} из {m}",
-    screen_loading: "Загружаем статусы…",
-    screen_open: "Открыть",
-  },
 };
-const LOCAL_STRINGS = LOCAL[getLanguage()] || LOCAL.en;
+const LOCAL_STRINGS = LOCAL.en; // translations arrive baked from scripts/i18n.py via the snapshot
 
 function has(table, key) {
   return Object.prototype.hasOwnProperty.call(table, key);
