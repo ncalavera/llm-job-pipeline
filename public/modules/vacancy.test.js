@@ -537,3 +537,39 @@ test("vacancyNotFoundHtml is a fixed, parameter-free panel", () => {
   // No raw script and no interpolated id (the fn takes none).
   assert.ok(!html.includes("<script>"));
 });
+
+test("Screen decisions advance through the review batch and close when drained", async () => {
+  const { state, groupsById } = await import("./state.js");
+  const { vacancyLike, vacancyPass } = await import("./vacancy.js");
+  const opened = [];
+  let closed = 0;
+  window.openVacancyRoute = (id, opts) => opened.push({ id, ...opts });
+  window.closeDetail = () => closed++;
+  state.statusesLoaded = true;
+  for (const id of ["screen-a", "screen-b"]) {
+    groupsById.set(id, { id, member_ids: [] });
+    state.dbData[id] = { status: "unseen" };
+  }
+  state.vacancyEntry = { context: "screen", queue: ["screen-a", "screen-b"] };
+  vacancyLike("screen-a");
+  assert.equal(state.dbData["screen-a"].status, "liked");
+  assert.deepEqual(opened, [
+    {
+      id: "screen-b",
+      context: "screen",
+      queue: ["screen-a", "screen-b"],
+      replace: true,
+    },
+  ]);
+  vacancyPass("screen-b");
+  assert.equal(closed, 1);
+  assert.equal(state.vacancyEntry, null);
+  state.vacancyEntry = { context: "screen", queue: [] };
+  vacancyLike("screen-b");
+  assert.equal(closed, 1, "Kept/Put aside detail must stay in place");
+  for (const id of ["screen-a", "screen-b"]) {
+    groupsById.delete(id);
+    delete state.dbData[id];
+  }
+  state.vacancyEntry = null;
+});

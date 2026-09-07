@@ -275,7 +275,6 @@ test("an empty list renders No roles left in this list.", () => {
   assert.match(screenListHtml([], { t }), /No roles left in this list\./);
 });
 
-
 test("undo leaves a decision made after the bulk action untouched", async () => {
   const db = { a: "unseen", b: "unseen" };
   const io = fakeIo(db, {});
@@ -295,5 +294,124 @@ test("a failing member save re-saves the member that had landed", async () => {
   assert.equal(r.saved, 0);
   assert.deepEqual(db, { a: "unseen", a2: "unseen" });
   // forward saves for both members, then one compensating save for the member that landed
-  assert.deepEqual(io.saved, [["a", "liked"], ["a2", "liked"], ["a", "unseen"]]);
+  assert.deepEqual(io.saved, [
+    ["a", "liked"],
+    ["a2", "liked"],
+    ["a", "unseen"],
+  ]);
+});
+
+const { setFilter, setPage, PAGE_SIZE } = await import("./screen.js");
+
+test("20-row pages bound selection, navigation clears it and filters apply to kept too", () => {
+  view.filters = {};
+  setGroup("all");
+  setList("toScreen");
+  const roles = Array.from({ length: 45 }, (_, n) => lang(String(n)));
+  let model = screenModel(roles, () => "unseen");
+  assert.equal(model.matchingIds.length, 45);
+  assert.equal(model.visibleIds.length, PAGE_SIZE);
+  assert.equal(model.pages, 3);
+  toggleSelectAll(model.visibleIds);
+  assert.equal(view.selected.size, 20);
+  setPage(2);
+  assert.equal(view.selected.size, 0);
+  model = screenModel(roles, () => "unseen");
+  assert.equal(model.visibleIds.length, 5);
+  toggleSelectAll(model.visibleIds);
+  setFilter("requirementText", "German");
+  assert.equal(view.selected.size, 0);
+  assert.equal(view.page, 0);
+  setList("kept");
+  model = screenModel(roles, () => "liked");
+  assert.equal(model.lists.kept.size, 45);
+  assert.equal(model.matchingIds.length, 0);
+  setFilter("requirementText", "Spanish");
+  assert.equal(screenModel(roles, () => "liked").matchingIds.length, 45);
+  setList("toScreen");
+  view.filters = {};
+});
+
+test("remote status changes prune selected rows that disappear from the visible batch", () => {
+  const db = { a: "unseen", b: "unseen" };
+  setGroup("all");
+  setList("toScreen");
+  toggleSelectAll(["a", "b"]);
+  db.a = "applied";
+  screenModel(ROLES.slice(0, 2), (g) => db[g.id]);
+  assert.deepEqual([...view.selected], ["b"]);
+  view.selected.clear();
+});
+
+test("compact row keeps complete escaped evidence behind disclosure and only two matching badges outside", () => {
+  const g = lang("safe");
+  g.screening.posting_facts.requirements = Array.from(
+    { length: 12 },
+    (_, n) => ({
+      kind: "language",
+      value: `German ${n}`,
+      strength: "required",
+      quote: "<script>evidence</script>",
+    }),
+  );
+  g.screening.work_profile = {
+    activities: [{ kind: "building", quote: '<img src=x onerror="alert(1)">' }],
+  };
+  const html = screenRowHtml(g, { filters: { kind: "language" } });
+  const [head, evidence] = html.split("<details");
+  assert.equal((head.match(/scr-badge--required/g) || []).length, 2);
+  assert.equal((evidence.match(/scr-badge--required/g) || []).length, 12);
+  assert.match(evidence, /&lt;script&gt;/);
+  assert.match(evidence, /&lt;img/);
+  assert.doesNotMatch(html, /<script>|<img/);
+  assert.equal(
+    (
+      screenRowHtml(g)
+        .split("<details")[0]
+        .match(/scr-badge--required/g) || []
+    ).length,
+    0,
+  );
+});
+
+test("first-seen is labelled separately from expired deadline on compact rows", () => {
+  const g = {
+    ...lang("dates"),
+    first_seen: "2026-09-05",
+    deadline: "2026-09-06",
+  };
+  const head = screenRowHtml(g, { today: "2026-09-07" }).split("<details")[0];
+  assert.match(head, /First seen 2d ago/);
+  assert.match(head, /Deadline passed: 2026-09-06/);
+  const current = screenRowHtml(
+    { ...g, deadline: "2026-09-07" },
+    { today: "2026-09-07" },
+  );
+  assert.doesNotMatch(current, /Deadline passed:/);
+  view.filters = {};
+  setFilter("deadline", "expired");
+  assert.deepEqual(screenModel([g], () => "unseen", "2026-09-07").visibleIds, [
+    "dates",
+  ]);
+  setFilter("age", "older30");
+  assert.equal(
+    screenModel([g], () => "unseen", "2026-09-07").matchingIds.length,
+    0,
+  );
+  view.filters = {};
+});
+
+test("technical specialist evidence has a technical label, distinct from specialist activity", () => {
+  const g = lang("tech");
+  g.screening.work_profile = {
+    activities: [],
+    technical_depth: {
+      level: "specialist",
+      quote: "Own production architecture",
+    },
+  };
+  assert.match(
+    screenRowHtml(g),
+    /Specialist technical expertise<blockquote>Own production architecture/,
+  );
 });

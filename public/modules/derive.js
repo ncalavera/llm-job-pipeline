@@ -498,3 +498,120 @@ export function screenGroups(roles) {
   }
   return out;
 }
+
+export const SCREEN_ACTIVITIES = [
+  "building",
+  "running",
+  "selling",
+  "specialist",
+];
+
+/** Every requirement predicate binds to the same piece of posting evidence. */
+export function screenMatchRequirements(g, filters = {}) {
+  const needle = String(filters.requirementText || "")
+    .trim()
+    .toLowerCase();
+  return screenRequirements(g).filter(
+    (r, index) =>
+      r &&
+      (!filters.kind || r.kind === filters.kind) &&
+      (!filters.strength || (r.strength || "unknown") === filters.strength) &&
+      (!needle ||
+        String(r.value || "")
+          .toLowerCase()
+          .includes(needle)) &&
+      (!filters.finding ||
+        (g.screening?.profile_comparison || []).some(
+          (c) => c.requirement === index && c.finding === filters.finding,
+        ) ||
+        (filters.finding === "unknown" &&
+          !(g.screening?.profile_comparison || []).some(
+            (c) => c.requirement === index,
+          ))),
+  );
+}
+
+/** Interpret only extracted facts: missing work_profile stays unclassified. */
+export function screenMatches(
+  g,
+  filters = {},
+  today = new Date().toISOString().slice(0, 10),
+) {
+  const dates = screenDateFacts(g, today);
+  if (filters.age) {
+    const limit = { last7: 7, last14: 14, last30: 30 }[filters.age];
+    if (
+      dates.age == null ||
+      dates.age < 0 ||
+      (filters.age === "older30" ? dates.age <= 30 : dates.age > limit)
+    )
+      return false;
+  }
+  if (filters.deadline === "expired" && !dates.expired) return false;
+  if (filters.deadline === "open" && dates.expired) return false;
+  if (filters.deadline === "unknown" && dates.deadline) return false;
+  const facts = g.screening?.posting_facts || {};
+  const work = g.screening?.work_profile;
+  const unknown = (v) => v || "unknown";
+  if (
+    filters.activity === "unclassified"
+      ? !!work
+      : filters.activity === "unknown"
+        ? !work || !!work.activities?.length
+        : filters.activity &&
+          !work?.activities?.some((a) => a.kind === filters.activity)
+  )
+    return false;
+  if (filters.workMode && unknown(facts.work_mode) !== filters.workMode)
+    return false;
+  if (filters.seniority && unknown(facts.seniority) !== filters.seniority)
+    return false;
+  if (
+    filters.technical &&
+    unknown(work?.technical_depth?.level) !== filters.technical
+  )
+    return false;
+  if (filters.purpose && unknown(work?.purpose?.kind) !== filters.purpose)
+    return false;
+  if (
+    filters.search &&
+    !`${g.title || ""} ${g.company_name || g.org || ""}`
+      .toLowerCase()
+      .includes(filters.search.trim().toLowerCase())
+  )
+    return false;
+  if (
+    (filters.kind ||
+      filters.strength ||
+      filters.requirementText?.trim() ||
+      filters.finding) &&
+    !screenMatchRequirements(g, filters).length
+  )
+    return false;
+  return true;
+}
+
+/** Calendar dates use UTC, matching the existing dashboard deadline convention. */
+export function screenDateFacts(
+  g,
+  today = new Date().toISOString().slice(0, 10),
+) {
+  const dateOnly = (value) => {
+    const day = String(value || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+    const date = new Date(day);
+    return Number.isFinite(date.getTime()) &&
+      date.toISOString().slice(0, 10) === day
+      ? day
+      : null;
+  };
+  const seen = dateOnly(g.first_seen);
+  const deadline = dateOnly(g.deadline);
+  return {
+    age: seen
+      ? Math.round((Date.parse(today) - Date.parse(seen)) / 86400000)
+      : null,
+    deadline,
+    expired: !!deadline && deadline < today,
+  };
+}

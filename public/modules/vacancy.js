@@ -678,7 +678,7 @@ export function renderVacancyDetail(id) {
   host.innerHTML = vacancyPageHtml(g, company, status, pageOpts());
 }
 
-// After a verdict from a Browse-unreviewed entry, hop to the next STILL-
+// After a verdict from a Browse or Screen review entry, hop to the next STILL-
 // unreviewed role in the same queue (F3) — the same advance "Move to apply"
 // uses, now shared by like/pass so any verdict walks you forward. Other entry
 // points (Today, company roles, cold deep link) confirm in place: the
@@ -687,7 +687,12 @@ export function renderVacancyDetail(id) {
 // queue-done banner), false when it left the page for the caller's re-render.
 function advanceBrowseQueue(id) {
   const entry = state.vacancyEntry;
-  if (!entry || entry.context !== "browse") return false;
+  if (
+    !entry ||
+    !["browse", "screen"].includes(entry.context) ||
+    !entry.queue?.length
+  )
+    return false;
 
   const isUnseen = (vid) => {
     const vg = groupsById.get(vid);
@@ -700,7 +705,7 @@ function advanceBrowseQueue(id) {
     // replace (not push) so the whole advance chain is one history entry: Back
     // from any hop returns straight to the originating Browse list (F1).
     window.openVacancyRoute(next, {
-      context: "browse",
+      context: entry.context,
       queue: entry.queue,
       replace: true,
     });

@@ -138,6 +138,39 @@ reading logs:
   Health tab (Mermaid lazy-loaded from a CDN on first open) and kept in sync
   with this document. **Any change to the pipeline's shape updates both.**
 
+### Screening inbox data
+
+`screening_prep` writes four columns on `vacancy`: `screening` (the prepared
+role's facts JSON — see [`CONCEPTS.md`](../CONCEPTS.md)), `screening_state`
+(`ready` or `failed`), `screening_prepared_at`, and `screening_fingerprint`
+(posting + prompt + profile, so an unchanged role is never re-prepared). The
+dashboard snapshot ships `screening`, `screening_state` and
+`screening_prepared_at` as raw per-role fields — no pre-baked group, the
+browser derives lists and groups — plus a run-level `stats.screening_processing`
+count (prepared / failed against the night's cohort). The Screen view
+(`public/modules/screen.js`, `?mode=screen` on the self-hosted dashboard)
+reads these fields to build To screen / Kept / Put aside lists; bulk Keep and
+Put aside write back through `/api/save` per row, same as every other status
+change.
+
+The optional `screening.work_profile` contains quoted work activities (building,
+running, selling, specialist), technical depth, and the role's contribution
+(direct impact, enabling impact, commercial, or unknown). Activities may overlap;
+none is a recommendation or a rejection. Extraction reads and fingerprints the
+complete posting. Existing results without work details stay visible as
+unclassified until prepared again; the changed prompt invalidates old fingerprints.
+
+The Screen view combines independent filters under “Can I take it?”, “Can I do
+it?”, and “Would I enjoy it?”. Requirement kind, strength, text, and profile
+comparison must match the same requirement. Text searches its extracted name,
+not a quote that may mention several different requirements. Unknown evidence stays separate from
+conflicts. Compact cards disclose complete evidence on demand; pages contain 20
+roles, and bulk selection applies only to the current page. First-seen age and
+passed deadlines are independent filters; first-seen is not the posting date. Kept and Put aside
+remain filterable. Opening a To screen role carries the page's review queue;
+Keep/Put aside advances through that queue and returns to the filtered list.
+No filter changes a human status or learns a new exclusion rule.
+
 ## Two backends
 
 The pipeline runs on one of two databases, chosen purely by whether

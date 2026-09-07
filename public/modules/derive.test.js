@@ -846,7 +846,10 @@ test("screenLists: ready roles split by status; an unprepared role lands in no l
 });
 
 test("screenLists: a failed role is in no list", () => {
-  const lists = screenLists([{ id: "f", screening_state: "failed" }], () => "unseen");
+  const lists = screenLists(
+    [{ id: "f", screening_state: "failed" }],
+    () => "unseen",
+  );
   assert.equal(lists.toScreen.size + lists.kept.size + lists.putAside.size, 0);
 });
 
@@ -858,7 +861,12 @@ test("screenGroups: a role with a Spanish requirement and an onsite constraint i
           work_mode: "onsite",
           seniority: "unknown",
           requirements: [
-            { kind: "language", value: "Spanish C1", strength: "required", quote: "Spanish C1 required." },
+            {
+              kind: "language",
+              value: "Spanish C1",
+              strength: "required",
+              quote: "Spanish C1 required.",
+            },
           ],
         },
         profile_comparison: [],
@@ -867,13 +875,23 @@ test("screenGroups: a role with a Spanish requirement and an onsite constraint i
     }),
     ready("b", {
       screening: {
-        posting_facts: { work_mode: "remote", seniority: "senior", requirements: [] },
+        posting_facts: {
+          work_mode: "remote",
+          seniority: "senior",
+          requirements: [],
+        },
         unknowns: ["eligible countries not stated"],
       },
     }),
   ];
   const g = screenGroups(roles);
-  assert.deepEqual(SCREEN_GROUP_KEYS, ["language", "onsite", "seniority", "unclear", "all"]);
+  assert.deepEqual(SCREEN_GROUP_KEYS, [
+    "language",
+    "onsite",
+    "seniority",
+    "unclear",
+    "all",
+  ]);
   assert.deepEqual([...g.language], ["a"]);
   assert.deepEqual([...g.onsite], ["a"]);
   assert.deepEqual([...g.seniority], ["b"]);
@@ -886,7 +904,14 @@ test("screenGroups: a location or authorisation requirement also counts as an on
     ready("a", {
       screening: {
         posting_facts: {
-          requirements: [{ kind: "authorisation", value: "UK right to work", strength: "required", quote: "" }],
+          requirements: [
+            {
+              kind: "authorisation",
+              value: "UK right to work",
+              strength: "required",
+              quote: "",
+            },
+          ],
         },
       },
     }),
@@ -896,6 +921,220 @@ test("screenGroups: a location or authorisation requirement also counts as an on
 
 test("screenGroups: a ready role with no screening facts sits only in All", () => {
   const g = screenGroups([ready("z")]);
-  assert.equal(g.language.size + g.onsite.size + g.seniority.size + g.unclear.size, 0);
+  assert.equal(
+    g.language.size + g.onsite.size + g.seniority.size + g.unclear.size,
+    0,
+  );
   assert.deepEqual([...g.all], ["z"]);
+});
+
+import { screenMatches, screenMatchRequirements } from "./derive.js";
+
+test("screen filters bind kind, strength, text and profile finding to one requirement", () => {
+  const g = {
+    screening: {
+      posting_facts: {
+        requirements: [
+          {
+            kind: "language",
+            strength: "preferred",
+            value: "German",
+            quote: "German is preferred",
+          },
+          {
+            kind: "skill",
+            strength: "required",
+            value: "SQL",
+            quote: "SQL required",
+          },
+        ],
+      },
+      profile_comparison: [{ requirement: 1, finding: "possible_conflict" }],
+    },
+  };
+  assert.equal(
+    screenMatches(g, { kind: "language", strength: "required" }),
+    false,
+  );
+  assert.equal(
+    screenMatches(g, {
+      requirementText: "GERMAN",
+      finding: "possible_conflict",
+    }),
+    false,
+  );
+  assert.equal(
+    screenMatches(g, {
+      kind: "language",
+      strength: "preferred",
+      requirementText: "german",
+    }),
+    true,
+  );
+  assert.equal(
+    screenMatchRequirements(g, { kind: "skill", finding: "possible_conflict" })
+      .length,
+    1,
+  );
+});
+
+test("old screening remains unclassified, never inferred from job title or unrelated unknowns", () => {
+  const g = {
+    title: "Commercial engineering sales director",
+    screening: {
+      unknowns: ["Salary not stated"],
+      posting_facts: { requirements: [] },
+    },
+  };
+  assert.equal(screenMatches(g, { activity: "unclassified" }), true);
+  assert.equal(screenMatches(g, { activity: "selling" }), false);
+  assert.equal(
+    screenMatches(g, { technical: "unknown", purpose: "unknown" }),
+    true,
+  );
+  assert.equal(
+    screenMatches(g, { kind: "authorisation", finding: "unknown" }),
+    false,
+  );
+});
+
+test("work activities overlap and all question filters intersect", () => {
+  const g = {
+    title: "Programme lead",
+    company_name: "Org",
+    screening: {
+      posting_facts: {
+        work_mode: "remote",
+        seniority: "senior",
+        requirements: [],
+      },
+      work_profile: {
+        activities: [
+          { kind: "building", quote: "Launch" },
+          { kind: "selling", quote: "Raise funding" },
+        ],
+        technical_depth: { level: "coordination" },
+        purpose: { kind: "direct_impact" },
+      },
+    },
+  };
+  assert.equal(
+    screenMatches(g, {
+      activity: "building",
+      technical: "coordination",
+      purpose: "direct_impact",
+      workMode: "remote",
+      search: "org",
+    }),
+    true,
+  );
+  assert.equal(
+    screenMatches(g, { activity: "selling", workMode: "onsite" }),
+    false,
+  );
+  assert.equal(screenMatches(g, { activity: "unclassified" }), false);
+});
+
+test("prepared work with no stated activities is unknown, distinct from unprepared", () => {
+  const g = { screening: { work_profile: { activities: [] } } };
+  assert.equal(screenMatches(g, { activity: "unknown" }), true);
+  assert.equal(screenMatches(g, { activity: "unclassified" }), false);
+  assert.equal(
+    screenMatches({ screening: {} }, { activity: "unknown" }),
+    false,
+  );
+});
+
+test("first-seen age and deadline filters are independent and preserve unstated deadline uncertainty", () => {
+  const today = "2026-09-07";
+  const old = { first_seen: "2026-08-07T12:00:00Z", deadline: "2026-10-01" };
+  const recentExpired = { first_seen: "2026-09-06", deadline: "2026-09-06" };
+  assert.equal(
+    screenMatches(old, { age: "older30", deadline: "open" }, today),
+    true,
+  );
+  assert.equal(screenMatches(old, { age: "last30" }, today), false);
+  assert.equal(
+    screenMatches(recentExpired, { age: "last7", deadline: "expired" }, today),
+    true,
+  );
+  assert.equal(
+    screenMatches(recentExpired, { deadline: "open" }, today),
+    false,
+  );
+  assert.equal(
+    screenMatches({ first_seen: "2026-08-08" }, { age: "last30" }, today),
+    true,
+  );
+  assert.equal(
+    screenMatches({ first_seen: "2026-08-08" }, { age: "older30" }, today),
+    false,
+  );
+  assert.equal(
+    screenMatches({ deadline: today }, { deadline: "open" }, today),
+    true,
+  );
+  assert.equal(
+    screenMatches({ deadline: today }, { deadline: "expired" }, today),
+    false,
+  );
+  assert.equal(screenMatches({}, { deadline: "unknown" }, today), true);
+  assert.equal(screenMatches({}, { deadline: "open" }, today), true);
+  assert.equal(screenMatches({}, { age: "last30" }, today), false);
+  assert.equal(
+    screenMatches({ first_seen: "2026-09-08" }, { age: "last7" }, today),
+    false,
+  );
+  assert.equal(
+    screenMatches({ deadline: "2026-02-30" }, { deadline: "unknown" }, today),
+    true,
+  );
+});
+
+test("requirement search does not borrow another language from a shared quote", () => {
+  const g = {
+    screening: {
+      posting_facts: {
+        requirements: [
+          {
+            kind: "language",
+            strength: "required",
+            value: "English",
+            quote: "English is required; German is preferred.",
+          },
+          {
+            kind: "language",
+            strength: "preferred",
+            value: "German",
+            quote: "English is required; German is preferred.",
+          },
+        ],
+      },
+      profile_comparison: [],
+    },
+  };
+  assert.equal(
+    screenMatches(g, {
+      kind: "language",
+      strength: "required",
+      requirementText: "German",
+    }),
+    false,
+  );
+  assert.equal(
+    screenMatches(g, {
+      kind: "language",
+      strength: "preferred",
+      requirementText: "German",
+    }),
+    true,
+  );
+  assert.equal(screenMatchRequirements(g, { finding: "unknown" }).length, 2);
+  g.screening.profile_comparison = [{ requirement: 0, finding: "match" }];
+  assert.deepEqual(
+    screenMatchRequirements(g, { finding: "unknown" }).map((r) => r.value),
+    ["German"],
+  );
+  g.screening.profile_comparison.push({ requirement: 1, finding: "unknown" });
+  assert.equal(screenMatchRequirements(g, { finding: "unknown" }).length, 1);
 });
