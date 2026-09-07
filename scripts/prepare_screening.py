@@ -56,8 +56,6 @@ USER_TEMPLATE = """Prepare this posting for screening.
 **Posting text:**
 {description}"""
 
-MAX_DESC = 8000
-
 ENUMS = {
     "seniority": {"junior", "mid", "senior", "head", "director", "executive", "unknown"},
     "employment_type": {
@@ -82,6 +80,11 @@ REQ_KINDS = {
 }
 STRENGTHS = {"required", "preferred", "unknown"}
 FINDINGS = {"match", "possible_conflict", "unknown"}
+ACTIVITIES = {"building", "running", "selling", "specialist"}
+WORK_PROFILE_ENUMS = {
+    "technical_depth": ("level", {"coordination", "practical", "specialist", "unknown"}),
+    "purpose": ("kind", {"direct_impact", "enabling_impact", "commercial", "unknown"}),
+}
 MAX_REQUIREMENTS = 40
 MAX_QUOTE = 600
 
@@ -106,7 +109,7 @@ def prompt_fingerprint() -> str:
 
 
 def posting_fingerprint(description: str) -> str:
-    return _sha(_norm_ws(description)[:MAX_DESC])
+    return _sha(_norm_ws(description))
 
 
 def fingerprint(description: str) -> str:
@@ -218,8 +221,6 @@ def load_pool(window_days: int) -> list[dict]:
 
 def build_payload(row: dict) -> dict:
     desc = _description(row)
-    if len(desc) > MAX_DESC:
-        desc = desc[:MAX_DESC] + "\n\n[Description truncated]"
     return {
         "payload_kind": "screening",
         "id": row["id"],
@@ -289,7 +290,7 @@ def validate_result(result: dict, posting_text: str) -> tuple[dict | None, str |
         clean_facts[key] = str(val)[:1000] if isinstance(val, str) and val.strip() else None
     for key, allowed in ENUMS.items():
         val = facts.get(key)
-        if val not in allowed:
+        if not isinstance(val, str) or val not in allowed:
             return None, f"{key}={val!r} not in {sorted(allowed)}"
         clean_facts[key] = val
     reqs = facts.get("requirements")
@@ -301,9 +302,9 @@ def validate_result(result: dict, posting_text: str) -> tuple[dict | None, str |
     for i, req in enumerate(reqs):
         if not isinstance(req, dict):
             return None, f"requirement {i} is not an object"
-        if req.get("kind") not in REQ_KINDS:
+        if not isinstance(req.get("kind"), str) or req["kind"] not in REQ_KINDS:
             return None, f"requirement {i}: kind={req.get('kind')!r}"
-        if req.get("strength") not in STRENGTHS:
+        if not isinstance(req.get("strength"), str) or req["strength"] not in STRENGTHS:
             return None, f"requirement {i}: strength={req.get('strength')!r}"
         quote = req.get("quote")
         if not isinstance(quote, str) or not _quote_in(quote, text):
@@ -327,7 +328,7 @@ def validate_result(result: dict, posting_text: str) -> tuple[dict | None, str |
         idx = c.get("requirement")
         if not isinstance(idx, int) or not 0 <= idx < len(clean_reqs):
             return None, f"comparison {i}: requirement index {idx!r} out of range"
-        if c.get("finding") not in FINDINGS:
+        if not isinstance(c.get("finding"), str) or c["finding"] not in FINDINGS:
             return None, f"comparison {i}: finding={c.get('finding')!r}"
         clean_comps.append(
             {
@@ -340,11 +341,47 @@ def validate_result(result: dict, posting_text: str) -> tuple[dict | None, str |
     unknowns = result.get("unknowns")
     if not isinstance(unknowns, list):
         unknowns = []
-    return {
+    clean = {
         "posting_facts": clean_facts,
         "profile_comparison": clean_comps,
         "unknowns": [str(u)[:300] for u in unknowns[:20]],
-    }, None
+    }
+    # Old prepared results remain readable; only new extractions request this field.
+    if "work_profile" in result:
+        profile = result["work_profile"]
+        if not isinstance(profile, dict):
+            return None, "work_profile must be an object"
+        activities = profile.get("activities")
+        if not isinstance(activities, list) or len(activities) > len(ACTIVITIES):
+            return None, "work_profile.activities must be a list of at most 4 activities"
+        clean_profile = {"activities": []}
+        seen = set()
+        for activity in activities:
+            if not isinstance(activity, dict):
+                return None, "work_profile activity must be an object"
+            kind = activity.get("kind")
+            if not isinstance(kind, str) or kind not in ACTIVITIES or kind in seen:
+                return None, f"work_profile activity kind invalid or duplicate: {kind!r}"
+            quote = activity.get("quote")
+            if not isinstance(quote, str) or not _quote_in(quote, text):
+                return None, "work_profile activity quote not found in the posting"
+            seen.add(kind)
+            clean_profile["activities"].append({"kind": kind, "quote": _norm_ws(quote)})
+        for field, (key, allowed) in WORK_PROFILE_ENUMS.items():
+            item = profile.get(field)
+            if not isinstance(item, dict):
+                return None, f"work_profile.{field} must be an object"
+            value, quote = item.get(key), item.get("quote")
+            if not isinstance(value, str) or value not in allowed:
+                return None, f"work_profile.{field}.{key} invalid: {value!r}"
+            if value == "unknown":
+                if quote is not None:
+                    return None, f"work_profile.{field}: unknown must have null quote"
+            elif not isinstance(quote, str) or not _quote_in(quote, text):
+                return None, f"work_profile.{field}: quote not found in the posting"
+            clean_profile[field] = {key: value, "quote": _norm_ws(quote) if quote else None}
+        clean["work_profile"] = clean_profile
+    return clean, None
 
 
 def _load_postings(ids: list[str]) -> dict[str, str]:
@@ -398,6 +435,8 @@ def cmd_save(args) -> None:
         desc = postings[vac_id]
         fp = fingerprint(desc)
         clean, reason = validate_result(entry, desc)
+        if clean is not None and "work_profile" not in clean:
+            clean, reason = None, "work_profile missing from new extraction"
         if clean is None:
             save_result(vac_id, {"failed": reason}, "failed", fp, args.prepared_by)
             print(f"FAILED {vac_id}: {reason}", file=sys.stderr)

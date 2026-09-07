@@ -87,10 +87,10 @@ filter stage. Python saves with `score_vacancies.py`; the
 Screening preparation: extraction with quotes plus a profile
 comparison — NO score. 1 vacancy = 1 subagent. The result is exactly the JSON
 object the payload's `system_prompt` defines (`id`, `posting_facts`,
-`profile_comparison`, `unknowns`), with the payload's `id` copied verbatim:
+`work_profile`, `profile_comparison`, `unknowns`), with the payload's `id` copied verbatim:
 
 ```json
-{"id": "<from the payload>", "posting_facts": {...}, "profile_comparison": [...], "unknowns": [...]}
+{"id": "<from the payload>", "posting_facts": {...}, "work_profile": {...}, "profile_comparison": [...], "unknowns": [...]}
 ```
 
 Every quote must be a sentence copied character for character from the

@@ -40,7 +40,7 @@ export const ARCHITECTURE_DETAILS = [
     V[validate profile] --> P[preflight DB check] --> LR2[learning review]
     LR2 --> F[fetch: career sites + boards] --> EN[enrich blind roles]
     EN --> FI[filter junk] --> CS[company scoring] --> VS[vacancy scoring<br/>cheap screen, then strong model]
-    VS --> SP[screening prep<br/>facts + quotes, no score, night only]
+    VS --> SP[screening prep<br/>facts + work activities + quotes<br/>no score, night only]
     SP --> VD[your verdicts] --> PU[publish snapshot once]
 
     style F fill:#1E40AF,color:#fff

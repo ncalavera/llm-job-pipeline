@@ -169,6 +169,24 @@ reads these fields to build To screen / Kept / Put aside lists; bulk Keep and
 Put aside write back through `/api/save` per row, same as every other status
 change.
 
+The optional `screening.work_profile` contains quoted work activities (building,
+running, selling, specialist), technical depth, and the role's contribution
+(direct impact, enabling impact, commercial, or unknown). Activities may overlap;
+none is a recommendation or a rejection. Extraction reads and fingerprints the
+complete posting. Existing results without work details stay visible as
+unclassified until prepared again; the changed prompt invalidates old fingerprints.
+
+The Screen view combines independent filters under “Can I take it?”, “Can I do
+it?”, and “Would I enjoy it?”. Requirement kind, strength, text, and profile
+comparison must match the same requirement. Text searches its extracted name,
+not a quote that may mention several different requirements. Unknown evidence stays separate from
+conflicts. Compact cards disclose complete evidence on demand; pages contain 20
+roles, and bulk selection applies only to the current page. First-seen age and
+passed deadlines are independent filters; first-seen is not the posting date. Kept and Put aside
+remain filterable. Opening a To screen role carries the page's review queue;
+Keep/Put aside advances through that queue and returns to the filtered list.
+No filter changes a human status or learns a new exclusion rule.
+
 ## Two backends
 
 The pipeline runs on one of two databases, chosen purely by whether
