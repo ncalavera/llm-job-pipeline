@@ -8,6 +8,8 @@
 
 import {
   state,
+  config,
+  scheduleRender,
   groups,
   groupsById,
   stats,
@@ -32,6 +34,8 @@ import {
   screenDateFacts,
   groupsInBasket,
 } from "./derive.js";
+import { REASON_GROUPS, reasonBatch } from "./reason-batches.js";
+import { bulkSet, undoLast, decisionState, retryDecision } from "./screen.js";
 import { createCursor, actionsFor } from "./keys.js";
 
 // The shared visibility options the basket badge AND the basket list both read,
@@ -162,7 +166,7 @@ export function renderCatalog() {
   // floor + expiry re-bucketing live in the shared filter; only the org/
   // location/search refinements below are catalog-specific.
   const inBasket = groupsInBasket(groups, state.currentBasket, catalogVisibility());
-  const filtered = inBasket.filter((g) => {
+  let filtered = inBasket.filter((g) => {
     if (orgFilter && g.org !== orgFilter) return false;
     if (
       state.activeCatalogLocs.size > 0 &&
@@ -181,6 +185,8 @@ export function renderCatalog() {
     }
     return true;
   });
+
+  filtered = renderReasonReview(filtered);
 
   const countTpl = T("browse_results_count", "{shown} of {total} vacancies");
   document.getElementById("catalogResultsCount").textContent = countTpl
@@ -241,7 +247,7 @@ export function renderCatalog() {
   _browseCursor.reconcile(_browseQueue);
   const rowOpts = { t: T, locale: dateLocale() };
   grid.innerHTML = filtered
-    .map((g) => catalogRowHtml(g, getGroupStatus(g), rowOpts))
+    .map((g) => catalogRowHtml(g, getGroupStatus(g), {...rowOpts, reason: state.currentBasket === "unseen" && reasonFilter ? reasonBatch(g, config.screening_prompt_fingerprint) : null}))
     .join("");
   applyCursorHighlight();
 }
@@ -482,7 +488,7 @@ export function catalogRowHtml(g, basket, opts) {
   return (
     '<div class="catalog-row" data-id="' +
     escHtml(g.id) +
-    '" role="button" tabindex="0" onclick="if(!event.target.closest(\'button,input,a\'))openCatalogRow(\'' +
+    '" role="button" tabindex="0" onclick="if(!event.target.closest(\'button,input,a,label,summary,details\'))openCatalogRow(\'' +
     idAttr +
     "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openCatalogRow('" +
     idAttr +
@@ -500,6 +506,7 @@ export function catalogRowHtml(g, basket, opts) {
     deadlineHtml +
     "</div>" +
     subHtml +
+    (o.reason ? reasonDetails(g, o.reason) : "") +
     (o.review ? '<div class="scr-row-meta">' + metadata + '</div>' : "") +
     (o.review && prepLabel ? '<div class="scr-concern">' + escHtml(prepLabel) + '</div>' : '') +
     (o.review && url ? '<a class="scr-posting" href="' + escHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escHtml(t("vac_open_posting","Open posting")) + ' ↗</a>' : '') +
@@ -554,4 +561,70 @@ export function catalogThumbAction(canonId, memberIds, action) {
   } else {
     updateStatus(canonId, memberIds, targetStatus);
   }
+}
+
+let reasonFilter = '';
+const reasonSelected = new Set();
+let reasonBusy = false;
+let reasonNotice = '';
+
+function reasonDetails(g, batch) {
+  return '<div class="reason-row"><label><input type="checkbox" data-reason-id="' + escHtml(g.id) + '"' +
+    (reasonSelected.has(g.id) ? ' checked' : '') + (reasonBusy ? ' disabled' : '') + '> ' +
+    escHtml(T('reason_select', 'Select for Pass')) + '</label><details><summary>' +
+    escHtml(batch.reasons[0].note) + '</summary>' + batch.reasons.map(r => '<p>' + escHtml(r.note) +
+    '</p><blockquote>' + escHtml(r.quote) + '</blockquote>').join('') + '</details></div>';
+}
+
+function renderReasonReview(rows) {
+  let host = document.getElementById('catalogReasonReview');
+  if (!host) {
+    host = document.createElement('div'); host.id = 'catalogReasonReview';
+    document.querySelector('.browse-header').after(host);
+    host.addEventListener('click', async e => {
+      const button = e.target.closest('button');
+      if (!button || reasonBusy) return;
+      if (button.dataset.reason !== undefined) {
+        reasonFilter = button.dataset.reason; reasonSelected.clear(); renderCatalog(); return;
+      }
+      if (button.dataset.reasonAction === 'select') {
+        document.querySelectorAll('[data-reason-id]').forEach(el => reasonSelected.add(el.dataset.reasonId));
+        renderCatalog(); return;
+      }
+      reasonBusy = true; renderCatalog();
+      try {
+        const result = button.dataset.reasonAction === 'undo' ? await undoLast() :
+          button.dataset.reasonAction === 'retry' ? await retryDecision() :
+          await bulkSet([...reasonSelected], 'passed', undefined, true);
+        reasonNotice = result ? `${result.saved ?? result.restored ?? 0} / ${result.total} ` + T('screen_saved','saved') : T('screen_notes_failed','Could not save. Retry.');
+        reasonSelected.clear();
+      } catch { reasonNotice = T('screen_notes_failed','Could not save. Retry.'); }
+      finally { reasonBusy = false; scheduleRender(); }
+    });
+    document.getElementById('catalogGrid').addEventListener('change', e => {
+      const id = e.target.dataset.reasonId;
+      if (!id || reasonBusy) return;
+      if (e.target.checked) reasonSelected.add(id); else reasonSelected.delete(id);
+      renderCatalog();
+    });
+  }
+  const pending = decisionState();
+  const candidates = state.currentBasket === 'unseen' ? rows : [];
+  const classified = new Map(candidates.map(g => [g.id, reasonBatch(g,config.screening_prompt_fingerprint)]));
+  const visible = reasonFilter && state.currentBasket === 'unseen' ? rows.filter(g => classified.get(g.id)?.key === reasonFilter) : rows;
+  for (const id of reasonSelected) if (!visible.some(g => g.id === id)) reasonSelected.delete(id);
+  const disabled = reasonBusy || !state.statusesLoaded || pending.pending;
+  const button = (action,label,off) => '<button class="browse-sort-btn" data-reason-action="' + action + '"' + (off ? ' disabled' : '') + '>' + escHtml(label) + '</button>';
+  host.innerHTML = (state.currentBasket === 'unseen' ? '<details' + (reasonFilter ? ' open' : '') + '><summary>' +
+    escHtml(T('reason_review','Review low scores by reason')) + ' · &lt;' + VISIBLE_MIN_SCORE + '</summary><div class="reason-toolbar">' +
+    [['',T('contacts_all_groups','All')],...REASON_GROUPS.map(([k,label])=>[k,T('reason_'+k,label)])].map(([key,label]) =>
+      '<button class="browse-sort-btn" data-reason="' + key + '" aria-pressed="' + (reasonFilter === key) + '"' +
+      (reasonBusy ? ' disabled' : '') + '>' + escHtml(label) + (key ? ' · ' + [...classified.values()].filter(b=>b?.key===key).length : '') + '</button>').join('') +
+    '</div><p>' + escHtml(T('reason_hint','Possible conflicts with required posting conditions. Review the explanation, select the roles you agree to pass, and leave exceptions unchecked. Other roles remain in All.')) + '</p></details>' : '') +
+    (reasonFilter && state.currentBasket === 'unseen' ? '<div class="reason-toolbar">' + button('select',T('screen_select_all','Select all'),disabled || !visible.length) +
+      button('pass',T('reason_pass','Pass selected') + ' · ' + reasonSelected.size,disabled || !reasonSelected.size) + '</div>' : '') +
+    (pending.pending ? button('retry',T('screen_retry','Retry'),reasonBusy) : '') +
+    (pending.canUndo ? button('undo',T('screen_undo','Undo'),disabled) : '') +
+    '<p role="status">' + escHtml(reasonNotice) + '</p>';
+  return visible;
 }

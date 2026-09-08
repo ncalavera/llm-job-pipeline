@@ -321,13 +321,13 @@ export const liveIo = {
  * Keep (liked) or Put aside (passed) the given canonical ids. Pushes one
  * operation with the saved rows only. @returns {{saved, total, op}}
  */
-export async function bulkSet(ids, status, io) {
+export async function bulkSet(ids, status, io, onlyUndecided = false) {
   io = io || liveIo;
   const rows = [];
   const op = { status, rows };
   for (const id of ids) {
     const members = io.members(id);
-    if (!members.length) continue;
+    if (!members.length || (onlyUndecided && members.some(mid => !["unseen", "expiring"].includes(io.current(mid))))) continue;
     const previous = await io.write(members, () => status, undefined, { id, status });
     if (previous) {
       const row = { id, member_ids: members, previous };
@@ -340,6 +340,14 @@ export async function bulkSet(ids, status, io) {
     if (io === liveIo && pendingDecision) break;
   }
   return { saved: rows.length, total: ids.length, op: rows.length ? op : null };
+}
+
+export function decisionState() {
+  return {pending: !!pendingDecision, canUndo: history.length > 0};
+}
+export function retryDecision() {
+  if (!pendingDecision) return Promise.resolve(null);
+  return pendingDecision.undo ? undoLast() : bulkSet([pendingDecision.id], pendingDecision.status);
 }
 
 /** Restore the last operation, retaining failed rows for another Undo attempt. */

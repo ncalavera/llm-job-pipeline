@@ -111,7 +111,10 @@ dashboard *code* changes.)
 
 The four primary website sections are Inbox, Applications, Companies and Sources.
 The main Inbox uses the original scored catalogue table, with descending score
-sort and explanations on vacancy detail pages. Legacy Screen links resolve to
+sort and explanations on vacancy detail pages. Optional reason batches group low-scored
+undecided roles using current quoted requirements and possible profile conflicts.
+They reuse revision-checked screening decisions, durable retries and Undo; no
+new LLM calls or automatic decisions are involved. Legacy Screen links resolve to
 this table. Missing scores do not exclude collected roles. Materials are reached through Applications. Older
 routes remain accessible for history and diagnostics, not competing navigation.
 

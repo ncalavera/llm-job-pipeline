@@ -20,7 +20,7 @@ The user's choice: Like or Pass. Preparation, filtering, and archiving do not ma
 *Avoid:* verdict, keep, skipped, or put aside for these same user-facing choices.
 
 ### Inbox
-The main scored catalogue of collected vacancies, with Undecided, Liked and Passed views. Rows sort by score by default; a missing score stays blank, never becomes zero. Preparation is a labelled property, never an inclusion gate. Bulk review uses the same records and content; filtered or paginated views are subsets of that table. Application outcomes do not manufacture a Pass. Archives preserve historical records outside the active table.
+The main scored catalogue of collected vacancies, with Undecided, Liked and Passed views. Rows sort by score by default; a missing score stays blank, never becomes zero. Preparation is a labelled property, never an inclusion gate. Bulk review uses the same records and content; filtered or paginated views are subsets of that table. Low-score reason batches are optional subsets: current, quoted required conditions with a possible profile conflict, grouped first by location/language/authorisation, otherwise experience/qualifications. Unclassified roles remain in All. Passing requires explicit selection; it preserves decided duplicate members and supports Undo. Application outcomes do not manufacture a Pass. Archives preserve historical records outside the active table.
 
 ### History
 Older records and past decisions retained for reference and recovery. Moving a record out of the active inbox does not mean the user passed on it.

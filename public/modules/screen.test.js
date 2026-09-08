@@ -605,3 +605,14 @@ test("Inbox function filters also classify liked roles", async () => {
   assert.deepEqual(reviewModel(roles, g => g.status).rows.map(g => g.id), ["liked-product"]);
   view.list = "toScreen"; view.batch = null;
 });
+
+
+test("reason batches preserve decided members and application progress", async () => {
+  const db = {a:"unseen", a2:"liked", b:"applied", c:"unseen"};
+  const io = fakeIo(db, {a:["a","a2"]});
+  const result = await bulkSet(["a","b","c"], "passed", io, true);
+  assert.equal(result.saved, 1);
+  assert.deepEqual(db, {a:"unseen", a2:"liked", b:"applied", c:"passed"});
+  await undoLast(io);
+  assert.equal(db.c, "unseen");
+});

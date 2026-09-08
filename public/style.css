@@ -6658,3 +6658,16 @@ body::after {
 
 /* Keep retired catalogue controls out of the initial loading screen. */
 #catalogLoading:not(.hidden) ~ * { display: none; }
+
+/* Reason review is a filter on the scored table, not another vacancy view. */
+#catalogReasonReview { margin: 12px 0; }
+#catalogReasonReview summary { cursor: pointer; font-weight: 600; }
+#catalogReasonReview p { font-size: 13px; max-width: 800px; }
+#catalogReasonReview p:empty { display: none; }
+.reason-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.reason-toolbar [aria-pressed="true"] { background: var(--cobalt); color: white; }
+.reason-row { margin: 10px 0; font-size: 13px; line-height: 1.5; }
+.reason-row label { display: block; margin-bottom: 6px; }
+.reason-row input { accent-color: var(--cobalt); width: 18px; height: 18px; vertical-align: middle; }
+.reason-row summary { cursor: pointer; color: #8b4d12; white-space: normal; }
+.reason-row blockquote { white-space: normal; margin: 8px 0; padding-left: 10px; border-left: 3px solid var(--cobalt); }
