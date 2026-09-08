@@ -36,7 +36,11 @@ Each state answers one named question. States are mutually exclusive **within th
 ### Company
 The organisation offering a vacancy. A company can have many vacancies and a direct careers source. Discovering a company on a job board does not connect its careers site.
 
-**Tracking:** To review → Tracked or Not tracked; either choice can be changed later. Tracked means included in the search, not that fetching is working.
+**Personal selection:** Selected or Not selected. Only an explicit personal selection changes this; discovery and scores never select a company. Selection does not enable direct collection.
+
+**Eligibility:** Eligible or Excluded. A personal block excludes all incoming vacancies and disables collection. Historical invalid/operational exclusions remain labelled with their reason; they must not be presented as personal decisions.
+
+**Direct collection:** Configured separately from selection. Existing active sources keep their settings; board-only candidates are never fetched separately just because they are selected.
 
 ### Job board
 A website listing vacancies from multiple companies. A board publishes a vacancy; the company offers it. The same vacancy may appear on several boards and on the company's careers site.
