@@ -240,7 +240,7 @@ test("companyProfileHtml (approved): status shows once, in the rail pill — no 
   );
   // …but the single source of truth, the rail Status pill, still reads Approved.
   assert.ok(html.includes("cp-status-pill"));
-  assert.ok(html.includes("Tracked"));
+  assert.ok(html.includes("Selected"));
 });
 
 test("companyProfileHtml: pending/rejected keep their action banners (only approved's duplicate went)", () => {
@@ -620,7 +620,7 @@ test("_buildRow: an XSS payload in the company name is inert in both text and th
     state.companySubTab = "archived"; // fixture has no rejected companies
     renderCompanies();
     assert.ok(
-      grid.innerHTML.includes("Not tracked") &&
+      grid.innerHTML.includes("Excluded") &&
         grid.innerHTML.includes("no companies"),
       "expected the sub-tab-labelled basket-empty copy, got: " + grid.innerHTML,
     );
@@ -706,7 +706,7 @@ test("selected companies require personal selection, not automatic activation", 
   for (const reason of [null, "auto-approved: alignment=82.0", "screening reset approved 2026-09-08"]) {
     assert.equal(companyListTab({review_status: "approved", status_reason: reason}), "pending");
   }
-  assert.equal(companyListTab({review_status: "pending", status_reason: "approved via dashboard"}), "pending");
+  assert.equal(companyListTab({review_status: "pending", status_reason: "approved via dashboard"}), "approved");
   assert.equal(companyListTab({review_status: "rejected", status_reason: "approved via dashboard"}), "archived");
 });
 

@@ -1378,3 +1378,14 @@ test('application notes reject stale edits and preserve previous notes on save',
     if(previous===undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL=previous;
   }
 });
+
+
+test("selecting a company preserves existing collection but does not activate a discovered source", async () => {
+  await withStubDb([["UPDATE company SET status = CASE", [{id: "c1", canonical_name: "Example"}]]], async (seen) => {
+    const res = await call({method: "POST", url: "/api/company-review", headers: {"content-type": "application/json"}, body: {company_id: "c1", action: "approve"}});
+    assert.equal(res.statusCode, 200);
+    assert.equal(seen[0].params[0], "candidate");
+    assert.match(seen[0].sql, /WHEN \$1 = 'candidate' AND status = 'active' THEN status ELSE \$1 END/);
+    assert.equal(seen[0].params[1], "approved via dashboard");
+  });
+});

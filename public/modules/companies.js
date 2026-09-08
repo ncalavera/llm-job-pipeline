@@ -165,7 +165,7 @@ function _getReviewStatus(c) {
 // Selection requires an explicit personal action, never an automatic score.
 export function companyListTab(c, reviewStatus = c.review_status) {
   if (reviewStatus === "rejected") return "archived";
-  return reviewStatus === "approved" && c.status_reason === "approved via dashboard"
+  return c.status_reason === "approved via dashboard"
     ? "approved" : "pending";
 }
 
@@ -610,58 +610,6 @@ function _getColumns() {
 }
 
 // ---------------------------------------------------------------------------
-// Stats cards (context-aware per tab)
-// ---------------------------------------------------------------------------
-
-// Approved tab shows no stat cards (post-ship fast fix: the maintainer
-// dropped the Total/With new/Needs attention row — the counts it carried are
-// not relocated anywhere else). Pending/Archived keep theirs.
-function _renderStatsCards(filtered) {
-  var statsEl = document.getElementById("companyEnrichmentStats");
-  if (!statsEl) return;
-
-  var subTab = state.companySubTab;
-
-  if (subTab === "approved") {
-    statsEl.innerHTML = "";
-  } else if (subTab === "pending") {
-    var pendingCount = filtered.length;
-    var enrichedCount = 0;
-    for (var pi = 0; pi < filtered.length; pi++) {
-      if (filtered[pi].alignment_score != null) enrichedCount++;
-    }
-    statsEl.innerHTML =
-      '<div class="ces-card ces-card--pending">' +
-      '<span class="ces-number">' +
-      pendingCount +
-      "</span>" +
-      '<span class="ces-label">' +
-      escHtml(T("stat_pending", "To review")) +
-      "</span>" +
-      "</div>" +
-      '<div class="ces-card ces-card--approved">' +
-      '<span class="ces-number">' +
-      enrichedCount +
-      "</span>" +
-      '<span class="ces-label">' +
-      escHtml(T("stat_enriched", "Enriched")) +
-      "</span>" +
-      "</div>";
-  } else {
-    // archived
-    statsEl.innerHTML =
-      '<div class="ces-card ces-card--total">' +
-      '<span class="ces-number">' +
-      filtered.length +
-      "</span>" +
-      '<span class="ces-label">' +
-      escHtml(T("stat_rejected", "Not tracked")) +
-      "</span>" +
-      "</div>";
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Monitoring status logic
 // ---------------------------------------------------------------------------
 
@@ -902,7 +850,8 @@ export function renderCompanies() {
   // Get final filtered list (with the chip filter applied)
   var filtered = getFilteredSortedCompanies();
 
-  _renderStatsCards(filtered);
+  var statsEl = document.getElementById("companyEnrichmentStats");
+  if (statsEl) statsEl.innerHTML = "";
   _renderPendingDisclaimer(unfiltered);
   _renderMonitoringChips(unfiltered);
 
@@ -944,7 +893,7 @@ export function renderCompanies() {
       var subTabLabels = {
         approved: T("subtab_approved", "Selected"),
         pending: T("subtab_pending", "Catalogue"),
-        archived: T("subtab_archived", "Not tracked"),
+        archived: T("subtab_archived", "Excluded"),
       };
       emptyMsg =
         (subTabLabels[subTab] || "") +
@@ -1241,7 +1190,7 @@ function _buildArchivedRow(c) {
     '<td class="ct-td ct-col-review">' +
     '<button class="cr-btn cr-approve" onclick="event.stopPropagation();reviewCompany(\'' +
     jsAttr(c.company_id || "") +
-    "','approve')\" title=\"Restore to active\">✓</button>" +
+    "','approve')\" title=\"Unblock and select\">✓</button>" +
     "</td>" +
     "</tr>"
   );
@@ -1267,7 +1216,7 @@ export function sortCompanyTable(col) {
 
 export function reviewCompany(companyId, action) {
   if (!companyId) return;
-  var newStatus = action === "approve" ? "approved" : "rejected";
+  var newStatus = action === "approve" ? "pending" : "rejected";
 
   // Remember the status to restore if the server call fails. The company may
   // currently be pending, approved, or rejected (active/archived tabs now have
@@ -1276,6 +1225,7 @@ export function reviewCompany(companyId, action) {
     return c.company_id === companyId;
   });
   var prevStatus = prevCompany ? _getReviewStatus(prevCompany) : "pending";
+  if (action === "approve" && prevStatus === "approved") newStatus = "approved";
   var prevReason = prevCompany && prevCompany.status_reason;
   state.companyStatusReasons ||= {};
   var prevLiveReason = state.companyStatusReasons[companyId];
@@ -2059,9 +2009,9 @@ function companyFactsHtml(c, t) {
 
 function companyStatusPillHtml(reviewStatus, t) {
   var STATUS_MAP = {
-    approved: ["q-good-bg", t("cp_review_approved", "Tracked")],
-    pending: ["q-moderate-bg", t("cp_review_pending", "To review")],
-    rejected: ["q-weak-bg", t("cp_review_archived", "Not tracked")],
+    approved: ["q-good-bg", t("cp_review_approved", "Selected")],
+    pending: ["q-moderate-bg", t("cp_review_pending", "Not selected")],
+    rejected: ["q-weak-bg", t("cp_review_archived", "Excluded")],
   };
   var m = STATUS_MAP[reviewStatus] || STATUS_MAP.pending;
   return (
@@ -2169,17 +2119,17 @@ export function companyProfileHtml(c, roles, opts) {
     banner =
       '<div class="cp-review-banner q-moderate-bg">' +
       '<span class="cp-review-label">' +
-      escHtml(t("cp_review_pending", "To review")) +
+      escHtml(t("cp_review_pending", "Not selected")) +
       "</span>" +
       '<button class="vac-btn vac-btn--like" onclick="reviewCompany(\'' +
       cid +
       "','approve')\">" +
-      escHtml(t("btn_approve", "Track company")) +
+      escHtml(t("btn_approve", "Select company")) +
       "</button>" +
       '<button class="vac-btn vac-btn--pass" onclick="reviewCompany(\'' +
       cid +
       "','reject')\">" +
-      escHtml(t("btn_reject", "Stop tracking")) +
+      escHtml(t("btn_reject", "Block company")) +
       "</button></div>";
     // Approved is a settled state: its status shows once, in the rail pill
     // (companyStatusPillHtml) — no second full-width banner (DHA-412 #6, the
@@ -2192,12 +2142,12 @@ export function companyProfileHtml(c, roles, opts) {
     banner =
       '<div class="cp-review-banner q-weak-bg">' +
       '<span class="cp-review-label">' +
-      escHtml(t("cp_review_archived", "Not tracked")) +
+      escHtml(t("cp_review_archived", "Excluded")) +
       "</span>" +
       '<button class="vac-btn vac-btn--like" onclick="reviewCompany(\'' +
       cidR +
       "','approve')\">" +
-      escHtml(t("cp_restore", "Track company")) +
+      escHtml(t("cp_restore", "Unblock and select")) +
       "</button></div>";
   }
 
@@ -2340,7 +2290,7 @@ function buildCompanyProfilePage(c) {
   var counts = getCompanyStatusCounts(c.vacancy_ids);
   return companyProfileHtml(c, roles, {
     t: T,
-    reviewStatus: _getReviewStatus(c),
+    reviewStatus: _listTab(c) === "archived" ? "rejected" : _listTab(c),
     monStatus: _getMonitoringStatus(c),
     counts: counts,
   });
@@ -2381,7 +2331,7 @@ function companyProfileKeydown(e) {
   var c = getCompanyBySlug(state.currentProfileSlug);
   if (!c || !c.company_id) return;
 
-  var status = _getReviewStatus(c);
+  var status = _listTab(c) === "archived" ? "rejected" : _listTab(c);
   // approve is available while pending or rejected (restore); reject only while
   // pending — mirrors the banner button rendering in companyProfileHtml.
   if (key === "l" && (status === "pending" || status === "rejected")) {

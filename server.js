@@ -680,13 +680,15 @@ async function handleCompanyReview(req, res) {
       error: "Invalid action — must be 'approve' or 'reject'",
     });
 
-  const newStatus = action === "approve" ? "active" : "inactive";
+  const newStatus = action === "approve" ? "candidate" : "inactive";
   const reason =
     action === "approve" ? "approved via dashboard" : "rejected via dashboard";
 
   try {
     const result = await getPool().query(
-      `UPDATE company SET status = $1, status_reason = $2
+      `UPDATE company SET status = CASE
+          WHEN $1 = 'candidate' AND status = 'active' THEN status ELSE $1 END,
+          status_reason = $2
         WHERE id = $3::uuid RETURNING id, canonical_name`,
       [newStatus, reason, company_id],
     );
