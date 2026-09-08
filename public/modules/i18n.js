@@ -1,11 +1,11 @@
 // =============================================================================
-// i18n.js — Apply the baked language strings to the shell.
+// i18n.js \u2014 Apply the baked language strings to the shell.
 //
 // The generator bakes the chosen language's string map (config.i18n) into
 // data.js. This module reads it and rewrites the static index.html chrome at
 // load time:
-//   - [data-i18n="key"]      → element.textContent     = T(key)
-//   - [data-i18n-ph="key"]   → element.placeholder     = T(key)
+//   - [data-i18n="key"]      \u2192 element.textContent     = T(key)
+//   - [data-i18n-ph="key"]   \u2192 element.placeholder     = T(key)
 // English text in index.html stays as the in-markup fallback, so a fork with no
 // translation renders correctly with zero baked config.
 // =============================================================================
@@ -23,7 +23,7 @@ export function availableLanguages() {
 /**
  * Pure resolver for the active UI language. Order:
  *   1. an explicit user toggle saved in localStorage (only if we bundle it),
- *   2. else the server-baked default `config.language` — which the generator
+ *   2. else the server-baked default `config.language` \u2014 which the generator
  *      sets from the profile's product language (## OUTPUT_LANGUAGE),
  *   3. else "en".
  * Kept side-effect-free so it unit-tests without DOM/localStorage.
@@ -55,7 +55,7 @@ export function setLanguage(lang) {
   try {
     localStorage.setItem(LANG_STORAGE_KEY, lang);
   } catch (e) {
-    /* ignore — the reload below still applies it for this load */
+    /* ignore \u2014 the reload below still applies it for this load */
   }
   location.reload();
 }
@@ -94,7 +94,7 @@ const LOCAL = {
     screen_undo: "Undo",
     screen_saved: "{n} of {m} saved",
     screen_undone: "{n} of {m} restored",
-    screen_loading: "Loading statuses…",
+    screen_loading: "Loading statuses\u2026",
     screen_open: "Open",
   },
 };
@@ -137,7 +137,7 @@ Object.assign(LOCAL.en, {
   screen_requirement_kind: "Requirement type",
   screen_strength_filter: "Requirement strength",
   screen_requirement_text: "Requirement name contains",
-  screen_requirement_placeholder: "Language, location, skill…",
+  screen_requirement_placeholder: "Language, location, skill\u2026",
   screen_language: "Language",
   screen_location: "Location",
   screen_authorisation: "Work authorisation",
@@ -155,7 +155,7 @@ Object.assign(LOCAL.en, {
   screen_filter_hint:
     "Filters combine. Requirement filters refer to the same requirement; text searches its name, not the quote. Unknown is not a rejection reason.",
   screen_clear_filters: "Clear filters",
-  screen_matches: "{n} matching · {m} in this list",
+  screen_matches: "{n} matching \xb7 {m} in this list",
   screen_work_availability:
     "{n} roles in this list have no work details yet. Requirement filters still work.",
   screen_page: "Page {n} of {m}",
@@ -163,6 +163,45 @@ Object.assign(LOCAL.en, {
   screen_next: "Next batch",
   screen_select_page: "Select this page",
   screen_flow_title: "Find a batch with a shared reason to decide.",
+});
+Object.assign(LOCAL.en, {
+  "nav_inbox": "Inbox",
+  "nav_applications": "Applications",
+  "nav_sources": "Sources",
+  "inbox_materials": "Materials",
+  "inbox_search": "Title or company",
+  "inbox_place": "Job location (not company HQ)",
+  "inbox_function": "Job function",
+  "inbox_more_filters": "More filters",
+  "inbox_work_mode": "Work mode",
+  "inbox_remote": "Remote",
+  "inbox_hybrid": "Hybrid",
+  "inbox_onsite": "Onsite",
+  "inbox_unknown": "Unknown / not stated",
+  "inbox_requirement": "Requirement",
+  "inbox_authorisation": "Work authorisation",
+  "inbox_language": "Language",
+  "inbox_education": "Education",
+  "inbox_experience": "Experience",
+  "inbox_skill": "Skill",
+  "inbox_older_facts": "Facts need updating",
+  "inbox_no_facts": "Facts not prepared",
+  "inbox_since_review": "New since last review on this device",
+  "inbox_finish": "Finish review",
+  "inbox_review_saved": "Checkpoint saved on this device. Undecided vacancies remain in Inbox."
+});
+Object.assign(LOCAL.en, {
+  "source_checks": "Collection checks",
+  "source_checks_hint": "Open a recorded run to inspect its original listings. Collection and import are separate: a listed role may be flagged, blocked or already archived.",
+  "source_complete": "Source pages fetched",
+  "source_incomplete": "Incomplete collection",
+  "source_listings": "listings",
+  "source_parser_counts": "Unflagged / flagged by parser",
+  "source_inspect": "Inspect listings",
+  "source_unverified": "No recorded listing checks yet. Coverage is not verified.",
+  "source_scope": "Detailed listing accounting covers Algolia sources. Other collectors still need listing-by-listing reconciliation.",
+  "source_diagnostics": "Diagnostics",
+  "source_unavailable": "Could not load listings. Retry the check."
 });
 const LOCAL_STRINGS = { ...LOCAL.en, ...(LOCAL[getLanguage()] || {}) };
 

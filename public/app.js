@@ -73,7 +73,7 @@ import { initArchive, renderArchive } from "./modules/archive.js";
 import { renderScreen } from "./modules/screen.js";
 import { initReports, renderReports } from "./modules/reports.js";
 import { initContacts, renderContacts } from "./modules/contacts.js";
-import { initBoards, renderBoards, toggleBoard } from "./modules/boards.js";
+import { initBoards, renderBoards, toggleBoard, showSourceRun } from "./modules/boards.js";
 import { initHealth, renderHealth } from "./modules/health.js";
 import { initSettings, renderSettings } from "./modules/settings.js";
 import {
@@ -169,9 +169,7 @@ function navVisOpts() {
 
 function updateNavCounts() {
   var vacEl = document.getElementById("navCountVacancies");
-  if (vacEl) vacEl.textContent = groups.some((g) => g.screening_state === "ready")
-    ? screenLists(groups, getGroupStatus, config.screening_prompt_fingerprint).toScreen.size
-    : basketCounts(groups, navVisOpts()).unseen;
+  if (vacEl) vacEl.textContent = screenLists(groups, getGroupStatus).toScreen.size;
   var compEl = document.getElementById("navCountCompanies");
   if (compEl) compEl.textContent = getCompanies().length;
 }
@@ -634,6 +632,7 @@ function applyRouteFromUrl() {
 // ---------------------------------------------------------------------------
 
 function switchMode(mode) {
+  if (mode === "catalog" || mode === "today") mode = "screen";
   // A section switch always drops any open detail overlay (company profile or
   // vacancy detail / not-found) and returns to a list.
   closeDetailOverlays();
@@ -777,6 +776,7 @@ window.renderToday = renderToday;
 window.renderArchive = renderArchive;
 // Boards section (inline onclick on each board's enabled toggle).
 window.toggleBoard = toggleBoard;
+window.showSourceRun = showSourceRun;
 window.renderSettings = renderSettings;
 
 // ---------------------------------------------------------------------------

@@ -109,6 +109,21 @@ dashboard *code* changes.)
 
 ## Health & observability
 
+The four primary website sections are Inbox, Applications, Companies and Sources.
+Catalogue links resolve to the same Inbox table; bulk selection does not change
+its content or base set. Materials are reached through Applications. Older
+routes remain accessible for history and diagnostics, not competing navigation.
+
+Algolia collection writes `source_observation` before applying parser flags,
+with stable external identifiers and original URLs. `source_fetch_run` records
+upstream pagination completeness and raw/unflagged/flagged counts; these are
+source listings, not counts of saved canonical vacancies. The Sources page reads
+recent runs from `stats.source_runs` and paginates their original listings through
+the authenticated `/api/source-observations` endpoint. Other collectors remain
+explicitly unverified at listing level. Archives and explicit company blocks
+are preserved; collection does not invent a human decision.
+
+
 ### Private application materials
 
 `scripts/materials.py` imports original bytes into the existing private zone
@@ -135,8 +150,7 @@ The daily update contains one current Inbox count and link, plus actionable run
 failures. Preparation queues belong to Health. Readiness requires matching the
 stored screening fingerprint against the current posting and prompt/profile
 fingerprints. The snapshot ships these raw identities; Inbox, its sidebar badge,
-and functional review batches share `screenLists`. The digest validates the same
-identities. `send --details` remains the explicit legacy scoring view.
+and bulk review share `screenLists`. Preparation badges validate those identities; preparation does not filter Inbox. The digest counts all retained undecided vacancies. `send --details` remains the explicit legacy scoring view.
 Delivery advances last-success only after sending; a crash may repeat a message,
 but cannot mark an undelivered one successful.
 
@@ -157,8 +171,7 @@ reading logs:
   `run_state.json`. `PARTIAL` is a stage that advanced the run but left its own
   work undone — a scoring session that stopped early and carried the remainder
   over; its note says how many of how many. The `screening_prep` stage reports
-  preparation outcomes in Health. The daily update counts current preparations
-  for undecided vacancies; raw `ready` alone is not sufficient.
+  preparation outcomes in Health. The daily update counts all retained undecided vacancies, including those awaiting preparation.
 - **Health tab** (dashboard) — `public/modules/health.js` renders four blocks
   from the live `api/health-detail.js` endpoint (read-only, no LLM spend):
   - **Boards** — per enabled board: freshness, failure streak, vacancy count,

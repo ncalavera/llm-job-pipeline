@@ -115,5 +115,5 @@ test("accepted is a win, so it stays in the liked basket", () => {
   // The opposite of `declined`, which leaves the active basket. Folding a won
   // offer into "passed" would count it as a rejection everywhere.
   assert.equal(STATUS_BASKET.accepted, "liked");
-  assert.notEqual(STATUS_BASKET.accepted, STATUS_BASKET.declined);
+  assert.equal(STATUS_BASKET.declined, "liked");
 });

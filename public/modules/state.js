@@ -88,33 +88,8 @@ export const STATUS_PRI = {
   unseen: 12,
 };
 
-export const STATUS_BASKET = {
-  liked: "liked",
-  to_apply: "liked",
-  to_research: "liked",
-  to_network: "liked",
-  applied: "liked",
-  // A take-home assignment is the most active work an application ever asks
-  // for, so it stays in the Liked basket alongside 'applied'.
-  test_task: "liked",
-  // An application still in flight is active work, so it stays in the Liked
-  // basket alongside 'applied'.
-  interview: "liked",
-  // A protected, about-to-disappear role with a decision still pending belongs
-  // in the active (Liked) basket, not Passed.
-  expiring: "liked",
-  unseen: "unseen",
-  passed: "passed",
-  skipped: "passed",
-  // The employer said no. A closed outcome, not a role still to consider — so
-  // it leaves the active basket. Unlike 'passed' it records THEIR decision,
-  // which is the strongest calibration signal scoring has.
-  declined: "passed",
-  // The employer said yes. A closed outcome like `declined`, but the opposite
-  // answer — so it stays in the active (Liked) basket, where every other role
-  // he wanted lives. Folding a win into Passed would count it as a rejection.
-  accepted: "liked",
-};
+export { VACANCY_BASKETS as STATUS_BASKET } from "./derive.js";
+import { VACANCY_BASKETS as STATUS_BASKET } from "./derive.js";
 
 export const TRIAGE_COLUMNS = [
   {key: "liked", label: "Backlog", color: "var(--gold)", compact: true},
@@ -153,10 +128,10 @@ export const state = {
   statsSortAsc: false,
   // Open prepared screening when available; empty/demo snapshots keep Today.
   // The six-section chrome derives the active section via nav.js.
-  currentMode: groups.some((g) => g.screening_state === "ready") ? "screen" : "today",
+  currentMode: "screen",
   // Remembered Vacancies sub-view (Browse/Geo/Archive) so re-opening the
   // Vacancies section returns to where the user was.
-  vacancyView: groups.some((g) => g.screening_state === "ready") ? "screen" : "catalog",
+  vacancyView: "screen",
   companyStatuses: {},
   companyStatusesLoaded: false,
   companySubTab: "approved",

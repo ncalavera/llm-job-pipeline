@@ -67,7 +67,7 @@ function setCatalog(next) {
   catalog.push(...next);
 }
 
-test("renders every board with a name, tier badge and TTL", () => {
+test("renders every board with its name and collection state", () => {
   setCatalog([
     boardRow({ id: "a", name: "Alpha", enabled: true, tier: "A" }),
     boardRow({ id: "b", name: "Beta", enabled: false, tier: "C" }),
@@ -80,15 +80,7 @@ test("renders every board with a name, tier badge and TTL", () => {
     html.includes("Alpha") && html.includes("Beta"),
     "both boards render",
   );
-  assert.ok(
-    html.includes("vac-tier tier-a"),
-    "tier A badge uses the shared tier helper",
-  );
-  assert.ok(
-    html.includes("vac-tier tier-c"),
-    "tier C badge uses the shared tier helper",
-  );
-  assert.ok(html.includes(">3d<"), "TTL renders as a day count");
+
 });
 
 test("the enabled dot distinguishes on/off boards, and off dims the row", () => {

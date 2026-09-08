@@ -56,7 +56,7 @@ function getReviewForGroup(g, reviewByVid) {
 function renderTriageFunnel(funnelEl) {
   if (!funnelEl) return;
   funnelEl.innerHTML = '<span class="triage-title">' +
-    escHtml(T("tab_triage", "Progress")) + '</span>' +
+    escHtml(T("nav_applications", "Applications")) + '</span><a class="scr-btn" href="/materials.html">' + escHtml(T("inbox_materials", "Materials")) + '</a>' +
     '<span class="triage-hint">' + escHtml(T("triage_drag_hint", "drag cards between columns")) + '</span>';
 }
 

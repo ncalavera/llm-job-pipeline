@@ -105,7 +105,7 @@ test("actionsFor mirrors catalogRowHtml button gating for every status", () => {
 test("row click opens the vacancy via openCatalogRow with the row's id", () => {
   const html = catalogRowHtml(baseGroup, "unseen", opts);
   assert.match(html, /class="catalog-row" data-id="g1"/);
-  assert.match(html, /onclick="openCatalogRow\('g1'\)"/);
+  assert.match(html, /onclick="if\(!event.target.closest\('button,input,a'\)\)openCatalogRow\('g1'\)"/);
 });
 
 test("row is keyboard-reachable and Enter/Space open it only when the row itself has focus (R12, WAI-ARIA button pattern)", () => {
@@ -149,7 +149,7 @@ test("no compensation/location/first_seen -> dash placeholders, not blank", () =
     "unseen",
     opts,
   );
-  assert.match(html, /<div class="catalog-row-loc">—<\/div>/);
+  assert.match(html, /<div class="catalog-row-loc"><span class="scr-meta scr-meta--location">—<\/span><\/div>/);
   assert.match(html, /<div class="catalog-row-comp">—<\/div>/);
   assert.match(html, /<div class="catalog-row-seen">—<\/div>/);
 });

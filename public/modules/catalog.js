@@ -18,6 +18,7 @@ import {
 } from "./state.js";
 import {
   escHtml,
+  safeUrl,
   jsAttr,
   formatDeadlineHtml,
   relativeTime,
@@ -31,6 +32,7 @@ import {
   VISIBLE_MIN_SCORE,
   basketCounts,
   clearsScoreFloor,
+  screenDateFacts,
   groupsInBasket,
 } from "./derive.js";
 import { createCursor, actionsFor } from "./keys.js";
@@ -463,7 +465,7 @@ export function catalogRowHtml(g, basket, opts) {
   const compText = g.compensation ? escHtml(g.compensation) : "—";
   const seenText = g.first_seen ? escHtml(relativeTime(g.first_seen, t)) : "—";
 
-  const subText = g.llm_summary || g.snippet || "";
+  const subText = g.llm_summary || g.screening?.posting_facts?.duties || g.snippet || "";
   const subHtml = subText
     ? '<div class="catalog-row-sub">' + escHtml(subText) + "</div>"
     : "";
@@ -496,10 +498,29 @@ export function catalogRowHtml(g, basket, opts) {
   else if (basket === "unseen") actionsHtml = likeBtn + passBtn;
   else if (basket === "passed") actionsHtml = likeBtn;
 
+  const dates = screenDateFacts(g);
+  const url = safeUrl((g.locations || []).find(l => l?.url)?.url || "");
+  const metadata = [
+    dates.firstSeen && `<span class="scr-meta scr-meta--date">${escHtml(t("vac_first_seen","First seen"))}: ${dates.firstSeen}</span>`,
+    dates.lastSeen && `<span class="scr-meta scr-meta--date">${escHtml(t("screen_last_seen","Last seen"))}: ${dates.lastSeen}</span>`,
+    g.source_board && `<span class="scr-meta">${escHtml(g.source_board)}</span>`,
+  ].filter(Boolean).join(" ");
+  const progress = !["unseen","liked","passed","skipped","expiring"].includes(basket);
+  const current = g.screening_state === "ready" && (!window.VACANCY_DATA.config.screening_prompt_fingerprint ||
+    g.screening_fingerprint === `${g.posting_fingerprint}:${window.VACANCY_DATA.config.screening_prompt_fingerprint}`);
+  const prepLabel = current ? "" : t(g.screening ? "inbox_older_facts" : "inbox_no_facts", g.screening ? "Facts need updating" : "Facts not prepared");
+  if (o.review) {
+    actionsHtml = progress ? '<span>' + escHtml(t("vac_status_" + basket,basket)) + '</span>' :
+      [["liked","screen_keep","Like"],["passed","screen_put_aside","Pass"]].map(([status,key,label]) =>
+        '<button class="catalog-row-btn" data-decision="' + status + '" data-vacancy="' + escHtml(g.id) + '"' +
+        (o.disabled ? ' disabled' : '') + '>' + escHtml(t(key,label)) + '</button>').join('');
+  }
+  const selectHtml = o.review ? '<input type="checkbox" data-toggle="' + escHtml(g.id) + '" aria-label="' + escHtml(g.title) + '"' +
+    (o.checked ? ' checked' : '') + (o.disabled || progress ? ' disabled' : '') + '>' : escHtml(scoreTxt);
   return (
     '<div class="catalog-row" data-id="' +
     escHtml(g.id) +
-    '" role="button" tabindex="0" onclick="openCatalogRow(\'' +
+    '" role="button" tabindex="0" onclick="if(!event.target.closest(\'button,input,a\'))openCatalogRow(\'' +
     idAttr +
     "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openCatalogRow('" +
     idAttr +
@@ -507,7 +528,7 @@ export function catalogRowHtml(g, basket, opts) {
     '<div class="catalog-row-score ' +
     scoreCls +
     '">' +
-    escHtml(scoreTxt) +
+    selectHtml +
     "</div>" +
     '<div class="catalog-row-role">' +
     '<div class="catalog-row-title-line">' +
@@ -517,15 +538,18 @@ export function catalogRowHtml(g, basket, opts) {
     deadlineHtml +
     "</div>" +
     subHtml +
+    '<div class="scr-row-meta">' + metadata + '</div>' +
+    (prepLabel ? '<div class="scr-concern">' + escHtml(prepLabel) + '</div>' : '') +
+    (url ? '<a class="scr-posting" href="' + escHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escHtml(t("vac_open_posting","Open posting")) + ' ↗</a>' : '') +
     "</div>" +
     '<div class="catalog-row-company">' +
     '<span class="catalog-row-org">' +
     escHtml(g.company_name || g.org) +
     "</span>" +
-    tierHtml +
+    (o.review ? "" : tierHtml) +
     "</div>" +
     '<div class="catalog-row-loc">' +
-    locHtml +
+    '<span class="scr-meta scr-meta--location">' + locHtml + "</span>" +
     "</div>" +
     '<div class="catalog-row-comp">' +
     compText +

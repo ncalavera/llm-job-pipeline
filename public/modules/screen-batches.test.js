@@ -44,10 +44,10 @@ test("functional batches retain undecided roles exactly once without score cutof
   );
   assert.deepEqual(
     batches[0].roles.map((g) => g.id),
-    ["p2", "p"],
+    ["failed", "p2", "p"],
   );
-  assert.equal(batches[0].roles[1], product);
-  assert.equal(batches.flatMap((b) => b.roles).length, 8);
+  assert.equal(batches[0].roles[2], product);
+  assert.equal(batches.flatMap((b) => b.roles).length, 9);
   assert.equal(JSON.stringify(roles), before);
   assert.deepEqual(reviewBatches([...roles].reverse(), status), batches);
   assert.deepEqual(

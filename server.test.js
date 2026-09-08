@@ -1389,3 +1389,21 @@ test("selecting a company preserves existing collection but does not activate a 
     assert.equal(seen[0].params[1], "approved via dashboard");
   });
 });
+
+test("source observations are bounded, parameterized and private", async () => {
+  await withStubDb([["SELECT external_id, title, organization", [{external_id:'j1',title:'Role',listing_url:'https://example.org/job'}]]], async (calls) => {
+    const res = await call({url:'/api/source-observations?source=board&run=run1'});
+    assert.equal(res.statusCode,200);
+    assert.equal(res.headers['Cache-Control'],'no-store');
+    assert.equal(JSON.parse(res.body).items[0].external_id,'j1');
+    const invalid = await call({url:'/api/source-observations?source=board&run=run1&offset=-1'});
+    assert.equal(invalid.statusCode,400);
+  });
+});
+
+test("screening writes cannot reset an application even with a matching revision", async () => {
+ await withStubDb([], async () => {
+  const res = await call({method:'POST',url:'/api/screening-decision',headers:{'content-type':'application/json'},body:{operation_id:randomUUID(),changes:[{id:randomUUID(),status:'passed',expected_status:'applied',expected_revision:'123'}]}});
+  assert.equal(res.statusCode,400);
+ });
+});

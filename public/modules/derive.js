@@ -377,25 +377,25 @@ export function selectTodayRoles(groups, opts) {
 // facts per role; lists and groups derive here, never on the server.
 // ---------------------------------------------------------------------------
 
-/**
- * Split the ready roles into the three inbox lists by live status. A role is
- * in a list only when its screening is ready; an unprepared or failed role is
- * in none. `getStatus(g)` is injected so this stays DOM-free.
- * @returns {{toScreen: Set, kept: Set, putAside: Set}} canonical id sets
- */
-export function screenLists(roles, getStatus, promptFingerprint) {
-  const toScreen = new Set();
-  const kept = new Set();
-  const putAside = new Set();
+// Decision baskets are shared by every vacancy view. Progress is independent:
+// an employer rejection preserves the user's interest, not a manufactured Pass.
+export const VACANCY_BASKETS = {
+  unseen: "unseen", expiring: "unseen",
+  liked: "liked", to_apply: "liked", to_research: "liked", to_network: "liked",
+  applied: "liked", test_task: "liked", interview: "liked", accepted: "liked", declined: "liked",
+  passed: "passed", skipped: "passed",
+};
+
+/** Same collected records, regardless of preparation readiness. */
+export function screenLists(roles, getStatus) {
+  const lists = { toScreen: new Set(), kept: new Set(), putAside: new Set() };
+  const keys = { unseen: "toScreen", liked: "kept", passed: "putAside" };
   for (const g of roles) {
     if (!g) continue;
-    const status = getStatus(g);
-    const current = !promptFingerprint || g.screening_fingerprint === `${g.posting_fingerprint}:${promptFingerprint}`;
-    if (status === "unseen" && g.screening_state === "ready" && current) toScreen.add(g.id);
-    else if (status === "liked") kept.add(g.id);
-    else if (status === "passed") putAside.add(g.id);
+    const key = keys[VACANCY_BASKETS[getStatus(g) || "unseen"]];
+    if (key) lists[key].add(g.id);
   }
-  return { toScreen, kept, putAside };
+  return lists;
 }
 
 // The fixed group vocabulary, in chooser order. Overlap is allowed: one role
@@ -485,6 +485,13 @@ export function screenMatches(
   today = new Date().toISOString().slice(0, 10),
 ) {
   const dates = screenDateFacts(g, today);
+  if (filters.source && g.source_board !== filters.source) return false;
+  if (filters.added && dates.firstSeen !== filters.added) return false;
+  if (filters.place) {
+    const locations = (g.locations || []).map(l => l.location || "").filter(l => !/^HQ:/i.test(l));
+    const place = [g.screening?.posting_facts?.location || "", ...locations].join(" ").toLowerCase();
+    if (!place.includes(filters.place.trim().toLowerCase())) return false;
+  }
   if (filters.age) {
     const limit = { last7: 7, last14: 14, last30: 30 }[filters.age];
     if (

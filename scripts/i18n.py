@@ -1561,3 +1561,108 @@ STRINGS["ru"].update(
         "concepts_application": "Прогресс: Бэклог / В работе / Отклик отправлен / Отбор / Оффер или приглашение / Отказ / Пропущено. Тестовые входят в отбор. Доступность вакансии и история отправки хранятся отдельно.",
     }
 )
+
+# Unified Inbox and source accounting.
+STRINGS["en"].update(
+    {
+        "nav_inbox": "Inbox",
+        "nav_applications": "Applications",
+        "nav_sources": "Sources",
+        "inbox_materials": "Materials",
+        "inbox_search": "Title or company",
+        "inbox_place": "Job location (not company HQ)",
+        "inbox_function": "Job function",
+        "inbox_more_filters": "More filters",
+        "inbox_work_mode": "Work mode",
+        "inbox_remote": "Remote",
+        "inbox_hybrid": "Hybrid",
+        "inbox_onsite": "Onsite",
+        "inbox_unknown": "Unknown / not stated",
+        "inbox_requirement": "Requirement",
+        "inbox_authorisation": "Work authorisation",
+        "inbox_language": "Language",
+        "inbox_education": "Education",
+        "inbox_experience": "Experience",
+        "inbox_skill": "Skill",
+        "inbox_older_facts": "Facts need updating",
+        "inbox_no_facts": "Facts not prepared",
+        "inbox_since_review": "New since last review on this device",
+        "inbox_finish": "Finish review",
+        "inbox_review_saved": "Checkpoint saved on this device. Undecided vacancies remain in Inbox.",
+        "source_checks": "Collection checks",
+        "source_checks_hint": "Open a recorded run to inspect its original listings. Collection and import are separate: a listed role may be flagged, blocked or already archived.",
+        "source_complete": "Source pages fetched",
+        "source_incomplete": "Incomplete collection",
+        "source_listings": "listings",
+        "source_parser_counts": "Unflagged / flagged by parser",
+        "source_inspect": "Inspect listings",
+        "source_unverified": "No recorded listing checks yet. Coverage is not verified.",
+        "source_scope": "Detailed listing accounting covers Algolia sources. Other collectors still need listing-by-listing reconciliation.",
+        "source_diagnostics": "Diagnostics",
+        "source_unavailable": "Could not load listings. Retry the check.",
+        "screen_review_title": "Inbox",
+        "screen_list_to_screen": "Undecided",
+        "screen_batch_showing": "Showing {start}–{end} of {total}",
+        "screen_review_later": "Next",
+        "screen_title": "Inbox",
+        "screen_batch_reason_other": "Other or mixed functions",
+    }
+)
+STRINGS["ru"].update(
+    {
+        "source_checks": "Проверки сбора",
+        "source_checks_hint": "Откройте запуск, чтобы увидеть исходные объявления. Сбор и импорт — разные шаги: вакансия может быть отмечена фильтром, заблокирована или уже находиться в архиве.",
+        "source_complete": "Страницы источника получены",
+        "source_incomplete": "Сбор не завершён",
+        "source_listings": "объявлений",
+        "source_parser_counts": "Без замечаний / отмечены фильтром",
+        "source_inspect": "Посмотреть объявления",
+        "source_unverified": "Проверок отдельных объявлений ещё нет. Полнота сбора не подтверждена.",
+        "source_scope": "Учёт отдельных объявлений действует для источников Algolia. Остальные источники ещё требуют сверки.",
+        "source_diagnostics": "Диагностика",
+        "source_unavailable": "Не удалось загрузить объявления. Повторите проверку.",
+        "nav_inbox": "Входящие",
+        "nav_applications": "Отклики",
+        "nav_sources": "Источники",
+        "inbox_materials": "Материалы",
+        "inbox_search": "Название или компания",
+        "inbox_place": "Место работы (не офис компании)",
+        "inbox_function": "Направление работы",
+        "inbox_more_filters": "Ещё фильтры",
+        "inbox_work_mode": "Формат работы",
+        "inbox_remote": "Удалённо",
+        "inbox_hybrid": "Гибрид",
+        "inbox_onsite": "В офисе",
+        "inbox_unknown": "Не указано",
+        "inbox_requirement": "Требование",
+        "inbox_authorisation": "Разрешение на работу",
+        "inbox_language": "Язык",
+        "inbox_education": "Образование",
+        "inbox_experience": "Опыт",
+        "inbox_skill": "Навык",
+        "inbox_older_facts": "Факты требуют обновления",
+        "inbox_no_facts": "Факты ещё не подготовлены",
+        "inbox_since_review": "Новые после прошлого просмотра на этом устройстве",
+        "inbox_finish": "Завершить просмотр",
+        "inbox_review_saved": "Отметка сохранена на этом устройстве. Вакансии без решения остаются во входящих.",
+        "screen_review_title": "Входящие",
+        "screen_list_to_screen": "Без решения",
+        "screen_batch_showing": "Показаны {start}–{end} из {total}",
+        "screen_review_later": "Далее",
+        "screen_title": "Входящие",
+        "screen_batch_reason_other": "Другие или смешанные направления",
+    }
+)
+
+STRINGS["en"].update(
+    {
+        "source_newsletter_counts": "Matched in source / unverified",
+        "source_newsletter_checked": "Newsletter links checked",
+    }
+)
+STRINGS["ru"].update(
+    {
+        "source_newsletter_counts": "Найдены в источнике / не подтверждены",
+        "source_newsletter_checked": "Ссылки рассылки проверены",
+    }
+)

@@ -20,8 +20,7 @@ The user's choice: Like or Pass. Preparation, filtering, and archiving do not ma
 *Avoid:* verdict, keep, skipped, or put aside for these same user-facing choices.
 
 ### Inbox
-Vacancies awaiting the user's decision whose facts and fit reflect the current posting and profile. Its count is the number of vacancies in that list; a page or function group is a subset of the same inbox.
-*Avoid:* mixing preparation queues or historical results into the inbox count.
+The single table of collected vacancies, with Undecided, Liked and Passed views. Preparation is a labelled property, never an inclusion gate. Bulk review uses the same records and content; filtered or paginated views are subsets of that table. Application outcomes do not manufacture a Pass. Archives preserve historical records outside the active table.
 
 ### History
 Older records and past decisions retained for reference and recovery. Moving a record out of the active inbox does not mean the user passed on it.

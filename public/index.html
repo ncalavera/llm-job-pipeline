@@ -114,7 +114,7 @@
           <button
             type="button"
             class="nav-item"
-            id="navVacancies"
+            id="navVacancies" aria-label="Inbox"
             data-section="vacancies"
             onclick="switchVacancies()"
           >
@@ -147,7 +147,7 @@
                   opacity=".35"
                 ></rect></svg
             ></span>
-            <span class="nav-label" data-i18n="tab_vacancies">Vacancies</span>
+            <span class="nav-label" data-i18n="nav_inbox">Inbox</span>
             <span
               class="nav-count nav-count--cobalt"
               id="navCountVacancies"
@@ -191,7 +191,7 @@
           <button
             type="button"
             class="nav-item"
-            id="navCompanies"
+            id="navCompanies" aria-label="Companies"
             data-section="companies"
             onclick="switchMode('companies')"
           >
@@ -222,7 +222,7 @@
           <button
             type="button"
             class="nav-item"
-            id="navTriage"
+            id="navTriage" aria-label="Applications"
             data-section="triage"
             onclick="switchMode('pipeline')"
           >
@@ -240,13 +240,13 @@
                   stroke-width="1.2"
                 ></path></svg
             ></span>
-            <span class="nav-label" data-i18n="tab_triage">Progress</span>
+            <span class="nav-label" data-i18n="nav_applications">Applications</span>
           </button>
 
           <button
             type="button"
             class="nav-item"
-            id="navBoards"
+            id="navBoards" aria-label="Sources"
             data-section="boards"
             onclick="switchMode('boards')"
           >
@@ -279,7 +279,7 @@
                   fill="#7C5CE0"
                 ></rect></svg
             ></span>
-            <span class="nav-label" data-i18n="tab_boards">Job boards</span>
+            <span class="nav-label" data-i18n="nav_sources">Sources</span>
           </button>
 
           <button
@@ -310,7 +310,7 @@
             ></span>
             <span class="nav-label" data-i18n="tab_reports">Reports</span>
           </button>
-          <a class="nav-item" href="/materials.html"><span class="nav-icon" aria-hidden="true">📎</span><span class="nav-label">Materials</span></a>
+
           <button
             type="button"
             class="nav-item"
@@ -368,7 +368,7 @@
           <button
             type="button"
             class="nav-item"
-            id="navSettings"
+            id="navSettings" aria-label="Settings"
             data-section="settings"
             onclick="switchMode('settings')"
           >
@@ -729,7 +729,7 @@
            the sheet below (U14, DHA-398). -->
           <div class="boards-section" id="boardsSection">
             <div class="boards-header">
-              <span class="boards-header-title" data-i18n="boards_title"
+              <span class="boards-header-title" data-i18n="nav_sources"
                 >Job boards</span
               >
               <span class="boards-header-sub" data-i18n="boards_sub"

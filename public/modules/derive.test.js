@@ -763,7 +763,7 @@ import { screenLists, screenGroups, SCREEN_GROUP_KEYS } from "./derive.js";
 const ready = (id, extra) =>
   Object.assign({ id, screening_state: "ready", screening: null }, extra);
 
-test("screenLists: ready roles split by status; an unprepared role lands in no list", () => {
+test("screenLists: preparation never hides an undecided role", () => {
   const roles = [
     ready("a"),
     ready("b"),
@@ -772,17 +772,17 @@ test("screenLists: ready roles split by status; an unprepared role lands in no l
   ];
   const status = { a: "unseen", b: "liked", c: "passed", d: "unseen" };
   const lists = screenLists(roles, (g) => status[g.id]);
-  assert.deepEqual([...lists.toScreen], ["a"]);
+  assert.deepEqual([...lists.toScreen], ["a", "d"]);
   assert.deepEqual([...lists.kept], ["b"]);
   assert.deepEqual([...lists.putAside], ["c"]);
 });
 
-test("screenLists: a failed role is in no list", () => {
+test("screenLists: a failed role remains undecided", () => {
   const lists = screenLists(
     [{ id: "f", screening_state: "failed" }],
     () => "unseen",
   );
-  assert.equal(lists.toScreen.size + lists.kept.size + lists.putAside.size, 0);
+  assert.equal(lists.toScreen.size + lists.kept.size + lists.putAside.size, 1);
 });
 
 test("screenGroups: a role with a Spanish requirement and an onsite constraint is in both groups and once in All", () => {
@@ -1076,7 +1076,7 @@ test("requirement search does not borrow another language from a shared quote", 
 });
 
 
-test("inbox requires current posting and profile; previous decisions survive refresh", () => {
+test("inbox keeps older preparations and previous decisions", () => {
   const roles = [
     ready("current", { posting_fingerprint: "post", screening_fingerprint: "post:new" }),
     ready("old-profile", { posting_fingerprint: "post", screening_fingerprint: "post:old" }),
@@ -1086,7 +1086,7 @@ test("inbox requires current posting and profile; previous decisions survive ref
   ];
   const status = g => ({kept: "liked", passed: "passed"}[g.id] || "unseen");
   const lists = screenLists(roles, status, "new");
-  assert.deepEqual([...lists.toScreen], ["current"]);
+  assert.deepEqual([...lists.toScreen], ["current", "old-profile", "edited"]);
   assert.deepEqual([...lists.kept], ["kept"]);
   assert.deepEqual([...lists.putAside], ["passed"]);
 });
@@ -1099,4 +1099,21 @@ test("ready screening vacancies remain in Browse without a legacy score or appro
   assert.equal(isVisible(role, opts), true);
   assert.equal(basketCounts([role], opts).unseen, 1);
   assert.equal(groupsInBasket([role], "unseen", opts).length, 1);
+});
+
+
+test("application outcomes preserve interest and never become a user Pass", () => {
+ const statuses = ["liked", "applied", "accepted", "declined", "passed", "skipped", "unseen", "expiring", "archived"];
+ const lists = screenLists(statuses.map(status => ({id: status, status})), r => r.status);
+ assert.deepEqual([...lists.kept], ["liked", "applied", "accepted", "declined"]);
+ assert.deepEqual([...lists.putAside], ["passed", "skipped"]);
+ assert.deepEqual([...lists.toScreen], ["unseen", "expiring"]);
+});
+
+test("inbox filters combine source, added date, place and explicit requirement", () => {
+ const g = {title:'Analyst', source_board:'Board', first_seen:'2026-09-08', locations:[{location:'Berlin, Germany'}], screening:{posting_facts:{requirements:[{kind:'authorisation',strength:'required',value:'EU work permit'}]}}};
+ assert.equal(screenMatches(g, {source:'Board',added:'2026-09-08',place:'Germany',kind:'authorisation'}),true);
+ assert.equal(screenMatches(g, {source:'Other'}),false);
+ assert.equal(screenMatches(g, {place:'United States'}),false);
+ assert.equal(screenMatches(g, {added:'2026-09-07'}),false);
 });

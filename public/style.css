@@ -6605,3 +6605,33 @@ body::after {
     padding: 12px;
   }
 }
+
+/* One Inbox, four primary sections. Historic routes remain valid deep links. */
+#navToday, #navReports, #navContacts, #navHealth,
+#navSubVacancies, #vacancySubNav, #navCountCompanies { display: none !important; }
+.inbox-filterbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 18px 0; }
+.inbox-filterbar label { display: grid; gap: 5px; font-size: var(--text-sm); color: var(--sky-text); }
+.inbox-filterbar input, .inbox-filterbar select { font: inherit; padding: 9px; border: 1px solid #ccc; border-radius: 8px; max-width: 240px; background: var(--card); color: var(--sky-text); }
+.inbox-filterbar summary { cursor: pointer; padding: 10px; }
+.inbox-review-checkpoint { display: flex; flex-wrap: wrap; gap: 8px; }
+.scr-inbox { padding: 12px 0; }
+.scr-inbox .catalog-row-score { background: transparent; }
+.scr-inbox input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--cobalt); }
+.scr-inbox .catalog-row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.scr-inbox .catalog-row-actions button { width: auto; height: auto; min-height: 36px; }
+.scr-inbox .catalog-row, .scr-inbox .catalog-row-head { grid-template-columns: 30px minmax(260px, 1fr) 125px 140px 100px 55px 105px; }
+.scr-inbox .catalog-row-sub { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; white-space: normal; color: var(--sky-text); }
+@media (max-width: 700px) {
+  .scr-inbox .catalog-table { min-width: 0; }
+  .scr-inbox .catalog-row-head { display: none; }
+  .scr-inbox .catalog-row { grid-template-columns: 30px minmax(0,1fr); align-items: start; padding: 12px; margin: 0; }
+  .scr-inbox .catalog-row-role { grid-column: 2; }
+  .scr-inbox .catalog-row-company, .scr-inbox .catalog-row-loc, .scr-inbox .catalog-row-comp,
+  .scr-inbox .catalog-row-seen, .scr-inbox .catalog-row-actions { grid-column: 2; }
+  .inbox-filterbar label, .inbox-filterbar input, .inbox-filterbar select { max-width: 100%; }
+}
+
+.source-accounting { margin-bottom: 24px; }
+.source-accounting details { margin: 10px 0; padding: 12px; background: var(--card); border-radius: 10px; }
+.source-accounting summary { cursor: pointer; font-weight: 600; }
+.source-accounting li { margin: 8px 0; overflow-wrap: anywhere; }

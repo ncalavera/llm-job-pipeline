@@ -488,6 +488,7 @@ const FEEDBACK_UUID =
 
 // PostgreSQL's row version changes for every writer, including agent/CLI writes.
 // Compare opaque tokens, never timestamps rounded by JavaScript.
+const SCREENING_STATUSES = ["unseen", "liked", "passed", "skipped", "expiring"];
 async function handleScreeningDecision(req, res) {
   if (piiPreamble(req, res, "screening-decision", "POST")) return;
   if (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] || ""))
@@ -498,7 +499,7 @@ async function handleScreeningDecision(req, res) {
   if (!Array.isArray(changes) || !changes.length || changes.length > 100 ||
       new Set(changes.map((c) => c?.id)).size !== changes.length ||
       changes.some((c) => !c || !FEEDBACK_UUID.test(c.id) ||
-        !VALID_STATUSES.includes(c.status) || !VALID_STATUSES.includes(c.expected_status) ||
+        !SCREENING_STATUSES.includes(c.status) || !SCREENING_STATUSES.includes(c.expected_status) ||
         typeof c.expected_revision !== "string" || !c.expected_revision))
     return sendJson(res, 400, { error: "Invalid changes or missing revision" });
   let client;
@@ -748,6 +749,26 @@ async function boardVacancyCounts(pool, recentCutoffIso) {
     [recentCutoffIso],
   );
   return new Map(rows.map((r) => [r.source_board, r]));
+}
+
+async function handleSourceObservations(req, res) {
+  if (piiPreamble(req, res, "source-observations")) return;
+  const query = new URL(req.url, "http://localhost").searchParams;
+  const source = query.get("source"), run = query.get("run");
+  const offset = Number(query.get("offset") || 0);
+  if (!source || !run || source.length > 200 || run.length > 200 || !Number.isSafeInteger(offset) || offset < 0) {
+    return sendJson(res, 400, { error: "Invalid source run" });
+  }
+  try {
+    const { rows } = await getPool().query(
+      `SELECT external_id, title, organization, listing_url, outcome, reason, canonical_id
+       FROM source_observation WHERE source_key = $1 AND run_id = $2
+       ORDER BY external_id LIMIT 251 OFFSET $3`, [source, run, offset]);
+    sendJson(res, 200, { items: rows.slice(0,250), next: rows.length > 250 ? offset + 250 : null });
+  } catch (error) {
+    logError("source-observations", error, reqMeta(req));
+    sendJson(res, 500, { error: "Source accounting unavailable" });
+  }
 }
 
 async function handleBoardStatuses(req, res) {
@@ -1527,6 +1548,7 @@ const API_ROUTES = {
   "/api/company-review": handleCompanyReview,
   "/api/company-statuses": handleCompanyStatuses,
   "/api/board-statuses": handleBoardStatuses,
+  "/api/source-observations": handleSourceObservations,
   "/api/board-toggle": handleBoardToggle,
   "/api/health": handleHealth,
   "/api/health-detail": handleHealthDetail,

@@ -477,7 +477,7 @@ test("technical specialist evidence has a technical label, distinct from special
 });
 
 const { reviewModel, REVIEW_SIZE, feedbackFor } = await import("./screen.js");
-test("functional review shows five roles and only selection from the current batch survives", () => {
+test("functional review paginates roles and only selection from the current batch survives", () => {
   view.batch = "product";
   view.list = "toScreen";
   view.page = 0;
@@ -488,7 +488,7 @@ test("functional review shows five roles and only selection from the current bat
   }));
   roles.push({ ...lang("ops"), title: "Head of Operations" });
   let m = reviewModel(roles, () => "unseen");
-  assert.equal(m.rows.length, REVIEW_SIZE);
+  assert.equal(m.rows.length, 7);
   toggleSelectAll(m.visibleIds);
   view.batch = "operations";
   view.page = 0;
@@ -497,7 +497,7 @@ test("functional review shows five roles and only selection from the current bat
   assert.equal(view.selected.size, 0);
   m = reviewModel(roles, (g) => (g.id === "ops" ? "declined" : "unseen"));
   assert(!m.visibleIds.includes("ops"));
-  assert.equal(m.batch.key, "product");
+  assert.equal(m.batch, undefined);
 });
 test("feedback refers only to successfully saved members and never creates a preference", () => {
   const op = { status: "passed", rows: [{ id: "a", member_ids: ["a", "a2"] }] };
@@ -515,7 +515,7 @@ test("feedback refers only to successfully saved members and never creates a pre
   assert.equal(feedbackFor(op, "   ", "Product", "id"), null);
 });
 test("kept and put-aside pages remain navigable after the screening inbox is empty", () => {
-  const roles = Array.from({ length: 8 }, (_, i) => ({
+  const roles = Array.from({ length: REVIEW_SIZE + 3 }, (_, i) => ({
     ...lang("k" + i),
     title: "Product Manager " + i,
   }));
@@ -530,7 +530,7 @@ test("kept and put-aside pages remain navigable after the screening inbox is emp
     const m = reviewModel(roles, () => status);
     assert.equal(view.page, 1);
     assert.equal(m.rows.length, 3);
-    assert.equal(m.visibleIds[0], "k5");
+    assert.equal(m.visibleIds.length, 3);
   }
   view.list = "toScreen";
   view.page = 0;
@@ -591,4 +591,13 @@ test("posting link is outside selection and rejects unsafe URLs", () => {
   assert.match(html, /rel="noopener noreferrer"/);
   assert.doesNotMatch(row("javascript:alert(1)"), /scr-posting/);
   assert.doesNotMatch(row(""), /scr-posting/);
+});
+
+
+test("Inbox function filters also classify liked roles", async () => {
+  const {reviewModel} = await import("./screen.js");
+  view.list = "kept"; view.batch = "product"; view.filters = {}; view.page = 0;
+  const roles = [{id:"liked-product",title:"Product Manager",status:"liked"},{id:"unseen-product",title:"Product Manager",status:"unseen"}];
+  assert.deepEqual(reviewModel(roles, g => g.status).rows.map(g => g.id), ["liked-product"]);
+  view.list = "toScreen"; view.batch = null;
 });
