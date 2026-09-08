@@ -6635,3 +6635,6 @@ body::after {
 .source-accounting details { margin: 10px 0; padding: 12px; background: var(--card); border-radius: 10px; }
 .source-accounting summary { cursor: pointer; font-weight: 600; }
 .source-accounting li { margin: 8px 0; overflow-wrap: anywhere; }
+
+/* Keep retired catalogue controls out of the initial loading screen. */
+#catalogLoading:not(.hidden) ~ * { display: none; }

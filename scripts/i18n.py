@@ -1666,3 +1666,33 @@ STRINGS["ru"].update(
         "source_newsletter_checked": "Ссылки рассылки проверены",
     }
 )
+
+STRINGS["en"].update(
+    {
+        "source_outcome_new": "Added to Inbox",
+        "source_outcome_existing": "Already in database",
+        "source_outcome_blocked": "Company blocked",
+        "source_outcome_archived": "Already archived",
+        "source_outcome_invalid": "Invalid listing",
+        "source_outcome_matched": "Found in source",
+        "source_outcome_unverified": "Not verified",
+        "source_outcome_accepted": "Import not confirmed",
+        "source_outcome_excluded": "Import not confirmed",
+        "source_outcome_observed": "Import not confirmed",
+    }
+)
+
+STRINGS["ru"].update(
+    {
+        "source_outcome_new": "Добавлена во Входящие",
+        "source_outcome_existing": "Уже есть в базе",
+        "source_outcome_blocked": "Компания заблокирована",
+        "source_outcome_archived": "Уже в архиве",
+        "source_outcome_invalid": "Некорректное объявление",
+        "source_outcome_matched": "Найдена в источнике",
+        "source_outcome_unverified": "Не подтверждена",
+        "source_outcome_accepted": "Импорт не подтверждён",
+        "source_outcome_excluded": "Импорт не подтверждён",
+        "source_outcome_observed": "Импорт не подтверждён",
+    }
+)

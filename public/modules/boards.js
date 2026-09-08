@@ -218,7 +218,7 @@ export async function showSourceRun(index, offset = 0) {
     const data = await response.json();
     el.innerHTML = '<ul>' + data.items.map(item => '<li>' + escHtml(item.organization || '') + ' — ' +
       (safeUrl(item.listing_url) ? '<a target="_blank" rel="noopener noreferrer" href="' + escHtml(safeUrl(item.listing_url)) + '">' + escHtml(item.title || item.external_id) + '</a>' : escHtml(item.title || item.external_id)) +
-      ' · ' + escHtml(item.reason || item.outcome) + '</li>').join('') + '</ul>' +
+      ' · ' + escHtml(T('source_outcome_' + item.outcome, item.outcome)) + '</li>').join('') + '</ul>' +
       (data.next != null ? '<button class="scr-btn" onclick="showSourceRun(' + index + ',' + Number(data.next) + ')">' + escHtml(T("screen_next","Next")) + '</button>' : '');
   } catch { el.textContent = T("source_unavailable","Could not load source listings. Retry the check."); }
 }
