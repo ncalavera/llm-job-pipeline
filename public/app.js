@@ -88,8 +88,6 @@ import {
   renderVacancyDetail,
   vacancyLike,
   vacancyPass,
-  vacancyResearch,
-  vacancyNetwork,
   vacancyMoveToApply,
 } from "./modules/vacancy.js";
 import {
@@ -773,8 +771,6 @@ window.closeDetail = closeDetail;
 // Vacancy detail page actions (U6) — inline onclick on the page's buttons.
 window.vacancyLike = vacancyLike;
 window.vacancyPass = vacancyPass;
-window.vacancyResearch = vacancyResearch;
-window.vacancyNetwork = vacancyNetwork;
 window.vacancyMoveToApply = vacancyMoveToApply;
 window.renderPipeline = renderPipeline;
 window.renderToday = renderToday;
