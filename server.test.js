@@ -9,6 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync, chmodSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -153,6 +154,128 @@ async function withStubDb(replies, fn) {
     else process.env.DATABASE_URL = previous;
   }
 }
+
+test("screening decisions require an operation UUID and return durable receipts before checking revisions", async () => {
+  const operation_id = randomUUID();
+  const changes = [{ id: randomUUID(), status: "liked", expected_status: "unseen", expected_revision: "old" }];
+  const receipt = { ok: true, rows: [{ id: changes[0].id, status: "liked", revision: "new", previous: "unseen" }] };
+  await withStubDb([], async () => {
+    const queries = [];
+    let same = true;
+    setPool({ connect: async () => ({
+      query: async (sql) => {
+        queries.push(sql);
+        return { rows: sql.includes("SELECT result") ? [{ result: receipt, same_request: same }] : [] };
+      }, release() {},
+    }) });
+    const post = (body) => call({ method: "POST", url: "/api/screening-decision",
+      headers: { "content-type": "application/json" }, body });
+    assert.equal((await post({ changes })).statusCode, 400);
+    assert.equal((await post({ changes, operation_id: "invalid" })).statusCode, 400);
+    assert.equal(queries.length, 0);
+    const retried = await post({ changes, operation_id });
+    assert.equal(retried.statusCode, 200);
+    assert.deepEqual(JSON.parse(retried.body), receipt);
+    same = false;
+    assert.equal((await post({ changes, operation_id })).statusCode, 409);
+    assert.ok(queries.some((q) => q.includes("pg_advisory_xact_lock")));
+    assert.ok(!queries.some((q) => q.includes("FROM vacancy") || q.includes("UPDATE vacancy")));
+  });
+});
+
+test("screening decisions reject a stale revision, including away-and-back status changes", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  await withStubDb([], async () => {
+    const queries = [];
+    setPool({ connect: async () => ({
+      query: async (sql) => {
+        queries.push(sql);
+        return { rows: sql.includes("FOR UPDATE") ? [{ id, status: "liked", revision: "new" }] : [] };
+      }, release() {},
+    }) });
+    const res = await call({ method: "POST", url: "/api/screening-decision", headers: { "content-type": "application/json" },
+      body: { operation_id: randomUUID(), changes: [{ id, status: "unseen", expected_status: "liked", expected_revision: "old" }] } });
+    assert.equal(res.statusCode, 409);
+    assert.ok(queries.includes("ROLLBACK"));
+    assert.ok(!queries.some((q) => q.includes("UPDATE vacancy")));
+  });
+});
+
+test("live PostgreSQL: lost commit response retry, exact selection, stale Undo and member rollback", {
+  skip: !process.env.SCREENING_TEST_DB_URL,
+}, async () => {
+  const { default: pg } = await import("pg");
+  const { createServer } = await import("node:http");
+  const client = new pg.Client({ connectionString: process.env.SCREENING_TEST_DB_URL });
+  const previousUrl = process.env.DATABASE_URL;
+  const server = createServer(handleRequest);
+  await client.connect();
+  try {
+    // Session-local shadow table: this check never writes production vacancies.
+    await client.query(`CREATE TEMP TABLE vacancy (
+      id uuid PRIMARY KEY, status text NOT NULL,
+      status_updated_at timestamptz, applied_at timestamptz,
+      CHECK (NOT (id = '00000000-0000-4000-8000-000000000004' AND status = 'passed')))`);
+    await client.query(readFileSync(join(ROOT, "sql/migrations/0029_screening_decision.postgres.sql"), "utf8")
+      .replace("CREATE TABLE IF NOT EXISTS", "CREATE TEMP TABLE"));
+    const ids = [1, 2, 3, 4, 5].map((n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`);
+    for (const id of ids) await client.query("INSERT INTO vacancy VALUES ($1, 'unseen', NULL, NULL)", [id]);
+    process.env.DATABASE_URL = process.env.SCREENING_TEST_DB_URL;
+    let loseCommitResponse = false;
+    const db = { async query(...args) {
+      const result = await client.query(...args);
+      if (args[0] === "COMMIT" && loseCommitResponse) {
+        loseCommitResponse = false;
+        throw new Error("Simulated lost COMMIT acknowledgement");
+      }
+      return result;
+    }, release() {} };
+    setPool({ ...db, connect: async () => db });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const statuses = async () => (await fetch(base + "/api/statuses")).json();
+    const change = async (changes, operation_id = randomUUID()) => {
+      const response = await fetch(base + "/api/screening-decision", { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ changes, operation_id }) });
+      return { status: response.status, body: await response.json() };
+    };
+    const before = await statuses();
+    const changes = ids.slice(0, 4).map((id) => ({ id, status: "liked",
+      expected_status: "unseen", expected_revision: before.revisions[id] }));
+    const operationId = randomUUID();
+    loseCommitResponse = true;
+    assert.equal((await change(changes, operationId)).status, 500);
+    const committed = await statuses();
+    const keep = await change(changes, operationId);
+    assert.equal(keep.status, 200);
+    assert.deepEqual((await statuses()).revisions, committed.revisions, "retry must not update rows twice");
+    assert.deepEqual((await change(changes, operationId)).body, keep.body, "retry returns original Undo receipt");
+    assert.equal((await change([{ ...changes[0], status: "passed" }], operationId)).status, 409);
+    assert.equal((await statuses()).statuses[ids[4]], "unseen");
+    assert.equal(keep.body.rows.length, 4);
+    const saved = keep.body.rows[0];
+    await client.query("UPDATE vacancy SET status='passed' WHERE id=$1", [saved.id]);
+    await client.query("UPDATE vacancy SET status='liked' WHERE id=$1", [saved.id]);
+    const stale = await change([{ id: saved.id, status: "unseen", expected_status: "liked", expected_revision: saved.revision }]);
+    assert.equal(stale.status, 409);
+    assert.equal((await statuses()).statuses[saved.id], "liked");
+    const fresh = await statuses();
+    const failed = await change([ids[1], ids[3]].map((id) => ({ id, status: "passed",
+      expected_status: "liked", expected_revision: fresh.revisions[id] })));
+    assert.equal(failed.status, 500);
+    const after = await statuses();
+    assert.equal(after.statuses[ids[1]], "liked", "earlier member rolls back on later failure");
+    assert.equal(after.statuses[ids[3]], "liked");
+    assert.equal((await client.query("SELECT count(*)::int AS count FROM screening_decision")).rows[0].count, 1,
+      "failed or conflicting operations must not leave receipts");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    setPool(null);
+    await client.end();
+    if (previousUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previousUrl;
+  }
+});
 
 // --- Routing contracts (no DB configured) ---------------------------------
 
@@ -305,7 +428,7 @@ test("/api/statuses returns the status and timestamp maps", async () => {
   await withStubDb(
     [
       [
-        "SELECT id, status, status_updated_at FROM vacancy",
+        "SELECT id, status, status_updated_at, xmin::text AS revision FROM vacancy",
         [
           { id: "v1", status: "test_task", status_updated_at: "2026-08-20" },
           { id: "v2", status: "liked", status_updated_at: null },
@@ -787,25 +910,35 @@ const REPORT_ROW = {
 test("GET /api/reports lists reports newest first, with an excerpt not a body", () => {
   // The list must stay one cheap response however long the library gets: a
   // hundred full reports would be megabytes, and the list shows none of it.
-  return withStubDb([["FROM report ORDER BY updated_at DESC", [REPORT_ROW]]], async () => {
-    const res = await call({ url: "/api/reports" });
-    assert.equal(res.statusCode, 200);
-    const { reports } = JSON.parse(res.body);
-    assert.equal(reports.length, 1);
-    assert.equal(reports[0].slug, "ea-funding-2026");
-    assert.equal(reports[0].excerpt, "Three funders matter here.");
-    assert.equal(reports[0].body_md, undefined, "the list leaked a full body");
-  });
+  return withStubDb(
+    [["FROM report ORDER BY updated_at DESC", [REPORT_ROW]]],
+    async () => {
+      const res = await call({ url: "/api/reports" });
+      assert.equal(res.statusCode, 200);
+      const { reports } = JSON.parse(res.body);
+      assert.equal(reports.length, 1);
+      assert.equal(reports[0].slug, "ea-funding-2026");
+      assert.equal(reports[0].excerpt, "Three funders matter here.");
+      assert.equal(
+        reports[0].body_md,
+        undefined,
+        "the list leaked a full body",
+      );
+    },
+  );
 });
 
 test("GET /api/reports/<slug> returns the full report", () => {
-  return withStubDb([["FROM report WHERE slug = $1", [REPORT_ROW]]], async (seen) => {
-    const res = await call({ url: "/api/reports/ea-funding-2026" });
-    assert.equal(res.statusCode, 200);
-    const { report } = JSON.parse(res.body);
-    assert.equal(report.body_md, REPORT_ROW.body_md);
-    assert.deepEqual(seen[0].params, ["ea-funding-2026"]);
-  });
+  return withStubDb(
+    [["FROM report WHERE slug = $1", [REPORT_ROW]]],
+    async (seen) => {
+      const res = await call({ url: "/api/reports/ea-funding-2026" });
+      assert.equal(res.statusCode, 200);
+      const { report } = JSON.parse(res.body);
+      assert.equal(report.body_md, REPORT_ROW.body_md);
+      assert.deepEqual(seen[0].params, ["ea-funding-2026"]);
+    },
+  );
 });
 
 test("GET /api/reports/<slug> answers 404 for a report that is not there", () => {
@@ -921,7 +1054,9 @@ test("REPORT_KINDS mirrors scripts/statuses.py", () => {
   // accepted on one side and refused on the other is a write that fails only
   // for some reports.
   const py = readFileSync(join(ROOT, "scripts/statuses.py"), "utf8");
-  const block = py.match(/^REPORT_KINDS: tuple\[str, \.\.\.\] = \(([\s\S]*?)\n\)/m);
+  const block = py.match(
+    /^REPORT_KINDS: tuple\[str, \.\.\.\] = \(([\s\S]*?)\n\)/m,
+  );
   assert.ok(block, "REPORT_KINDS not found in scripts/statuses.py");
   const pyKinds = [...block[1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
   assert.deepEqual([...REPORT_KINDS].sort(), pyKinds.sort());
@@ -964,7 +1099,10 @@ test("the excerpt collapses the newlines a markdown file is full of", () => {
 // --- Slug routing ----------------------------------------------------------
 
 test("the detail route reads the slug out of the path", () => {
-  assert.equal(reportSlugFromPath("/api/reports/ea-funding-2026"), "ea-funding-2026");
+  assert.equal(
+    reportSlugFromPath("/api/reports/ea-funding-2026"),
+    "ea-funding-2026",
+  );
   assert.equal(reportSlugFromPath("/api/reports/a%20b"), "a b");
 });
 
@@ -1008,12 +1146,15 @@ test("the excerpt skips a fenced diagram and finds the real prose", () => {
 });
 
 test("the excerpt skips headings at any depth, not only the title", () => {
-  const excerpt = reportExcerpt("# Title\n\n## Section\n\n### Deeper\n\nReal prose.");
+  const excerpt = reportExcerpt(
+    "# Title\n\n## Section\n\n### Deeper\n\nReal prose.",
+  );
   assert.equal(excerpt, "Real prose.");
 });
 
 test("the excerpt skips horizontal rules and table rows", () => {
-  const body = "# T\n\n---\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nThe sentence.";
+  const body =
+    "# T\n\n---\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nThe sentence.";
   assert.equal(reportExcerpt(body), "The sentence.");
 });
 
@@ -1022,17 +1163,17 @@ test("the excerpt strips inline markers that would show as literal characters", 
   const excerpt = reportExcerpt(
     "# T\n\n**Date:** 2026-07-06. See [the notes](https://example.org) and `run.py`.",
   );
-  assert.equal(
-    excerpt,
-    "Date: 2026-07-06. See the notes and run.py.",
-  );
+  assert.equal(excerpt, "Date: 2026-07-06. See the notes and run.py.");
   assert.ok(!excerpt.includes("*"));
   assert.ok(!excerpt.includes("`"));
   assert.ok(!excerpt.includes("https://"));
 });
 
 test("the excerpt drops list and quote markers but keeps the text", () => {
-  assert.equal(reportExcerpt("# T\n\n- First point\n- Second point"), "First point Second point");
+  assert.equal(
+    reportExcerpt("# T\n\n- First point\n- Second point"),
+    "First point Second point",
+  );
   assert.equal(reportExcerpt("# T\n\n1. Step one"), "Step one");
   assert.equal(reportExcerpt("# T\n\n> A quotation."), "A quotation.");
 });
@@ -1040,4 +1181,167 @@ test("the excerpt drops list and quote markers but keeps the text", () => {
 test("a report that is nothing but a diagram yields an empty excerpt", () => {
   // Empty is honest. A row of box-drawing characters is not.
   assert.equal(reportExcerpt("# T\n\n```\n┌──┐\n└──┘\n```"), "");
+});
+
+// Feedback exercises the actual HTTP handler, including retries after a response
+// is lost; it must never write vacancy statuses or turn a reason into a rule.
+test("screening feedback validates input before touching the database", async () => {
+  const valid = {
+    id: "00000000-0000-4000-8000-000000000001",
+    vacancy_ids: ["00000000-0000-4000-8000-000000000002"],
+    decision: "liked",
+    reason: "Build systems",
+    group_label: "Operations",
+  };
+  await withStubDb([], async (seen) => {
+    for (const body of [
+      null,
+      {},
+      { ...valid, id: "bad" },
+      { ...valid, vacancy_ids: [] },
+      { ...valid, vacancy_ids: ["bad"] },
+      { ...valid, vacancy_ids: [...valid.vacancy_ids, ...valid.vacancy_ids] },
+      { ...valid, vacancy_ids: Array(101).fill(valid.vacancy_ids[0]) },
+      { ...valid, decision: "applied" },
+      { ...valid, reason: " " },
+      { ...valid, reason: "x".repeat(4001) },
+      { ...valid, group_label: "x".repeat(201) },
+    ]) {
+      const res = await call({
+        url: "/api/screening-feedback",
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      assert.equal(res.statusCode, 400);
+    }
+    assert.equal(seen.length, 0);
+  });
+});
+
+test("screening feedback stores once, preserves exact reason, and rejects conflicting retries", async () => {
+  const body = {
+    id: "00000000-0000-4000-8000-000000000001",
+    vacancy_ids: ["00000000-0000-4000-8000-000000000002"],
+    decision: "passed",
+    reason: "  Required experience is missing.\nNot a permanent exclusion.  ",
+    group_label: "Operations",
+  };
+  await withStubDb([], async () => {
+    const records = new Map();
+    const seen = [];
+    setPool({
+      async query(sql, params) {
+        seen.push(sql);
+        if (sql.includes("INSERT INTO screening_feedback")) {
+          assert.match(sql, /ON CONFLICT \(id\) DO NOTHING/);
+          assert.match(sql, /FROM vacancy WHERE id = ANY/);
+          const [id, ids, decision, reason, group_label, checkedIds, count] =
+            params;
+          assert.deepEqual(JSON.parse(ids), checkedIds);
+          assert.equal(count, checkedIds.length);
+          if (!records.has(id))
+            records.set(id, {
+              id,
+              vacancy_ids: JSON.parse(ids),
+              decision,
+              reason,
+              group_label,
+              status: "pending",
+              created_at: "2026-01-01T00:00:00Z",
+              reviewed_at: null,
+              review_outcome: null,
+              review_session: null,
+            });
+          return { rows: [] };
+        }
+        assert.match(sql, /SELECT \* FROM screening_feedback/);
+        return {
+          rows: params
+            ? [records.get(params[0])].filter(Boolean)
+            : [...records.values()],
+        };
+      },
+    });
+    for (let i = 0; i < 2; i++) {
+      const res = await call({
+        url: "/api/screening-feedback",
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      assert.equal(res.statusCode, 200);
+      assert.equal(JSON.parse(res.body).item.reason, body.reason);
+      assert.equal(JSON.parse(res.body).item.status, "pending");
+    }
+    assert.equal(records.size, 1);
+    const conflict = await call({
+      url: "/api/screening-feedback",
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: { ...body, reason: "Different reason" },
+    });
+    assert.equal(conflict.statusCode, 409);
+    assert.equal(records.get(body.id).reason, body.reason);
+    const list = await call({ url: "/api/screening-feedback" });
+    assert.equal(JSON.parse(list.body).items.length, 1);
+    assert.equal(list.headers["Cache-Control"], "no-store");
+    assert.equal(list.headers["Access-Control-Allow-Origin"], undefined);
+    assert.match(seen.at(-1), /ORDER BY created_at DESC, id DESC LIMIT 100/);
+    assert.ok(seen.every((sql) => !/UPDATE vacancy|user_profile/.test(sql)));
+  });
+});
+
+test("screening feedback reports unknown vacancies and database failures", async () => {
+  const body = {
+    id: "00000000-0000-4000-8000-000000000001",
+    vacancy_ids: ["00000000-0000-4000-8000-000000000002"],
+    decision: "liked",
+    reason: "Useful experience",
+    group_label: "Product",
+  };
+  await withStubDb(
+    [
+      ["INSERT INTO screening_feedback", []],
+      ["SELECT * FROM screening_feedback", []],
+    ],
+    async () => {
+      const res = await call({
+        url: "/api/screening-feedback",
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      assert.equal(res.statusCode, 404);
+    },
+  );
+  await withStubDb(
+    [["INSERT INTO screening_feedback", new Error("private database detail")]],
+    async () => {
+      const res = await call({
+        url: "/api/screening-feedback",
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      assert.equal(res.statusCode, 500);
+      assert.deepEqual(JSON.parse(res.body), { error: "Database error" });
+    },
+  );
+});
+
+test("feedback rejects cross-origin simple form requests before touching the database", async () => {
+  await withStubDb([], async (seen) => {
+    const res = await call({
+      url: "/api/screening-feedback",
+      method: "POST",
+      headers: {
+        origin: "https://foreign.example",
+        "content-type": "text/plain",
+      },
+      body: {},
+    });
+    assert.equal(res.statusCode, 415);
+    assert.equal(seen.length, 0);
+  });
 });

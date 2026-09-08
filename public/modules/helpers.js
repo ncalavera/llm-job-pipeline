@@ -1549,12 +1549,18 @@ export function toastMessage(status) {
 // (in English) when called without it.
 export function showToast(status, t) {
   const m = toastMessage(status);
-  if (!m || !toastEl) return;
+  if (!m) return;
   const translate = t || ((key, fallback) => fallback);
-  const msg = translate(m.key, m.fallback);
+  showToastText(translate(m.key, m.fallback), status);
+}
+
+// The display mechanics behind showToast, for callers whose message is
+// dynamic (the Screen view's "N of M saved") rather than a TOAST_MESSAGES key.
+export function showToastText(text, cls, ms) {
+  if (!toastEl) return;
   if (toastTimer) clearTimeout(toastTimer);
-  toastEl.className = "toast toast-" + status;
-  toastEl.textContent = msg;
+  toastEl.className = "toast toast-" + cls;
+  toastEl.textContent = text;
   requestAnimationFrame(function () {
     requestAnimationFrame(function () {
       toastEl.classList.add("visible");
@@ -1562,5 +1568,5 @@ export function showToast(status, t) {
   });
   toastTimer = setTimeout(function () {
     toastEl.classList.remove("visible");
-  }, 2000);
+  }, ms || 2000);
 }

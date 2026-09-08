@@ -21,7 +21,7 @@ follow it verbatim when the user asks for that workflow:
 
 | User asks for | Runbook |
 | --- | --- |
-| first-time setup, daily fetch + score, resume, deploy | `.claude/commands/jobs-new.md` |
+| first-time setup, daily fetch + prepare, resume, deploy | `.claude/commands/jobs-new.md` |
 | review liked vacancies, archive low scores, terminal triage | `.claude/commands/jobs-review.md` |
 | check scoring quality against your own labels (golden set) | `.claude/commands/jobs-eval.md` |
 | add a company or job board | `.claude/commands/jobs-add.md` |
@@ -32,12 +32,12 @@ follow it verbatim when the user asks for that workflow:
 The daily loop (`jobs-new.md`) is driven by `scripts/run_daily.py` — a plain
 Python state machine that owns stage ORDER, checkpoints, the heartbeat and the
 publish gate. Any agent runs `python3 scripts/run_daily.py`, watches for exit
-code 10 (a GATE), does the printed judgment task (scoring / verdicts), then
+code 10 (a GATE), does the printed evidence-preparation task, then
 `--resume`s — repeating until exit 0. The agent never orders the stages; it only
 answers the gates. Exit codes: 0 done, 10 gate, 20 abort, 30 stage error.
 
 Install guides: `INSTALL-EASY.md` (simple mode, zero signups) and
-`INSTALL.md` (full mode, Supabase + a self-hosted dashboard server).
+`INSTALL.md` (full mode, Supabase + Vercel).
 
 `CONCEPTS.md` at the repo root defines the project's shared domain
 vocabulary (entities, named processes, status concepts) — relevant when
@@ -57,14 +57,12 @@ the scorer. The loop:
    stdout: a list of vacancies, each item carrying its own `system_prompt`,
    `user_msg` and `member_ids`.
 2. For EACH vacancy independently (never batch several into one request —
-   batching causes systematic over-scoring), evaluate `system_prompt` +
+   batching is untested here), evaluate `system_prompt` +
    `user_msg` with the model tier from your profile's `## VOLUME` settings and
    produce the JSON object the prompt requests (score, reasoning, tags,
    hard_requirements, short_summary).
 3. Collect results as a JSON array and pipe it to
-   `python3 scripts/score_vacancies.py --save` (stdin). Saving writes scores
-   only — the dashboard snapshot is rebuilt once by the publish stage, or on
-   demand with `--dashboard`. Use `member_ids` from
+   `python3 scripts/score_vacancies.py --save` (stdin). Use `member_ids` from
    step 1 to address vacancies — not your own ids. If you saved each
    subagent's raw result to its own file, pass them as `--files r1.json
    r2.json ...` instead of assembling one array — a malformed file (a kill
@@ -78,16 +76,45 @@ Claude Code does this with one subagent per vacancy; Codex and others should
 replicate the same one-vacancy-per-request discipline. Scoring quality was
 benchmarked with Claude models; other models work but calibration may differ.
 
-**Two-pass scoring (the daily driver).** To spend the strong model only where it
-matters, the daily driver scores in two passes: a cheap `screen_model` (default
-Haiku) scores every new vacancy, then the strong `scoring_model` re-scores only
-the finalists whose screen score clears `escalate_threshold` (default 50);
-everything below the floor keeps its cheap score. Both passes keep the
-one-vacancy-per-subagent rule. Because model calibration differs, the cheap
-screen uses its own floor, not score parity: the floor was tuned against the
-golden set so the screen drops none of the roles the strong model would surface.
-The direct `score_vacancies.py --local` contract above is the single-pass
-fallback for agents not driven by the daily runner.
+**Default daily screening.** After filtering, the driver prepares undecided
+roles with one LLM call per vacancy: quoted posting facts and profile comparison,
+without a numerical score. Both attended and scheduled runs use this path.
+Unchanged successful results are reused until the posting or profile changes;
+failed results retry next run. Human keep/put-aside decisions happen in the
+Screen view. Telegram sends one compact score-free morning summary.
+
+**Optional legacy scoring.** The explicit `score_vacancies.py --local` contract
+above and `score_companies.py` remain available when the user requests numerical
+scoring. The daily driver skips company scoring, vacancy scoring and terminal
+verdict checkpoints; their checkpoint entries remain for backward compatibility.
+
+## No direct-API key is a supported setup, not a defect
+
+The pipeline is designed to run its LLM work through the agent you are already
+in — headless Claude sessions / subagents answering the driver's gates. A
+direct API key is one optional shortcut for one stage, never a requirement.
+
+So: **`ANTHROPIC_API_KEY` unset is the normal, intended configuration.** In
+`screen_candidates.py`, `build_call_llm()` returning `None` is the supported
+route — screening falls to the subagent path and the run proceeds. It is not a
+failure, a degradation, or something to warn the user about.
+
+Rules that follow, for any agent working here:
+
+- Never add, suggest adding, or ask the user for an `ANTHROPIC_API_KEY`.
+- Never emit a user-facing warning, report-card note or digest line saying a
+  run was degraded because that key is missing. `tests/test_no_anthropic_key_nagging.py`
+  fails the build if one appears.
+- Never let that key reach a Claude child process. `nightly_run.py` keeps it
+  out of `_CHILD_ENV_ALLOWLIST` on purpose: the session would prefer the key
+  over the subscription login and move the run's spend to per-token billing.
+- A log line reading `ANTHROPIC_API_KEY unset` in an old transcript is NOT
+  evidence of a bug. This section exists because that line was once read as
+  one, and the user was asked three times to add a key he had ruled out.
+
+`FIRECRAWL_API_KEY` and `EXA_API_KEY` are different — those are real external
+services with no in-agent substitute, and a run without them genuinely does
+less. Warning about those two is correct.
 
 ## Ground rules
 

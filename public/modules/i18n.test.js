@@ -67,3 +67,12 @@ test("getLanguage: an unknown stored value is ignored, default wins", () => {
   _store = { dashboard_lang: "zz" };
   assert.equal(getLanguage(), "ru");
 });
+
+test("T: a key shipped with the browser code falls back to its English text; a baked string wins", async () => {
+  const { T } = await import("./i18n.js");
+  // Translations are baked from scripts/i18n.py into the snapshot; the browser
+  // table carries English only (the dashboard invariant forbids raw Cyrillic here).
+  assert.equal(T("screen_keep", "x"), "Keep");
+  assert.equal(T("x", "fallback"), "ru");
+  assert.equal(T("nope", "fallback"), "fallback");
+});

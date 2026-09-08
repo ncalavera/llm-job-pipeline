@@ -144,6 +144,9 @@ def test_no_raw_cyrillic_in_dashboard():
     hits: list[str] = []
     for p in _dashboard_files():
         for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            # Matching a Russian posting title is not rendered English chrome.
+            if p.name == "screen-batches.js" and re.fullmatch(r"\s*/.*?/iu,\s*", line):
+                continue
             if RAW_CYRILLIC.search(line):
                 hits.append(f"{p.relative_to(REPO)}:{i}: {line.strip()[:120]}")
     assert not hits, "Raw Cyrillic leaked into the English dashboard:\n" + "\n".join(hits)

@@ -3,7 +3,7 @@
 //
 // The dashboard has SEVEN top-level sections. Six are single leaf views; one
 // is a hub that holds leaf views behind a sub-navigation: "Vacancies" (Browse
-// / Geo / Archive). `state.currentMode` stays the LEAF the render dispatch
+// / Screen / Geo / Archive). `state.currentMode` stays the LEAF the render dispatch
 // keys on (unchanged for every existing module); this module only maps a
 // leaf mode → the top-nav section it belongs to, so the section chrome
 // (active button, sub-nav visibility) can follow along.
@@ -28,7 +28,7 @@ export const SECTIONS = [
 ];
 
 // Leaf views that live UNDER the Vacancies section, in sub-nav order.
-export const VACANCY_VIEWS = ["catalog", "stats", "archive"];
+export const VACANCY_VIEWS = ["catalog", "screen", "stats", "archive"];
 
 // The vacancy leaf shown when Vacancies is opened with no remembered view.
 export const DEFAULT_VACANCY_VIEW = "catalog";
@@ -42,6 +42,7 @@ export const DEFAULT_VACANCY_VIEW = "catalog";
 const MODE_TO_SECTION = {
   today: "today",
   catalog: "vacancies",
+  screen: "vacancies",
   stats: "vacancies",
   archive: "vacancies",
   companies: "companies",

@@ -116,7 +116,7 @@ def display_source_path(path) -> str:
 
     An absolute path is recorded relative to the working directory when the file
     is under it, else trimmed to its last two segments. The dashboard SHOWS this
-    line, and "/Users/<name>/Projects/personal/job-search-2026/research/..." on
+    line, and "/Users/<name>/Projects/personal/example/research/..." on
     screen is both noise and a needless leak of one machine's directory layout —
     the field answers "which file is this", not "where was it on that laptop".
     """

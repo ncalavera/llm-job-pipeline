@@ -53,6 +53,7 @@ test("every leaf mode maps to its owning section", () => {
   assert.equal(sectionForMode("catalog"), "vacancies");
   assert.equal(sectionForMode("stats"), "vacancies");
   assert.equal(sectionForMode("archive"), "vacancies");
+  assert.equal(sectionForMode("screen"), "vacancies");
   assert.equal(sectionForMode("companies"), "companies");
   // Triage (DHA-413: the Applications section it used to share a nav slot
   // with was deleted) is its own top-nav section now.
@@ -76,7 +77,7 @@ test("an unknown mode falls back to the Today section (safe home)", () => {
 });
 
 test("the three vacancy sub-views are recognised; nothing else is", () => {
-  assert.deepEqual(VACANCY_VIEWS, ["catalog", "stats", "archive"]);
+  assert.deepEqual(VACANCY_VIEWS, ["catalog", "screen", "stats", "archive"]);
   for (const v of VACANCY_VIEWS) assert.equal(isVacancyView(v), true);
   assert.equal(isVacancyView("pipeline"), false);
   assert.equal(isVacancyView("today"), false);

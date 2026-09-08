@@ -12,8 +12,10 @@
 //   { screen: "vacancy",  id: <group-id> }
 //   { screen: "company",  id: <slug> }
 //   { screen: "section" }                    // no detail overlay (bare URL)
-// `id` is present only for the two detail screens; section routes carry none
-// (the URL encodes no leaf mode — switching sections is a bare-URL replaceState).
+//   { screen: "section", mode: "screen" }    // a leaf mode landed by URL
+// `id` is present only for the two detail screens. A section route carries a
+// `mode` only when the URL names one (?mode=screen, the digest's inbox link);
+// app.js checks the mode against its leaf table before switching to it.
 //
 // Precedence: if a (malformed / hand-crafted) URL carries BOTH params, the
 // vacancy route wins — it is the deeper, more specific target, and the app never
@@ -35,6 +37,8 @@ export function parse(search) {
     if (vacancy) return { screen: "vacancy", id: vacancy };
     const company = params.get("company");
     if (company) return { screen: "company", id: company };
+    const mode = params.get("mode");
+    if (mode) return { screen: "section", mode };
     return { screen: "section" };
   } catch (e) {
     return { screen: "section" };
@@ -43,7 +47,7 @@ export function parse(search) {
 
 /**
  * Build the query string (including the leading "?") for a route object.
- * Only `screen` + `id` are read; any other field is ignored. A detail route
+ * Only `screen`, `id` and `mode` are read; any other field is ignored. A detail route
  * with a missing/empty id, a section route, or anything unrecognised builds the
  * empty string (a bare URL). Round-trips with parse: build(parse(x)) is a
  * fixpoint for every valid x.
@@ -54,5 +58,7 @@ export function build(route) {
     return "?" + new URLSearchParams({ vacancy: String(route.id) }).toString();
   if (route.screen === "company" && route.id)
     return "?" + new URLSearchParams({ company: String(route.id) }).toString();
+  if (route.screen === "section" && route.mode)
+    return "?" + new URLSearchParams({ mode: String(route.mode) }).toString();
   return "";
 }

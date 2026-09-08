@@ -20,7 +20,7 @@ scheduler — one command a day.
 | `config/defaults.toml` | Machine mechanics — thresholds, geo tables, junk words, the `[boards.*]` catalogue, the `[volume]` window. Neutral; ships for any field. |
 | `config/user_profile.example.md` | The template for your candidate profile. Copy to `config/user_profile.md` (gitignored) — the single place personal taste lives. |
 | `sql/` | `schema.sql` (Postgres) + `schema.sqlite.sql` (SQLite) and `migrations/` (numbered, dual-dialect). |
-| `server.js` | The self-hosted Node HTTP server: serves `public/` and answers the `/api/*` routes the dashboard calls for live reads and status writes. |
+| `api/` | Vercel serverless routes (Node) the hosted dashboard calls for live status writes. |
 | `public/` | The static dashboard (vanilla JS/CSS) — six sections: Today, Vacancies, Companies, Applications, Boards, Settings. |
 | `docs/` | This file, the [board catalogue](job-boards-catalogue.md), the [fetch-engine reference](fetch-engines.md), and the onboarding questionnaire (`index.html`, served by GitHub Pages). |
 | `tests/` | Offline pytest suite — guards, characterizations, parity checks. |
@@ -44,7 +44,7 @@ scheduler — one command a day.
 | `scripts/database_supabase.py` | The data-access layer (DAL) — same API over both backends. Writes stage changes but leaves the commit to the caller (see the DAL rule in [`AGENTS.md`](../AGENTS.md)). |
 | `scripts/db_conn.py` / `db_backend.py` | Backend selection + connection (loads `.env`); picks SQLite or Postgres. |
 | `scripts/migrate.py` | Applies pending numbered migrations after backing up (SQLite online-backup API — WAL-safe; Postgres `pg_dump` best-effort on top of transactional rollback); safe to re-run. |
-| `scripts/telegram_digest.py` | The optional daily digest (send + poll) — full mode only. |
+| `scripts/telegram_digest.py` | The optional daily digest (send only; no buttons, nothing listens for a tap) — full mode only. |
 
 ## The daily pipeline
 
@@ -64,10 +64,12 @@ not in a runbook and not in anyone's head (STRATEGY guardrail 4).
 | 5 | `fetch` | AUTO | Pull new vacancies from tracked companies + enabled boards (heartbeat to disk). |
 | 6 | `enrich` | AUTO | Backfill blind descriptions via Firecrawl (skips cleanly if unset). |
 | 7 | `filter` | AUTO | Quality report, dedup, geo buckets, gone-from-source archive. Never auto-deletes silently. |
-| 8 | `company_scoring` | GATE | WANT-score new candidate companies (1 company = 1 subagent). |
-| 9 | `vacancy_scoring` | GATE | Two-pass per-vacancy scoring (see below). |
-| 10 | `verdicts` | GATE | Show top fresh matches; capture like / pass / to_apply, each committed immediately. |
-| 11 | `publish` | AUTO | Always publish; warn loudly on a dirty run (see the publish gate). |
+| 8 | `company_scoring` | SKIP | Historical checkpoint retained; optional `score_companies.py` is outside the daily path. |
+| 9 | `vacancy_scoring` | SKIP | Historical checkpoint retained; optional `score_vacancies.py` is outside the daily path. |
+| 10 | `screening_prep` | GATE | One subagent read per changed posting/profile extracts quoted facts and a profile comparison — no score, no status. Both attended and scheduled runs prepare roles directly after filtering. |
+| 11 | `verdicts` | SKIP | Human decisions happen in the dashboard Screen view. |
+| 12 | `digest` | AUTO | One score-free Telegram summary (scheduled runs only), before publish. |
+| 13 | `publish` | AUTO | Always publish; warn loudly on a dirty run (see the publish gate). |
 
 Exit codes the runbook branches on: `0` done, `10` gate, `20` abort
 (bad profile / DB outage — fix, do not retry blindly), `30` stage error
@@ -88,7 +90,7 @@ passes:
    plan, Opus on a bigger one). Everything below the floor keeps its cheap score.
 
 Both passes keep the invariant: **one vacancy = one request**. Batching several
-into one prompt systematically over-scores by +20–50 (STRATEGY guardrail 6), so
+into one prompt is untested here (STRATEGY guardrail 6), so
 it is never done. Each score records its provenance in `vacancy.scored_by`, so
 the dashboard can distinguish a cheap screen score from a confirmed one.
 
@@ -98,24 +100,53 @@ The gate is a warn-only detector, not a blocker: `publish` always refreshes the
 dashboard, and a dirty run — a crashed stage, a blocking warning, or a single
 org losing a large share of its live roles to gone-from-source archival (the
 signature of a truncated fetch) — is flagged loudly on the publish note and the
-report card instead of being withheld. (Skipping protects nothing and costs
-something: `publish` is the run's only dashboard rebuild — `score --save`
-regenerates the snapshot only when passed `--dashboard` — so withholding it
-would leave the board on stale data and hide the bad run.) In full mode
+report card instead of being withheld. Scoring `--save` commits each chunk
+without rebuilding the snapshot; `publish` refreshes it once after verdicts. In full mode
 publish refreshes the hosted dashboard snapshot (a browser refresh, no
 redeploy); in simple mode it rewrites the local `public/data.js`. Both go
-through the same driver — no mode branching. (Dashboard *code* changes are a
-separate concern: redeploy the Node server, see [MIGRATION.md](../MIGRATION.md).)
+through the same driver — no mode branching. (`vercel --prod` is only ever for
+dashboard *code* changes.)
 
 ## Health & observability
+
+The default daily path is fetch → enrich → dedup → filter → evidence preparation
+→ one Telegram summary → publish. Legacy company/vacancy scoring and terminal
+verdict checkpoints are skipped, preserving resumability of old checkpoints.
+Preparation records the requested fingerprint and the initial attempt timestamp;
+resume counts only a ready/failed save from this attempt for that fingerprint.
+Old ready/failed rows do not masquerade as progress. Failed results retry on the
+next run even when unchanged; successful unchanged results are reused.
+The summary separates ready-to-review roles from the eligible preparation cohort
+(awaiting preparation and failed), contains one screening link and surfaces run
+failures. It never lists numerical scores. `send --details` explicitly requests
+the historical scored lists. Delivery advances last-success only after sending;
+a crash may repeat a summary, but cannot mark an undelivered one successful.
+
+
+Nightly scoring agents have file-only tools, restricted payload/result paths,
+no shell/MCP tools and no database/provider credentials. Python chooses the
+model, saves completed files every five seconds and sweeps after exit/timeout.
+Malformed results are skipped independently.
+
+Scores are durable after each save; snapshot freshness changes at the publish
+stage. An attended resume rechecks outstanding verdicts before advancing.
 
 Two read-only surfaces answer "does the pipeline work as intended?" without
 reading logs:
 
 - **Run report card** — every `run_daily.py` run ends with a per-stage verdict
-  table (`OK / OK-BUT / FAILED / SKIPPED`) rendered from `run_state.json`.
+  table (`OK / OK-BUT / PARTIAL / FAILED / SKIPPED`) rendered from
+  `run_state.json`. `PARTIAL` is a stage that advanced the run but left its own
+  work undone — a scoring session that stopped early and carried the remainder
+  over; its note says how many of how many. The `screening_prep` stage reports
+  ready / failed counts (`vacancy.screening_state`); the morning digest repeats
+  them as a processing line, separate from the human queue. A second digest
+  line, "N roles ready to screen", links to `?mode=screen` and shares one SQL
+  predicate (`status = 'unseen'`, `screening_state = 'ready'`, company not
+  `inactive`) with the Screen view's To screen list, so the two counts never
+  drift apart.
 - **Health tab** (dashboard) — `public/modules/health.js` renders four blocks
-  from the live `/api/health-detail` endpoint (read-only, no LLM spend):
+  from the live `api/health-detail.js` endpoint (read-only, no LLM spend):
   - **Boards** — per enabled board: freshness, failure streak, vacancy count,
     and a **PRESUMED BROKEN** flag (3+ consecutive failures, or fetched yet zero
     vacancies).
@@ -138,6 +169,39 @@ reading logs:
   Health tab (Mermaid lazy-loaded from a CDN on first open) and kept in sync
   with this document. **Any change to the pipeline's shape updates both.**
 
+### Screening inbox data
+
+`screening_prep` writes four columns on `vacancy`: `screening` (the prepared
+role's facts JSON — see [`CONCEPTS.md`](../CONCEPTS.md)), `screening_state`
+(`ready` or `failed`), `screening_prepared_at`, and `screening_fingerprint`
+(posting + prompt + profile, so an unchanged role is never re-prepared). The
+dashboard snapshot ships `screening`, `screening_state` and
+`screening_prepared_at` as raw per-role fields — no pre-baked group, the
+browser derives lists and groups — plus a run-level `stats.screening_processing`
+count (prepared / failed against the night's cohort). The Screen view
+(`public/modules/screen.js`, `?mode=screen` on the self-hosted dashboard)
+reads these fields to build To screen / Kept / Put aside lists; bulk Keep and
+Put aside write back through `/api/save` per row, same as every other status
+change.
+
+The optional `screening.work_profile` contains quoted work activities (building,
+running, selling, specialist), technical depth, and the role's contribution
+(direct impact, enabling impact, commercial, or unknown). Activities may overlap;
+none is a recommendation or a rejection. Extraction reads and fingerprints the
+complete posting. Existing results without work details stay visible as
+unclassified until prepared again; the changed prompt invalidates old fingerprints.
+
+The Screen view combines independent filters under “Can I take it?”, “Can I do
+it?”, and “Would I enjoy it?”. Requirement kind, strength, text, and profile
+comparison must match the same requirement. Text searches its extracted name,
+not a quote that may mention several different requirements. Unknown evidence stays separate from
+conflicts. Compact cards disclose complete evidence on demand; pages contain 20
+roles, and bulk selection applies only to the current page. First-seen age and
+passed deadlines are independent filters; first-seen is not the posting date. Kept and Put aside
+remain filterable. Opening a To screen role carries the page's review queue;
+Keep/Put aside advances through that queue and returns to the filtered list.
+No filter changes a human status or learns a new exclusion rule.
+
 ## Two backends
 
 The pipeline runs on one of two databases, chosen purely by whether
@@ -148,9 +212,9 @@ guardrail 2).
 
 | | Full mode (canonical) | Simple mode (honest demo) |
 | --- | --- | --- |
-| Backend | self-hosted Postgres, `SUPABASE_DB_URL` set (historical name, plain Postgres URL) | local SQLite file (`data/jobsearch.db`), auto-created |
-| What you need | a server you control, running Postgres and `server.js` | nothing |
-| Dashboard | always-on self-hosted Node server (`server.js`) on a VPS, any device, Basic-Auth at the reverse proxy | `localhost` via `dashboard_local.py`, while your terminal is open |
+| Backend | Postgres (Supabase), `SUPABASE_DB_URL` set | local SQLite file (`data/jobsearch.db`), auto-created |
+| Signups | Supabase + Vercel (free tiers) | none |
+| Dashboard | always-on Vercel URL, any device, Basic-Auth | `localhost` via `dashboard_local.py`, while your terminal is open |
 | Telegram digest | yes | no (needs a server) |
 | Multi-device / sync | yes | no |
 | Runbook | [`INSTALL.md`](../INSTALL.md) | [`INSTALL-EASY.md`](../INSTALL-EASY.md) |
@@ -159,13 +223,13 @@ Postgres is the canonical daily path. SQLite is the zero-signup way to try the
 product — everything the pipeline *computes* (fetching, filtering, dedup,
 company review, scoring quality) is identical, and a crash on the demo path is
 still a bug. The differences above are **documented product features that need a
-server**, not silent gaps: simple mode never promises the always-on dashboard,
-the digest, or multi-device sync. Simple mode upgrades to full at any time —
-point `.env` at a Postgres database and the same scripts switch to it, no code
-changes (the one extra step is installing `psycopg2`, which simple mode skips).
+server**, not silent gaps: simple mode never promises the hosted dashboard, the
+digest, or multi-device sync. Simple mode upgrades to full at any time — point
+`.env` at Supabase and the same scripts switch to Postgres, no code changes
+(the one extra step is installing `psycopg2`, which simple mode skips).
 
 Because Postgres is always the live prod database (there is no separate
-staging database), `db_backend.get_conn()` blocks INSERT/UPDATE/DELETE against
+staging project), `db_backend.get_conn()` blocks INSERT/UPDATE/DELETE against
 it from anything it doesn't recognize as pytest or one of the repo's KNOWN
 pipeline entrypoints (an explicit allowlist in `db_backend.py` — location
 under `scripts/` alone is not identity) — the guard that stops a stray ad-hoc
@@ -203,3 +267,29 @@ The core needs only `requests`, `beautifulsoup4` and `python-dateutil`
 - **`anthropic`** — only for `score_companies.py --api`, the direct-SDK scoring
   path. The normal daily flow scores through your coding agent's subagents
   (`--local`), which needs no API key and no `anthropic` package.
+
+
+### Functional screening review and feedback
+
+The Screen view groups ready undecided roles by function from posting facts and titles,
+showing five at a time. Existing profile comparison evidence orders rows inside each
+function (explicit matches before unknowns, required possible conflicts last); it is
+not a new fit score. Unknown functions remain accessible. No score floor or automatic
+personal exclusion is introduced. Keep/Put aside use POST `/api/screening-decision`. Each canonical role and its
+members are saved in one transaction, guarded by the current status and PostgreSQL
+row revision (`xmin`). A later edit on another device makes a stale decision or Undo
+fail safely, including changes away from and back to the same status.
+
+A UUID receipt (`screening_decision`, migration0029) commits with the status changes.
+Retries return the original previous statuses and revisions without writing again.
+The browser keeps pending receipts and Undo history in local storage; Retry recovers
+an interrupted save after reconnecting or refreshing. Failed Undo rows remain
+retryable. Browser storage being unavailable limits recovery to the open page.
+
+An optional reason is saved after successful status writes to `screening_feedback`
+(migration0028), with the exact successful member IDs and an idempotency key.
+Failed reasons remain retryable, including after refresh when browser storage works.
+GET/POST `/api/screening-feedback` share the dashboard authentication boundary.
+Agents read pending feedback and current statuses before proposing any preference
+change. Reviewed feedback records an outcome and session; no automatic consumer or
+preference mutation is enabled. See [review-feedback.md](review-feedback.md).

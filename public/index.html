@@ -165,6 +165,14 @@
             <button
               type="button"
               class="nav-subitem"
+              id="navSubScreen"
+              onclick="switchMode('screen')"
+            >
+              <span class="nav-label" data-i18n="screen_tab">Screen</span>
+            </button>
+            <button
+              type="button"
+              class="nav-subitem"
               id="navSubGeo"
               onclick="switchMode('stats')"
             >
@@ -441,6 +449,13 @@
             </button>
             <button
               class="vacancy-sub-tab"
+              id="vsubScreen"
+              onclick="switchMode('screen')"
+            >
+              <span data-i18n="screen_tab">Screen</span>
+            </button>
+            <button
+              class="vacancy-sub-tab"
               id="vsubGeo"
               onclick="switchMode('stats')"
             >
@@ -670,6 +685,9 @@
 
           <!-- === STATS MODE === -->
           <div class="stats-section" id="statsSection"></div>
+
+          <!-- === SCREEN MODE (bulk screening inbox, DHA-603) === -->
+          <div class="screen-section" id="screenSection"></div>
 
           <!-- === ARCHIVE MODE === -->
           <div class="archive-section" id="archiveSection">

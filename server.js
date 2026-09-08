@@ -202,13 +202,13 @@ export function isNotModified(ifNoneMatch, etag) {
 
 /** Same-origin PII readers (/api/vacancies, /api/companies): no CORS header,
  * no-store. Returns true when the preamble already answered. */
-function piiPreamble(req, res, label) {
+function piiPreamble(req, res, label, method = "GET") {
   res.setHeader("Cache-Control", "no-store");
   if (req.method === "OPTIONS") {
     sendEmpty(res, 204);
     return true;
   }
-  if (req.method !== "GET") {
+  if (req.method !== method) {
     sendJson(res, 405, { error: "Method not allowed" });
     return true;
   }
@@ -481,6 +481,161 @@ async function handleSave(req, res) {
   }
 }
 
+// Feedback is an append-only account of a decision, not a preference change.
+const FEEDBACK_UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// PostgreSQL's row version changes for every writer, including agent/CLI writes.
+// Compare opaque tokens, never timestamps rounded by JavaScript.
+async function handleScreeningDecision(req, res) {
+  if (piiPreamble(req, res, "screening-decision", "POST")) return;
+  if (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] || ""))
+    return sendJson(res, 415, { error: "JSON required" });
+  const { changes, operation_id } = await readJsonBody(req);
+  if (typeof operation_id !== "string" || !FEEDBACK_UUID.test(operation_id))
+    return sendJson(res, 400, { error: "A valid operation_id UUID is required" });
+  if (!Array.isArray(changes) || !changes.length || changes.length > 100 ||
+      new Set(changes.map((c) => c?.id)).size !== changes.length ||
+      changes.some((c) => !c || !FEEDBACK_UUID.test(c.id) ||
+        !VALID_STATUSES.includes(c.status) || !VALID_STATUSES.includes(c.expected_status) ||
+        typeof c.expected_revision !== "string" || !c.expected_revision))
+    return sendJson(res, 400, { error: "Invalid changes or missing revision" });
+  let client;
+  try {
+    client = await getPool().connect();
+    await client.query("BEGIN");
+    const request = JSON.stringify(changes.map(({ id, status, expected_status, expected_revision }) =>
+      ({ id, status, expected_status, expected_revision })).sort((a, b) => a.id.localeCompare(b.id)));
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [operation_id.toLowerCase()]);
+    const receipt = await client.query(
+      "SELECT result, request = $2::jsonb AS same_request FROM screening_decision WHERE operation_id = $1::uuid",
+      [operation_id, request]);
+    if (receipt.rows.length) {
+      await client.query("COMMIT");
+      return receipt.rows[0].same_request
+        ? sendJson(res, 200, receipt.rows[0].result)
+        : sendJson(res, 409, { error: "operation_id already used for different changes" });
+    }
+    const { rows } = await client.query(
+      `SELECT id, status, xmin::text AS revision FROM vacancy
+       WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`, [changes.map((c) => c.id)]);
+    const current = new Map(rows.map((r) => [r.id, r]));
+    const conflicts = changes.filter((c) => {
+      const r = current.get(c.id);
+      return !r || r.status !== c.expected_status || r.revision !== c.expected_revision;
+    }).map((c) => c.id);
+    if (conflicts.length) {
+      await client.query("ROLLBACK");
+      return sendJson(res, 409, { error: "Vacancies changed; refresh and try again", conflicts, rows });
+    }
+    const saved = [];
+    for (const c of changes) {
+      const result = await client.query(
+        `UPDATE vacancy SET status = $2, status_updated_at = clock_timestamp(),
+         applied_at = CASE WHEN $3 THEN COALESCE(applied_at, clock_timestamp()) ELSE applied_at END
+         WHERE id = $1::uuid RETURNING id, status, xmin::text AS revision, status_updated_at`,
+        [c.id, c.status, APPLICATION_STATUSES.includes(c.status)]);
+      saved.push({ ...result.rows[0], previous: current.get(c.id).status });
+    }
+    const result = { ok: true, rows: saved };
+    await client.query(
+      "INSERT INTO screening_decision (operation_id, request, result) VALUES ($1::uuid, $2::jsonb, $3::jsonb)",
+      [operation_id, request, JSON.stringify(result)]);
+    await client.query("COMMIT");
+    return sendJson(res, 200, result);
+  } catch (err) {
+    if (client) await client.query("ROLLBACK").catch(() => {});
+    logError("screening-decision", err, reqMeta(req));
+    return sendJson(res, 500, { error: "Could not save decisions" });
+  } finally { client?.release(); }
+}
+
+async function handleScreeningFeedback(req, res) {
+  if (
+    piiPreamble(
+      req,
+      res,
+      "screening-feedback",
+      req.method === "GET" ? "GET" : "POST",
+    )
+  )
+    return;
+  // A foreign site must not submit a simple form request using cached login.
+  if (
+    req.method === "POST" &&
+    String(req.headers["content-type"] || "")
+      .split(";")[0]
+      .trim()
+      .toLowerCase() !== "application/json"
+  ) {
+    return sendJson(res, 415, { error: "Expected application/json" });
+  }
+  try {
+    if (req.method === "GET") {
+      const { rows } = await getPool().query(
+        "SELECT * FROM screening_feedback ORDER BY created_at DESC, id DESC LIMIT 100",
+      );
+      return sendJson(res, 200, { items: rows });
+    }
+    const body = await readJsonBody(req);
+    const { id, vacancy_ids, decision, reason, group_label } = body || {};
+    if (
+      typeof id !== "string" ||
+      !FEEDBACK_UUID.test(id) ||
+      !Array.isArray(vacancy_ids) ||
+      vacancy_ids.length < 1 ||
+      vacancy_ids.length > 100 ||
+      vacancy_ids.some(
+        (v) => typeof v !== "string" || !FEEDBACK_UUID.test(v),
+      ) ||
+      !["liked", "passed"].includes(decision) ||
+      typeof reason !== "string" ||
+      !reason.trim() ||
+      reason.length > 4000 ||
+      typeof group_label !== "string" ||
+      group_label.length > 200
+    ) {
+      return sendJson(res, 400, { error: "Invalid screening feedback" });
+    }
+    const ids = vacancy_ids.map((v) => v.toLowerCase());
+    if (new Set(ids).size !== ids.length) {
+      return sendJson(res, 400, { error: "Duplicate vacancy IDs" });
+    }
+    // A retry cannot change the original payload. Check existing IDs at insert
+    // time, but preserve historical feedback even if a vacancy is later removed.
+    await getPool().query(
+      `INSERT INTO screening_feedback (id, vacancy_ids, decision, reason, group_label)
+       SELECT $1::uuid, $2::jsonb, $3, $4, $5
+       WHERE (SELECT count(*) FROM vacancy WHERE id = ANY($6::uuid[])) = $7
+       ON CONFLICT (id) DO NOTHING`,
+      [id, JSON.stringify(ids), decision, reason, group_label, ids, ids.length],
+    );
+    const { rows } = await getPool().query(
+      "SELECT * FROM screening_feedback WHERE id = $1::uuid",
+      [id],
+    );
+    const item = rows[0];
+    if (!item) return sendJson(res, 404, { error: "Vacancy not found" });
+    if (
+      JSON.stringify(item.vacancy_ids) !== JSON.stringify(ids) ||
+      item.decision !== decision ||
+      item.reason !== reason ||
+      item.group_label !== group_label
+    ) {
+      return sendJson(res, 409, {
+        error: "Feedback ID already used for a different decision",
+      });
+    }
+    return sendJson(res, 200, { ok: true, item });
+  } catch (err) {
+    // Do not include reasons or database error details: those can contain private text.
+    console.error("screening-feedback: database request failed", {
+      code: err.code,
+    });
+    return sendJson(res, 500, { error: "Database error" });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/statuses — contract in MIGRATION.md
 // ---------------------------------------------------------------------------
@@ -489,18 +644,19 @@ async function handleStatuses(req, res) {
   if (wrappedPreamble(req, res, "GET", "statuses")) return;
   try {
     const { rows } = await getPool().query(
-      `SELECT id, status, status_updated_at FROM vacancy
-        WHERE status <> 'unseen' AND status <> 'archived'`,
+      `SELECT id, status, status_updated_at, xmin::text AS revision FROM vacancy`,
     );
     const statuses = {};
     const timestamps = {};
+    const revisions = {};
     for (const row of rows) {
       statuses[row.id] = row.status;
+      revisions[row.id] = row.revision;
       if (row.status_updated_at) {
         timestamps[row.id] = row.status_updated_at;
       }
     }
-    return sendJson(res, 200, { statuses, timestamps });
+    return sendJson(res, 200, { statuses, timestamps, revisions });
   } catch (err) {
     logError("statuses", err, reqMeta(req));
     return sendJson(res, 500, { error: "Database error" });
@@ -969,13 +1125,7 @@ async function handleStatic(req, res, pathname) {
 // What kind of reading a stored report is. Twin of statuses.REPORT_KINDS and
 // the SQL CHECK on report.kind; an unrecognised kind would silently create a
 // group of one in the list, which reads as a broken grouping, not a typo.
-export const REPORT_KINDS = [
-  "research",
-  "grant",
-  "company",
-  "sector",
-  "other",
-];
+export const REPORT_KINDS = ["research", "grant", "company", "sector", "other"];
 
 // How much of a report the list view carries. Enough to tell two reports apart
 // at a glance, small enough that a hundred of them are still one cheap
@@ -1026,7 +1176,9 @@ export function reportExcerpt(bodyMd, limit = REPORT_EXCERPT_CHARS) {
   if (flat.length <= limit) return flat;
   const cut = flat.slice(0, limit);
   const lastSpace = cut.lastIndexOf(" ");
-  return (lastSpace > limit * 0.6 ? cut.slice(0, lastSpace) : cut).trim() + "\u2026";
+  return (
+    (lastSpace > limit * 0.6 ? cut.slice(0, lastSpace) : cut).trim() + "\u2026"
+  );
 }
 
 /** Drop the markers that only mean something once rendered. The excerpt lands
@@ -1349,7 +1501,8 @@ async function handleContactStatus(req, res) {
       "UPDATE contact SET status = $1, status_at = now(), updated_at = now() WHERE id = $2",
       [status, id],
     );
-    if (!rowCount) return sendJson(res, 404, { error: "Contact not found", id });
+    if (!rowCount)
+      return sendJson(res, 404, { error: "Contact not found", id });
     return sendJson(res, 200, { ok: true, id, status });
   } catch (err) {
     logError("contacts", err, reqMeta(req, { id, status }));
@@ -1361,6 +1514,8 @@ const API_ROUTES = {
   "/api/vacancies": handleVacancies,
   "/api/companies": handleCompanies,
   "/api/save": handleSave,
+  "/api/screening-decision": handleScreeningDecision,
+  "/api/screening-feedback": handleScreeningFeedback,
   "/api/statuses": handleStatuses,
   "/api/company-review": handleCompanyReview,
   "/api/company-statuses": handleCompanyStatuses,

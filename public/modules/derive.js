@@ -425,3 +425,193 @@ export function selectTodayRoles(groups, opts) {
     working,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Screen view (bulk screening inbox, DHA-603). The payload ships raw screening
+// facts per role; lists and groups derive here, never on the server.
+// ---------------------------------------------------------------------------
+
+/**
+ * Split the ready roles into the three inbox lists by live status. A role is
+ * in a list only when its screening is ready; an unprepared or failed role is
+ * in none. `getStatus(g)` is injected so this stays DOM-free.
+ * @returns {{toScreen: Set, kept: Set, putAside: Set}} canonical id sets
+ */
+export function screenLists(roles, getStatus) {
+  const toScreen = new Set();
+  const kept = new Set();
+  const putAside = new Set();
+  for (const g of roles) {
+    if (!g || g.screening_state !== "ready") continue;
+    const status = getStatus(g);
+    if (status === "unseen") toScreen.add(g.id);
+    else if (status === "liked") kept.add(g.id);
+    else if (status === "passed") putAside.add(g.id);
+  }
+  return { toScreen, kept, putAside };
+}
+
+// The fixed group vocabulary, in chooser order. Overlap is allowed: one role
+// can sit in several groups; each group is a Set so a list counts it once.
+export const SCREEN_GROUP_KEYS = [
+  "language",
+  "onsite",
+  "seniority",
+  "unclear",
+  "all",
+];
+
+/** Requirements array of a role's screening facts, always an array. */
+export function screenRequirements(g) {
+  const facts = g && g.screening && g.screening.posting_facts;
+  return facts && Array.isArray(facts.requirements) ? facts.requirements : [];
+}
+
+/**
+ * Group the ready roles by validated facts:
+ *   language  – any requirement of kind "language"
+ *   onsite    – work_mode onsite, or a requirement of kind location/authorisation
+ *   seniority – seniority stated (not null / "unknown")
+ *   unclear   – unknowns present
+ *   all       – every role given
+ * @returns {Object<string, Set>} group key → canonical id set
+ */
+export function screenGroups(roles) {
+  const out = {};
+  for (const k of SCREEN_GROUP_KEYS) out[k] = new Set();
+  for (const g of roles) {
+    if (!g) continue;
+    const s = g.screening || {};
+    const facts = s.posting_facts || {};
+    const reqs = screenRequirements(g).filter(Boolean);
+    const mode = String(facts.work_mode || "").toLowerCase();
+    if (reqs.some((r) => r.kind === "language")) out.language.add(g.id);
+    if (
+      /on.?site/.test(mode) ||
+      reqs.some((r) => r.kind === "location" || r.kind === "authorisation")
+    )
+      out.onsite.add(g.id);
+    if (facts.seniority && String(facts.seniority).toLowerCase() !== "unknown")
+      out.seniority.add(g.id);
+    if (Array.isArray(s.unknowns) && s.unknowns.length) out.unclear.add(g.id);
+    out.all.add(g.id);
+  }
+  return out;
+}
+
+export const SCREEN_ACTIVITIES = [
+  "building",
+  "running",
+  "selling",
+  "specialist",
+];
+
+/** Every requirement predicate binds to the same piece of posting evidence. */
+export function screenMatchRequirements(g, filters = {}) {
+  const needle = String(filters.requirementText || "")
+    .trim()
+    .toLowerCase();
+  return screenRequirements(g).filter(
+    (r, index) =>
+      r &&
+      (!filters.kind || r.kind === filters.kind) &&
+      (!filters.strength || (r.strength || "unknown") === filters.strength) &&
+      (!needle ||
+        String(r.value || "")
+          .toLowerCase()
+          .includes(needle)) &&
+      (!filters.finding ||
+        (g.screening?.profile_comparison || []).some(
+          (c) => c.requirement === index && c.finding === filters.finding,
+        ) ||
+        (filters.finding === "unknown" &&
+          !(g.screening?.profile_comparison || []).some(
+            (c) => c.requirement === index,
+          ))),
+  );
+}
+
+/** Interpret only extracted facts: missing work_profile stays unclassified. */
+export function screenMatches(
+  g,
+  filters = {},
+  today = new Date().toISOString().slice(0, 10),
+) {
+  const dates = screenDateFacts(g, today);
+  if (filters.age) {
+    const limit = { last7: 7, last14: 14, last30: 30 }[filters.age];
+    if (
+      dates.age == null ||
+      dates.age < 0 ||
+      (filters.age === "older30" ? dates.age <= 30 : dates.age > limit)
+    )
+      return false;
+  }
+  if (filters.deadline === "expired" && !dates.expired) return false;
+  if (filters.deadline === "open" && dates.expired) return false;
+  if (filters.deadline === "unknown" && dates.deadline) return false;
+  const facts = g.screening?.posting_facts || {};
+  const work = g.screening?.work_profile;
+  const unknown = (v) => v || "unknown";
+  if (
+    filters.activity === "unclassified"
+      ? !!work
+      : filters.activity === "unknown"
+        ? !work || !!work.activities?.length
+        : filters.activity &&
+          !work?.activities?.some((a) => a.kind === filters.activity)
+  )
+    return false;
+  if (filters.workMode && unknown(facts.work_mode) !== filters.workMode)
+    return false;
+  if (filters.seniority && unknown(facts.seniority) !== filters.seniority)
+    return false;
+  if (
+    filters.technical &&
+    unknown(work?.technical_depth?.level) !== filters.technical
+  )
+    return false;
+  if (filters.purpose && unknown(work?.purpose?.kind) !== filters.purpose)
+    return false;
+  if (
+    filters.search &&
+    !`${g.title || ""} ${g.company_name || g.org || ""}`
+      .toLowerCase()
+      .includes(filters.search.trim().toLowerCase())
+  )
+    return false;
+  if (
+    (filters.kind ||
+      filters.strength ||
+      filters.requirementText?.trim() ||
+      filters.finding) &&
+    !screenMatchRequirements(g, filters).length
+  )
+    return false;
+  return true;
+}
+
+/** Calendar dates use UTC, matching the existing dashboard deadline convention. */
+export function screenDateFacts(
+  g,
+  today = new Date().toISOString().slice(0, 10),
+) {
+  const dateOnly = (value) => {
+    const day = String(value || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+    const date = new Date(day);
+    return Number.isFinite(date.getTime()) &&
+      date.toISOString().slice(0, 10) === day
+      ? day
+      : null;
+  };
+  const seen = dateOnly(g.first_seen);
+  const deadline = dateOnly(g.deadline);
+  return {
+    age: seen
+      ? Math.round((Date.parse(today) - Date.parse(seen)) / 86400000)
+      : null,
+    deadline,
+    expired: !!deadline && deadline < today,
+  };
+}

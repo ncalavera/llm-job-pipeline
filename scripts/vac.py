@@ -793,8 +793,7 @@ def _contact_add(args, contacts_mod):
     """Add or edit one person by hand."""
     if args.status not in VALID_CONTACT_STATUSES:
         print(
-            f"Invalid status: {args.status}. "
-            f"Allowed: {', '.join(sorted(VALID_CONTACT_STATUSES))}"
+            f"Invalid status: {args.status}. Allowed: {', '.join(sorted(VALID_CONTACT_STATUSES))}"
         )
         sys.exit(1)
 

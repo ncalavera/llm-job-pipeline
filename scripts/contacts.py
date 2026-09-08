@@ -192,9 +192,7 @@ def read_csv(path) -> list[dict]:
     with file_path.open(encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         if not reader.fieldnames or "name" not in reader.fieldnames:
-            raise ValueError(
-                f"{file_path} has no 'name' column — found: {reader.fieldnames}"
-            )
+            raise ValueError(f"{file_path} has no 'name' column — found: {reader.fieldnames}")
         return [dict(r) for r in reader]
 
 
@@ -277,7 +275,7 @@ def upsert_contact(contact: dict) -> str:
         # Keep the status the UI last set unless the import states one.
         keep_status = current_status if not contact.get("status") else status
         cur.execute(
-            'UPDATE contact SET name_local = %s, city = %s, org = %s, role = %s, '
+            "UPDATE contact SET name_local = %s, city = %s, org = %s, role = %s, "
             "why_matters = %s, channels = %s, status = %s, last_active = %s, "
             "opener = %s, notes = %s, source_path = %s, updated_at = now() "
             "WHERE id = %s",
@@ -298,7 +296,7 @@ def upsert_contact(contact: dict) -> str:
         )
     else:
         cur.execute(
-            'INSERT INTO contact (name, name_local, city, org, role, why_matters, '
+            "INSERT INTO contact (name, name_local, city, org, role, why_matters, "
             'channels, "group", status, last_active, opener, notes, source_path) '
             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
             (
@@ -343,7 +341,7 @@ def list_contacts(status: str = None, group: str = None) -> list[dict]:
     where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
 
     columns = (
-        'id, name, name_local, city, org, role, why_matters, channels, '
+        "id, name, name_local, city, org, role, why_matters, channels, "
         '"group", status, status_at, last_active, opener, notes, source_path, '
         "created_at, updated_at"
     )
@@ -381,8 +379,7 @@ def set_contact_status(contact_id: str, status: str) -> bool:
         )
     cur = _conn().cursor()
     cur.execute(
-        "UPDATE contact SET status = %s, status_at = now(), updated_at = now() "
-        "WHERE id = %s",
+        "UPDATE contact SET status = %s, status_at = now(), updated_at = now() WHERE id = %s",
         (status, contact_id),
     )
     changed = cur.rowcount > 0
