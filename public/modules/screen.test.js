@@ -488,7 +488,11 @@ test("functional review paginates roles and only selection from the current batc
   }));
   roles.push({ ...lang("ops"), title: "Head of Operations" });
   let m = reviewModel(roles, () => "unseen");
-  assert.equal(m.rows.length, 7);
+  assert.equal(m.rows.length, REVIEW_SIZE);
+  assert.equal(m.total, 7);
+  view.page = 1;
+  assert.equal(reviewModel(roles, () => "unseen").rows.length, 1);
+  view.page = 0;
   toggleSelectAll(m.visibleIds);
   view.batch = "operations";
   view.page = 0;

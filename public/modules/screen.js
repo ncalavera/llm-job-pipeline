@@ -160,16 +160,15 @@ function canDecide(g) {
 let reviewedIds = new Set();
 try { reviewedIds = new Set(JSON.parse(localStorage.getItem("inbox-review-ids") || "[]")); } catch { /* First visit or blocked storage. */ }
 
-function inboxFiltersHtml(model) {
+function inboxFiltersHtml() {
   const select = (key, label, values) => '<label>' + escHtml(label) + '<select data-filter="' + key + '"><option value="">' +
     escHtml(T("screen_all_values", "Any")) + '</option>' + values.map(([value, text]) => '<option value="' + escHtml(value) + '"' +
-    ((key === "function" ? view.batch : view.filters[key]) === value ? ' selected' : '') + '>' + escHtml(text) + '</option>').join('') + '</select></label>';
+    (view.filters[key] === value ? ' selected' : '') + '>' + escHtml(text) + '</option>').join('') + '</select></label>';
   const values = key => [...new Set(groups.map(g => key === "added" ? String(g.first_seen || "").slice(0,10) : g.source_board).filter(Boolean))].sort().reverse().map(v => [v,v]);
   return '<div class="inbox-filterbar">' +
     '<label>' + escHtml(T("inbox_search", "Title or company")) + '<input data-filter="search" value="' + escHtml(view.filters.search || "") + '"></label>' +
     '<label>' + escHtml(T("inbox_place", "Job location")) + '<input data-filter="place" value="' + escHtml(view.filters.place || "") + '"></label>' +
     select("added", T("vac_first_seen", "First seen"), values("added")) +
-    select("function", T("inbox_function", "Job function"), model.batches.map(b => [b.key,T("screen_batch_" + b.key,b.label)])) +
     '<details><summary>' + escHtml(T("inbox_more_filters", "More filters")) + '</summary><div class="inbox-filterbar">' +
     select("source",T("vac_source","Source"),values("source")) +
     select("workMode",T("inbox_work_mode","Work mode"),["remote","hybrid","onsite","unknown"].map(v => [v,T("inbox_"+v,v)])) +
@@ -181,18 +180,17 @@ function inboxFiltersHtml(model) {
     escHtml(T("inbox_finish","Finish review")) + '</button></div>';
 }
 
-export const REVIEW_SIZE = 20;
+export const REVIEW_SIZE = 6;
 
 export function reviewModel(roles, getStatus) {
   const lists = screenLists(roles, getStatus, config.screening_prompt_fingerprint);
-  const batches = reviewBatches(roles.filter(g => lists[view.list].has(g.id)), () => "unseen");
+  const cohort = roles.filter(g => lists[view.list].has(g.id) &&
+    (!view.newOnly || !reviewedIds.has(g.id)) && screenMatches(g, view.filters));
+  const batches = reviewBatches(cohort, () => "unseen");
   if (view.batch && !batches.some((b) => b.key === view.batch)) view.batch = null;
   const batch = batches.find((b) => b.key === view.batch);
-  const matching = roles.filter((g) =>
-    lists[view.list].has(g.id) &&
-    (!batch || batch.roles.some(r => r.id === g.id)) &&
-    (!view.newOnly || !reviewedIds.has(g.id)) &&
-    screenMatches(g, view.filters)
+  const matching = cohort.filter((g) =>
+    !batch || batch.roles.some(r => r.id === g.id)
   ).sort((a, b) => String(b.first_seen || "").localeCompare(String(a.first_seen || "")) || String(a.title || "").localeCompare(String(b.title || "")));
   const pages = Math.max(1, Math.ceil(matching.length / REVIEW_SIZE));
   view.page = Math.min(view.page, pages - 1);
@@ -839,13 +837,25 @@ export function renderScreen() {
   lastVisible = model.visibleIds;
   const pendingFeedback = view.feedbackState === "failed";
   const dis = view.busy ? " disabled" : "";
+  const pagination = '<div class="scr-pagination"><button class="scr-btn" data-page="' +
+    (view.page - 1) + '"' + (view.page === 0 || view.busy ? ' disabled' : '') + '>' +
+    escHtml(T("screen_previous", "Previous")) + '</button><span>' + (view.page + 1) + ' / ' + model.pages +
+    '</span><button class="scr-btn" data-page="' + (view.page + 1) + '"' +
+    (view.page >= model.pages - 1 || view.busy ? ' disabled' : '') + '>' +
+    escHtml(T("screen_next", "Next batch")) + '</button></div>';
   el.innerHTML =
     '<div class="scr-head"><h2 class="scr-title">' +
     escHtml(T("screen_review_title", "Review vacancies")) +
     "</h2></div>" +
     tabsHtml(model.lists, T) +
-    inboxFiltersHtml(model) +
-    '<section class="scr-review-sheet scr-inbox">' +
+    inboxFiltersHtml() +
+    '<div class="scr-review-layout"><nav class="scr-batch-nav" aria-label="Job functions">' +
+    [{key: "", label: T("contacts_all_groups", "All"), roles: {length: model.batches.reduce((n,b) => n + b.roles.length, 0)}}, ...model.batches].map(b =>
+      '<button class="scr-batch" data-batch="' + escHtml(b.key) + '" aria-pressed="' +
+      (!b.key ? !view.batch : view.batch === b.key) + '"' + dis + '><strong>' +
+      escHtml(b.key ? T("screen_batch_" + b.key,b.label) : b.label) + '</strong><span>' + b.roles.length +
+      ' ' + escHtml(T("screen_roles", "roles")) + '</span></button>').join('') + '</nav>' +
+    '<section class="scr-review-sheet scr-inbox"><h3>' + escHtml(model.batch ? T("screen_batch_" + model.batch.key,model.batch.label) : T("contacts_all_groups","All")) + '</h3>' +
     '<p class="scr-matches" tabindex="-1">' +
     escHtml(
       fill(
@@ -861,28 +871,14 @@ export function renderScreen() {
       ),
     ) +
     "</p>" +
-    '<div class="catalog-sheet"><div class="catalog-table"><div class="catalog-row-head"><div></div><div>' +
-    escHtml(T("browse_col_role", "Role")) + '</div><div>' + escHtml(T("browse_col_company", "Company")) +
-    '</div><div>' + escHtml(T("browse_col_location", "Location")) + '</div><div>' + escHtml(T("browse_col_comp", "Comp")) +
-    '</div><div>' + escHtml(T("browse_col_seen", "Seen")) + '</div><div></div></div>' +
+    pagination +
+    '<div class="catalog-sheet"><div class="catalog-table">' +
     (model.rows.length ? model.rows.map(g => catalogRowHtml(g, getGroupStatus(g), {
       t: T, review: true, checked: view.selected.has(g.id),
       disabled: view.busy || !state.statusesLoaded || !!pendingFeedback || !!pendingDecision,
     })).join("") : '<p>' + escHtml(T("screen_empty", "No roles left in this list.")) + '</p>') +
     '</div></div>' +
-    '<div class="scr-pagination"><button class="scr-btn" data-page="' +
-    (view.page - 1) +
-    '"' +
-    (view.page === 0 || view.busy ? " disabled" : "") +
-    ">" +
-    escHtml(T("screen_previous", "Previous")) +
-    '</button><button class="scr-btn" data-page="' +
-    ((view.page + 1) % model.pages) +
-    '"' +
-    (model.pages === 1 || view.busy ? " disabled" : "") +
-    ">" +
-    escHtml(T("screen_review_later", "Review later · next few")) +
-    "</button></div>" +
+    pagination +
     '<label class="scr-reason">' +
     escHtml(
       T(
@@ -931,7 +927,7 @@ export function renderScreen() {
       decisionBlocked: pendingFeedback || !!pendingDecision,
       canUndo: history.length > 0 && !pendingDecision,
     }) +
-    "</section>" +
+    "</section></div>" +
     '<button class="scr-btn" id="scrLoadNotes">' +
     escHtml(T("screen_past_notes", "Past review notes")) +
     "</button>" +
@@ -1026,7 +1022,7 @@ function onClick(e) {
       renderScreen();
     });
   } else if ((el = hit("[data-batch]"))) {
-    view.batch = el.getAttribute("data-batch");
+    view.batch = el.getAttribute("data-batch") || null;
     view.reason = "";
     setPage(0);
     renderScreen();

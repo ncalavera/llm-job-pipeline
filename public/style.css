@@ -6614,20 +6614,40 @@ body::after {
 .inbox-filterbar input, .inbox-filterbar select { font: inherit; padding: 9px; border: 1px solid #ccc; border-radius: 8px; max-width: 240px; background: var(--card); color: var(--sky-text); }
 .inbox-filterbar summary { cursor: pointer; padding: 10px; }
 .inbox-review-checkpoint { display: flex; flex-wrap: wrap; gap: 8px; }
-.scr-inbox { padding: 12px 0; }
-.scr-inbox .catalog-row-score { background: transparent; }
+/* Cards reuse the catalogue content and decision handlers. */
+.scr-inbox { padding: 0; background: transparent; }
+.scr-inbox .catalog-sheet { padding: 0; background: transparent; box-shadow: none; overflow: visible; }
+.scr-inbox .catalog-table { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.scr-inbox .catalog-row {
+  position: relative; display: flex; flex-direction: column; align-items: stretch;
+  gap: 12px; margin: 0; padding: 22px; min-width: 0;
+  border: 1px solid var(--border, #ddd); border-radius: 16px; background: var(--card);
+  box-shadow: 0 3px 12px #00000006;
+}
+.scr-inbox .catalog-row:hover { border-color: var(--cobalt); }
+.scr-inbox .catalog-row:has(input:checked) { border-color: var(--cobalt); background: color-mix(in srgb, var(--cobalt) 5%, var(--card)); }
+.scr-inbox .catalog-row-score { position: absolute; top: 20px; right: 18px; background: transparent; width: auto; height: auto; padding: 0; }
 .scr-inbox input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--cobalt); }
-.scr-inbox .catalog-row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.scr-inbox .catalog-row-actions button { width: auto; height: auto; min-height: 36px; }
-.scr-inbox .catalog-row, .scr-inbox .catalog-row-head { grid-template-columns: 30px minmax(260px, 1fr) 125px 140px 100px 55px 105px; }
-.scr-inbox .catalog-row-sub { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; white-space: normal; color: var(--sky-text); }
+.scr-inbox .catalog-row-company { order: -1; padding-right: 32px; color: var(--cobalt); font-weight: 600; }
+.scr-inbox .catalog-row-title { font-size: 20px; line-height: 1.3; white-space: normal; }
+.scr-inbox .catalog-row-title-line { display: block; }
+.scr-inbox .catalog-row-sub { font-size: 14px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; white-space: normal; color: var(--sky-text); line-height: 1.5; margin: 12px 0; }
+.scr-inbox .catalog-row-loc, .scr-inbox .catalog-row-comp { white-space: normal; }
+.scr-inbox .catalog-row-seen { display: none; } /* Exact dates already appear on every card. */
+.scr-inbox .catalog-row-actions { display: flex; gap: 8px; margin-top: auto; padding-top: 8px; }
+.scr-inbox .catalog-row-actions button { width: auto; height: auto; min-height: 40px; padding: 8px 18px; border-radius: 10px; }
+.scr-inbox [data-decision="liked"] { background: #e5f5ed; color: #14633c; border-color: #9dceae; }
+.scr-inbox [data-decision="passed"] { background: #fff1ed; color: #9b3b28; border-color: #e9bdad; }
+.scr-inbox .scr-pagination { justify-content: space-between; align-items: center; margin: 14px 0; }
+.scr-batch-nav { position: sticky; top: 20px; }
+.scr-batch { min-height: 0; padding: 12px; }
+.scr-batch span { color: var(--muted); }
+@media (max-width: 1050px) {
+  .scr-inbox .catalog-table { grid-template-columns: 1fr; }
+}
 @media (max-width: 700px) {
-  .scr-inbox .catalog-table { min-width: 0; }
-  .scr-inbox .catalog-row-head { display: none; }
-  .scr-inbox .catalog-row { grid-template-columns: 30px minmax(0,1fr); align-items: start; padding: 12px; margin: 0; }
-  .scr-inbox .catalog-row-role { grid-column: 2; }
-  .scr-inbox .catalog-row-company, .scr-inbox .catalog-row-loc, .scr-inbox .catalog-row-comp,
-  .scr-inbox .catalog-row-seen, .scr-inbox .catalog-row-actions { grid-column: 2; }
+  .scr-batch-nav { position: static; }
+  .scr-inbox .catalog-row { padding: 18px; }
   .inbox-filterbar label, .inbox-filterbar input, .inbox-filterbar select { max-width: 100%; }
 }
 
