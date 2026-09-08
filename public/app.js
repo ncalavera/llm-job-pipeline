@@ -8,9 +8,7 @@ import {
   config,
   companiesBySlug,
   groups,
-  STATUS_BASKET,
   getGroupStatus,
-  isGroupCompanyApproved,
   getCompanies,
   dashboardSource,
   on,
@@ -20,7 +18,6 @@ import {
 import {
   initUI,
   showToast,
-  isVacancyExpired,
   escHtml,
 } from "./modules/helpers.js";
 import {
@@ -36,9 +33,10 @@ import {
   loadCompanyStatuses,
   loadCompanies,
 } from "./modules/api.js";
-import { VISIBLE_MIN_SCORE, basketCounts, screenLists } from "./modules/derive.js";
+import { basketCounts } from "./modules/derive.js";
 import {
   initCatalog,
+  catalogVisibility,
   updateBasketCounts,
   renderCatalog,
   switchBasket,
@@ -157,19 +155,9 @@ function renderLanguageSwitch() {
 // violate the same badge==list invariant this reuses.
 // ---------------------------------------------------------------------------
 
-function navVisOpts() {
-  return {
-    isApproved: isGroupCompanyApproved,
-    getStatus: getGroupStatus,
-    isExpired: isVacancyExpired,
-    basketMap: STATUS_BASKET,
-    minScore: state.catalogShowAll ? null : VISIBLE_MIN_SCORE,
-  };
-}
-
 function updateNavCounts() {
   var vacEl = document.getElementById("navCountVacancies");
-  if (vacEl) vacEl.textContent = screenLists(groups, getGroupStatus).toScreen.size;
+  if (vacEl) vacEl.textContent = basketCounts(groups, catalogVisibility()).unseen;
   var compEl = document.getElementById("navCountCompanies");
   if (compEl) compEl.textContent = getCompanies().length;
 }
@@ -632,7 +620,7 @@ function applyRouteFromUrl() {
 // ---------------------------------------------------------------------------
 
 function switchMode(mode) {
-  if (mode === "catalog" || mode === "today") mode = "screen";
+  if (mode === "screen" || mode === "today" || mode === "browse") mode = "catalog";
   // A section switch always drops any open detail overlay (company profile or
   // vacancy detail / not-found) and returns to a list.
   closeDetailOverlays();

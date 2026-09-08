@@ -20,7 +20,7 @@ The user's choice: Like or Pass. Preparation, filtering, and archiving do not ma
 *Avoid:* verdict, keep, skipped, or put aside for these same user-facing choices.
 
 ### Inbox
-The single table of collected vacancies, with Undecided, Liked and Passed views. Preparation is a labelled property, never an inclusion gate. Bulk review uses the same records and content; filtered or paginated views are subsets of that table. Application outcomes do not manufacture a Pass. Archives preserve historical records outside the active table.
+The main scored catalogue of collected vacancies, with Undecided, Liked and Passed views. Rows sort by score by default; a missing score stays blank, never becomes zero. Preparation is a labelled property, never an inclusion gate. Bulk review uses the same records and content; filtered or paginated views are subsets of that table. Application outcomes do not manufacture a Pass. Archives preserve historical records outside the active table.
 
 ### History
 Older records and past decisions retained for reference and recovery. Moving a record out of the active inbox does not mean the user passed on it.
@@ -99,7 +99,7 @@ A user's reason or correction accompanying a decision. **Review state:** Pending
 An optional numerical model estimate, labelled Score everywhere. Older company scores describe company preference; vacancy scores describe vacancy preference. A score is neither a Fact, a Fit explanation, nor a human Decision. Daily preparation does not require scoring.
 
 ### Views and counts
-Inbox is the current, prepared, undecided vacancy list. Catalog is the broader vacancy list; filters can make it smaller. Progress groups liked vacancies and applications by current progress. Applications is the submitted-application table. Companies and Job boards count their own entities, never vacancies. Reports contains research documents; Contacts contains people; Health contains processing and connection details; Settings contains preferences.
+Inbox and Catalog refer to the same main scored vacancy table; filters can make it smaller. Preparation never determines inclusion. Progress groups liked vacancies and applications by current progress. Applications is the submitted-application table. Companies and Job boards count their own entities, never vacancies. Reports contains research documents; Contacts contains people; Health contains processing and connection details; Settings contains preferences.
 
 A list count names its entity and uses that list's filters. A page count says how many are shown, not how many exist. Function groups partition the inbox, with mixed/unknown functions in Other. Attribute filters (language, location, seniority) may overlap and must never be presented as additive totals. Database record counts include source copies and history; they are not unique-vacancy counts. Cumulative funnel counts overlap and are not current states.
 

@@ -17,7 +17,7 @@ export const ARCHITECTURE_OVERVIEW = `flowchart LR
     DB --> SCORE[Filter +<br/>evidence preparation]
     SCORE --> N[File-only preparation agents]
     N -->|quoted facts + profile comparison<br/>polled and saved by Python| DB
-    DB -->|compact rows + filter facts| SCR[One Inbox table<br/>Like / Pass + bulk filters]
+    DB -->|compact rows + filter facts| SCR[Scored Inbox table<br/>Score sort + Like / Pass]
     SCR -->|open one record| DETAIL[Full vacancy or company text]
     DB -->|private detail endpoint| DETAIL
     SCR -->|/api/screening-decision<br/>durable receipt| DB

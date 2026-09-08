@@ -31,7 +31,7 @@ export const SECTIONS = [
 export const VACANCY_VIEWS = ["catalog", "screen", "stats", "archive"];
 
 // The vacancy leaf shown when Vacancies is opened with no remembered view.
-export const DEFAULT_VACANCY_VIEW = "screen";
+export const DEFAULT_VACANCY_VIEW = "catalog";
 
 // Every leaf mode → the top-nav section that owns it. The last two entries are
 // not leaf modes but the deep-link DETAIL screens (route.js's route.screen

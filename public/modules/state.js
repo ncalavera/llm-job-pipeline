@@ -126,12 +126,12 @@ export const state = {
   companySortAsc: false,
   statsSortCol: "count",
   statsSortAsc: false,
-  // Open prepared screening when available; empty/demo snapshots keep Today.
+  // The scored catalogue is the main vacancy view.
   // The six-section chrome derives the active section via nav.js.
-  currentMode: "screen",
+  currentMode: "catalog",
   // Remembered Vacancies sub-view (Browse/Geo/Archive) so re-opening the
   // Vacancies section returns to where the user was.
-  vacancyView: "screen",
+  vacancyView: "catalog",
   companyStatuses: {},
   companyStatusesLoaded: false,
   companySubTab: "approved",

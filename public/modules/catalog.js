@@ -13,7 +13,6 @@ import {
   stats,
   STATUS_BASKET,
   getGroupStatus,
-  isGroupCompanyApproved,
   updateStatus,
 } from "./state.js";
 import {
@@ -28,10 +27,8 @@ import {
 } from "./helpers.js";
 import { T, dateLocale } from "./i18n.js";
 import {
-  ANY_COMPANY_MIN_SCORE,
   VISIBLE_MIN_SCORE,
   basketCounts,
-  clearsScoreFloor,
   screenDateFacts,
   groupsInBasket,
 } from "./derive.js";
@@ -41,9 +38,9 @@ import { createCursor, actionsFor } from "./keys.js";
 // so a count can never disagree with its list (DHA-374). The score floor is
 // VISIBLE_MIN_SCORE unless "show all" (state.catalogShowAll, shared with Geo)
 // lifts it.
-function visOpts() {
+export function catalogVisibility() {
   return {
-    isApproved: isGroupCompanyApproved,
+    isApproved: () => true,
     getStatus: getGroupStatus,
     isExpired: isVacancyExpired,
     basketMap: STATUS_BASKET,
@@ -58,10 +55,12 @@ function visOpts() {
 export function updateBasketCounts() {
   // Same visibility filter + expiry re-bucketing the basket LIST uses, so the
   // badge is always the count of the rows the list renders (DHA-374).
-  const counts = basketCounts(groups, visOpts());
+  const counts = basketCounts(groups, catalogVisibility());
   document.getElementById("countLiked").textContent = counts.liked;
   document.getElementById("countUnseen").textContent = counts.unseen;
   document.getElementById("countPassed").textContent = counts.passed;
+  const navCount = document.getElementById("navCountVacancies");
+  if (navCount) navCount.textContent = counts.unseen;
 }
 
 export function switchBasket(btn) {
@@ -113,7 +112,7 @@ export function initCatalog() {
   const sel = document.getElementById("catalogOrgFilter");
   const orgs = [
     ...new Set(
-      groups.filter((g) => isGroupCompanyApproved(g)).map((g) => g.org),
+      groups.map((g) => g.org).filter(Boolean),
     ),
   ].sort();
   sel.innerHTML = '<option value="">All companies</option>';
@@ -140,41 +139,6 @@ export function initCatalog() {
 // Render catalog table
 // ---------------------------------------------------------------------------
 
-// Persistent note above the catalog: roles from not-yet-approved (candidate)
-// companies are excluded from the list until the company is approved on the
-// Companies tab. Same message as the Companies → Pending banner.
-function _renderCatalogHiddenNote(grid) {
-  const existing = document.getElementById("catalogHiddenNote");
-  if (existing) existing.remove();
-  if (!grid || !grid.parentNode) return;
-
-  // Only roles still hidden after the fix: not-yet-approved AND below the
-  // any-company floor. Strong matches (≥ ANY_COMPANY_MIN_SCORE) now show
-  // inline, so they no longer belong in this "hidden" note.
-  const hidden = groups.filter(
-    (g) =>
-      !isGroupCompanyApproved(g) && !clearsScoreFloor(g, ANY_COMPANY_MIN_SCORE),
-  );
-  if (hidden.length === 0) return;
-
-  const orgs = new Set();
-  let vacs = 0;
-  for (const g of hidden) {
-    orgs.add(g.org);
-    vacs += g.member_ids && g.member_ids.length ? g.member_ids.length : 1;
-  }
-
-  const tpl = T(
-    "catalog_hidden_pending",
-    "\u2139\ufe0f {vacs} vacancies from {orgs} companies are outside Catalog until those companies are tracked. Inbox uses preparation readiness separately.",
-  );
-  const note = document.createElement("div");
-  note.id = "catalogHiddenNote";
-  note.className = "ces-pending-hidden";
-  note.textContent = tpl.replace("{vacs}", vacs).replace("{orgs}", orgs.size);
-  grid.parentNode.insertBefore(note, grid);
-}
-
 // The ordered id queue for the currently rendered rows — what a row click
 // hands the U4 router as the "browse" context (F3's auto-advance walks this
 // same order). Read by openCatalogRow's thin DOM shell below, and the set the
@@ -193,13 +157,11 @@ export function renderCatalog() {
   const orgFilter = document.getElementById("catalogOrgFilter").value;
   const grid = document.getElementById("catalogGrid");
 
-  _renderCatalogHiddenNote(grid);
-
   // The visible rows in the current basket — the SAME set the badge counts, so
   // the "N of M" denominator always matches the badge (DHA-374). The score
   // floor + expiry re-bucketing live in the shared filter; only the org/
   // location/search refinements below are catalog-specific.
-  const inBasket = groupsInBasket(groups, state.currentBasket, visOpts());
+  const inBasket = groupsInBasket(groups, state.currentBasket, catalogVisibility());
   const filtered = inBasket.filter((g) => {
     if (orgFilter && g.org !== orgFilter) return false;
     if (
@@ -538,9 +500,9 @@ export function catalogRowHtml(g, basket, opts) {
     deadlineHtml +
     "</div>" +
     subHtml +
-    '<div class="scr-row-meta">' + metadata + '</div>' +
-    (prepLabel ? '<div class="scr-concern">' + escHtml(prepLabel) + '</div>' : '') +
-    (url ? '<a class="scr-posting" href="' + escHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escHtml(t("vac_open_posting","Open posting")) + ' ↗</a>' : '') +
+    (o.review ? '<div class="scr-row-meta">' + metadata + '</div>' : "") +
+    (o.review && prepLabel ? '<div class="scr-concern">' + escHtml(prepLabel) + '</div>' : '') +
+    (o.review && url ? '<a class="scr-posting" href="' + escHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escHtml(t("vac_open_posting","Open posting")) + ' ↗</a>' : '') +
     "</div>" +
     '<div class="catalog-row-company">' +
     '<span class="catalog-row-org">' +

@@ -22,7 +22,7 @@ globalThis.window = {
 };
 globalThis.location = { protocol: "file:", origin: "" };
 
-const { catalogQueueIds, catalogRowHtml, openCatalogRow } =
+const { catalogQueueIds, catalogRowHtml, openCatalogRow, catalogVisibility } =
   await import("./catalog.js");
 const { actionsFor } = await import("./keys.js");
 
@@ -230,4 +230,13 @@ test("an id with quotes/HTML is escaped in the data-id AND the onclick attribute
   assert.match(html, /data-id="g&quot;/);
   // the onclick's single-quoted JS string is jsAttr-escaped — no unescaped ' breaks out.
   assert.doesNotMatch(html, /openCatalogRow\('g"'\)/);
+});
+
+// Restoring the layout must not restore the old hidden-company gate.
+test("main scored table retains unscored roles from unselected companies", async () => {
+  const { groupsInBasket, basketCounts } = await import("./derive.js");
+  const rows = [{...baseGroup, id: "unscored", llm_score: null, company_id: "unknown"}];
+  const visibility = catalogVisibility();
+  assert.deepEqual(groupsInBasket(rows, "unseen", visibility).map(g => g.id), ["unscored"]);
+  assert.equal(basketCounts(rows, visibility).unseen, 1);
 });

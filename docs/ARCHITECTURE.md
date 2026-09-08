@@ -110,8 +110,9 @@ dashboard *code* changes.)
 ## Health & observability
 
 The four primary website sections are Inbox, Applications, Companies and Sources.
-Catalogue links resolve to the same Inbox table; bulk selection does not change
-its content or base set. Materials are reached through Applications. Older
+The main Inbox uses the original scored catalogue table, with descending score
+sort and explanations on vacancy detail pages. Legacy Screen links resolve to
+this table. Missing scores do not exclude collected roles. Materials are reached through Applications. Older
 routes remain accessible for history and diagnostics, not competing navigation.
 
 Algolia collection writes `source_observation` before applying parser flags,
@@ -150,7 +151,7 @@ The daily update contains one current Inbox count and link, plus actionable run
 failures. Preparation queues belong to Health. Readiness requires matching the
 stored screening fingerprint against the current posting and prompt/profile
 fingerprints. The snapshot ships these raw identities; Inbox, its sidebar badge,
-and bulk review share `screenLists`. Preparation badges validate those identities; preparation does not filter Inbox. The digest counts all retained undecided vacancies. `send --details` remains the explicit legacy scoring view.
+and table rows share `catalogVisibility` with the basket derivations. Preparation does not filter Inbox. The digest counts all retained undecided vacancies. `send --details` remains the explicit legacy scoring view.
 Delivery advances last-success only after sending; a crash may repeat a message,
 but cannot mark an undelivered one successful.
 
