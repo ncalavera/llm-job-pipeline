@@ -16,16 +16,19 @@
 
 import {
   state,
+  config,
   API_BASE,
   groups,
   groupsById,
-  stats,
+  getCompanies,
   getGroupStatus,
   setStatusLocal,
   scheduleRender,
 } from "./state.js";
 import { loadFromServer } from "./api.js";
-import { escHtml, showToastText } from "./helpers.js";
+import { escHtml, safeUrl, showToastText, resolveVacancyCompany } from "./helpers.js";
+import { catalogRowHtml } from "./catalog.js";
+import { sourceLabel } from "./vacancy.js";
 import { T } from "./i18n.js";
 import { reviewBatches, batchConcern } from "./screen-batches.js";
 import {
@@ -124,7 +127,7 @@ export function screenModel(
   getStatus,
   today = new Date().toISOString().slice(0, 10),
 ) {
-  const lists = screenLists(roles, getStatus);
+  const lists = screenLists(roles, getStatus, config.screening_prompt_fingerprint);
   const cohort = roles.filter((g) => lists[view.list].has(g.id));
   const groupSets = screenGroups(cohort);
   const matching = cohort.filter(
@@ -151,20 +154,44 @@ export function screenModel(
   };
 }
 
-export const REVIEW_SIZE = 5;
+function canDecide(g) {
+  return !!g && ["unseen", "liked", "passed", "skipped", "expiring"].includes(getGroupStatus(g));
+}
+let reviewedIds = new Set();
+try { reviewedIds = new Set(JSON.parse(localStorage.getItem("inbox-review-ids") || "[]")); } catch { /* First visit or blocked storage. */ }
+
+function inboxFiltersHtml() {
+  const select = (key, label, values) => '<label>' + escHtml(label) + '<select data-filter="' + key + '"><option value="">' +
+    escHtml(T("screen_all_values", "Any")) + '</option>' + values.map(([value, text]) => '<option value="' + escHtml(value) + '"' +
+    (view.filters[key] === value ? ' selected' : '') + '>' + escHtml(text) + '</option>').join('') + '</select></label>';
+  const values = key => [...new Set(groups.map(g => key === "added" ? String(g.first_seen || "").slice(0,10) : g.source_board).filter(Boolean))].sort().reverse().map(v => [v,v]);
+  return '<div class="inbox-filterbar">' +
+    '<label>' + escHtml(T("inbox_search", "Title or company")) + '<input data-filter="search" value="' + escHtml(view.filters.search || "") + '"></label>' +
+    '<label>' + escHtml(T("inbox_place", "Job location")) + '<input data-filter="place" value="' + escHtml(view.filters.place || "") + '"></label>' +
+    select("added", T("vac_first_seen", "First seen"), values("added")) +
+    '<details><summary>' + escHtml(T("inbox_more_filters", "More filters")) + '</summary><div class="inbox-filterbar">' +
+    select("source",T("vac_source","Source"),values("source")) +
+    select("workMode",T("inbox_work_mode","Work mode"),["remote","hybrid","onsite","unknown"].map(v => [v,T("inbox_"+v,v)])) +
+    select("technical",T("screen_technical","Technical requirements"),["coordination","practical","specialist","unknown"].map(v => [v,T(v === "specialist" ? "screen_technical_specialist" : "screen_"+v,v)])) +
+    select("kind",T("inbox_requirement","Requirement"),["authorisation","language","education","experience","skill"].map(v => [v,T("inbox_"+v,v)])) +
+    '</div></details><button class="scr-btn" id="inboxClear">' + escHtml(T("screen_clear_filters","Clear filters")) + '</button></div>' +
+    '<div class="inbox-review-checkpoint"><button class="scr-btn" id="inboxNew" aria-pressed="' + !!view.newOnly + '">' +
+    escHtml(T("inbox_since_review","New since last review on this device")) + '</button><button class="scr-btn" id="inboxFinish">' +
+    escHtml(T("inbox_finish","Finish review")) + '</button></div>';
+}
+
+export const REVIEW_SIZE = 6;
 
 export function reviewModel(roles, getStatus) {
-  const lists = screenLists(roles, getStatus);
-  const batches = reviewBatches(roles, getStatus);
-  if (view.list === "toScreen" && !batches.some((b) => b.key === view.batch)) {
-    view.batch = batches[0]?.key || null;
-    view.page = 0;
-  }
+  const lists = screenLists(roles, getStatus, config.screening_prompt_fingerprint);
+  const cohort = roles.filter(g => lists[view.list].has(g.id) &&
+    (!view.newOnly || !reviewedIds.has(g.id)) && screenMatches(g, view.filters));
+  const batches = reviewBatches(cohort, () => "unseen");
+  if (view.batch && !batches.some((b) => b.key === view.batch)) view.batch = null;
   const batch = batches.find((b) => b.key === view.batch);
-  const matching =
-    view.list === "toScreen"
-      ? batch?.roles || []
-      : roles.filter((g) => lists[view.list].has(g.id));
+  const matching = cohort.filter((g) =>
+    !batch || batch.roles.some(r => r.id === g.id)
+  ).sort((a, b) => String(b.first_seen || "").localeCompare(String(a.first_seen || "")) || String(a.title || "").localeCompare(String(b.title || "")));
   const pages = Math.max(1, Math.ceil(matching.length / REVIEW_SIZE));
   view.page = Math.min(view.page, pages - 1);
   const rows = matching.slice(
@@ -294,13 +321,13 @@ export const liveIo = {
  * Keep (liked) or Put aside (passed) the given canonical ids. Pushes one
  * operation with the saved rows only. @returns {{saved, total, op}}
  */
-export async function bulkSet(ids, status, io) {
+export async function bulkSet(ids, status, io, onlyUndecided = false) {
   io = io || liveIo;
   const rows = [];
   const op = { status, rows };
   for (const id of ids) {
     const members = io.members(id);
-    if (!members.length) continue;
+    if (!members.length || (onlyUndecided && members.some(mid => !["unseen", "expiring"].includes(io.current(mid))))) continue;
     const previous = await io.write(members, () => status, undefined, { id, status });
     if (previous) {
       const row = { id, member_ids: members, previous };
@@ -313,6 +340,14 @@ export async function bulkSet(ids, status, io) {
     if (io === liveIo && pendingDecision) break;
   }
   return { saved: rows.length, total: ids.length, op: rows.length ? op : null };
+}
+
+export function decisionState() {
+  return {pending: !!pendingDecision, canUndo: history.length > 0};
+}
+export function retryDecision() {
+  if (!pendingDecision) return Promise.resolve(null);
+  return pendingDecision.undo ? undoLast() : bulkSet([pendingDecision.id], pendingDecision.status);
 }
 
 /** Restore the last operation, retaining failed rows for another Undo attempt. */
@@ -456,7 +491,7 @@ function evidenceHtml(g, reqs, t) {
         "</em>") +
     (notes.length || unknowns.length
       ? '<div class="scr-notes-title">' +
-        escHtml(t("screen_profile_notes", "Compared with your profile")) +
+        escHtml(t("screen_profile_notes", "Fit")) +
         '</div><ul class="scr-notes">' +
         notes.join("") +
         unknowns.join("") +
@@ -470,7 +505,7 @@ function evidenceHtml(g, reqs, t) {
   );
 }
 
-/** One row. opts: { t, checked, open } */
+/** One row. opts: { t, checked, open, disabled } */
 export function screenRowHtml(g, opts) {
   const o = opts || {};
   const t = o.t || ((k, fb) => fb);
@@ -481,17 +516,20 @@ export function screenRowHtml(g, opts) {
   const loc = locationOf(g, facts);
   const fact = factLine(facts);
   const dates = screenDateFacts(g, o.today);
-  const seen =
-    dates.age != null && dates.age >= 0
-      ? fill(t("screen_first_seen_days", "First seen {n}d ago"), {
-          n: dates.age,
-        })
-      : "";
-  const expiry = dates.expired
-    ? fill(t("screen_deadline_passed", "Deadline passed: {date}"), {
-        date: dates.deadline,
-      })
-    : "";
+  const company = resolveVacancyCompany(g, getCompanies());
+  const source = g.source_board || (company && sourceLabel(company.strategy)) || "";
+  const sourceText = source || t("screen_unknown", "unknown");
+  const metadata = [
+    ["date", dates.firstSeen && `${t("vac_first_seen", "First seen")}: ${dates.firstSeen}`],
+    ["date", dates.lastSeen && `${t("screen_last_seen", "Last seen")}: ${dates.lastSeen}`],
+    ["source", `${t("vac_source", "Source")}: ${sourceText}`],
+    [dates.expired ? "expired" : "deadline", dates.deadline && (dates.expired
+      ? fill(t("screen_deadline_passed", "Deadline passed: {date}"), { date: dates.deadline })
+      : `${t("vac_deadline", "Deadline")}: ${dates.deadline}`)],
+  ].filter(([, text]) => text).map(([kind, text]) =>
+    `<span class="scr-meta scr-meta--${kind}">${escHtml(text)}</span>`
+  ).join("");
+  const postingUrl = safeUrl((g.locations || []).find((l) => l && l.url)?.url || "");
   const work = g.screening?.work_profile;
   const activities = work
     ? work.activities?.map((a) => flowLabel(a.kind, t)).join(" · ") ||
@@ -524,12 +562,9 @@ export function screenRowHtml(g, opts) {
     "</div>" +
     '<div class="scr-row-sub">' +
     escHtml(org) +
-    (loc ? " · " + escHtml(loc) : "") +
+    (loc ? ' <span class="scr-meta scr-meta--location">' + escHtml(loc) + "</span>" : "") +
     "</div>" +
-    (!o.compact && seen
-      ? '<div class="scr-work">' + escHtml(seen) + "</div>"
-      : "") +
-    (expiry ? '<div class="scr-expired">' + escHtml(expiry) + "</div>" : "") +
+    '<div class="scr-row-meta">' + metadata + "</div>" +
     (fact ? '<div class="scr-row-fact">' + escHtml(fact) + "</div>" : "") +
     (o.compact
       ? '<div class="scr-concern">' + escHtml(batchConcern(g, t)) + "</div>"
@@ -550,12 +585,25 @@ export function screenRowHtml(g, opts) {
         "</div>"
       : "") +
     "</div></div>" +
+    '<div class="scr-row-actions">' +
+    [
+      ["liked", "screen_keep", "Like"],
+      ["passed", "screen_put_aside", "Pass"],
+    ].map(([status, key, label]) =>
+      '<button type="button" class="scr-btn" data-decision="' + status +
+      '" data-vacancy="' + id + '"' + (o.disabled ? " disabled" : "") +
+      '>' + escHtml(t(key, label)) + '</button>'
+    ).join("") +
+    (postingUrl ? '<a class="scr-btn scr-posting" href="' + escHtml(postingUrl) +
+      '" target="_blank" rel="noopener noreferrer">' +
+      escHtml(t("vac_open_posting", "Open posting")) + ' ↗</a>' : "") +
+    "</div>" +
     '<details class="scr-evidence" data-evidence="' +
     id +
     '"' +
     (o.open ? " open" : "") +
     "><summary>" +
-    escHtml(t("screen_evidence", "Read posting evidence")) +
+    escHtml(t("screen_evidence", "Facts")) +
     "</summary>" +
     evidenceHtml(g, reqs, t) +
     "</details></article>"
@@ -608,12 +656,12 @@ export function screenFooterHtml(o) {
     '<button type="button" class="scr-btn scr-btn--keep" id="scrKeep"' +
     dis(off || o.decisionBlocked || none || o.list === "kept") +
     ">" +
-    escHtml(t("screen_keep", "Keep")) +
+    escHtml(t("screen_keep", "Like")) +
     "</button>" +
     '<button type="button" class="scr-btn scr-btn--aside" id="scrAside"' +
     dis(off || o.decisionBlocked || none || o.list === "putAside") +
     ">" +
-    escHtml(t("screen_put_aside", "Put aside")) +
+    escHtml(t("screen_put_aside", "Pass")) +
     "</button>" +
     '<button type="button" class="scr-btn" id="scrUndo"' +
     dis(off || !o.canUndo) +
@@ -701,7 +749,7 @@ export const SCREEN_FLOW_TEXT = {
   screen_other: "Other",
   screen_required: "Required",
   screen_preferred: "Preferred",
-  screen_finding: "Compared with my profile",
+  screen_finding: "Fit",
   screen_match: "Evidence in profile",
   screen_possible_conflict: "Possible conflict",
   screen_search: "Title or company",
@@ -721,27 +769,6 @@ export const SCREEN_FLOW_TEXT = {
 function flowLabel(value, t) {
   const key = "screen_" + value;
   return t(key, SCREEN_FLOW_TEXT[key] || String(value).replaceAll("_", " "));
-}
-
-function processingHtml(t) {
-  const p = stats && stats.screening_processing;
-  if (!p) return "";
-  return (
-    '<p class="scr-processing">' +
-    escHtml(
-      fill(
-        t(
-          "screen_processing",
-          "Not prepared yet: {unprepared} · Failed: {failed}",
-        ),
-        {
-          unprepared: p.unprepared || 0,
-          failed: p.failed || 0,
-        },
-      ),
-    ) +
-    "</p>"
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -768,8 +795,8 @@ function notesHtml() {
               " · " +
               escHtml(
                 n.decision === "liked"
-                  ? T("screen_keep", "Keep")
-                  : T("screen_put_aside", "Put aside"),
+                  ? T("screen_keep", "Like")
+                  : T("screen_put_aside", "Pass"),
               ) +
               "</strong><p>" +
               escHtml(n.reason) +
@@ -816,54 +843,27 @@ export function renderScreen() {
   }
   const model = reviewModel(groups, getGroupStatus);
   lastVisible = model.visibleIds;
-  const label = model.batch?.label || "All reviewed";
   const pendingFeedback = view.feedbackState === "failed";
   const dis = view.busy ? " disabled" : "";
+  const pagination = '<div class="scr-pagination"><button class="scr-btn" data-page="' +
+    (view.page - 1) + '"' + (view.page === 0 || view.busy ? ' disabled' : '') + '>' +
+    escHtml(T("screen_previous", "Previous")) + '</button><span>' + (view.page + 1) + ' / ' + model.pages +
+    '</span><button class="scr-btn" data-page="' + (view.page + 1) + '"' +
+    (view.page >= model.pages - 1 || view.busy ? ' disabled' : '') + '>' +
+    escHtml(T("screen_next", "Next batch")) + '</button></div>';
   el.innerHTML =
     '<div class="scr-head"><h2 class="scr-title">' +
-    escHtml(T("screen_review_title", "Review a few roles together")) +
+    escHtml(T("screen_review_title", "Review vacancies")) +
     "</h2></div>" +
     tabsHtml(model.lists, T) +
-    '<div class="scr-review-layout">' +
-    (view.list === "toScreen"
-      ? '<nav class="scr-batch-nav" aria-label="Job functions">' +
-        model.batches
-          .map(
-            (b) =>
-              '<button type="button" class="scr-batch" data-batch="' +
-              escHtml(b.key) +
-              '" aria-pressed="' +
-              (view.batch === b.key) +
-              '"' +
-              dis +
-              "><strong>" +
-              escHtml(T("screen_batch_" + b.key, b.label)) +
-              "</strong><span>" +
-              b.roles.length +
-              " " +
-              escHtml(T("screen_roles", "roles")) +
-              "</span></button>",
-          )
-          .join("") +
-        "</nav>"
-      : "") +
-    '<section class="scr-review-sheet"><h3>' +
-    escHtml(
-      view.list === "toScreen"
-        ? T("screen_batch_" + model.batch?.key, label)
-        : T(LIST_KEYS[view.list], view.list),
-    ) +
-    "</h3>" +
-    '<p class="scr-hint">' +
-    escHtml(
-      view.list === "toScreen"
-        ? T(
-            "screen_batch_reason_" + model.batch?.key,
-            model.batch?.reason || "Nothing waiting in this list.",
-          )
-        : T("screen_recover_hint", "Your decisions are reversible."),
-    ) +
-    "</p>" +
+    inboxFiltersHtml() +
+    '<div class="scr-review-layout"><nav class="scr-batch-nav" aria-label="Job functions">' +
+    [{key: "", label: T("contacts_all_groups", "All"), roles: {length: model.batches.reduce((n,b) => n + b.roles.length, 0)}}, ...model.batches].map(b =>
+      '<button class="scr-batch" data-batch="' + escHtml(b.key) + '" aria-pressed="' +
+      (!b.key ? !view.batch : view.batch === b.key) + '"' + dis + '><strong>' +
+      escHtml(b.key ? T("screen_batch_" + b.key,b.label) : b.label) + '</strong><span>' + b.roles.length +
+      ' ' + escHtml(T("screen_roles", "roles")) + '</span></button>').join('') + '</nav>' +
+    '<section class="scr-review-sheet scr-inbox"><h3>' + escHtml(model.batch ? T("screen_batch_" + model.batch.key,model.batch.label) : T("contacts_all_groups","All")) + '</h3>' +
     '<p class="scr-matches" tabindex="-1">' +
     escHtml(
       fill(
@@ -879,35 +879,14 @@ export function renderScreen() {
       ),
     ) +
     "</p>" +
-    '<div class="scr-list">' +
-    (model.rows.length
-      ? model.rows
-          .map((g) =>
-            screenRowHtml(g, {
-              t: T,
-              compact: true,
-              checked: view.selected.has(g.id),
-              open: view.open.has(g.id),
-            }),
-          )
-          .join("")
-      : "<p>" +
-        escHtml(T("screen_empty", "No roles left in this list.")) +
-        "</p>") +
-    "</div>" +
-    '<div class="scr-pagination"><button class="scr-btn" data-page="' +
-    (view.page - 1) +
-    '"' +
-    (view.page === 0 || view.busy ? " disabled" : "") +
-    ">" +
-    escHtml(T("screen_previous", "Previous")) +
-    '</button><button class="scr-btn" data-page="' +
-    ((view.page + 1) % model.pages) +
-    '"' +
-    (model.pages === 1 || view.busy ? " disabled" : "") +
-    ">" +
-    escHtml(T("screen_review_later", "Review later · next few")) +
-    "</button></div>" +
+    pagination +
+    '<div class="catalog-sheet"><div class="catalog-table">' +
+    (model.rows.length ? model.rows.map(g => catalogRowHtml(g, getGroupStatus(g), {
+      t: T, review: true, checked: view.selected.has(g.id),
+      disabled: view.busy || !state.statusesLoaded || !!pendingFeedback || !!pendingDecision,
+    })).join("") : '<p>' + escHtml(T("screen_empty", "No roles left in this list.")) + '</p>') +
+    '</div></div>' +
+    pagination +
     '<label class="scr-reason">' +
     escHtml(
       T(
@@ -949,7 +928,7 @@ export function renderScreen() {
     screenFooterHtml({
       t: T,
       selected: view.selected.size,
-      visible: model.rows.length,
+      visible: model.rows.filter(g => canDecide(g)).length,
       list: view.list,
       loaded: state.statusesLoaded,
       busy: view.busy,
@@ -957,11 +936,6 @@ export function renderScreen() {
       canUndo: history.length > 0 && !pendingDecision,
     }) +
     "</section></div>" +
-    '<details class="scr-preparation"><summary>' +
-    escHtml(T("screen_preparation", "Preparation status")) +
-    "</summary>" +
-    processingHtml(T) +
-    "</details>" +
     '<button class="scr-btn" id="scrLoadNotes">' +
     escHtml(T("screen_past_notes", "Past review notes")) +
     "</button>" +
@@ -977,6 +951,13 @@ export function renderScreen() {
     el.addEventListener("click", onClick);
     el.addEventListener("keydown", onKeydown);
     el.addEventListener("toggle", onToggle, true);
+    el.addEventListener("change", (e) => {
+      if (!e.target.dataset.filter) return;
+      const key = e.target.dataset.filter;
+      if (key === "function") view.batch = e.target.value || null;
+      else view.filters[key] = e.target.value;
+      view.page = 0; view.selected.clear(); renderScreen();
+    });
     el.addEventListener("input", (e) => {
       if (e.target.id === "scrReason") view.reason = e.target.value;
     });
@@ -1006,11 +987,23 @@ function onClick(e) {
   const t = e.target;
   const hit = (sel) => t.closest && t.closest(sel);
   let el;
-  if (hit("#scrRetryDecision")) {
+  if (hit("#inboxClear")) {
+    view.filters = {}; view.batch = null; view.newOnly = false; view.page = 0; view.selected.clear(); renderScreen();
+  } else if (hit("#inboxNew")) {
+    view.newOnly = !view.newOnly; view.page = 0; view.selected.clear(); renderScreen();
+  } else if (hit("#inboxFinish")) {
+    try {
+      const ids = groups.map(g => g.id);
+      localStorage.setItem("inbox-review-ids", JSON.stringify(ids));
+      reviewedIds = new Set(ids); view.newOnly = false;
+      view.notice = T("inbox_review_saved", "Review checkpoint saved on this device. Undecided vacancies remain in Inbox.");
+    } catch { view.notice = T("screen_save_failed", "Could not save."); }
+    renderScreen();
+  } else if (hit("#scrRetryDecision")) {
     view.reason = pendingDecision.reason || "";
     view.batch = pendingDecision.batch;
     if (pendingDecision.undo) runUndo(true);
-    else runBulk(pendingDecision.status, [pendingDecision.id]);
+    else runBulk(pendingDecision.status, [pendingDecision.id], true);
   } else if (hit("#scrLoadNotes")) {
     view.busy = true;
     renderScreen();
@@ -1037,7 +1030,7 @@ function onClick(e) {
       renderScreen();
     });
   } else if ((el = hit("[data-batch]"))) {
-    view.batch = el.getAttribute("data-batch");
+    view.batch = el.getAttribute("data-batch") || null;
     view.reason = "";
     setPage(0);
     renderScreen();
@@ -1067,8 +1060,13 @@ function onClick(e) {
         queue: view.list === "toScreen" ? lastVisible.slice() : [],
       });
   } else if (hit("#scrSelectAll")) {
-    toggleSelectAll(lastVisible);
+    toggleSelectAll(lastVisible.filter(id => canDecide(groupsById.get(id))));
     renderScreen();
+  } else if ((el = hit("[data-decision]"))) {
+    const id = el.getAttribute("data-vacancy");
+    const status = el.getAttribute("data-decision");
+    if (lastVisible.includes(id) && canDecide(groupsById.get(id)) && ["liked", "passed"].includes(status))
+      runBulk(status, [id]);
   } else if (hit("#scrKeep")) {
     runBulk("liked");
   } else if (hit("#scrAside")) {
@@ -1078,9 +1076,9 @@ function onClick(e) {
   }
 }
 
-async function runBulk(status, retryIds) {
-  if (view.busy || view.feedback || !state.statusesLoaded || (pendingDecision && !retryIds)) return;
-  const ids = retryIds || lastVisible.filter((id) => view.selected.has(id));
+async function runBulk(status, requestedIds, retry = false) {
+  if (view.busy || view.feedback || !state.statusesLoaded || (pendingDecision && !retry)) return;
+  const ids = requestedIds || lastVisible.filter((id) => view.selected.has(id) && canDecide(groupsById.get(id)));
   if (!ids.length) return;
   view.busy = true;
   renderScreen();
@@ -1112,7 +1110,7 @@ async function runBulk(status, retryIds) {
     return;
   }
   view.busy = false;
-  view.selected.clear();
+  for (const id of ids) view.selected.delete(id);
   view.notice = fill(T("screen_saved", "{n} of {m} saved"), {
     n: r.saved,
     m: r.total,

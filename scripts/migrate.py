@@ -379,7 +379,7 @@ class _Postgres:
             return dest
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
             print(
-                f"  ! pg_dump failed ({e}); continuing — per-migration "
+                f"  ! pg_dump failed ({type(e).__name__}); continuing — per-migration "
                 f"transactions still protect you.",
                 file=sys.stderr,
             )

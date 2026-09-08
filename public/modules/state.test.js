@@ -62,22 +62,8 @@ test("full mode: a live /api/statuses value overrides the baked base layer", () 
 // STATUS_BASKET entry silently falls into the "unseen" basket, and a column
 // with no STATUS_PRI entry loses every dedup tie.
 
-test("test_task sits between Applied and Interview on the board", () => {
-  const keys = TRIAGE_COLUMNS.map((c) => c.key);
-  assert.equal(keys.indexOf("test_task"), keys.indexOf("applied") + 1);
-  assert.equal(keys.indexOf("interview"), keys.indexOf("test_task") + 1);
-});
-
-test("test_task is a real (droppable) column with its own label and accent", () => {
-  const col = TRIAGE_COLUMNS.find((c) => c.key === "test_task");
-  assert.ok(col, "no test_task column");
-  assert.equal(col.label, "Test task");
-  assert.ok(!col.derived, "test_task is a real DB status, not a derived column");
-  // Its own hue: the columns on either side must not share it.
-  const neighbours = TRIAGE_COLUMNS.filter((c) => c.key !== "test_task").map(
-    (c) => c.color,
-  );
-  assert.ok(!neighbours.includes(col.color), `colour ${col.color} is not unique`);
+test("the board has one preparation column and one interviewing column", () => {
+  assert.deepEqual(TRIAGE_COLUMNS.map(c=>c.key), ["liked","to_apply","applied","interview","accepted","declined","skipped"]);
 });
 
 test("test_task ranks between applied and interview, and every column has a rank", () => {
@@ -115,7 +101,7 @@ test("accepted sits right after Interview on the board", () => {
 test("accepted is a real (droppable) column with its own label and accent", () => {
   const col = TRIAGE_COLUMNS.find((c) => c.key === "accepted");
   assert.ok(col, "no accepted column");
-  assert.equal(col.label, "Accepted");
+  assert.equal(col.label, "Offer / invitation");
   assert.ok(!col.derived, "accepted is a real DB status, not a derived column");
   // Its own green: To apply already owns --emerald, and two greens on one board
   // would read as one meaning.
@@ -129,5 +115,5 @@ test("accepted is a win, so it stays in the liked basket", () => {
   // The opposite of `declined`, which leaves the active basket. Folding a won
   // offer into "passed" would count it as a rejection everywhere.
   assert.equal(STATUS_BASKET.accepted, "liked");
-  assert.notEqual(STATUS_BASKET.accepted, STATUS_BASKET.declined);
+  assert.equal(STATUS_BASKET.declined, "liked");
 });

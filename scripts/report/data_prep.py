@@ -13,7 +13,6 @@ from config import (
     resolve_canonical_name,
 )
 from company_registry import PARSING_ARTIFACTS
-from statuses import APPLICATION_STATUSES
 
 #: Statuses that mean "this role is live work" — the user picked it up, or an
 #: application is running, or it closed with the employer's own answer. These
@@ -58,7 +57,7 @@ def keep_on_dashboard(vacancy: dict) -> bool:
     and never seen by the scorer. Dropping those would make the Applications
     table miss exactly the applications the board could not already show.
     """
-    if vacancy.get("status") in APPLICATION_STATUSES:
+    if vacancy.get("status") in _ACTIVE_STATUSES:
         return True
     score = vacancy.get("llm_score")
     if score is None or score < 0:
@@ -272,7 +271,7 @@ def _project_application(app: dict | None) -> dict | None:
     """
     if not app:
         return app
-    artifacts = app.get("artifacts") or {}
+    artifacts = {k: v for k, v in (app.get("artifacts") or {}).items() if k != "note_history"}
     return {
         "status": app.get("status", ""),
         "channel": app.get("channel", ""),

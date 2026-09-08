@@ -449,9 +449,9 @@ test("/api/company-statuses maps company status to a review verdict", async () =
   await withStubDb(
     [
       [
-        "SELECT id, status FROM company",
+        "SELECT id, status, status_reason FROM company",
         [
-          { id: "c1", status: "active" },
+          { id: "c1", status: "active", status_reason: "approved via dashboard" },
           { id: "c2", status: "candidate" },
           { id: "c3", status: "inactive" },
           { id: "c4", status: "something-else" },
@@ -461,6 +461,7 @@ test("/api/company-statuses maps company status to a review verdict", async () =
     async () => {
       const res = await call({ url: "/api/company-statuses" });
       assert.equal(res.statusCode, 200);
+      assert.equal(JSON.parse(res.body).reasons.c1, "approved via dashboard");
       assert.deepEqual(JSON.parse(res.body).statuses, {
         c1: "approved",
         c2: "pending",
@@ -1344,4 +1345,89 @@ test("feedback rejects cross-origin simple form requests before touching the dat
     assert.equal(res.statusCode, 415);
     assert.equal(seen.length, 0);
   });
+});
+
+test('application notes reject stale edits and preserve previous notes on save', async () => {
+  const previous = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = 'postgres://stub/stub';
+  const seen = [];
+  setPool({connect:async()=>({
+    async query(sql, params) {
+      seen.push({sql,params});
+      if (sql.startsWith('SELECT company_id')) return {rows:[{company_id:randomUUID(),status:'applied',applied_at:null}]};
+      if (sql.startsWith('SELECT notes')) return {rows:[{notes:'previous notes'}]};
+      return {rows:[]};
+    },release(){},
+  })});
+  try {
+    const id = randomUUID();
+    const stale = mockRes();
+    await handleRequest(mockReq({method:'POST',url:'/api/application-notes',headers:{'content-type':'application/json'},body:{id,notes:'draft',expected_notes:'stale'}}),stale);
+    assert.equal(stale.statusCode,409);
+    assert.ok(!seen.some(x=>x.sql.startsWith('UPDATE')));
+    const saved = mockRes();
+    await handleRequest(mockReq({method:'POST',url:'/api/application-notes',headers:{'content-type':'application/json'},body:{id,notes:'new notes',expected_notes:'previous notes'}}),saved);
+    assert.equal(saved.statusCode,200);
+    assert.ok(seen.some(x=>x.sql.includes("'{note_history}'") && x.params[1]==='new notes'));
+    assert.equal(saved.headers['Access-Control-Allow-Origin'],undefined);
+    const invalid = mockRes();
+    await handleRequest(mockReq({method:'POST',url:'/api/application-notes',body:{id,notes:'x',expected_notes:''}}),invalid);
+    assert.equal(invalid.statusCode,400);
+  } finally {
+    setPool(null);
+    if(previous===undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL=previous;
+  }
+});
+
+
+test("selecting a company preserves existing collection but does not activate a discovered source", async () => {
+  await withStubDb([["UPDATE company SET status = CASE", [{id: "c1", canonical_name: "Example"}]]], async (seen) => {
+    const res = await call({method: "POST", url: "/api/company-review", headers: {"content-type": "application/json"}, body: {company_id: "c1", action: "approve"}});
+    assert.equal(res.statusCode, 200);
+    assert.equal(seen[0].params[0], "candidate");
+    assert.match(seen[0].sql, /WHEN \$1 = 'candidate' AND status = 'active' THEN status ELSE \$1 END/);
+    assert.equal(seen[0].params[1], "approved via dashboard");
+  });
+});
+
+test("source observations are bounded, parameterized and private", async () => {
+  await withStubDb([["SELECT external_id, title, organization", [{external_id:'j1',title:'Role',listing_url:'https://example.org/job'}]]], async (calls) => {
+    const res = await call({url:'/api/source-observations?source=board&run=run1'});
+    assert.equal(res.statusCode,200);
+    assert.equal(res.headers['Cache-Control'],'no-store');
+    assert.equal(JSON.parse(res.body).items[0].external_id,'j1');
+    const invalid = await call({url:'/api/source-observations?source=board&run=run1&offset=-1'});
+    assert.equal(invalid.statusCode,400);
+  });
+});
+
+test("screening writes cannot reset an application even with a matching revision", async () => {
+ await withStubDb([], async () => {
+  const res = await call({method:'POST',url:'/api/screening-decision',headers:{'content-type':'application/json'},body:{operation_id:randomUUID(),changes:[{id:randomUUID(),status:'passed',expected_status:'applied',expected_revision:'123'}]}});
+  assert.equal(res.statusCode,400);
+ });
+});
+
+test('compact Inbox defers descriptions and has a distinct snapshot validator', async () => {
+ await withStubDb([
+  ['to_json(updated_at)',[{updated_at:'version'}]],
+  ['SELECT payload',[{payload:{groups:[{id:'v',full_description:'Long text',llm_summary:'Summary'}]}}]],
+ ],async()=>{
+  const res=await call({url:'/api/vacancies?view=inbox',headers:{'accept-encoding':'br;q=0'}});
+  assert.equal(res.statusCode,200);
+  assert.equal(res.headers.ETag,'W/"version:inbox-v1"');
+  assert.equal(JSON.parse(res.body).groups[0].full_description,undefined);
+  assert.equal(JSON.parse(res.body).groups[0].llm_summary,'Summary');
+ });
+});
+
+test('detail reads are parameterized, private and cannot overwrite a decision', async()=>{
+ await withStubDb([['SELECT item',[{item:{id:'v',status:'unseen',full_description:'Complete posting',llm_reasoning:'Evidence'}}]]],async()=>{
+  const res=await call({url:'/api/snapshot-detail?kind=vacancy&id=v'});
+  assert.equal(res.statusCode,200);
+  assert.equal(res.headers['Cache-Control'],'no-store');
+  assert.deepEqual(JSON.parse(res.body),{full_description:'Complete posting',llm_reasoning:'Evidence'});
+  const invalid=await call({url:'/api/snapshot-detail?kind=constructor&id=v'});
+  assert.equal(invalid.statusCode,400);
+ });
 });

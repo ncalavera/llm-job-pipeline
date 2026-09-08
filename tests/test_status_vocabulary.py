@@ -232,7 +232,7 @@ def test_TT10_the_column_accent_resolves_to_a_defined_token():
     columns = columns[: columns.index("\n];")]
     tokens = set(re.findall(r"var\((--[a-z0-9-]+)\)", columns))
 
-    assert "--raspberry" in tokens, "the Test task column lost its accent"
+    assert "--orange" in tokens, "the Interviewing column lost its accent"
     for token in sorted(tokens):
         assert re.search(rf"^\s*{re.escape(token)}:\s*#", css, re.M), (
             f"{token} is used by a triage column but never defined in style.css"

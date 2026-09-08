@@ -8,16 +8,18 @@
 
 import {
   state,
+  config,
+  scheduleRender,
   groups,
   groupsById,
   stats,
   STATUS_BASKET,
   getGroupStatus,
-  isGroupCompanyApproved,
   updateStatus,
 } from "./state.js";
 import {
   escHtml,
+  safeUrl,
   jsAttr,
   formatDeadlineHtml,
   relativeTime,
@@ -27,21 +29,22 @@ import {
 } from "./helpers.js";
 import { T, dateLocale } from "./i18n.js";
 import {
-  ANY_COMPANY_MIN_SCORE,
   VISIBLE_MIN_SCORE,
   basketCounts,
-  clearsScoreFloor,
+  screenDateFacts,
   groupsInBasket,
 } from "./derive.js";
+import { REASON_GROUPS, reasonBatch } from "./reason-batches.js";
+import { bulkSet, undoLast, decisionState, retryDecision } from "./screen.js";
 import { createCursor, actionsFor } from "./keys.js";
 
 // The shared visibility options the basket badge AND the basket list both read,
 // so a count can never disagree with its list (DHA-374). The score floor is
 // VISIBLE_MIN_SCORE unless "show all" (state.catalogShowAll, shared with Geo)
 // lifts it.
-function visOpts() {
+export function catalogVisibility() {
   return {
-    isApproved: isGroupCompanyApproved,
+    isApproved: () => true,
     getStatus: getGroupStatus,
     isExpired: isVacancyExpired,
     basketMap: STATUS_BASKET,
@@ -56,10 +59,12 @@ function visOpts() {
 export function updateBasketCounts() {
   // Same visibility filter + expiry re-bucketing the basket LIST uses, so the
   // badge is always the count of the rows the list renders (DHA-374).
-  const counts = basketCounts(groups, visOpts());
+  const counts = basketCounts(groups, catalogVisibility());
   document.getElementById("countLiked").textContent = counts.liked;
   document.getElementById("countUnseen").textContent = counts.unseen;
   document.getElementById("countPassed").textContent = counts.passed;
+  const navCount = document.getElementById("navCountVacancies");
+  if (navCount) navCount.textContent = counts.unseen;
 }
 
 export function switchBasket(btn) {
@@ -111,7 +116,7 @@ export function initCatalog() {
   const sel = document.getElementById("catalogOrgFilter");
   const orgs = [
     ...new Set(
-      groups.filter((g) => isGroupCompanyApproved(g)).map((g) => g.org),
+      groups.map((g) => g.org).filter(Boolean),
     ),
   ].sort();
   sel.innerHTML = '<option value="">All companies</option>';
@@ -138,41 +143,6 @@ export function initCatalog() {
 // Render catalog table
 // ---------------------------------------------------------------------------
 
-// Persistent note above the catalog: roles from not-yet-approved (candidate)
-// companies are excluded from the list until the company is approved on the
-// Companies tab. Same message as the Companies → Pending banner.
-function _renderCatalogHiddenNote(grid) {
-  const existing = document.getElementById("catalogHiddenNote");
-  if (existing) existing.remove();
-  if (!grid || !grid.parentNode) return;
-
-  // Only roles still hidden after the fix: not-yet-approved AND below the
-  // any-company floor. Strong matches (≥ ANY_COMPANY_MIN_SCORE) now show
-  // inline, so they no longer belong in this "hidden" note.
-  const hidden = groups.filter(
-    (g) =>
-      !isGroupCompanyApproved(g) && !clearsScoreFloor(g, ANY_COMPANY_MIN_SCORE),
-  );
-  if (hidden.length === 0) return;
-
-  const orgs = new Set();
-  let vacs = 0;
-  for (const g of hidden) {
-    orgs.add(g.org);
-    vacs += g.member_ids && g.member_ids.length ? g.member_ids.length : 1;
-  }
-
-  const tpl = T(
-    "catalog_hidden_pending",
-    "ℹ️ {vacs} vacancies from {orgs} not-yet-approved companies are hidden here — approve the company on the Companies tab to see its roles.",
-  );
-  const note = document.createElement("div");
-  note.id = "catalogHiddenNote";
-  note.className = "ces-pending-hidden";
-  note.textContent = tpl.replace("{vacs}", vacs).replace("{orgs}", orgs.size);
-  grid.parentNode.insertBefore(note, grid);
-}
-
 // The ordered id queue for the currently rendered rows — what a row click
 // hands the U4 router as the "browse" context (F3's auto-advance walks this
 // same order). Read by openCatalogRow's thin DOM shell below, and the set the
@@ -191,14 +161,12 @@ export function renderCatalog() {
   const orgFilter = document.getElementById("catalogOrgFilter").value;
   const grid = document.getElementById("catalogGrid");
 
-  _renderCatalogHiddenNote(grid);
-
   // The visible rows in the current basket — the SAME set the badge counts, so
   // the "N of M" denominator always matches the badge (DHA-374). The score
   // floor + expiry re-bucketing live in the shared filter; only the org/
   // location/search refinements below are catalog-specific.
-  const inBasket = groupsInBasket(groups, state.currentBasket, visOpts());
-  const filtered = inBasket.filter((g) => {
+  const inBasket = groupsInBasket(groups, state.currentBasket, catalogVisibility());
+  let filtered = inBasket.filter((g) => {
     if (orgFilter && g.org !== orgFilter) return false;
     if (
       state.activeCatalogLocs.size > 0 &&
@@ -217,6 +185,8 @@ export function renderCatalog() {
     }
     return true;
   });
+
+  filtered = renderReasonReview(filtered);
 
   const countTpl = T("browse_results_count", "{shown} of {total} vacancies");
   document.getElementById("catalogResultsCount").textContent = countTpl
@@ -244,9 +214,9 @@ export function renderCatalog() {
       return;
     }
     const basketLabels = {
-      liked: T("basket_liked", "Liked"),
-      unseen: T("basket_unreviewed", "Unreviewed"),
-      passed: T("basket_passed", "Passed"),
+      liked: T("basket_liked", "Liked & applications"),
+      unseen: T("basket_unreviewed", "Undecided"),
+      passed: T("basket_passed", "Passed & rejected"),
     };
     var basketEmpty =
       (basketLabels[state.currentBasket] || "") +
@@ -277,7 +247,7 @@ export function renderCatalog() {
   _browseCursor.reconcile(_browseQueue);
   const rowOpts = { t: T, locale: dateLocale() };
   grid.innerHTML = filtered
-    .map((g) => catalogRowHtml(g, getGroupStatus(g), rowOpts))
+    .map((g) => catalogRowHtml(g, getGroupStatus(g), {...rowOpts, reason: state.currentBasket === "unseen" && reasonFilter ? reasonBatch(g, config.screening_prompt_fingerprint) : null}))
     .join("");
   applyCursorHighlight();
 }
@@ -463,13 +433,13 @@ export function catalogRowHtml(g, basket, opts) {
   const compText = g.compensation ? escHtml(g.compensation) : "—";
   const seenText = g.first_seen ? escHtml(relativeTime(g.first_seen, t)) : "—";
 
-  const subText = g.llm_summary || g.snippet || "";
+  const subText = g.llm_summary || g.screening?.posting_facts?.duties || g.snippet || "";
   const subHtml = subText
     ? '<div class="catalog-row-sub">' + escHtml(subText) + "</div>"
     : "";
 
   const mids = jsAttr(JSON.stringify(g.member_ids));
-  const likeLabel = escHtml(t("vac_like", "Like"));
+  const likeLabel = escHtml(t("vac_like", "Keep"));
   const passLabel = escHtml(t("vac_pass", "Pass"));
   const likeBtn =
     '<button class="catalog-row-btn like" onclick="event.stopPropagation();catalogThumbAction(\'' +
@@ -496,10 +466,29 @@ export function catalogRowHtml(g, basket, opts) {
   else if (basket === "unseen") actionsHtml = likeBtn + passBtn;
   else if (basket === "passed") actionsHtml = likeBtn;
 
+  const dates = screenDateFacts(g);
+  const url = safeUrl((g.locations || []).find(l => l?.url)?.url || "");
+  const metadata = [
+    dates.firstSeen && `<span class="scr-meta scr-meta--date">${escHtml(t("vac_first_seen","First seen"))}: ${dates.firstSeen}</span>`,
+    dates.lastSeen && `<span class="scr-meta scr-meta--date">${escHtml(t("screen_last_seen","Last seen"))}: ${dates.lastSeen}</span>`,
+    g.source_board && `<span class="scr-meta">${escHtml(g.source_board)}</span>`,
+  ].filter(Boolean).join(" ");
+  const progress = !["unseen","liked","passed","skipped","expiring"].includes(basket);
+  const current = g.screening_state === "ready" && (!window.VACANCY_DATA.config.screening_prompt_fingerprint ||
+    g.screening_fingerprint === `${g.posting_fingerprint}:${window.VACANCY_DATA.config.screening_prompt_fingerprint}`);
+  const prepLabel = current ? "" : t(g.screening ? "inbox_older_facts" : "inbox_no_facts", g.screening ? "Facts need updating" : "Facts not prepared");
+  if (o.review) {
+    actionsHtml = progress ? '<span>' + escHtml(t("vac_status_" + basket,basket)) + '</span>' :
+      [["liked","screen_keep","Like"],["passed","screen_put_aside","Pass"]].map(([status,key,label]) =>
+        '<button class="catalog-row-btn" data-decision="' + status + '" data-vacancy="' + escHtml(g.id) + '"' +
+        (o.disabled ? ' disabled' : '') + '>' + escHtml(t(key,label)) + '</button>').join('');
+  }
+  const selectHtml = o.review ? '<input type="checkbox" data-toggle="' + escHtml(g.id) + '" aria-label="' + escHtml(g.title) + '"' +
+    (o.checked ? ' checked' : '') + (o.disabled || progress ? ' disabled' : '') + '>' : escHtml(scoreTxt);
   return (
     '<div class="catalog-row" data-id="' +
     escHtml(g.id) +
-    '" role="button" tabindex="0" onclick="openCatalogRow(\'' +
+    '" role="button" tabindex="0" onclick="if(!event.target.closest(\'button,input,a,label,summary,details\'))openCatalogRow(\'' +
     idAttr +
     "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openCatalogRow('" +
     idAttr +
@@ -507,7 +496,7 @@ export function catalogRowHtml(g, basket, opts) {
     '<div class="catalog-row-score ' +
     scoreCls +
     '">' +
-    escHtml(scoreTxt) +
+    selectHtml +
     "</div>" +
     '<div class="catalog-row-role">' +
     '<div class="catalog-row-title-line">' +
@@ -517,15 +506,19 @@ export function catalogRowHtml(g, basket, opts) {
     deadlineHtml +
     "</div>" +
     subHtml +
+    (o.reason ? reasonDetails(g, o.reason) : "") +
+    (o.review ? '<div class="scr-row-meta">' + metadata + '</div>' : "") +
+    (o.review && prepLabel ? '<div class="scr-concern">' + escHtml(prepLabel) + '</div>' : '') +
+    (o.review && url ? '<a class="scr-posting" href="' + escHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escHtml(t("vac_open_posting","Open posting")) + ' ↗</a>' : '') +
     "</div>" +
     '<div class="catalog-row-company">' +
     '<span class="catalog-row-org">' +
     escHtml(g.company_name || g.org) +
     "</span>" +
-    tierHtml +
+    (o.review ? "" : tierHtml) +
     "</div>" +
     '<div class="catalog-row-loc">' +
-    locHtml +
+    '<span class="scr-meta scr-meta--location">' + locHtml + "</span>" +
     "</div>" +
     '<div class="catalog-row-comp">' +
     compText +
@@ -568,4 +561,70 @@ export function catalogThumbAction(canonId, memberIds, action) {
   } else {
     updateStatus(canonId, memberIds, targetStatus);
   }
+}
+
+let reasonFilter = '';
+const reasonSelected = new Set();
+let reasonBusy = false;
+let reasonNotice = '';
+
+function reasonDetails(g, batch) {
+  return '<div class="reason-row"><label><input type="checkbox" data-reason-id="' + escHtml(g.id) + '"' +
+    (reasonSelected.has(g.id) ? ' checked' : '') + (reasonBusy ? ' disabled' : '') + '> ' +
+    escHtml(T('reason_select', 'Select for Pass')) + '</label><details><summary>' +
+    escHtml(batch.reasons[0].note) + '</summary>' + batch.reasons.map(r => '<p>' + escHtml(r.note) +
+    '</p><blockquote>' + escHtml(r.quote) + '</blockquote>').join('') + '</details></div>';
+}
+
+function renderReasonReview(rows) {
+  let host = document.getElementById('catalogReasonReview');
+  if (!host) {
+    host = document.createElement('div'); host.id = 'catalogReasonReview';
+    document.querySelector('.browse-header').after(host);
+    host.addEventListener('click', async e => {
+      const button = e.target.closest('button');
+      if (!button || reasonBusy) return;
+      if (button.dataset.reason !== undefined) {
+        reasonFilter = button.dataset.reason; reasonSelected.clear(); renderCatalog(); return;
+      }
+      if (button.dataset.reasonAction === 'select') {
+        document.querySelectorAll('[data-reason-id]').forEach(el => reasonSelected.add(el.dataset.reasonId));
+        renderCatalog(); return;
+      }
+      reasonBusy = true; renderCatalog();
+      try {
+        const result = button.dataset.reasonAction === 'undo' ? await undoLast() :
+          button.dataset.reasonAction === 'retry' ? await retryDecision() :
+          await bulkSet([...reasonSelected], 'passed', undefined, true);
+        reasonNotice = result ? `${result.saved ?? result.restored ?? 0} / ${result.total} ` + T('screen_saved','saved') : T('screen_notes_failed','Could not save. Retry.');
+        reasonSelected.clear();
+      } catch { reasonNotice = T('screen_notes_failed','Could not save. Retry.'); }
+      finally { reasonBusy = false; scheduleRender(); }
+    });
+    document.getElementById('catalogGrid').addEventListener('change', e => {
+      const id = e.target.dataset.reasonId;
+      if (!id || reasonBusy) return;
+      if (e.target.checked) reasonSelected.add(id); else reasonSelected.delete(id);
+      renderCatalog();
+    });
+  }
+  const pending = decisionState();
+  const candidates = state.currentBasket === 'unseen' ? rows : [];
+  const classified = new Map(candidates.map(g => [g.id, reasonBatch(g,config.screening_prompt_fingerprint)]));
+  const visible = reasonFilter && state.currentBasket === 'unseen' ? rows.filter(g => classified.get(g.id)?.key === reasonFilter) : rows;
+  for (const id of reasonSelected) if (!visible.some(g => g.id === id)) reasonSelected.delete(id);
+  const disabled = reasonBusy || !state.statusesLoaded || pending.pending;
+  const button = (action,label,off) => '<button class="browse-sort-btn" data-reason-action="' + action + '"' + (off ? ' disabled' : '') + '>' + escHtml(label) + '</button>';
+  host.innerHTML = (state.currentBasket === 'unseen' ? '<details' + (reasonFilter ? ' open' : '') + '><summary>' +
+    escHtml(T('reason_review','Review low scores by reason')) + ' · &lt;' + VISIBLE_MIN_SCORE + '</summary><div class="reason-toolbar">' +
+    [['',T('contacts_all_groups','All')],...REASON_GROUPS.map(([k,label])=>[k,T('reason_'+k,label)])].map(([key,label]) =>
+      '<button class="browse-sort-btn" data-reason="' + key + '" aria-pressed="' + (reasonFilter === key) + '"' +
+      (reasonBusy ? ' disabled' : '') + '>' + escHtml(label) + (key ? ' · ' + [...classified.values()].filter(b=>b?.key===key).length : '') + '</button>').join('') +
+    '</div><p>' + escHtml(T('reason_hint','Possible conflicts with required posting conditions. Review the explanation, select the roles you agree to pass, and leave exceptions unchecked. Other roles remain in All.')) + '</p></details>' : '') +
+    (reasonFilter && state.currentBasket === 'unseen' ? '<div class="reason-toolbar">' + button('select',T('screen_select_all','Select all'),disabled || !visible.length) +
+      button('pass',T('reason_pass','Pass selected') + ' · ' + reasonSelected.size,disabled || !reasonSelected.size) + '</div>' : '') +
+    (pending.pending ? button('retry',T('screen_retry','Retry'),reasonBusy) : '') +
+    (pending.canUndo ? button('undo',T('screen_undo','Undo'),disabled) : '') +
+    '<p role="status">' + escHtml(reasonNotice) + '</p>';
+  return visible;
 }

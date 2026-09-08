@@ -290,12 +290,31 @@ test("the row head is a 44px checkbox target with the title, org, location, fact
     /scr-row-head" role="checkbox" tabindex="0" aria-checked="true"/,
   );
   assert.match(html, /Ops &lt;Lead&gt;/);
-  assert.match(html, /Org &amp; Co · Berlin/);
+  assert.match(html, /Org &amp; Co <span class="scr-meta scr-meta--location">Berlin<\/span>/);
   assert.match(html, /scr-row-fact">Run the office\./);
 });
 
 test("an empty list renders No roles left in this list.", () => {
   assert.match(screenListHtml([], { t }), /No roles left in this list\./);
+});
+
+test("individual rows offer Like and Pass outside the selection checkbox", async () => {
+  const row = { id: "one", title: "Role", ...facts() };
+  const html = screenRowHtml(row);
+  assert.match(html, /<\/div><\/div><div class="scr-row-actions">/);
+  assert.match(html, /data-decision="liked" data-vacancy="one">Like<\/button>/);
+  assert.match(html, /data-decision="passed" data-vacancy="one">Pass<\/button>/);
+  assert.match(screenRowHtml(row, { disabled: true }), /data-vacancy="one" disabled/);
+
+  const db = { one: "unseen", other: "unseen" };
+  const io = fakeIo(db, {});
+  view.selected = new Set(["other"]);
+  await bulkSet(["one"], "passed", io);
+  assert.equal(db.one, "passed");
+  assert.equal(db.other, "unseen");
+  await undoLast(io);
+  assert.equal(db.one, "unseen");
+  view.selected.clear();
 });
 
 test("undo leaves a decision made after the bulk action untouched", async () => {
@@ -399,7 +418,7 @@ test("first-seen is labelled separately from expired deadline on compact rows", 
     deadline: "2026-09-06",
   };
   const head = screenRowHtml(g, { today: "2026-09-07" }).split("<details")[0];
-  assert.match(head, /First seen 2d ago/);
+  assert.match(head, /First seen: 2026-09-05/);
   assert.match(head, /Deadline passed: 2026-09-06/);
   const current = screenRowHtml(
     { ...g, deadline: "2026-09-07" },
@@ -419,6 +438,29 @@ test("first-seen is labelled separately from expired deadline on compact rows", 
   view.filters = {};
 });
 
+test("compact row metadata uses validated dates, escapes source, and shows unknowns", () => {
+  const html = screenRowHtml(
+    {
+      id: "meta",
+      title: "Role",
+      source_board: "Board <A>",
+      first_seen: "2026-09-01T10:00:00Z",
+      last_seen: "2026-09-07",
+      deadline: "2026-09-20",
+      screening: { posting_facts: {} },
+    },
+    { t, compact: true, today: "2026-09-08" },
+  );
+  assert.match(html, /First seen: 2026-09-01/);
+  assert.match(html, /Last seen: 2026-09-07/);
+  assert.match(html, /Source: Board &lt;A&gt;/);
+  assert.match(html, /Deadline: 2026-09-20/);
+  assert.doesNotMatch(html, /First seen: undefined|Last seen: undefined/);
+  const missing = screenRowHtml({ id: "missing", title: "Role" }, { t, compact: true });
+  assert.match(missing, /Source: unknown/);
+  assert.doesNotMatch(missing, /First seen:|Last seen:|Deadline:/);
+});
+
 test("technical specialist evidence has a technical label, distinct from specialist activity", () => {
   const g = lang("tech");
   g.screening.work_profile = {
@@ -435,7 +477,7 @@ test("technical specialist evidence has a technical label, distinct from special
 });
 
 const { reviewModel, REVIEW_SIZE, feedbackFor } = await import("./screen.js");
-test("functional review shows five roles and only selection from the current batch survives", () => {
+test("functional review paginates roles and only selection from the current batch survives", () => {
   view.batch = "product";
   view.list = "toScreen";
   view.page = 0;
@@ -447,6 +489,10 @@ test("functional review shows five roles and only selection from the current bat
   roles.push({ ...lang("ops"), title: "Head of Operations" });
   let m = reviewModel(roles, () => "unseen");
   assert.equal(m.rows.length, REVIEW_SIZE);
+  assert.equal(m.total, 7);
+  view.page = 1;
+  assert.equal(reviewModel(roles, () => "unseen").rows.length, 1);
+  view.page = 0;
   toggleSelectAll(m.visibleIds);
   view.batch = "operations";
   view.page = 0;
@@ -455,7 +501,7 @@ test("functional review shows five roles and only selection from the current bat
   assert.equal(view.selected.size, 0);
   m = reviewModel(roles, (g) => (g.id === "ops" ? "declined" : "unseen"));
   assert(!m.visibleIds.includes("ops"));
-  assert.equal(m.batch.key, "product");
+  assert.equal(m.batch, undefined);
 });
 test("feedback refers only to successfully saved members and never creates a preference", () => {
   const op = { status: "passed", rows: [{ id: "a", member_ids: ["a", "a2"] }] };
@@ -473,7 +519,7 @@ test("feedback refers only to successfully saved members and never creates a pre
   assert.equal(feedbackFor(op, "   ", "Product", "id"), null);
 });
 test("kept and put-aside pages remain navigable after the screening inbox is empty", () => {
-  const roles = Array.from({ length: 8 }, (_, i) => ({
+  const roles = Array.from({ length: REVIEW_SIZE + 3 }, (_, i) => ({
     ...lang("k" + i),
     title: "Product Manager " + i,
   }));
@@ -488,7 +534,7 @@ test("kept and put-aside pages remain navigable after the screening inbox is emp
     const m = reviewModel(roles, () => status);
     assert.equal(view.page, 1);
     assert.equal(m.rows.length, 3);
-    assert.equal(m.visibleIds[0], "k5");
+    assert.equal(m.visibleIds.length, 3);
   }
   view.list = "toScreen";
   view.page = 0;
@@ -539,4 +585,34 @@ test("a failed Undo remains available for retry", async () => {
   assert.equal((await undoLast(fakeIo(db, {}, new Set(["retryUndo"])))).restored, 0);
   assert.equal((await undoLast(fakeIo(db, {}))).restored, 1);
   assert.equal(db.retryUndo, "unseen");
+});
+
+
+test("posting link is outside selection and rejects unsafe URLs", () => {
+  const row = (url) => screenRowHtml({ id: "link", locations: [{ url }] }, { t });
+  const html = row('https://example.org/job?q="test"');
+  assert.match(html, /scr-row-actions[\s\S]*href="https:\/\/example.org\/job\?q=&quot;test&quot;"/);
+  assert.match(html, /rel="noopener noreferrer"/);
+  assert.doesNotMatch(row("javascript:alert(1)"), /scr-posting/);
+  assert.doesNotMatch(row(""), /scr-posting/);
+});
+
+
+test("Inbox function filters also classify liked roles", async () => {
+  const {reviewModel} = await import("./screen.js");
+  view.list = "kept"; view.batch = "product"; view.filters = {}; view.page = 0;
+  const roles = [{id:"liked-product",title:"Product Manager",status:"liked"},{id:"unseen-product",title:"Product Manager",status:"unseen"}];
+  assert.deepEqual(reviewModel(roles, g => g.status).rows.map(g => g.id), ["liked-product"]);
+  view.list = "toScreen"; view.batch = null;
+});
+
+
+test("reason batches preserve decided members and application progress", async () => {
+  const db = {a:"unseen", a2:"liked", b:"applied", c:"unseen"};
+  const io = fakeIo(db, {a:["a","a2"]});
+  const result = await bulkSet(["a","b","c"], "passed", io, true);
+  assert.equal(result.saved, 1);
+  assert.deepEqual(db, {a:"unseen", a2:"liked", b:"applied", c:"passed"});
+  await undoLast(io);
+  assert.equal(db.c, "unseen");
 });

@@ -28,6 +28,7 @@ import {
   getGroupStatus,
 } from "./state.js";
 import {
+  progressStage,
   escHtml,
   jsAttr,
   safeUrl,
@@ -295,10 +296,10 @@ export function countStripText(counts, t) {
   const translate = t || ((k, fb) => fb);
   const parts = [counts.sent + " " + translate("apps_count_sent", "sent")];
   const optional = [
-    [counts.waiting, "apps_count_waiting", "waiting"],
-    [counts.inProgress, "apps_count_in_progress", "in progress"],
-    [counts.accepted, "apps_count_accepted", "accepted"],
-    [counts.declined, "apps_count_declined", "declined"],
+    [counts.waiting, "apps_count_waiting", "applied"],
+    [counts.inProgress, "apps_count_in_progress", "interviewing"],
+    [counts.accepted, "apps_count_accepted", "offers / invitations"],
+    [counts.declined, "apps_count_declined", "rejected"],
   ];
   for (const [n, key, fallback] of optional) {
     if (n > 0) parts.push(n + " " + translate(key, fallback));
@@ -313,7 +314,7 @@ export function countStripText(counts, t) {
 /** The board column that owns a status — its label and accent, so the table's
  *  stage dot and the board's column dot are the same colour by construction. */
 function columnFor(status) {
-  return TRIAGE_COLUMNS.find((c) => c.key === status) || null;
+  return TRIAGE_COLUMNS.find((c) => c.key === progressStage(status)) || null;
 }
 
 export function buildApplicationRow(row, opts) {
@@ -508,7 +509,7 @@ export function buildTriageToggle(active, t) {
   ];
   return (
     '<div class="triage-view-toggle" role="group" aria-label="' +
-    escHtml(translate("triage_view_label", "Triage view")) +
+    escHtml(translate("triage_view_label", "Progress view")) +
     '">' +
     buttons
       .map(

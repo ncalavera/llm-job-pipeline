@@ -22,7 +22,7 @@ globalThis.window = {
 };
 globalThis.location = { protocol: "file:", origin: "" };
 
-const { catalogQueueIds, catalogRowHtml, openCatalogRow } =
+const { catalogQueueIds, catalogRowHtml, openCatalogRow, catalogVisibility } =
   await import("./catalog.js");
 const { actionsFor } = await import("./keys.js");
 
@@ -105,7 +105,7 @@ test("actionsFor mirrors catalogRowHtml button gating for every status", () => {
 test("row click opens the vacancy via openCatalogRow with the row's id", () => {
   const html = catalogRowHtml(baseGroup, "unseen", opts);
   assert.match(html, /class="catalog-row" data-id="g1"/);
-  assert.match(html, /onclick="openCatalogRow\('g1'\)"/);
+  assert.match(html, /onclick="if\(!event.target.closest\('button,input,a,label,summary,details'\)\)openCatalogRow\('g1'\)"/);
 });
 
 test("row is keyboard-reachable and Enter/Space open it only when the row itself has focus (R12, WAI-ARIA button pattern)", () => {
@@ -149,7 +149,7 @@ test("no compensation/location/first_seen -> dash placeholders, not blank", () =
     "unseen",
     opts,
   );
-  assert.match(html, /<div class="catalog-row-loc">—<\/div>/);
+  assert.match(html, /<div class="catalog-row-loc"><span class="scr-meta scr-meta--location">—<\/span><\/div>/);
   assert.match(html, /<div class="catalog-row-comp">—<\/div>/);
   assert.match(html, /<div class="catalog-row-seen">—<\/div>/);
 });
@@ -230,4 +230,13 @@ test("an id with quotes/HTML is escaped in the data-id AND the onclick attribute
   assert.match(html, /data-id="g&quot;/);
   // the onclick's single-quoted JS string is jsAttr-escaped — no unescaped ' breaks out.
   assert.doesNotMatch(html, /openCatalogRow\('g"'\)/);
+});
+
+// Restoring the layout must not restore the old hidden-company gate.
+test("main scored table retains unscored roles from unselected companies", async () => {
+  const { groupsInBasket, basketCounts } = await import("./derive.js");
+  const rows = [{...baseGroup, id: "unscored", llm_score: null, company_id: "unknown"}];
+  const visibility = catalogVisibility();
+  assert.deepEqual(groupsInBasket(rows, "unseen", visibility).map(g => g.id), ["unscored"]);
+  assert.equal(basketCounts(rows, visibility).unseen, 1);
 });

@@ -39,22 +39,13 @@ export function hasVerdict(g, opts) {
 // such roles when they clear this bar, so client and server agree on the set.
 export const ANY_COMPANY_MIN_SCORE = VISIBLE_MIN_SCORE;
 
-// The shared visibility filter. A role is visible when its company is approved —
-// OR the role scores above ANY_COMPANY_MIN_SCORE, a strong match that ORs past
-// the approval gate (same rule the pipeline applies server-side) — AND (the user
-// has already acted on it OR it clears the score floor). An explicit verdict
-// overrides the floor — a liked role always shows in Liked and a passed role in
-// Passed regardless of score, the same principle the Today tab uses (a role you
-// acted on must never silently vanish under the discovery floor). Only undecided
-// ("unseen") roles are subject to the floor, which keeps the Catalog/Geo browse
-// surfaces focused on high-fit unreviewed roles. Expiry is deliberately NOT a
-// visibility gate — an expired liked role stays "visible", it is only re-bucketed
-// to Passed (see effectiveBasket), so it is counted and surfaced rather than
-// vanishing.
+// Decisions and applications stay visible regardless of company tracking or
+// score. Prepared screening roles also bypass legacy discovery gates. Availability is
+// shown separately and never changes the decision basket.
 export function isVisible(g, opts) {
+  if (hasVerdict(g, opts) || g.screening_state === "ready") return true;
   if (!opts.isApproved(g) && !clearsScoreFloor(g, ANY_COMPANY_MIN_SCORE))
     return false;
-  if (hasVerdict(g, opts)) return true;
   return clearsScoreFloor(g, opts.minScore);
 }
 
@@ -62,14 +53,10 @@ export function visibleGroups(groups, opts) {
   return groups.filter((g) => isVisible(g, opts));
 }
 
-// The basket a group belongs to right now. An expired role that would sit in
-// the "liked" basket moves to "passed" — a lapsed like is no longer an active
-// like. This is the single rule the badge, the list and the Geo "liked" column
-// all read, so they cannot drift apart.
+// Availability is independent of the user's decision. A passed deadline
+// never turns Like or an application into Pass.
 export function effectiveBasket(g, opts) {
-  const basket = opts.basketMap[opts.getStatus(g)] || "unseen";
-  if (basket === "liked" && opts.isExpired(g)) return "passed";
-  return basket;
+  return opts.basketMap[opts.getStatus(g)] || "unseen";
 }
 
 // Basket counts over the visible set — exactly the rows each basket list would
@@ -238,47 +225,6 @@ export function companyRollup(roles, opts) {
 }
 
 // ---------------------------------------------------------------------------
-// Per-board yield — "is this board earning its place?" over the user's own
-// history. Each board's funnel (scored → fit → liked) is a pure function of the
-// raw shipped roles (each carries source_board + llm_score) plus live statuses,
-// so it needs no /api and reacts to a like/pass or a passing deadline with no
-// run — the same derive-never-bake path the company rollups take (DHA-360).
-//
-// The dashboard payload ships only SCORED roles, so "scored" here means
-// "reached your scored catalogue"; the total-saved and fresh-14d numbers (which
-// also count unscored/archived rows) stay on the live /api/board-statuses feed.
-// A board with zero shipped roles reports hasData:false so the renderer can show
-// an honest "no data yet" instead of 0/0/0 read as a verdict.
-// ---------------------------------------------------------------------------
-
-// Fold the shipped roles into a per-board funnel keyed by source_board (== the
-// board's display name / board.name). Returns { [boardName]: { scored, fit,
-// liked, hasData } }. `roles` with no source_board are skipped (direct ATS
-// fetches belong to no board). `fit` counts roles at/above APPLYABLE_MIN_SCORE;
-// `liked` counts roles whose effective basket is "liked" (an expired like has
-// already lapsed to "passed", see effectiveBasket), so the funnel narrows
-// honestly. `opts` injects getStatus + isExpired + basketMap, exactly like the
-// other derivations here.
-export function boardYield(groups, opts) {
-  const out = {};
-  for (const g of groups) {
-    const board = (g.source_board || "").trim();
-    if (!board) continue;
-    let row = out[board];
-    if (!row) {
-      row = { scored: 0, fit: 0, liked: 0, hasData: true };
-      out[board] = row;
-    }
-    row.scored += 1;
-    if (typeof g.llm_score === "number" && g.llm_score >= APPLYABLE_MIN_SCORE) {
-      row.fit += 1;
-    }
-    if (effectiveBasket(g, opts) === "liked") row.liked += 1;
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
 // Today cockpit — the few things that need a decision now (DHA-410 rework).
 //
 // Six ordered, hide-when-empty populations replace the old three-list cockpit.
@@ -431,24 +377,25 @@ export function selectTodayRoles(groups, opts) {
 // facts per role; lists and groups derive here, never on the server.
 // ---------------------------------------------------------------------------
 
-/**
- * Split the ready roles into the three inbox lists by live status. A role is
- * in a list only when its screening is ready; an unprepared or failed role is
- * in none. `getStatus(g)` is injected so this stays DOM-free.
- * @returns {{toScreen: Set, kept: Set, putAside: Set}} canonical id sets
- */
+// Decision baskets are shared by every vacancy view. Progress is independent:
+// an employer rejection preserves the user's interest, not a manufactured Pass.
+export const VACANCY_BASKETS = {
+  unseen: "unseen", expiring: "unseen",
+  liked: "liked", to_apply: "liked", to_research: "liked", to_network: "liked",
+  applied: "liked", test_task: "liked", interview: "liked", accepted: "liked", declined: "liked",
+  passed: "passed", skipped: "passed",
+};
+
+/** Same collected records, regardless of preparation readiness. */
 export function screenLists(roles, getStatus) {
-  const toScreen = new Set();
-  const kept = new Set();
-  const putAside = new Set();
+  const lists = { toScreen: new Set(), kept: new Set(), putAside: new Set() };
+  const keys = { unseen: "toScreen", liked: "kept", passed: "putAside" };
   for (const g of roles) {
-    if (!g || g.screening_state !== "ready") continue;
-    const status = getStatus(g);
-    if (status === "unseen") toScreen.add(g.id);
-    else if (status === "liked") kept.add(g.id);
-    else if (status === "passed") putAside.add(g.id);
+    if (!g) continue;
+    const key = keys[VACANCY_BASKETS[getStatus(g) || "unseen"]];
+    if (key) lists[key].add(g.id);
   }
-  return { toScreen, kept, putAside };
+  return lists;
 }
 
 // The fixed group vocabulary, in chooser order. Overlap is allowed: one role
@@ -538,6 +485,13 @@ export function screenMatches(
   today = new Date().toISOString().slice(0, 10),
 ) {
   const dates = screenDateFacts(g, today);
+  if (filters.source && g.source_board !== filters.source) return false;
+  if (filters.added && dates.firstSeen !== filters.added) return false;
+  if (filters.place) {
+    const locations = (g.locations || []).map(l => l.location || "").filter(l => !/^HQ:/i.test(l));
+    const place = [g.screening?.posting_facts?.location || "", ...locations].join(" ").toLowerCase();
+    if (!place.includes(filters.place.trim().toLowerCase())) return false;
+  }
   if (filters.age) {
     const limit = { last7: 7, last14: 14, last30: 30 }[filters.age];
     if (
@@ -606,8 +560,11 @@ export function screenDateFacts(
       : null;
   };
   const seen = dateOnly(g.first_seen);
+  const lastSeen = dateOnly(g.last_seen);
   const deadline = dateOnly(g.deadline);
   return {
+    firstSeen: seen,
+    lastSeen,
     age: seen
       ? Math.round((Date.parse(today) - Date.parse(seen)) / 86400000)
       : null,

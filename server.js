@@ -19,10 +19,14 @@
 
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { stat, readFile } from "node:fs/promises";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { brotliCompress, constants as zlibConstants } from "node:zlib";
+import { promisify } from "node:util";
+import { compactSnapshot, compactRecord, DETAIL_FIELDS } from "./public/modules/payload.js";
+const compressBrotli = promisify(brotliCompress);
 
 const PUBLIC_DIR = join(fileURLToPath(new URL(".", import.meta.url)), "public");
 
@@ -266,7 +270,8 @@ async function handleVacancies(req, res) {
       return sendJson(res, 503, { error: "Snapshot not generated yet" });
     }
 
-    const etag = computeETag(meta.rows[0].updated_at);
+    const compact = new URL(req.url, "http://localhost").searchParams.get("view") === "inbox";
+    const etag = compact ? "W/" + computeETag(meta.rows[0].updated_at + ":inbox-v1") : computeETag(meta.rows[0].updated_at);
     if (etag) res.setHeader("ETag", etag);
     if (isNotModified(req.headers["if-none-match"], etag)) {
       return sendEmpty(res, 304);
@@ -278,10 +283,43 @@ async function handleVacancies(req, res) {
     if (data.rowCount === 0) {
       return sendJson(res, 503, { error: "Snapshot not generated yet" });
     }
-    return sendJson(res, 200, data.rows[0].payload);
+    const payload = compact ? compactSnapshot(data.rows[0].payload) : data.rows[0].payload;
+    res.setHeader('Vary', 'Accept-Encoding');
+    const acceptsBr = (req.headers['accept-encoding'] || '').split(',').some(value => {
+      const match = value.trim().match(/^br(?:\s*;\s*q=(0(?:\.\d+)?|1(?:\.0+)?))?$/i);
+      return match && (match[1] === undefined || Number(match[1]) > 0);
+    });
+    if (compact && acceptsBr) {
+      const body = await compressBrotli(JSON.stringify(payload), {params: {[zlibConstants.BROTLI_PARAM_QUALITY]: 4}});
+      res.writeHead(200, {'Content-Type':'application/json; charset=utf-8', 'Content-Encoding':'br', 'Content-Length':body.length});
+      return res.end(body);
+    }
+    return sendJson(res, 200, payload);
   } catch (err) {
     logError("vacancies", err, reqMeta(req));
     return sendJson(res, 500, { error: "Database error" });
+  }
+}
+
+// Load one record's long text only when its detail page opens.
+async function handleSnapshotDetail(req, res) {
+  if (piiPreamble(req, res, "snapshot-detail")) return;
+  const params = new URL(req.url, "http://localhost").searchParams;
+  const kind = params.get("kind"), id = params.get("id");
+  const section = {vacancy: "groups", archive: "archived_groups", company: "companies"}[kind];
+  if (!Object.hasOwn(DETAIL_FIELDS, kind) || !id || id.length > 100)
+    return sendJson(res, 400, {error: "Invalid record"});
+  try {
+    const {rows} = await getPool().query(
+      `SELECT item FROM dashboard_snapshot,
+       LATERAL jsonb_array_elements(payload->$1) AS item
+       WHERE dashboard_snapshot.id = 'current' AND item->>$2 = $3 LIMIT 1`,
+      [section, kind === "company" ? "company_id" : "id", id]);
+    if (!rows.length) return sendJson(res, 404, {error: "Record not found"});
+    return sendJson(res, 200, Object.fromEntries(DETAIL_FIELDS[kind].map(k => [k, rows[0].item[k] ?? null])));
+  } catch (error) {
+    logError("snapshot-detail", error, reqMeta(req));
+    return sendJson(res, 500, {error: "Details unavailable"});
   }
 }
 
@@ -305,7 +343,7 @@ async function handleCompanies(req, res) {
     const pool = getPool();
     // Plain SQL — no PostgREST 1000-row paging loops needed.
     const { rows } = await pool.query(
-      `SELECT id, canonical_name, status, tier, alignment_score, mission_fit,
+      `SELECT id, canonical_name, status, status_reason, tier, alignment_score, mission_fit,
               about, notes, experience_match, personal_interest,
               website, careers_url,
               offices, category, fetch_strategy, fetch_status, last_fetched
@@ -358,6 +396,7 @@ async function handleCompanies(req, res) {
         slug: slugify(c.canonical_name),
         status: (c.status || "").toLowerCase(),
         review_status: REVIEW_MAP[(c.status || "").toLowerCase()] || "pending",
+        status_reason: c.status_reason || "",
         calculated_tier: c.tier || null,
         alignment_score: alignmentScore,
         // Emit undefined (not "") when absent so the client's snapshot merge
@@ -401,7 +440,8 @@ async function handleCompanies(req, res) {
       };
     });
 
-    return sendJson(res, 200, { companies });
+    const compact = new URL(req.url, "http://localhost").searchParams.get("view") === "inbox";
+    return sendJson(res, 200, { companies: compact ? companies.map(c => compactRecord(c, "company")) : companies });
   } catch (err) {
     logError("companies", err, reqMeta(req));
     return sendJson(res, 500, { error: "Database error" });
@@ -487,6 +527,7 @@ const FEEDBACK_UUID =
 
 // PostgreSQL's row version changes for every writer, including agent/CLI writes.
 // Compare opaque tokens, never timestamps rounded by JavaScript.
+const SCREENING_STATUSES = ["unseen", "liked", "passed", "skipped", "expiring"];
 async function handleScreeningDecision(req, res) {
   if (piiPreamble(req, res, "screening-decision", "POST")) return;
   if (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] || ""))
@@ -497,7 +538,7 @@ async function handleScreeningDecision(req, res) {
   if (!Array.isArray(changes) || !changes.length || changes.length > 100 ||
       new Set(changes.map((c) => c?.id)).size !== changes.length ||
       changes.some((c) => !c || !FEEDBACK_UUID.test(c.id) ||
-        !VALID_STATUSES.includes(c.status) || !VALID_STATUSES.includes(c.expected_status) ||
+        !SCREENING_STATUSES.includes(c.status) || !SCREENING_STATUSES.includes(c.expected_status) ||
         typeof c.expected_revision !== "string" || !c.expected_revision))
     return sendJson(res, 400, { error: "Invalid changes or missing revision" });
   let client;
@@ -679,13 +720,15 @@ async function handleCompanyReview(req, res) {
       error: "Invalid action — must be 'approve' or 'reject'",
     });
 
-  const newStatus = action === "approve" ? "active" : "inactive";
+  const newStatus = action === "approve" ? "candidate" : "inactive";
   const reason =
     action === "approve" ? "approved via dashboard" : "rejected via dashboard";
 
   try {
     const result = await getPool().query(
-      `UPDATE company SET status = $1, status_reason = $2
+      `UPDATE company SET status = CASE
+          WHEN $1 = 'candidate' AND status = 'active' THEN status ELSE $1 END,
+          status_reason = $2
         WHERE id = $3::uuid RETURNING id, canonical_name`,
       [newStatus, reason, company_id],
     );
@@ -714,12 +757,14 @@ async function handleCompanyReview(req, res) {
 async function handleCompanyStatuses(req, res) {
   if (wrappedPreamble(req, res, "GET", "company-statuses")) return;
   try {
-    const { rows } = await getPool().query("SELECT id, status FROM company");
+    const { rows } = await getPool().query("SELECT id, status, status_reason FROM company");
     const statuses = {};
+    const reasons = {};
     for (const row of rows) {
+      reasons[row.id] = row.status_reason || "";
       statuses[row.id] = REVIEW_MAP[row.status] || "pending";
     }
-    return sendJson(res, 200, { statuses });
+    return sendJson(res, 200, { statuses, reasons });
   } catch (err) {
     logError("company-statuses", err, reqMeta(req));
     return sendJson(res, 500, { error: "Database error" });
@@ -743,6 +788,26 @@ async function boardVacancyCounts(pool, recentCutoffIso) {
     [recentCutoffIso],
   );
   return new Map(rows.map((r) => [r.source_board, r]));
+}
+
+async function handleSourceObservations(req, res) {
+  if (piiPreamble(req, res, "source-observations")) return;
+  const query = new URL(req.url, "http://localhost").searchParams;
+  const source = query.get("source"), run = query.get("run");
+  const offset = Number(query.get("offset") || 0);
+  if (!source || !run || source.length > 200 || run.length > 200 || !Number.isSafeInteger(offset) || offset < 0) {
+    return sendJson(res, 400, { error: "Invalid source run" });
+  }
+  try {
+    const { rows } = await getPool().query(
+      `SELECT external_id, title, organization, listing_url, outcome, reason, canonical_id
+       FROM source_observation WHERE source_key = $1 AND run_id = $2
+       ORDER BY external_id LIMIT 251 OFFSET $3`, [source, run, offset]);
+    sendJson(res, 200, { items: rows.slice(0,250), next: rows.length > 250 ? offset + 250 : null });
+  } catch (error) {
+    logError("source-observations", error, reqMeta(req));
+    sendJson(res, 500, { error: "Source accounting unavailable" });
+  }
 }
 
 async function handleBoardStatuses(req, res) {
@@ -1511,7 +1576,10 @@ async function handleContactStatus(req, res) {
 }
 
 const API_ROUTES = {
+  "/api/application-notes": handleApplicationNotes,
+  "/api/materials": handleMaterials,
   "/api/vacancies": handleVacancies,
+  "/api/snapshot-detail": handleSnapshotDetail,
   "/api/companies": handleCompanies,
   "/api/save": handleSave,
   "/api/screening-decision": handleScreeningDecision,
@@ -1520,12 +1588,98 @@ const API_ROUTES = {
   "/api/company-review": handleCompanyReview,
   "/api/company-statuses": handleCompanyStatuses,
   "/api/board-statuses": handleBoardStatuses,
+  "/api/source-observations": handleSourceObservations,
   "/api/board-toggle": handleBoardToggle,
   "/api/health": handleHealth,
   "/api/health-detail": handleHealthDetail,
   "/api/reports": handleReports,
   "/api/contacts": handleContacts,
 };
+
+// Reuse the existing private application dossier. Vacancy status remains the
+// dashboard's progress state; notes may describe any employer-specific steps.
+export async function handleApplicationNotes(req, res) {
+  if (piiPreamble(req, res, "application-notes", req.method === "GET" ? "GET" : "POST")) return;
+  const body = req.method === "GET"
+    ? Object.fromEntries(new URL(req.url, "http://localhost").searchParams)
+    : await readJsonBody(req);
+  if (!body || typeof body.id !== "string" || !FEEDBACK_UUID.test(body.id)) return sendJson(res, 400, { error: "Invalid vacancy ID" });
+  if (req.method === "POST" && (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] || "") ||
+      typeof body.notes !== "string" || typeof body.expected_notes !== "string" ||
+      body.notes.length > 50000 || body.expected_notes.length > 50000))
+    return sendJson(res, 400, { error: "Notes and their previous value are required (maximum 50,000 characters)" });
+  let client;
+  try {
+    client = await getPool().connect();
+    await client.query("BEGIN");
+    const vacancy = await client.query("SELECT company_id, status, applied_at FROM vacancy WHERE id = $1::uuid FOR UPDATE", [body.id]);
+    if (!vacancy.rows.length) {
+      await client.query("ROLLBACK");
+      return sendJson(res, 404, { error: "Vacancy not found" });
+    }
+    const existing = await client.query("SELECT notes FROM application WHERE vacancy_id = $1::uuid FOR UPDATE", [body.id]);
+    const notes = existing.rows[0]?.notes || "";
+    if (req.method === "GET") {
+      await client.query("COMMIT");
+      const events = await client.query("SELECT previous_status, status, recorded_at FROM vacancy_status_event WHERE vacancy_id = $1::uuid ORDER BY id", [body.id]);
+      return sendJson(res, 200, { notes, events: events.rows });
+    }
+    if (notes !== body.expected_notes) {
+      await client.query("ROLLBACK");
+      return sendJson(res, 409, { error: "Notes changed elsewhere. Copy your draft, then reload to compare before saving." });
+    }
+    if (body.notes === notes) {
+      await client.query("COMMIT");
+      return sendJson(res, 200, { notes });
+    }
+    if (existing.rows.length) {
+      await client.query(`UPDATE application SET notes = $2, updated_at = now(),
+        artifacts = jsonb_set(COALESCE(artifacts, '{}'::jsonb), '{note_history}',
+          COALESCE(artifacts->'note_history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object('recorded_at', now(), 'notes', notes)))
+        WHERE vacancy_id = $1::uuid`, [body.id, body.notes]);
+    } else {
+      const v = vacancy.rows[0];
+      const status = {applied: "applied", test_task: "interview", interview: "interview", accepted: "offer", declined: "rejected"}[v.status] || "draft";
+      await client.query(`INSERT INTO application (vacancy_id, company_id, status, applied_at, notes)
+        VALUES ($1::uuid, $2::uuid, $3, $4, $5)`, [body.id, v.company_id, status, v.applied_at, body.notes]);
+    }
+    await client.query("COMMIT");
+    return sendJson(res, 200, { notes: body.notes });
+  } catch (err) {
+    if (client) await client.query("ROLLBACK").catch(() => {});
+    console.error("application-notes: database request failed", {code: err.code});
+    return sendJson(res, 500, { error: "Could not save or load application notes" });
+  } finally { client?.release(); }
+}
+
+// Private files stay outside public/. Caddy supplies the dashboard's auth;
+// this endpoint follows the existing no-CORS, no-store PII boundary.
+export async function handleMaterials(req, res) {
+  res.setHeader("Cache-Control", "no-store");
+  if (req.method !== "GET") return sendJson(res, 405, { error: "Method not allowed" });
+  const root = join(process.env.JOBSEARCH_PRIVATE_DIR || join(fileURLToPath(new URL(".", import.meta.url)), "private"), "materials");
+  const params = new URL(req.url, "http://localhost").searchParams;
+  const statements = params.get("view") === "statements";
+  let rows;
+  try { rows = JSON.parse(await readFile(join(root, statements ? "statements.json" : "index.json"), "utf8")); }
+  catch (err) {
+    if (err.code === "ENOENT") return sendJson(res, 200, []);
+    throw err;
+  }
+  if (statements) return sendJson(res, 200, rows);
+  const id = params.get("id");
+  if (!id) return sendJson(res, 200, rows);
+  const row = rows.find((r) => r.id === id);
+  if (!row || !/^[a-f0-9]{64}$/.test(row.sha256)) return sendJson(res, 404, { error: "Not found" });
+  const data = await readFile(join(root, "objects", row.sha256));
+  res.writeHead(200, {
+    "Content-Type": "application/octet-stream",
+    "Content-Disposition": "attachment; filename*=UTF-8''" + encodeURIComponent(row.filename),
+    "X-Content-Type-Options": "nosniff",
+    "Content-Length": data.length,
+  });
+  res.end(data);
+}
 
 // One report by slug: /api/reports/<slug>. The only path-parameter route on
 // this server, so it is matched explicitly rather than by adding a pattern
