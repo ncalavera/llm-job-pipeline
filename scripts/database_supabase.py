@@ -1677,9 +1677,9 @@ def _gate_job(job: dict) -> tuple[str, str | None, bool]:
     # an empty title.
     if not title.strip():
         return title, "empty_title", boilerplate_gated
-    if filters.title_words_blacklisted(title):
+    if filters.title_words_blacklisted(title) and not job.get("preserve_listing"):
         return title, "blacklist", boilerplate_gated
-    if not filters.has_enough_content(job):
+    if not filters.has_enough_content(job) and not job.get("preserve_listing"):
         return title, "thin", boilerplate_gated
     if filters.is_content_junk(job.get("full_description", "")):
         return title, "junk", boilerplate_gated
@@ -1988,6 +1988,8 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
     Unknown orgs → ensure_company(status=_auto_discovery_status()), "candidate"
     by default (see that function). Skips inactive companies.
     """
+    from source_observations import record_import_outcome
+
     today = datetime.now(DASHBOARD_TZ).date().isoformat()
     tier = board_cfg.get("tier", "C")
     board_url = board_cfg["url"]
@@ -2041,6 +2043,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
         elif skip_reason == "empty_title":
             print(f"  [{board_name}] skipped a board row with a missing/empty title", flush=True)
         if skip_reason is not None:
+            record_import_outcome(cur, job, "invalid", skip_reason)
             # A gated title we ALREADY track is still being listed by the board:
             # refresh its last_seen so it isn't shown stale/expired while live.
             if skip_reason != "empty_title" and _refresh_gated_last_seen(
@@ -2077,6 +2080,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
         cur.execute("SELECT status FROM company WHERE id = %s", (company_id,))
         comp_row = cur.fetchone()
         if comp_row and comp_row["status"] == "inactive":
+            record_import_outcome(cur, job, "blocked", "company_inactive")
             skipped_inactive[org] = skipped_inactive.get(org, 0) + 1
             continue
 
@@ -2087,6 +2091,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
         if filters.is_recently_archived(
             archived_hashes, dedup_hash
         ) or filters.is_recently_archived(archived_hashes, norm_hash):
+            record_import_outcome(cur, job, "archived", "existing_archive")
             skipped_archived += 1
             continue
 
@@ -2172,6 +2177,7 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
             set_parts = [f"{k} = %s" for k in updates]
             vals = list(updates.values()) + [existing["id"]]
             cur.execute(f"UPDATE vacancy SET {', '.join(set_parts)} WHERE id = %s", vals)
+            record_import_outcome(cur, job, "existing", canonical_id=existing["id"])
         else:
             parsed_deadline = _resolve_new_deadline(job)
             cols = [
@@ -2206,6 +2212,9 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
                 f"INSERT INTO vacancy ({', '.join(cols)}) VALUES ({placeholders})",
                 vals,
             )
+            if job.get("_source_run"):
+                cur.execute("SELECT id FROM vacancy WHERE dedup_hash = %s", (insert_hash,))
+                record_import_outcome(cur, job, "new", canonical_id=cur.fetchone()["id"])
             new_count += 1
 
     cur.close()

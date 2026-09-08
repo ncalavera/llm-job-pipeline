@@ -17,7 +17,6 @@ from pathlib import Path
 import pytest
 
 from database_supabase import APPLICATION_STATUSES
-from report.data_prep import _ACTIVE_STATUSES
 
 _DAL = Path(__file__).resolve().parents[1] / "scripts" / "database_supabase.py"
 
@@ -133,14 +132,4 @@ def test_AP05_force_allows_a_deliberate_correction(monkeypatch):
     assert any("SET status" in s for s in executed)
 
 
-# ---------------------------------------------------------------------------
-# Layer 3 — the dashboard ships them whatever they scored
-# ---------------------------------------------------------------------------
-
-
-def test_AP06_applications_survive_the_dashboard_score_floor():
-    for status in APPLICATION_STATUSES:
-        assert status in _ACTIVE_STATUSES, (
-            f"'{status}' records an application but does not survive the score "
-            "floor — a low-scored application would vanish from the board"
-        )
+# Layer 3 is exercised against the real payload in test_dashboard_sections.py.

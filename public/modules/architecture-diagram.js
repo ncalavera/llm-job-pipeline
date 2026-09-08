@@ -17,12 +17,14 @@ export const ARCHITECTURE_OVERVIEW = `flowchart LR
     DB --> SCORE[Filter +<br/>evidence preparation]
     SCORE --> N[File-only preparation agents]
     N -->|quoted facts + profile comparison<br/>polled and saved by Python| DB
-    SCORE --> SCR[Dashboard Inbox<br/>Like / Pass]
+    DB --> SCR[One Inbox table<br/>Like / Pass + bulk filters]
     SCR -->|/api/screening-decision<br/>durable receipt| DB
     SCORE --> YOU[Dashboard / Telegram<br/>you review]
     YOU -->|Like / Pass| LEARN[Learning loop]
     LEARN -->|user-approved changes| DB
-    DB --> OBS[Health tab +<br/>run report card]
+    SRC --> RAW[Algolia raw listing ledger<br/>before parser flags]
+    RAW --> OBS[Sources: listing checks<br/>and collection gaps]
+    DB --> OBS
 
     style DB fill:#1E40AF,color:#fff
     style SCORE fill:#065F46,color:#fff
@@ -55,7 +57,8 @@ export const ARCHITECTURE_DETAILS = [
     LR2 --> F[fetch: career sites + boards] --> EN[enrich blind roles]
     EN --> FI[filter junk] --> SP[screening prep<br/>one call: facts + comparison<br/>reuse unchanged results<br/>validate posting + profile identity]
     SP --> TG[Inbox count + link] --> PU[publish snapshot once]
-    PU --> VD[human review in Inbox]
+    PU --> VD[all retained vacancies in Inbox<br/>preparation never hides a role]
+    F --> RAW[Algolia source observations<br/>raw listings + complete or partial run]
 
     style F fill:#1E40AF,color:#fff
     style SP fill:#065F46,color:#fff

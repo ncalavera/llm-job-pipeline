@@ -8,7 +8,6 @@ from config import (
     COMPANIES,
     PROJECT_ROOT,
     APPLYABLE_SCORE,
-    CATALOG_MIN_SCORE,
     DASHBOARD_TZ,
     resolve_canonical_name,
 )
@@ -19,11 +18,9 @@ from prepare_screening import posting_fingerprint
 #: application is running, or it closed with the employer's own answer. These
 #: survive the dashboard score floor at any score. Everything else (unseen below
 #: the floor, passed, skipped) is either noise or history.
-from statuses import DECIDED_STATUSES
-
-_ACTIVE_STATUSES = DECIDED_STATUSES - {"passed", "skipped"}
 from database_supabase import load_vacancies, load_all_enrichment
 from db_conn import get_conn
+from source_observations import recent_source_runs
 
 # Per-company vacancy NUMBERS (vacancy_count, applyable_count, avg score and the
 # hot-vacancy signal) are no longer baked here — they derive in the browser from
@@ -502,49 +499,14 @@ def prepare_report_data(db: dict = None) -> dict:
     from scoring_settings import scoring_model
     import applications
 
-    # Roles scoring > 40 surface on the dashboard regardless of their company's
-    # status — a strong match is worth reviewing even before its company is
-    # approved (score_floor_any_company). Company-status gating still hides the
-    # long tail of low/unscored roles from not-yet-approved companies.
     all_vacs = load_vacancies(
         include_candidate_companies=True,
         status_exclude=["archived"],
-        score_floor_any_company=40,
     )
-    # Exclude unscored vacancies from dashboard — they appear after /score.
-    #
-    # Also drop the weak tail: an UNDECIDED role below CATALOG_MIN_SCORE never
-    # reaches the dashboard at all (decision 2026-08-10). The 40 floor used to
-    # live only in the Catalog tab's client-side filter and in
-    # score_floor_any_company above, which gates unapproved companies — so a
-    # weak role at an APPROVED company was shipped and shown everywhere else.
-    # That is how "EA Funds — Director" (32, a scraped fundraiser page) and
-    # "Elevate Philanthropy — Historical Projects" (28, no description) ended up
-    # in front of him. One floor, applied once, before the data leaves Python.
-    #
-    # An ACTIVE decision outranks the score: the weakest role in the liked
-    # basket scores 15, and a role being worked cannot be hidden by a number.
-    # 'passed' / 'skipped' are NOT such decisions — they are dead ends, and
-    # keeping every one of them shipped the whole rejected pile back onto the
-    # board (a bulk pass of 190 roles reappeared in the list immediately).
-    # Below the floor they are history, not work; the Archive tab still has them.
-    #
-    # A role the night PREPARED for screening (screening_state = 'ready') ships
-    # at any status and any score: the Screen view keeps a Kept / Put aside row
-    # visible after the decision, and the quoted evidence outranks the number.
-    vacancies = [
-        v
-        for v in all_vacs.values()
-        if v.get("screening_state") == "ready"
-        or v.get("status") in _ACTIVE_STATUSES
-        or (
-            v.get("llm_score") is not None
-            and v.get("llm_score", -1) >= 0
-            and v.get("llm_score", -1) >= CATALOG_MIN_SCORE
-        )
-    ]
-    # Fetched-but-not-yet-scored vacancies (rows NOT shipped in `groups`) — the one
-    # count the browser can't derive from the raw payload; see the docstring.
+    # Every retained role is shipped; browser visibility derives from raw rows
+    # and live status. Explicitly archived rows remain in the archive payload.
+    vacancies = list(all_vacs.values())
+    # Legacy scoring count retained for older report consumers.
     unscored_count = _count_unscored(all_vacs)
 
     # --- Build org color map (needed before building groups) ---
@@ -578,6 +540,7 @@ def prepare_report_data(db: dict = None) -> dict:
         "stats": {
             "unscored_count": unscored_count,
             "screening_processing": _count_screening_processing(),
+            "source_runs": recent_source_runs(20),
         },
     }
 

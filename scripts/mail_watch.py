@@ -274,8 +274,22 @@ def run_once(
     seen = {k: v for k, v in state.get("seen", {}).items() if now * 1000 - v < SEEN_TTL_S * 1000}
     metas = fetch_new(service, seen, query=query)
 
+    # Newsletter reconciliation is best effort and has a private retry cache;
+    # it must never suppress the established hiring-email watcher.
+    from newsletter_reconcile import is_newsletter, reconcile_message
+
     if seed:
-        seen.update({m["id"]: m["internalDate"] for m in metas})
+        failed_newsletters = set()
+        if not dry_run:
+            for meta in metas:
+                if is_newsletter(meta):
+                    try:
+                        if reconcile_message(meta, service).get("status") != "complete":
+                            failed_newsletters.add(meta["id"])
+                    except Exception as e:  # advisory; seed still protects watcher behavior
+                        failed_newsletters.add(meta["id"])
+                        log(f"newsletter reconciliation uncertain: {e.__class__.__name__}: {e}")
+        seen.update({m["id"]: m["internalDate"] for m in metas if m["id"] not in failed_newsletters})
         if not dry_run:
             update_state_file(state_path, seen=seen, seeded_at=now)
         log(f"seed: recorded {len(metas)} messages, sent 0")
@@ -284,6 +298,15 @@ def run_once(
     sent = matched = 0
     for m in sorted(metas, key=lambda x: x["internalDate"]):
         reason = classify(m["from"], m["subject"], rules)
+        newsletter_ok = True
+        if is_newsletter(m) and not dry_run:
+            try:
+                newsletter_ok = reconcile_message(m, service).get("status") == "complete"
+            except Exception as e:  # Gmail/body parsing is advisory only
+                newsletter_ok = False
+                log(f"newsletter reconciliation uncertain: {e.__class__.__name__}: {e}")
+        if is_newsletter(m) and not newsletter_ok:
+            continue  # keep unseen so the private reconciliation cache can retry
         if reason:
             matched += 1
             if sent >= MAX_SENDS_PER_RUN:

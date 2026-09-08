@@ -333,7 +333,7 @@ def test_report_stats_carries_only_the_nonderivable_run_fact(dal):
     stats = data_prep.prepare_report_data()["stats"]
     # The non-derivable run-level facts ship, and nothing else: rows NOT in
     # `groups` (unscored; screening cohort not yet prepared / failed).
-    assert set(stats) == {"unscored_count", "screening_processing"}
+    assert {"unscored_count", "screening_processing", "source_runs"} <= set(stats)
     # None of the browser-derivable aggregates may creep back in.
     for baked in (
         "total_roles",

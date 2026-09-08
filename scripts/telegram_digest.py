@@ -121,8 +121,7 @@ SELECT_READY_TO_SCREEN_SQL = """
 SELECT v.id, v.screening_state, v.screening_fingerprint, v.full_description
 FROM vacancy v
 JOIN company c ON v.company_id = c.id
-WHERE v.status = 'unseen'
-  AND v.screening_state = 'ready'
+WHERE v.status IN ('unseen', 'expiring')
   AND c.status != 'inactive'
 """
 
@@ -826,11 +825,9 @@ def fetch_mid(conn, min_score, max_score):
 
 
 def fetch_ready_to_screen(conn):
-    from prepare_screening import is_current
-
     with _dict_cursor(conn) as cur:
         cur.execute(SELECT_READY_TO_SCREEN_SQL)
-        return sum(is_current(dict(row)) for row in cur.fetchall())
+        return len(cur.fetchall())
 
 
 def fetch_dropped(conn):

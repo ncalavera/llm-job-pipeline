@@ -233,3 +233,7 @@ The UX stance adopted 2026-07-04: the dashboard is a calm coach, not a control p
 ## Flagged ambiguities
 
 - "Expiring" had been used for both the stored protected status and for liked roles past their deadline (one Triage column mixed both) — these are distinct concepts; the derived display state is now called Expired.
+
+## Inbox contract (2026-09-08)
+
+Inbox is one view over every retained vacancy, before relevance filtering. Screening preparation is optional content, never a visibility gate. Like and Pass are user decisions; employer rejection remains an application outcome. Main navigation is Inbox, Applications, Companies and Sources; Materials belongs under Applications.

@@ -569,9 +569,15 @@ def _drop_by_profile(default_org, jobs, fetch_stats):
     for job in jobs:
         org = job.get("org_override") or default_org
         body = job.get("full_description") or job.get("snippet") or ""
-        if filters.fetch_time_drop_reason(org, job.get("title", ""), body) is None:
+        reason = filters.fetch_time_drop_reason(org, job.get("title", ""), body)
+        if reason is None:
             kept.append(job)
         else:
+            if job.get("_source_run"):
+                from source_observations import record_import_outcome
+                from db_conn import get_conn
+                with get_conn().cursor() as cur:
+                    record_import_outcome(cur, job, "blocked", reason)
             dropped[org] = dropped.get(org, 0) + 1
     if dropped:
         bucket = fetch_stats.setdefault(PROFILE_DROP_KEY, {})
@@ -773,7 +779,7 @@ def _fetch_one_board(board_id, board_cfg, strategy, fetch_stats) -> tuple[int, s
     # recorded reason (error: timeout / http_500 / …), it does not
     # masquerade as a healthy zero.
     board_fetch_error = get_fetch_errors().get(board_name)
-    if board_fetch_status == "ok" and not jobs and board_fetch_error:
+    if board_fetch_status == "ok" and board_fetch_error:
         board_fetch_status = board_fetch_error
 
     # Save raw fetch log

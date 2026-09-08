@@ -330,8 +330,8 @@ def _payload(monkeypatch):
     return importlib.reload(data_prep).prepare_report_data()
 
 
-def test_ready_role_ships_at_any_score_and_status(tmp_path, monkeypatch):
-    """R6: a prepared role survives the score floor and a Put-aside decision."""
+def test_retained_roles_ship_without_score_or_preparation(tmp_path, monkeypatch):
+    """Every retained decision and application survives without a model score."""
     from datetime import date
 
     db = _screening_db(tmp_path, monkeypatch)
@@ -340,9 +340,13 @@ def test_ready_role_ships_at_any_score_and_status(tmp_path, monkeypatch):
     _seed_role(db, "low-passed", score=12, status="passed", first_seen=today, state="ready")
     _seed_role(db, "low-plain", score=12, status="unseen", first_seen=today)
 
+    statuses = ["liked", "applied", "interview", "declined", "passed", "unseen"]
+    for status in statuses:
+        _seed_role(db, "unscored-" + status, score=None, status=status, first_seen=today)
     ids = {g["id"] for g in _payload(monkeypatch)["groups"]}
+    assert {"unscored-" + status for status in statuses} <= ids
     assert {"low-unseen", "low-passed"} <= ids
-    assert "low-plain" not in ids
+    assert "low-plain" in ids
 
 
 def test_screening_json_round_trips_raw(tmp_path, monkeypatch):
@@ -390,7 +394,7 @@ def test_processing_counts_cover_tonights_cohort_only(tmp_path, monkeypatch):
     _seed_role(db, "unprep-stale", score=12, status="unseen", first_seen=stale)
 
     data = _payload(monkeypatch)
-    assert {g["id"] for g in data["groups"]} == set()
+    assert {g["id"] for g in data["groups"]} == {"unprep-fresh", "failed-fresh", "unprep-stale"}
     assert data["stats"]["screening_processing"] == {"unprepared": 1, "failed": 1}
 
 

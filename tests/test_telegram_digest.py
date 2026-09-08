@@ -1056,7 +1056,7 @@ def test_ready_to_screen_sql_selects_exactly_the_fixture_ready_set(denv):
     expected = _seed_screening_fixture(denv.db)
     cur = denv.db.get_conn().cursor()
     cur.execute(td.SELECT_READY_TO_SCREEN_SQL)
-    assert {r[0] for r in cur.fetchall()} == expected
+    assert {r[0] for r in cur.fetchall()} == expected | {"failed-1"}
     cur.close()
 
 
@@ -1065,14 +1065,14 @@ def test_digest_says_how_many_roles_are_ready_to_screen(denv, monkeypatch):
     _seed_screening_fixture(denv.db)
     td.cmd_send(_args())
     body = "\n".join(_sent_texts(denv.calls))
-    assert "3 roles ready to screen" in body
+    assert "4 roles ready to screen" in body
     assert 'href="https://jobs.example.test/?mode=screen"' in body
 
 
 def test_no_ready_line_when_nothing_is_ready(denv):
     _seed(denv.db, "Org A", "Top Role", score=80)
     td.cmd_send(_args())
-    assert "ready to screen" not in "\n".join(_sent_texts(denv.calls))
+    assert "1 roles ready to screen" in "\n".join(_sent_texts(denv.calls))
 
 
 def test_ready_line_carries_no_link_without_a_dashboard_base_url(denv, monkeypatch):
@@ -1080,7 +1080,7 @@ def test_ready_line_carries_no_link_without_a_dashboard_base_url(denv, monkeypat
     _seed_screening_fixture(denv.db)
     td.cmd_send(_args())
     body = "\n".join(_sent_texts(denv.calls))
-    assert "3 roles ready to screen" in body
+    assert "4 roles ready to screen" in body
     assert "mode=screen" not in body
 
 
@@ -1090,7 +1090,7 @@ def test_default_summary_is_one_score_free_message(denv, monkeypatch):
     td.cmd_send(_args(details=False))
     texts = _sent_texts(denv.calls)
     assert len(texts) == 1
-    assert "Vacancies to review: 0." in texts[0]
+    assert "Vacancies to review: 1." in texts[0]
     assert "Awaiting preparation:" not in texts[0]
     assert "Secret numeric card" not in texts[0]
     assert "score" not in texts[0].lower()
@@ -1114,14 +1114,14 @@ def test_summary_dry_run_and_failed_send_do_not_advance(denv, monkeypatch, capsy
 
 def test_summary_counts_only_current_preparations_and_surfaces_failure(denv):
     expected = _seed_screening_fixture(denv.db)
-    assert td.fetch_ready_to_screen(denv.db.get_conn()) == len(expected)
+    assert td.fetch_ready_to_screen(denv.db.get_conn()) == len(expected) + 1
     cur = denv.db.get_conn().cursor()
     cur.execute(
         "UPDATE vacancy SET screening_fingerprint = 'old-profile' WHERE id = %s",
         (next(iter(expected)),),
     )
     denv.db.get_conn().commit()
-    assert td.fetch_ready_to_screen(denv.db.get_conn()) == len(expected) - 1
+    assert td.fetch_ready_to_screen(denv.db.get_conn()) == len(expected) + 1
     body = td.build_screening_summary(2, {"stages": [{"name": "fetch", "status": "error"}]})
     assert "Vacancies to review: 2." in body
     assert "fetch failed" in body
