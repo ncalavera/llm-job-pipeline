@@ -7,7 +7,7 @@ choices live in [`STRATEGY.md`](../STRATEGY.md); the shared vocabulary in
 
 The whole thing is deliberately small: a Python core that does the deterministic
 work (fetch, filter, dedup, publish, ordering) and a coding agent on top that
-supplies only judgment (scoring, verdicts). No service to run, no queue, no
+supplies judgment (discovery scoring and facts); decisions remain human. No service to run, no queue, no
 scheduler — one command a day.
 
 ## Repo layout
@@ -35,7 +35,9 @@ scheduler — one command a day.
 | `scripts/quality.py` | The single validation layer — strips cookie banners, nav junk and non-vacancy pages before anything reaches the DB. |
 | `scripts/filter_vacancies.py` | Title blacklists, exact + fuzzy dedup across boards, geography buckets, auto-archive of vacancies gone from source. Writes `reports/REPORT-filter.html`. |
 | `scripts/hard_filters.py` | Reads `## HARD_FILTERS` from the profile (geo regions, title keywords) to drop roles pre-scoring. |
-| `scripts/score_vacancies.py` | Builds per-vacancy scoring payloads (`--local`), saves agent results (`--save`). One vacancy = one request. |
+| `scripts/score_vacancies.py` | Builds and saves explicit legacy per-vacancy scoring payloads. One vacancy = one request. |
+| `scripts/prepare_discovery.py` | Builds combined nightly payloads and conditionally saves validated score + facts results without changing decisions. |
+| `scripts/discovery_runner.py` | Runs one isolated file-only agent request per vacancy for the configured nightly model. |
 | `scripts/score_companies.py` | Same for whole-company WANT scoring. `--local` (agent, default) / `--save`; an optional `--api` path calls the Anthropic SDK directly (needs the optional `anthropic` dependency). |
 | `scripts/learning.py` | The verdict-driven feedback loop — filter/scoring/board correction proposals, backtested against liked history, applied only on explicit approval. No LLM calls. |
 | `scripts/sources.py` | Enabled-board management (list / enable-board / disable-board / recommend); the enabled set persists in the DB. |
@@ -66,7 +68,7 @@ not in a runbook and not in anyone's head (STRATEGY guardrail 4).
 | 7 | `filter` | AUTO | Quality report, dedup, geo buckets, gone-from-source archive. Never auto-deletes silently. |
 | 8 | `company_scoring` | SKIP | Historical checkpoint retained; optional `score_companies.py` is outside the daily path. |
 | 9 | `vacancy_scoring` | SKIP | Historical checkpoint retained; optional `score_vacancies.py` is outside the daily path. |
-| 10 | `screening_prep` | GATE | One subagent read per changed posting/profile extracts quoted facts and a profile comparison — no score, no status. Both attended and scheduled runs prepare roles directly after filtering. |
+| 10 | `screening_prep` | GATE | Combined discovery: one request per vacancy. Unscored roles get numeric scoring plus quoted facts/profile comparison; existing roles below 40 get only stale or missing facts; roles at 40+ are untouched. |
 | 11 | `verdicts` | SKIP | Human decisions happen in the dashboard Screen view. |
 | 12 | `digest` | AUTO | One score-free Telegram summary (scheduled runs only), before publish. |
 | 13 | `publish` | AUTO | Always publish; warn loudly on a dirty run (see the publish gate). |
@@ -109,13 +111,13 @@ dashboard *code* changes.)
 
 ## Health & observability
 
-The default daily path is fetch → enrich → dedup → filter → evidence preparation
+The default daily path is fetch → enrich → dedup → filter → combined discovery
 → one Telegram summary → publish. Legacy company/vacancy scoring and terminal
-verdict checkpoints are skipped, preserving resumability of old checkpoints.
-Preparation records the requested fingerprint and the initial attempt timestamp;
-resume counts only a ready/failed save from this attempt for that fingerprint.
-Old ready/failed rows do not masquerade as progress. Failed results retry on the
-next run even when unchanged; successful unchanged results are reused.
+verdict checkpoints remain readable, preserving resumability of old checkpoints.
+Preparation records the requested fingerprint and sections. Resume checks the
+database for those results and counts state changes separately from completed work.
+Current results are reused; rejected or unfinished results remain pending for the
+next run.
 The daily update contains one current Inbox count and link, plus actionable run
 failures. Preparation queues belong to Health. Readiness requires matching the
 stored screening fingerprint against the current posting and prompt/profile
@@ -126,7 +128,7 @@ Delivery advances last-success only after sending; a crash may repeat a message,
 but cannot mark an undelivered one successful.
 
 
-Nightly scoring agents have file-only tools, restricted payload/result paths,
+Nightly discovery agents have file-only tools, restricted payload/result paths,
 no shell/MCP tools and no database/provider credentials. Python chooses the
 model, saves completed files every five seconds and sweeps after exit/timeout.
 Malformed results are skipped independently.

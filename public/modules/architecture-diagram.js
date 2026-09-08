@@ -14,10 +14,12 @@
 
 export const ARCHITECTURE_OVERVIEW = `flowchart LR
     SRC[Job boards +<br/>company career sites] -->|fetch daily| DB[(Database)]
-    DB --> SCORE[Filter +<br/>evidence preparation]
-    SCORE --> N[File-only preparation agents]
-    N -->|quoted facts + profile comparison<br/>polled and saved by Python| DB
-    DB --> SCR[One Inbox table<br/>Like / Pass + bulk filters]
+    DB --> SCORE[Approved filters +<br/>score and facts]
+    SCORE --> N[Cheap file-only agents<br/>one vacancy per request]
+    N -->|score + quoted facts + comparison<br/>validated and saved by Python| DB
+    DB -->|compact rows + filter facts| SCR[Scored Inbox table<br/>Score sort + reason batches<br/>Like / Pass + Undo]
+    SCR -->|open one record| DETAIL[Full vacancy or company text]
+    DB -->|private detail endpoint| DETAIL
     SCR -->|/api/screening-decision<br/>durable receipt| DB
     SCORE --> YOU[Dashboard / Telegram<br/>you review]
     YOU -->|Like / Pass| LEARN[Learning loop]
@@ -55,7 +57,7 @@ export const ARCHITECTURE_DETAILS = [
     src: `flowchart LR
     V[validate profile] --> P[preflight DB check] --> LR2[learning review]
     LR2 --> F[fetch: career sites + boards] --> EN[enrich blind roles]
-    EN --> FI[filter junk] --> SP[screening prep<br/>one call: facts + comparison<br/>reuse unchanged results<br/>validate posting + profile identity]
+    EN --> FI[filter junk] --> SP[combined discovery<br/>unscored: score + missing facts<br/>below 40: missing facts only<br/>40+: unchanged]
     SP --> TG[Inbox count + link] --> PU[publish snapshot once]
     PU --> VD[all retained vacancies in Inbox<br/>preparation never hides a role]
     F --> RAW[Algolia source observations<br/>raw listings + complete or partial run]

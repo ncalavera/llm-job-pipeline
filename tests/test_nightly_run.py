@@ -1181,3 +1181,73 @@ def test_save_cmd_uses_prepared_by_for_screening_with_and_without_model():
     assert "--prepared-by" in without and "--scored-by" not in without
     scored = nr._save_cmd("score_vacancies", ["a.json"], "opus")
     assert "--scored-by" in scored and "--prepared-by" not in scored
+
+
+def _run_discovery_session_with_completion(nr, monkeypatch, state):
+    """Run the wrapper's discovery branch with a file-only fake worker."""
+    import settings
+
+    payload = [{
+        "payload_kind": "discovery",
+        "id": "v1",
+        "fingerprint": "fp1",
+        "existing_score": None,
+        "scoring": {"system_prompt": "s", "user_msg": "u"},
+        "screening": {"user_msg": "u"},
+    }]
+    (nr.vac / "prepare_screening_payload.json").write_text(json.dumps(payload))
+    night = nr.night_dir()
+    night.mkdir(parents=True)
+    (night / "score_in").mkdir()
+    (night / "score_out").mkdir()
+    monkeypatch.setattr(settings, "nightly_llm", lambda: {"provider": "codex", "codex_model": "cheap-luna"})
+
+    class Finished:
+        returncode = 0
+        pid = 12345
+
+        def wait(self, timeout=None):
+            return 0
+
+        def terminate(self):
+            pass
+
+    def fake_popen(cmd, **kwargs):
+        (night / "score_out" / "000.json").write_text(json.dumps({"id": "v1"}))
+        return Finished()
+
+    monkeypatch.setattr(nr.mod.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(nr.mod, "_sweep_save", lambda *args, **kwargs: True)
+    monkeypatch.setattr(nr.mod, "completion", lambda items: {"v1": state}) if hasattr(nr.mod, "completion") else None
+    import prepare_discovery
+    monkeypatch.setattr(prepare_discovery, "completion", lambda items: {"v1": state})
+    alerts = []
+    ctx = nr.mod._Ctx({"max_items_per_night": 1, "vacancy_gate_minutes": 1}, night,
+                       datetime.now() + timedelta(minutes=5))
+    monkeypatch.setattr(ctx, "alert", lambda stage, message: alerts.append((stage, message)))
+    nr.mod._run_session(ctx, "prepare_screening", "prepare")
+    return ctx, alerts
+
+
+def test_discovery_pending_file_is_not_counted_as_completed(nr, monkeypatch):
+    ctx, alerts = _run_discovery_session_with_completion(nr, monkeypatch, "pending")
+    log = nr.wrapper_log()
+    assert "no-progress" in log
+    assert "1/1 result file(s) written" not in log
+    assert alerts  # clean exit with no authoritative completion remains actionable
+    assert ctx.items_left == 0
+
+
+def test_discovery_skipped_completion_does_not_alert(nr, monkeypatch):
+    _ctx, alerts = _run_discovery_session_with_completion(nr, monkeypatch, "skipped")
+    assert alerts == []
+    assert "all dispatched roles changed or became ineligible" in nr.wrapper_log()
+
+
+def test_discovery_save_command_and_cheap_model_route():
+    import nightly_run as nr
+
+    cmd = nr._save_cmd("prepare_screening", ["out.json"], "cheap-luna", discovery=True)
+    assert cmd[1].endswith("prepare_discovery.py")
+    assert "--prepared-by" in cmd and "cheap-luna" in cmd
+    assert "--payload" in cmd
