@@ -289,7 +289,9 @@ def run_once(
                     except Exception as e:  # advisory; seed still protects watcher behavior
                         failed_newsletters.add(meta["id"])
                         log(f"newsletter reconciliation uncertain: {e.__class__.__name__}: {e}")
-        seen.update({m["id"]: m["internalDate"] for m in metas if m["id"] not in failed_newsletters})
+        seen.update(
+            {m["id"]: m["internalDate"] for m in metas if m["id"] not in failed_newsletters}
+        )
         if not dry_run:
             update_state_file(state_path, seen=seen, seeded_at=now)
         log(f"seed: recorded {len(metas)} messages, sent 0")

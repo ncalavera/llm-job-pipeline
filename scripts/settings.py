@@ -394,6 +394,18 @@ def nightly() -> dict:
     return out
 
 
+def nightly_llm() -> dict:
+    """Model route for combined discovery; other legacy gates keep their route."""
+    sec = _section("nightly")
+    provider = str(sec.get("provider", "claude")).strip().lower()
+    if provider not in {"claude", "codex"}:
+        raise ValueError("nightly.provider must be claude or codex")
+    return {
+        "provider": provider,
+        "codex_model": str(sec.get("codex_model", "gpt-5.4-mini")).strip(),
+    }
+
+
 def nightly_paused_until() -> str:
     """``[nightly] paused_until`` as a bare ``YYYY-MM-DD`` string, or "" when
     unset. Kept out of ``nightly()`` because every knob there is numeric and

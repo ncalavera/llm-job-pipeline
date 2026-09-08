@@ -576,6 +576,7 @@ def _drop_by_profile(default_org, jobs, fetch_stats):
             if job.get("_source_run"):
                 from source_observations import record_import_outcome
                 from db_conn import get_conn
+
                 with get_conn().cursor() as cur:
                     record_import_outcome(cur, job, "blocked", reason)
             dropped[org] = dropped.get(org, 0) + 1

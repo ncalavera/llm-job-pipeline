@@ -97,10 +97,17 @@ A person the user may contact about the search. Companies and vacancies can link
 A user's reason or correction accompanying a decision. **Review state:** Pending review or Reviewed. Saving a decision and reviewing its note are separate events.
 
 ### Score
-An optional numerical model estimate, labelled Score everywhere. Older company scores describe company preference; vacancy scores describe vacancy preference. A score is neither a Fact, a Fit explanation, nor a human Decision. Daily preparation does not require scoring.
+An optional numerical model estimate, labelled Score everywhere. Older company scores describe company preference; vacancy scores describe vacancy preference. A score is neither a Fact, a Fit explanation, nor a human Decision. Unscored rows remain visible; daily discovery adds scores for ranking.
+
+### Discovery
+The nightly per-vacancy preparation pass. One request may return both a numeric
+Score and the independent Facts/Fit preparation: unscored vacancies request
+both, scored vacancies below 40 request only missing or stale Facts/Fit, and
+vacancies scored at 40 or above are left untouched. Discovery never changes a
+human Decision and never creates an exclusion rule.
 
 ### Views and counts
-Inbox is the current, prepared, undecided vacancy list. Catalog is the broader vacancy list; filters can make it smaller. Progress groups liked vacancies and applications by current progress. Applications is the submitted-application table. Companies and Job boards count their own entities, never vacancies. Reports contains research documents; Contacts contains people; Health contains processing and connection details; Settings contains preferences.
+Inbox is the single retained vacancy list, including rows not yet prepared. Catalog and screening are views of the same records and decisions; filters can make a view smaller. Progress groups liked vacancies and applications by current progress. Applications is the submitted-application table. Companies and Job boards count their own entities, never vacancies. Reports contains research documents; Contacts contains people; Health contains processing and connection details; Settings contains preferences.
 
 A list count names its entity and uses that list's filters. A page count says how many are shown, not how many exist. Function groups partition the inbox, with mixed/unknown functions in Other. Attribute filters (language, location, seniority) may overlap and must never be presented as additive totals. Database record counts include source copies and history; they are not unique-vacancy counts. Cumulative funnel counts overlap and are not current states.
 

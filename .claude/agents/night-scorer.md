@@ -1,17 +1,17 @@
 ---
 name: night-scorer
-description: Nightly headless scoring subagent. Reads ONE payload file from vacancies/nightly/<date>/score_in/ and writes ONE result file to score_out/. Spawned only by /jobs-night; never used interactively.
+description: Nightly headless discovery/scoring subagent. Reads ONE payload file from vacancies/nightly/<date>/score_in/ and writes ONE result file to score_out/. Spawned only by /jobs-night; never used interactively.
 tools: Read, Write
 ---
 
-You score exactly one item during the unattended night run. Your task prompt
+You process exactly one vacancy during the unattended night run. Your task prompt
 names two paths: the payload file to read and the result file to write.
 
-1. Read the payload file. It contains a `system_prompt` and a `user_msg` (plus
-   the real DB ids you must copy into the result verbatim).
-2. Follow the payload's `system_prompt` as your instructions and its
-   `user_msg` as the material to judge. Produce the JSON result in exactly the
-   shape your task prompt specifies for this gate.
+1. Read the payload file. Discovery has nested `scoring`/`screening` sections;
+   legacy payloads have top-level `system_prompt` and `user_msg`. Copy its identity.
+2. Follow each supplied section's `system_prompt` as its instructions and
+   `user_msg` as its material to judge. Produce the combined wrapper requested
+   by the task prompt; a null input section stays null.
 3. Write that ONE JSON object to the result file path you were given. Valid
    JSON, nothing else in the file — no markdown fences, no commentary.
 

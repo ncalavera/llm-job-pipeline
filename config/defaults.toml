@@ -627,8 +627,12 @@ location_hint_cities = [
 # carries over to the next night; nothing is ever lost, only delayed.
 # ===========================================================================
 [nightly]
-# Hard cap on scoring items dispatched to Claude sessions per night (cost fuse).
+# Hard cap on items dispatched to model requests per night (cost fuse).
 max_items_per_night = 120
+# New vacancy discovery uses the cheapest configured agent route. Deployments
+# may override these keys privately; personal search defaults do not belong here.
+provider = "claude"
+codex_model = "gpt-5.4-mini"
 # Per-session time limits, minutes (also bounded by the whole-run deadline).
 company_gate_minutes = 30
 vacancy_gate_minutes = 120

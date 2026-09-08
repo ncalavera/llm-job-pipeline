@@ -76,17 +76,19 @@ Claude Code does this with one subagent per vacancy; Codex and others should
 replicate the same one-vacancy-per-request discipline. Scoring quality was
 benchmarked with Claude models; other models work but calibration may differ.
 
-**Default daily screening.** After filtering, the driver prepares undecided
-roles with one LLM call per vacancy: quoted posting facts and profile comparison,
-without a numerical score. Both attended and scheduled runs use this path.
-Unchanged successful results are reused until the posting or profile changes;
-failed results retry next run. Human keep/put-aside decisions happen in the
-Screen view. Telegram sends one compact score-free morning summary.
+**Default daily discovery.** After filtering, the driver prepares one combined
+payload per vacancy. Unscored roles receive numerical scoring and quoted posting
+facts/profile comparison in that one request. Existing roles below 40 receive
+only missing or stale facts; existing roles at 40 or above are untouched.
+Successful results are reused until the posting or profile changes; failed
+results retry next run. Human keep/put-aside decisions happen in the Screen view.
+The nightly wrapper uses the configured cheap model and does not silently fall
+back to a more expensive model.
 
 **Optional legacy scoring.** The explicit `score_vacancies.py --local` contract
-above and `score_companies.py` remain available when the user requests numerical
-scoring. The daily driver skips company scoring, vacancy scoring and terminal
-verdict checkpoints; their checkpoint entries remain for backward compatibility.
+above and `score_companies.py` remain available when requested. Their checkpoint
+entries remain readable for backward compatibility; the daily driver preserves
+the old gate names while routing new vacancy work through discovery.
 
 ## No direct-API key is a supported setup, not a defect
 

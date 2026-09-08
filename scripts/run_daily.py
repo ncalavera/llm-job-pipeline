@@ -114,7 +114,7 @@ STAGE_ORDER = [
     "filter",  # AUTO  — quality report; never auto-deletes
     "company_scoring",  # SKIP — legacy scripts remain available
     "vacancy_scoring",  # SKIP — no numeric scores in the daily path
-    "screening_prep",  # GATE — one extraction + profile comparison
+    "screening_prep",  # GATE — combined cheap scoring + facts
     "verdicts",  # SKIP — human review lives in the dashboard
     "digest",  # AUTO  — tiered morning Telegram message (before publish, KTD5:
     #                     a dashboard refresh failure can never cost the digest)
@@ -179,7 +179,7 @@ STAGE_ABOUT = {
     "filter": "quality-filtering the freshly fetched roles",
     "company_scoring": "WANT-scoring new candidate companies",
     "vacancy_scoring": "scoring new roles (cheap screen, then strong finalists)",
-    "screening_prep": "preparing undecided roles for evidence-based screening",
+    "screening_prep": "scoring unscored roles and preparing review facts",
     "verdicts": "collecting your like / pass verdicts",
     "digest": "sending the tiered morning digest to Telegram",
     "publish": "publishing the dashboard (warns if the run was not clean)",
@@ -2031,38 +2031,133 @@ def _screening_states(target_ids: list[str]) -> dict[str, dict]:
 
 
 def _h_screening_prep(state, entry, opts):
-    """Screening preparation: one subagent read per undecided role,
-    producing quoted facts and a profile comparison — no score, no status.
-    Attended and scheduled runs share the same preparation gate. Resume
-    checks the requested fingerprint and timestamp of this attempt."""
-    if not entry.get("emitted"):
-        res = _run_capture(_py("prepare_screening.py") + ["--local"], opts)
-        if res.returncode != 0:
-            return (
-                "error",
-                f"prepare_screening --local exited {res.returncode}: {res.stderr[-400:]}",
-            )
-        if res.stderr.strip():
-            print(res.stderr.strip(), file=sys.stderr, flush=True)
-        try:
-            payloads = _extract_json(res.stdout or "[]")
-        except Exception:
-            return "error", "prepare_screening --local did not emit valid JSON"
-        if not payloads:
-            return "advance", "no undecided roles waiting for screening prep"
-        _write_payload(SCREEN_PREP_PAYLOAD_PATH, payloads)
-        entry["target_ids"] = [str(p["id"]) for p in payloads]
-        entry["fingerprints"] = {str(p["id"]): p["fingerprint"] for p in payloads}
-        entry["attempt_started_at"] = datetime.now(timezone.utc).isoformat()
-        _unattended_scoring_gate(entry, "prepare", len(entry["target_ids"]))
-        return "gate", {
-            "action": "prepare_screening",
-            "phase": "prepare",
-            "count": len(payloads),
-            "payload_path": str(SCREEN_PREP_PAYLOAD_PATH),
-            "instructions": f"Prepare {len(payloads)} role(s) for screening.",
-        }
+    """Combined discovery gate, with a legacy checkpoint fallback.
 
+    New attempts use ``prepare_discovery.py``: unscored rows request score +
+    facts, while already-scored rows below 40 request facts only.  The gate
+    name and checkpoint shape remain ``prepare_screening`` for re-entry
+    compatibility.  A checkpoint emitted before this flow was deployed still
+    follows the old screening-only path below.
+    """
+    if entry.get("discovery") or not entry.get("emitted"):
+        if not entry.get("emitted"):
+            res = _run_capture(_py("prepare_discovery.py") + ["--local"], opts)
+            if res.returncode != 0:
+                return (
+                    "error",
+                    f"prepare_discovery --local exited {res.returncode}: {res.stderr[-400:]}",
+                )
+            if res.stderr.strip():
+                print(res.stderr.strip(), file=sys.stderr, flush=True)
+            try:
+                payloads = _extract_json(res.stdout or "[]")
+            except Exception:
+                return "error", "prepare_discovery --local did not emit valid JSON"
+            if not payloads:
+                return "advance", "no vacancies waiting for combined discovery"
+            _write_payload(SCREEN_PREP_PAYLOAD_PATH, payloads)
+            entry["discovery"] = True
+            entry["target_ids"] = [str(p["id"]) for p in payloads]
+            entry["fingerprints"] = {str(p["id"]): p.get("fingerprint") for p in payloads}
+            entry["requested_modes"] = {
+                str(p["id"]): {
+                    "scoring": p.get("scoring") is not None,
+                    "screening": p.get("screening") is not None,
+                }
+                for p in payloads
+            }
+            entry["attempt_started_at"] = datetime.now(timezone.utc).isoformat()
+            entry["discovery_counts"] = {
+                "requested": len(payloads),
+                "scoring_requested": sum(p.get("scoring") is not None for p in payloads),
+                "facts_only_requested": sum(p.get("scoring") is None for p in payloads),
+            }
+            entry["completed_ids"] = []
+            entry["skipped_ids"] = []
+            _unattended_scoring_gate(entry, "prepare", len(entry["target_ids"]))
+            return "gate", {
+                "action": "prepare_screening",
+                "phase": "prepare",
+                "count": len(payloads),
+                "payload_path": str(SCREEN_PREP_PAYLOAD_PATH),
+                "instructions": (
+                    f"Process {len(payloads)} role(s) with one independent cheap-model request per role. "
+                    "Return combined scoring and evidence facts; use scoring:null for facts-only entries."
+                ),
+            }
+
+        # New checkpoints use the selector's authoritative completion map.
+        payloads = _read_payload(SCREEN_PREP_PAYLOAD_PATH)
+        try:
+            from prepare_discovery import completion
+
+            states = completion(payloads)
+        except Exception as exc:
+            return "error", f"combined discovery completion check failed: {exc}"
+        if not isinstance(states, dict):
+            return "error", "combined discovery completion check returned invalid JSON"
+        target_ids = [str(v) for v in entry.get("target_ids", [])]
+        target_set = set(target_ids)
+        payload_ids = {str(p.get("id")) for p in payloads if p.get("id")}
+        completed_ids = set(str(v) for v in entry.get("completed_ids", []))
+        skipped_ids = set(str(v) for v in entry.get("skipped_ids", []))
+        if not payloads and completed_ids != target_set:
+            return "error", "combined discovery payload is empty while roles remain incomplete"
+        if not payload_ids <= target_set or set(states) - payload_ids:
+            return "error", "combined discovery completion contains an unknown role id"
+        if set(states) != payload_ids:
+            return "error", "combined discovery completion is missing a role id"
+        unfinished = target_set - completed_ids
+        if not unfinished <= payload_ids:
+            return "error", "combined discovery payload is missing an unfinished role"
+        invalid_states = set(states.values()) - {"ready", "pending", "skipped"}
+        if invalid_states:
+            return "error", "combined discovery completion contains an invalid state"
+        pending_ids = {vid for vid in payload_ids if states.get(vid) == "pending"}
+        requested = entry.get("requested_modes", {})
+        newly_ready = {vid for vid in payload_ids if states.get(vid) == "ready"}
+        newly_skipped = {vid for vid in payload_ids if states.get(vid) == "skipped"}
+        completed_ids |= newly_ready | newly_skipped
+        skipped_ids |= newly_skipped
+        entry["completed_ids"] = sorted(completed_ids)
+        entry["skipped_ids"] = sorted(skipped_ids)
+        entry["prepared"] = sum(
+            1
+            for vid in completed_ids - skipped_ids
+            if requested.get(vid, {}).get("screening", True)
+        )
+        entry["scored"] = sum(
+            1 for vid in completed_ids - skipped_ids if requested.get(vid, {}).get("scoring", False)
+        )
+        entry["skipped"] = len(skipped_ids)
+        entry["failed"] = 0
+        if pending_ids:
+            remaining = [p for p in payloads if str(p.get("id")) in pending_ids]
+            if not remaining:
+                return "error", "combined discovery payload is missing pending roles"
+            carried = _carry_over(
+                opts,
+                entry,
+                "prepare",
+                len(pending_ids),
+                f"combined discovery stopped early — {len(pending_ids)} role(s) remain pending; they go first next night",
+            )
+            if carried:
+                return carried
+            _write_payload(SCREEN_PREP_PAYLOAD_PATH, remaining)
+            return "gate", {
+                "action": "prepare_screening",
+                "phase": "prepare",
+                "count": len(remaining),
+                "payload_path": str(SCREEN_PREP_PAYLOAD_PATH),
+                "instructions": f"Process {len(remaining)} pending role(s) with one independent request per role.",
+            }
+        return "advance", (
+            f"combined discovery complete — {entry['scored']} scored, "
+            f"{entry['prepared']} facts ready, {entry['skipped']} skipped, {entry['failed']} failed"
+        )
+
+    # Legacy checkpoint emitted before combined discovery was enabled.
     target_ids = entry.get("target_ids", [])
     saved = _screening_states(target_ids)
     # Preserve the initial attempt identity while shrinking the payload on resume.
@@ -2280,6 +2375,13 @@ def _run_counts(state: dict) -> dict:
         if prep.get("prepared") is not None:
             counts["screening_ready"] = _safe_int(prep.get("prepared"))
             counts["screening_failed"] = _safe_int(prep.get("failed")) or 0
+        if prep.get("discovery"):
+            # Combined discovery owns the real score count; the legacy
+            # vacancy_scoring checkpoint is intentionally skipped.
+            if prep.get("scored") is not None:
+                counts["scored"] = _safe_int(prep.get("scored"))
+            if prep.get("skipped") is not None:
+                counts["discovery_skipped"] = _safe_int(prep.get("skipped"))
     except Exception:
         pass
     return counts

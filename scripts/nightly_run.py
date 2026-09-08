@@ -219,13 +219,15 @@ def _orchestrator_model() -> str:
         return "opus"
 
 
-def _claude_cmd(action: str, night_dir, cfg: dict, phase: str) -> list[str]:
+def _claude_cmd(
+    action: str, night_dir, cfg: dict, phase: str, model: str | None = None
+) -> list[str]:
     base = shlex.split(os.environ.get("NIGHTLY_CLAUDE_BIN") or "claude")
     return base + [
         "-p",
         f"/jobs-night {action} {night_dir} {phase}",
         "--model",
-        _orchestrator_model(),
+        model or _orchestrator_model(),
         "--permission-mode",
         "dontAsk",
         "--tools",
@@ -610,9 +612,23 @@ def _prune_old_nights(ctx: _Ctx) -> None:
             ctx.log(f"pruned night directory {child.name} (seven-day retention, R17)")
 
 
-def _save_cmd(action: str, files: list[str], model: str | None = None) -> list[str]:
+def _save_cmd(
+    action: str, files: list[str], model: str | None = None, discovery: bool = False
+) -> list[str]:
     """The idempotent save command for a gate — one builder for the real sweep
     and --dry-run, so the printed command can never drift from the real one."""
+    if discovery:
+        return [
+            sys.executable,
+            str(SCRIPTS_DIR / "prepare_discovery.py"),
+            "--save",
+            "--payload",
+            str(VACANCIES_DIR / GATES[action]["payload"]),
+            "--prepared-by",
+            model or "unknown",
+            "--files",
+            *files,
+        ]
     spec = GATES[action]
     return (
         [sys.executable, str(SCRIPTS_DIR / spec["save_script"]), "--save"]
@@ -628,8 +644,11 @@ def _sweep_save(ctx: _Ctx, action: str, out_files: list[Path], timeout: float = 
     file so the rest still land (BUG-5). Best-effort: a sweep failure is
     logged, never fatal — the driver re-prompts for whatever is missing."""
     session_config = ctx.night_dir / "session.json"
-    model = json.loads(session_config.read_text())["model"] if session_config.exists() else None
-    cmd = _save_cmd(action, [str(f) for f in out_files], model)
+    session = json.loads(session_config.read_text()) if session_config.exists() else {}
+    model = session.get("model")
+    cmd = _save_cmd(
+        action, [str(f) for f in out_files], model, discovery=session.get("flow") == "discovery"
+    )
     ctx.log("save sweep: " + " ".join(cmd))
     try:
         res = subprocess.run(
@@ -673,7 +692,10 @@ def _run_session(ctx: _Ctx, action: str, phase: str) -> None:
         )
 
     import scoring_settings
+    import settings
 
+    discovery = action == "prepare_screening" and items[0].get("payload_kind") == "discovery"
+    route = settings.nightly_llm() if discovery else {"provider": "claude"}
     model_fn = (
         scoring_settings.company_screen_model
         if action == "screen_companies"
@@ -681,27 +703,58 @@ def _run_session(ctx: _Ctx, action: str, phase: str) -> None:
         if action == "score_vacancies" and phase == "screen"
         else scoring_settings.scoring_model
     )
-    (ctx.night_dir / "session.json").write_text(json.dumps({"model": model_fn()}), encoding="utf-8")
+    model = (
+        route["codex_model"]
+        if route["provider"] == "codex"
+        else (scoring_settings.screen_model() if discovery else model_fn())
+    )
+    (ctx.night_dir / "session.json").write_text(
+        json.dumps({"model": model, "flow": "discovery" if discovery else "legacy"}),
+        encoding="utf-8",
+    )
 
     budget = min(
         float(ctx.cfg[spec["limit_key"]]) * 60.0,
         (ctx.deadline - datetime.now()).total_seconds(),
     )
     budget = max(budget, 1.0)
-    cmd = _claude_cmd(action, ctx.night_dir, ctx.cfg, phase)
-    ctx.log(f"claude session for {action} ({phase}): {len(items)} item(s), budget {int(budget)}s")
-    ctx.log("claude cmd: " + " ".join(cmd))
+    if discovery and route["provider"] == "codex":
+        cmd = [
+            sys.executable,
+            str(SCRIPTS_DIR / "discovery_runner.py"),
+            "--input-dir",
+            str(score_in),
+            "--output-dir",
+            str(score_out),
+            "--model",
+            model,
+            "--seconds",
+            str(budget),
+        ]
+    else:
+        cmd = _claude_cmd(action, ctx.night_dir, ctx.cfg, phase, model if discovery else None)
+    ctx.log(
+        f"{route['provider']} session for {action} ({phase}): {len(items)} item(s), budget {int(budget)}s"
+    )
+    ctx.log("model command: " + " ".join(cmd))
 
     out_path = ctx.night_dir / f"claude-{action}.jsonl"
     err_path = ctx.night_dir / f"claude-{action}.err"
     timed_out = False
     rc: int | None = None
     started = time.monotonic()
+    session_env = _claude_env(spec["firecrawl"], ctx.night_dir)
+    if discovery and route["provider"] == "codex":
+        # Python validation must use the same profile/config as selection. Model
+        # children get a separate minimal environment in discovery_runner.py.
+        for key in ("USER_PROFILE_PATH", "DEFAULTS_TOML_PATH", "CODEX_HOME", "NIGHTLY_CODEX_BIN"):
+            if os.environ.get(key):
+                session_env[key] = os.environ[key]
     with open(out_path, "ab") as out_fh, open(err_path, "ab") as err_fh:
         proc = subprocess.Popen(
             cmd,
             cwd=str(PROJECT_ROOT),
-            env=_claude_env(spec["firecrawl"], ctx.night_dir),
+            env=session_env,
             stdout=out_fh,
             stderr=err_fh,
         )
@@ -741,6 +794,16 @@ def _run_session(ctx: _Ctx, action: str, phase: str) -> None:
     # Only ok results count as progress: a "failed"-field file saves nothing.
     ok_files, failed_files = _split_results(out_files)
     n_in, n_out = len(items), len(ok_files)
+    if discovery:
+        from prepare_discovery import completion
+
+        # A JSON file is not a successful save: CAS skips and rejected output
+        # must not inflate progress or usage-limit refunds.
+        completed = completion(items)
+        n_out = sum(value == "ready" for value in completed.values())
+        if completed and all(value == "skipped" for value in completed.values()):
+            ctx.log(f"{action}: all dispatched roles changed or became ineligible; nothing to save")
+            return
     if failed_files:
         ctx.log(f"{action}: {len(failed_files)} result file(s) failed or malformed")
     if timed_out:
@@ -779,7 +842,8 @@ def _run_session(ctx: _Ctx, action: str, phase: str) -> None:
     elif n_out < n_in:
         ctx.log(f"{action}: {n_in - n_out} of {n_in} item(s) unscored — carried over")
     else:
-        ctx.log(f"{action}: {n_out}/{n_in} result file(s) written")
+        unit = "role(s) completed" if discovery else "result file(s) written"
+        ctx.log(f"{action}: {n_out}/{n_in} {unit}")
 
 
 def _gate_loop(ctx: _Ctx) -> None:
@@ -950,6 +1014,7 @@ def run_night() -> int:
 
 def _print_dry_run() -> None:
     import settings
+    import scoring_settings
 
     cfg = settings.nightly()
     night = "vacancies/nightly/<date>"
@@ -964,15 +1029,32 @@ def _print_dry_run() -> None:
         f"deadline start + {cfg['run_deadline_minutes']:g} min, "
         f"{RATE_LIMIT_WAITS} usage-limit waits (+{RATE_LIMIT_MARGIN_S}s margin)"
     )
+    route = settings.nightly_llm()
+    print(
+        f"  combined discovery: {route['provider']} / "
+        + (route["codex_model"] if route["provider"] == "codex" else "screen_model (cheap tier)")
+    )
+    print(
+        "  one fresh request per vacancy; existing scores >=40 untouched; existing low scores keep their score"
+    )
     for action, spec in GATES.items():
         minutes = cfg[spec["limit_key"]]
-        save = " ".join(_save_cmd(action, [f"{night}/score_out/NNN.json ..."]))
+        discovery = action == "prepare_screening"
+        save = " ".join(_save_cmd(action, [f"{night}/score_out/NNN.json ..."], discovery=discovery))
         env_keys = list(_claude_env(spec["firecrawl"]))
         print(f"  {action}:")
         print(f"    payload: vacancies/{spec['payload']} → {night}/score_in/NNN.json")
-        for phase in spec["phases"]:
-            session = " ".join(_claude_cmd(action, night, cfg, phase))
-            print(f"    session ({phase}): {mask_secrets(session)}  [limit {minutes:g} min]")
+        if discovery and route["provider"] == "codex":
+            print(
+                f"    session: discovery_runner.py --model {route['codex_model']} "
+                f"--input-dir {night}/score_in --output-dir {night}/score_out "
+                f"--seconds {minutes * 60:g}"
+            )
+        else:
+            for phase in spec["phases"]:
+                model = scoring_settings.screen_model() if discovery else None
+                session = " ".join(_claude_cmd(action, night, cfg, phase, model=model))
+                print(f"    session ({phase}): {mask_secrets(session)}  [limit {minutes:g} min]")
         print(f"    save:    {mask_secrets(save)}")
         print(f"    env:     {', '.join(env_keys) or '(empty)'} — TELEGRAM_* never passed")
     print("  every other gate: the driver's own unattended answer (no session)")
