@@ -26,7 +26,7 @@ import {
   scheduleRender,
 } from "./state.js";
 import { loadFromServer } from "./api.js";
-import { escHtml, showToastText, resolveVacancyCompany } from "./helpers.js";
+import { escHtml, safeUrl, showToastText, resolveVacancyCompany } from "./helpers.js";
 import { sourceLabel } from "./vacancy.js";
 import { T } from "./i18n.js";
 import { reviewBatches, batchConcern } from "./screen-batches.js";
@@ -487,13 +487,16 @@ export function screenRowHtml(g, opts) {
   const source = g.source_board || (company && sourceLabel(company.strategy)) || "";
   const sourceText = source || t("screen_unknown", "unknown");
   const metadata = [
-    dates.firstSeen && `${t("vac_first_seen", "First seen")}: ${dates.firstSeen}`,
-    dates.lastSeen && `${t("screen_last_seen", "Last seen")}: ${dates.lastSeen}`,
-    `${t("vac_source", "Source")}: ${sourceText}`,
-    dates.deadline && (dates.expired
+    ["date", dates.firstSeen && `${t("vac_first_seen", "First seen")}: ${dates.firstSeen}`],
+    ["date", dates.lastSeen && `${t("screen_last_seen", "Last seen")}: ${dates.lastSeen}`],
+    ["source", `${t("vac_source", "Source")}: ${sourceText}`],
+    [dates.expired ? "expired" : "deadline", dates.deadline && (dates.expired
       ? fill(t("screen_deadline_passed", "Deadline passed: {date}"), { date: dates.deadline })
-      : `${t("vac_deadline", "Deadline")}: ${dates.deadline}`),
-  ].filter(Boolean).join(" · ");
+      : `${t("vac_deadline", "Deadline")}: ${dates.deadline}`)],
+  ].filter(([, text]) => text).map(([kind, text]) =>
+    `<span class="scr-meta scr-meta--${kind}">${escHtml(text)}</span>`
+  ).join("");
+  const postingUrl = safeUrl((g.locations || []).find((l) => l && l.url)?.url || "");
   const work = g.screening?.work_profile;
   const activities = work
     ? work.activities?.map((a) => flowLabel(a.kind, t)).join(" · ") ||
@@ -526,9 +529,9 @@ export function screenRowHtml(g, opts) {
     "</div>" +
     '<div class="scr-row-sub">' +
     escHtml(org) +
-    (loc ? " · " + escHtml(loc) : "") +
+    (loc ? ' <span class="scr-meta scr-meta--location">' + escHtml(loc) + "</span>" : "") +
     "</div>" +
-    '<div class="scr-row-meta">' + escHtml(metadata) + "</div>" +
+    '<div class="scr-row-meta">' + metadata + "</div>" +
     (fact ? '<div class="scr-row-fact">' + escHtml(fact) + "</div>" : "") +
     (o.compact
       ? '<div class="scr-concern">' + escHtml(batchConcern(g, t)) + "</div>"
@@ -558,6 +561,9 @@ export function screenRowHtml(g, opts) {
       '" data-vacancy="' + id + '"' + (o.disabled ? " disabled" : "") +
       '>' + escHtml(t(key, label)) + '</button>'
     ).join("") +
+    (postingUrl ? '<a class="scr-btn scr-posting" href="' + escHtml(postingUrl) +
+      '" target="_blank" rel="noopener noreferrer">' +
+      escHtml(t("vac_open_posting", "Open posting")) + ' ↗</a>' : "") +
     "</div>" +
     '<details class="scr-evidence" data-evidence="' +
     id +

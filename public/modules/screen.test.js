@@ -290,7 +290,7 @@ test("the row head is a 44px checkbox target with the title, org, location, fact
     /scr-row-head" role="checkbox" tabindex="0" aria-checked="true"/,
   );
   assert.match(html, /Ops &lt;Lead&gt;/);
-  assert.match(html, /Org &amp; Co · Berlin/);
+  assert.match(html, /Org &amp; Co <span class="scr-meta scr-meta--location">Berlin<\/span>/);
   assert.match(html, /scr-row-fact">Run the office\./);
 });
 
@@ -581,4 +581,14 @@ test("a failed Undo remains available for retry", async () => {
   assert.equal((await undoLast(fakeIo(db, {}, new Set(["retryUndo"])))).restored, 0);
   assert.equal((await undoLast(fakeIo(db, {}))).restored, 1);
   assert.equal(db.retryUndo, "unseen");
+});
+
+
+test("posting link is outside selection and rejects unsafe URLs", () => {
+  const row = (url) => screenRowHtml({ id: "link", locations: [{ url }] }, { t });
+  const html = row('https://example.org/job?q="test"');
+  assert.match(html, /scr-row-actions[\s\S]*href="https:\/\/example.org\/job\?q=&quot;test&quot;"/);
+  assert.match(html, /rel="noopener noreferrer"/);
+  assert.doesNotMatch(row("javascript:alert(1)"), /scr-posting/);
+  assert.doesNotMatch(row(""), /scr-posting/);
 });

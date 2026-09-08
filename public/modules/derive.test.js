@@ -1090,3 +1090,13 @@ test("inbox requires current posting and profile; previous decisions survive ref
   assert.deepEqual([...lists.kept], ["kept"]);
   assert.deepEqual([...lists.putAside], ["passed"]);
 });
+
+
+test("ready screening vacancies remain in Browse without a legacy score or approved company", () => {
+  const opts = visOpts({});
+  opts.isApproved = () => false;
+  const role = { id: "ready", screening_state: "ready", llm_score: null };
+  assert.equal(isVisible(role, opts), true);
+  assert.equal(basketCounts([role], opts).unseen, 1);
+  assert.equal(groupsInBasket([role], "unseen", opts).length, 1);
+});

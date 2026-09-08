@@ -6202,10 +6202,41 @@ body::after {
   overflow-wrap: anywhere;
 }
 .scr-row-meta {
-  margin-top: 3px;
-  font-size: var(--text-xs);
-  color: var(--sky-text-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+.scr-meta {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--sky-text);
+  background: var(--surface);
   overflow-wrap: anywhere;
+}
+.scr-meta--date {
+  color: var(--cobalt);
+  background: var(--cobalt-tint);
+}
+.scr-meta--location {
+  color: var(--q-good);
+  background: var(--q-good-bg);
+}
+.scr-meta--deadline {
+  color: var(--q-moderate);
+  background: var(--q-moderate-bg);
+}
+.scr-meta--expired {
+  color: var(--q-weak);
+  background: var(--q-weak-bg);
+}
+.scr-posting {
+  color: var(--cobalt);
+  text-decoration: underline;
 }
 .scr-row-fact {
   margin-top: 6px;
@@ -6242,6 +6273,7 @@ body::after {
   color: var(--slate);
 }
 .scr-row-actions {
+  flex-wrap: wrap;
   display: flex;
   gap: 8px;
   margin: 8px 0 0 34px;

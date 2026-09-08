@@ -40,10 +40,10 @@ export function hasVerdict(g, opts) {
 export const ANY_COMPANY_MIN_SCORE = VISIBLE_MIN_SCORE;
 
 // Decisions and applications stay visible regardless of company tracking or
-// score. Only undecided Catalog entries use discovery gates. Availability is
+// score. Prepared screening roles also bypass legacy discovery gates. Availability is
 // shown separately and never changes the decision basket.
 export function isVisible(g, opts) {
-  if (hasVerdict(g, opts)) return true;
+  if (hasVerdict(g, opts) || g.screening_state === "ready") return true;
   if (!opts.isApproved(g) && !clearsScoreFloor(g, ANY_COMPANY_MIN_SCORE))
     return false;
   return clearsScoreFloor(g, opts.minScore);
