@@ -553,8 +553,11 @@ export function screenDateFacts(
       : null;
   };
   const seen = dateOnly(g.first_seen);
+  const lastSeen = dateOnly(g.last_seen);
   const deadline = dateOnly(g.deadline);
   return {
+    firstSeen: seen,
+    lastSeen,
     age: seen
       ? Math.round((Date.parse(today) - Date.parse(seen)) / 86400000)
       : null,

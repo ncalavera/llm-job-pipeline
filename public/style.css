@@ -6201,6 +6201,12 @@ body::after {
   color: var(--sky-text-secondary);
   overflow-wrap: anywhere;
 }
+.scr-row-meta {
+  margin-top: 3px;
+  font-size: var(--text-xs);
+  color: var(--sky-text-secondary);
+  overflow-wrap: anywhere;
+}
 .scr-row-fact {
   margin-top: 6px;
   font-size: var(--text-sm);

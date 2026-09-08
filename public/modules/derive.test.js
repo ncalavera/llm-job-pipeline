@@ -19,6 +19,7 @@ import {
   HOT_MIN_SCORE,
   isApplyable,
   companyRollup,
+  screenDateFacts,
 } from "./derive.js";
 
 // Mirror of STATUS_BASKET in state.js (kept inline so the test imports nothing
@@ -980,6 +981,10 @@ test("first-seen age and deadline filters are independent and preserve unstated 
   const today = "2026-09-07";
   const old = { first_seen: "2026-08-07T12:00:00Z", deadline: "2026-10-01" };
   const recentExpired = { first_seen: "2026-09-06", deadline: "2026-09-06" };
+  assert.deepEqual(
+    screenDateFacts({ first_seen: old.first_seen, last_seen: "2026-09-06T08:00:00Z", deadline: old.deadline }, today),
+    { firstSeen: "2026-08-07", lastSeen: "2026-09-06", age: 31, deadline: "2026-10-01", expired: false },
+  );
   assert.equal(
     screenMatches(old, { age: "older30", deadline: "open" }, today),
     true,

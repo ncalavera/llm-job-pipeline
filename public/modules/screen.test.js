@@ -418,7 +418,7 @@ test("first-seen is labelled separately from expired deadline on compact rows", 
     deadline: "2026-09-06",
   };
   const head = screenRowHtml(g, { today: "2026-09-07" }).split("<details")[0];
-  assert.match(head, /First seen 2d ago/);
+  assert.match(head, /First seen: 2026-09-05/);
   assert.match(head, /Deadline passed: 2026-09-06/);
   const current = screenRowHtml(
     { ...g, deadline: "2026-09-07" },
@@ -436,6 +436,29 @@ test("first-seen is labelled separately from expired deadline on compact rows", 
     0,
   );
   view.filters = {};
+});
+
+test("compact row metadata uses validated dates, escapes source, and shows unknowns", () => {
+  const html = screenRowHtml(
+    {
+      id: "meta",
+      title: "Role",
+      source_board: "Board <A>",
+      first_seen: "2026-09-01T10:00:00Z",
+      last_seen: "2026-09-07",
+      deadline: "2026-09-20",
+      screening: { posting_facts: {} },
+    },
+    { t, compact: true, today: "2026-09-08" },
+  );
+  assert.match(html, /First seen: 2026-09-01/);
+  assert.match(html, /Last seen: 2026-09-07/);
+  assert.match(html, /Source: Board &lt;A&gt;/);
+  assert.match(html, /Deadline: 2026-09-20/);
+  assert.doesNotMatch(html, /First seen: undefined|Last seen: undefined/);
+  const missing = screenRowHtml({ id: "missing", title: "Role" }, { t, compact: true });
+  assert.match(missing, /Source: unknown/);
+  assert.doesNotMatch(missing, /First seen:|Last seen:|Deadline:/);
 });
 
 test("technical specialist evidence has a technical label, distinct from specialist activity", () => {

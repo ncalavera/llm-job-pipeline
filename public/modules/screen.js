@@ -20,12 +20,14 @@ import {
   API_BASE,
   groups,
   groupsById,
+  getCompanies,
   getGroupStatus,
   setStatusLocal,
   scheduleRender,
 } from "./state.js";
 import { loadFromServer } from "./api.js";
-import { escHtml, showToastText } from "./helpers.js";
+import { escHtml, showToastText, resolveVacancyCompany } from "./helpers.js";
+import { sourceLabel } from "./vacancy.js";
 import { T } from "./i18n.js";
 import { reviewBatches, batchConcern } from "./screen-batches.js";
 import {
@@ -481,17 +483,17 @@ export function screenRowHtml(g, opts) {
   const loc = locationOf(g, facts);
   const fact = factLine(facts);
   const dates = screenDateFacts(g, o.today);
-  const seen =
-    dates.age != null && dates.age >= 0
-      ? fill(t("screen_first_seen_days", "First seen {n}d ago"), {
-          n: dates.age,
-        })
-      : "";
-  const expiry = dates.expired
-    ? fill(t("screen_deadline_passed", "Deadline passed: {date}"), {
-        date: dates.deadline,
-      })
-    : "";
+  const company = resolveVacancyCompany(g, getCompanies());
+  const source = g.source_board || (company && sourceLabel(company.strategy)) || "";
+  const sourceText = source || t("screen_unknown", "unknown");
+  const metadata = [
+    dates.firstSeen && `${t("vac_first_seen", "First seen")}: ${dates.firstSeen}`,
+    dates.lastSeen && `${t("screen_last_seen", "Last seen")}: ${dates.lastSeen}`,
+    `${t("vac_source", "Source")}: ${sourceText}`,
+    dates.deadline && (dates.expired
+      ? fill(t("screen_deadline_passed", "Deadline passed: {date}"), { date: dates.deadline })
+      : `${t("vac_deadline", "Deadline")}: ${dates.deadline}`),
+  ].filter(Boolean).join(" · ");
   const work = g.screening?.work_profile;
   const activities = work
     ? work.activities?.map((a) => flowLabel(a.kind, t)).join(" · ") ||
@@ -526,10 +528,7 @@ export function screenRowHtml(g, opts) {
     escHtml(org) +
     (loc ? " · " + escHtml(loc) : "") +
     "</div>" +
-    (!o.compact && seen
-      ? '<div class="scr-work">' + escHtml(seen) + "</div>"
-      : "") +
-    (expiry ? '<div class="scr-expired">' + escHtml(expiry) + "</div>" : "") +
+    '<div class="scr-row-meta">' + escHtml(metadata) + "</div>" +
     (fact ? '<div class="scr-row-fact">' + escHtml(fact) + "</div>" : "") +
     (o.compact
       ? '<div class="scr-concern">' + escHtml(batchConcern(g, t)) + "</div>"
