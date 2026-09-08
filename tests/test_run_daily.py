@@ -1642,7 +1642,9 @@ def test_combined_discovery_partial_resumes_accumulate_counts(rd, monkeypatch, t
             {"b2": "ready"},
         ]
     )
-    monkeypatch.setitem(sys.modules, "prepare_discovery", types.SimpleNamespace(completion=lambda p: next(waves)))
+    monkeypatch.setitem(
+        sys.modules, "prepare_discovery", types.SimpleNamespace(completion=lambda p: next(waves))
+    )
     state = rd._new_state(rd.Opts())
     entry = rd._stage(state, "screening_prep")
     entry.update(
@@ -1672,7 +1674,9 @@ def test_combined_discovery_missing_payload_does_not_advance(rd, monkeypatch, tm
 
     monkeypatch.setattr(rd, "SCREEN_PREP_PAYLOAD_PATH", tmp_path / "prep.json")
     rd._write_payload(tmp_path / "prep.json", [])
-    monkeypatch.setitem(sys.modules, "prepare_discovery", types.SimpleNamespace(completion=lambda p: {}))
+    monkeypatch.setitem(
+        sys.modules, "prepare_discovery", types.SimpleNamespace(completion=lambda p: {})
+    )
     state = rd._new_state(rd.Opts())
     entry = rd._stage(state, "screening_prep")
     entry.update({"emitted": True, "discovery": True, "target_ids": ["a1"], "completed_ids": []})

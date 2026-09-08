@@ -2043,7 +2043,10 @@ def _h_screening_prep(state, entry, opts):
         if not entry.get("emitted"):
             res = _run_capture(_py("prepare_discovery.py") + ["--local"], opts)
             if res.returncode != 0:
-                return "error", f"prepare_discovery --local exited {res.returncode}: {res.stderr[-400:]}"
+                return (
+                    "error",
+                    f"prepare_discovery --local exited {res.returncode}: {res.stderr[-400:]}",
+                )
             if res.stderr.strip():
                 print(res.stderr.strip(), file=sys.stderr, flush=True)
             try:
@@ -2119,7 +2122,9 @@ def _h_screening_prep(state, entry, opts):
         entry["completed_ids"] = sorted(completed_ids)
         entry["skipped_ids"] = sorted(skipped_ids)
         entry["prepared"] = sum(
-            1 for vid in completed_ids - skipped_ids if requested.get(vid, {}).get("screening", True)
+            1
+            for vid in completed_ids - skipped_ids
+            if requested.get(vid, {}).get("screening", True)
         )
         entry["scored"] = sum(
             1 for vid in completed_ids - skipped_ids if requested.get(vid, {}).get("scoring", False)

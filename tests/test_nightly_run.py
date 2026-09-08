@@ -1187,20 +1187,24 @@ def _run_discovery_session_with_completion(nr, monkeypatch, state):
     """Run the wrapper's discovery branch with a file-only fake worker."""
     import settings
 
-    payload = [{
-        "payload_kind": "discovery",
-        "id": "v1",
-        "fingerprint": "fp1",
-        "existing_score": None,
-        "scoring": {"system_prompt": "s", "user_msg": "u"},
-        "screening": {"user_msg": "u"},
-    }]
+    payload = [
+        {
+            "payload_kind": "discovery",
+            "id": "v1",
+            "fingerprint": "fp1",
+            "existing_score": None,
+            "scoring": {"system_prompt": "s", "user_msg": "u"},
+            "screening": {"user_msg": "u"},
+        }
+    ]
     (nr.vac / "prepare_screening_payload.json").write_text(json.dumps(payload))
     night = nr.night_dir()
     night.mkdir(parents=True)
     (night / "score_in").mkdir()
     (night / "score_out").mkdir()
-    monkeypatch.setattr(settings, "nightly_llm", lambda: {"provider": "codex", "codex_model": "cheap-luna"})
+    monkeypatch.setattr(
+        settings, "nightly_llm", lambda: {"provider": "codex", "codex_model": "cheap-luna"}
+    )
 
     class Finished:
         returncode = 0
@@ -1218,12 +1222,18 @@ def _run_discovery_session_with_completion(nr, monkeypatch, state):
 
     monkeypatch.setattr(nr.mod.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(nr.mod, "_sweep_save", lambda *args, **kwargs: True)
-    monkeypatch.setattr(nr.mod, "completion", lambda items: {"v1": state}) if hasattr(nr.mod, "completion") else None
+    monkeypatch.setattr(nr.mod, "completion", lambda items: {"v1": state}) if hasattr(
+        nr.mod, "completion"
+    ) else None
     import prepare_discovery
+
     monkeypatch.setattr(prepare_discovery, "completion", lambda items: {"v1": state})
     alerts = []
-    ctx = nr.mod._Ctx({"max_items_per_night": 1, "vacancy_gate_minutes": 1}, night,
-                       datetime.now() + timedelta(minutes=5))
+    ctx = nr.mod._Ctx(
+        {"max_items_per_night": 1, "vacancy_gate_minutes": 1},
+        night,
+        datetime.now() + timedelta(minutes=5),
+    )
     monkeypatch.setattr(ctx, "alert", lambda stage, message: alerts.append((stage, message)))
     nr.mod._run_session(ctx, "prepare_screening", "prepare")
     return ctx, alerts

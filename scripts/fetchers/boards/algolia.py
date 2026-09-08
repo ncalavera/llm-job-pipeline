@@ -23,13 +23,16 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
     index = board_cfg["algolia_index"]
     board_name = board_cfg["name"]
     run_id = os.environ.get("JOBS_RUN_ID") or str(uuid.uuid4())
-    source_key = board_cfg.get("source_key") or board_cfg.get("id") or re.sub(
-        r"[^a-z0-9]+", "_", board_name.lower()
-    ).strip("_")
+    source_key = (
+        board_cfg.get("source_key")
+        or board_cfg.get("id")
+        or re.sub(r"[^a-z0-9]+", "_", board_name.lower()).strip("_")
+    )
     source_url = board_cfg.get("url")
     ledger_ok = record_source_run(run_id, source_key, source_url)
     if run_id and not ledger_ok:
         from fetchers.registry import record_fetch_error
+
         record_fetch_error(board_name, "error: source ledger unavailable")
 
     url = f"https://{app_id}-dsn.algolia.net/1/indexes/{index}/query"
@@ -83,15 +86,19 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
 
     # Durable raw capture happens before parser filters run. A second upsert
     # below annotates each row with the parser outcome.
-    raw_observations = [{
-        "external_id": hit.get("objectID") or hashlib.md5(
-            f"{hit.get('company_name', '')}:{hit.get('title', '')}".encode()
-        ).hexdigest()[:12],
-        "title": hit.get("title") or "",
-        "organization": (hit.get("company_name") or "").strip(),
-        "url": hit.get("url_external") or "",
-        "outcome": "observed",
-    } for hit in all_hits]
+    raw_observations = [
+        {
+            "external_id": hit.get("objectID")
+            or hashlib.md5(
+                f"{hit.get('company_name', '')}:{hit.get('title', '')}".encode()
+            ).hexdigest()[:12],
+            "title": hit.get("title") or "",
+            "organization": (hit.get("company_name") or "").strip(),
+            "url": hit.get("url_external") or "",
+            "outcome": "observed",
+        }
+        for hit in all_hits
+    ]
     observations_ok = record_source_observations(run_id, source_key, source_url, raw_observations)
 
     # Apply GLOBAL_BLACKLIST + board-specific blacklist (NO caps, NO location filter, NO keyword filter)
@@ -120,29 +127,38 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
         else:
             reason = None
             outcome = "accepted"
-        observations.append({
-            "external_id": hit.get("objectID") or hashlib.md5(
-                f"{hit.get('company_name', '')}:{title}".encode()
-            ).hexdigest()[:12],
-            "title": title,
-            "organization": (hit.get("company_name") or "").strip(),
-            "url": hit.get("url_external") or "",
-            "outcome": outcome,
-            "reason": reason,
-        })
+        observations.append(
+            {
+                "external_id": hit.get("objectID")
+                or hashlib.md5(f"{hit.get('company_name', '')}:{title}".encode()).hexdigest()[:12],
+                "title": title,
+                "organization": (hit.get("company_name") or "").strip(),
+                "url": hit.get("url_external") or "",
+                "outcome": outcome,
+                "reason": reason,
+            }
+        )
     observations_ok = observations_ok and record_source_observations(
-        run_id, source_key, source_url,
+        run_id,
+        source_key,
+        source_url,
         observations,
     )
     final_ledger_ok = record_source_run(
-        run_id, source_key, source_url, raw_count=len(all_hits),
+        run_id,
+        source_key,
+        source_url,
+        raw_count=len(all_hits),
         accepted_count=sum(o["outcome"] == "accepted" for o in observations),
         excluded_count=sum(o["outcome"] == "excluded" for o in observations),
         complete=last_error is None and ledger_ok and observations_ok,
-        error=str(last_error) if last_error else (None if ledger_ok and observations_ok else "source ledger write failed"),
+        error=str(last_error)
+        if last_error
+        else (None if ledger_ok and observations_ok else "source ledger write failed"),
     )
     if run_id and (not observations_ok or not final_ledger_ok):
         from fetchers.registry import record_fetch_error
+
         record_fetch_error(board_name, "error: source ledger write failed")
 
     # A partial page walk is useful evidence, but it is not a complete source
@@ -150,6 +166,7 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
     # fetch boundary so gone detection/publish gates cannot treat it as healthy.
     if last_error is not None:
         from fetchers.registry import record_fetch_error
+
         record_fetch_error(board_name, f"error: incomplete pagination: {last_error}")
 
     jobs = []

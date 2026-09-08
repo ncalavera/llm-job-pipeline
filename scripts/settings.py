@@ -400,7 +400,10 @@ def nightly_llm() -> dict:
     provider = str(sec.get("provider", "claude")).strip().lower()
     if provider not in {"claude", "codex"}:
         raise ValueError("nightly.provider must be claude or codex")
-    return {"provider": provider, "codex_model": str(sec.get("codex_model", "gpt-5.4-mini")).strip()}
+    return {
+        "provider": provider,
+        "codex_model": str(sec.get("codex_model", "gpt-5.4-mini")).strip(),
+    }
 
 
 def nightly_paused_until() -> str:
