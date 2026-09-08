@@ -298,6 +298,25 @@ test("an empty list renders No roles left in this list.", () => {
   assert.match(screenListHtml([], { t }), /No roles left in this list\./);
 });
 
+test("individual rows offer Like and Pass outside the selection checkbox", async () => {
+  const row = { id: "one", title: "Role", ...facts() };
+  const html = screenRowHtml(row);
+  assert.match(html, /<\/div><\/div><div class="scr-row-actions">/);
+  assert.match(html, /data-decision="liked" data-vacancy="one">Like<\/button>/);
+  assert.match(html, /data-decision="passed" data-vacancy="one">Pass<\/button>/);
+  assert.match(screenRowHtml(row, { disabled: true }), /data-vacancy="one" disabled/);
+
+  const db = { one: "unseen", other: "unseen" };
+  const io = fakeIo(db, {});
+  view.selected = new Set(["other"]);
+  await bulkSet(["one"], "passed", io);
+  assert.equal(db.one, "passed");
+  assert.equal(db.other, "unseen");
+  await undoLast(io);
+  assert.equal(db.one, "unseen");
+  view.selected.clear();
+});
+
 test("undo leaves a decision made after the bulk action untouched", async () => {
   const db = { a: "unseen", b: "unseen" };
   const io = fakeIo(db, {});

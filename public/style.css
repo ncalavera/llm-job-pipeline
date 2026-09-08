@@ -6235,6 +6235,11 @@ body::after {
   background: var(--surface);
   color: var(--slate);
 }
+.scr-row-actions {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 0 34px;
+}
 .scr-evidence {
   margin-left: 34px;
   font-size: var(--text-sm);

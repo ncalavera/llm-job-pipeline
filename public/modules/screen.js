@@ -470,7 +470,7 @@ function evidenceHtml(g, reqs, t) {
   );
 }
 
-/** One row. opts: { t, checked, open } */
+/** One row. opts: { t, checked, open, disabled } */
 export function screenRowHtml(g, opts) {
   const o = opts || {};
   const t = o.t || ((k, fb) => fb);
@@ -550,6 +550,16 @@ export function screenRowHtml(g, opts) {
         "</div>"
       : "") +
     "</div></div>" +
+    '<div class="scr-row-actions">' +
+    [
+      ["liked", "screen_keep", "Like"],
+      ["passed", "screen_put_aside", "Pass"],
+    ].map(([status, key, label]) =>
+      '<button type="button" class="scr-btn" data-decision="' + status +
+      '" data-vacancy="' + id + '"' + (o.disabled ? " disabled" : "") +
+      '>' + escHtml(t(key, label)) + '</button>'
+    ).join("") +
+    "</div>" +
     '<details class="scr-evidence" data-evidence="' +
     id +
     '"' +
@@ -867,6 +877,7 @@ export function renderScreen() {
               compact: true,
               checked: view.selected.has(g.id),
               open: view.open.has(g.id),
+              disabled: view.busy || !state.statusesLoaded || !!pendingFeedback || !!pendingDecision,
             }),
           )
           .join("")
@@ -984,7 +995,7 @@ function onClick(e) {
     view.reason = pendingDecision.reason || "";
     view.batch = pendingDecision.batch;
     if (pendingDecision.undo) runUndo(true);
-    else runBulk(pendingDecision.status, [pendingDecision.id]);
+    else runBulk(pendingDecision.status, [pendingDecision.id], true);
   } else if (hit("#scrLoadNotes")) {
     view.busy = true;
     renderScreen();
@@ -1043,6 +1054,11 @@ function onClick(e) {
   } else if (hit("#scrSelectAll")) {
     toggleSelectAll(lastVisible);
     renderScreen();
+  } else if ((el = hit("[data-decision]"))) {
+    const id = el.getAttribute("data-vacancy");
+    const status = el.getAttribute("data-decision");
+    if (lastVisible.includes(id) && ["liked", "passed"].includes(status))
+      runBulk(status, [id]);
   } else if (hit("#scrKeep")) {
     runBulk("liked");
   } else if (hit("#scrAside")) {
@@ -1052,9 +1068,9 @@ function onClick(e) {
   }
 }
 
-async function runBulk(status, retryIds) {
-  if (view.busy || view.feedback || !state.statusesLoaded || (pendingDecision && !retryIds)) return;
-  const ids = retryIds || lastVisible.filter((id) => view.selected.has(id));
+async function runBulk(status, requestedIds, retry = false) {
+  if (view.busy || view.feedback || !state.statusesLoaded || (pendingDecision && !retry)) return;
+  const ids = requestedIds || lastVisible.filter((id) => view.selected.has(id));
   if (!ids.length) return;
   view.busy = true;
   renderScreen();
@@ -1086,7 +1102,7 @@ async function runBulk(status, retryIds) {
     return;
   }
   view.busy = false;
-  view.selected.clear();
+  for (const id of ids) view.selected.delete(id);
   view.notice = fill(T("screen_saved", "{n} of {m} saved"), {
     n: r.saved,
     m: r.total,
