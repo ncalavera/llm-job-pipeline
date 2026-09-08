@@ -164,120 +164,6 @@ Object.assign(LOCAL.en, {
   screen_select_page: "Select this page",
   screen_flow_title: "Find a batch with a shared reason to decide.",
 });
-LOCAL.ru = {
-  screen_age: "Когда впервые найдена",
-  screen_last7: "За последние 7 дней",
-  screen_last14: "За последние 14 дней",
-  screen_last30: "За последние 30 дней",
-  screen_older30: "Больше 30 дней назад",
-  screen_deadline_filter: "Срок подачи",
-  screen_no_passed_deadline: "Нет истёкшего срока",
-  screen_expired: "Срок подачи истёк",
-  screen_first_seen_days: "Найдена {n} дн. назад",
-  screen_deadline_passed: "Срок подачи истёк: {date}",
-  screen_take: "Могу ли я принять эту работу?",
-  screen_do: "Справлюсь ли я с работой?",
-  screen_enjoy: "Хочу ли я этим заниматься?",
-  screen_activity: "Чем я буду заниматься в течение недели?",
-  screen_all_values: "Любой вариант",
-  screen_building: "Создавать и запускать",
-  screen_running: "Управлять и улучшать",
-  screen_selling: "Продавать и развивать отношения",
-  screen_specialist: "Выполнять специализированную работу",
-  screen_unclassified: "Характер работы ещё не разобран",
-  screen_work_unprepared: "Характер работы ещё не разобран",
-  screen_coordination: "Координация технической работы",
-  screen_practical: "Инструменты и автоматизация",
-  screen_technical_specialist: "Глубокая техническая экспертиза",
-  screen_unknown: "Неизвестно / не указано",
-  screen_direct_impact: "Прямой общественно полезный результат",
-  screen_enabling_impact: "Обеспечивать общественно полезную работу",
-  screen_commercial: "Коммерческий результат",
-  screen_purpose: "Ради какого результата работа",
-  screen_technical: "Техническая глубина",
-  screen_seniority_filter: "Уровень роли",
-  screen_work_mode: "Формат работы",
-  screen_remote: "Удалённо",
-  screen_hybrid: "Гибрид",
-  screen_onsite: "В офисе",
-  screen_requirement_kind: "Тип требования",
-  screen_strength_filter: "Насколько обязательно",
-  screen_requirement_text: "Слова в названии требования",
-  screen_requirement_placeholder: "Язык, место, навык…",
-  screen_language: "Язык",
-  screen_location: "Место работы",
-  screen_authorisation: "Право на работу",
-  screen_skill: "Навык",
-  screen_experience: "Опыт",
-  screen_education: "Образование",
-  screen_domain: "Профессиональная область",
-  screen_other: "Другое",
-  screen_required: "Обязательно",
-  screen_preferred: "Желательно",
-  screen_finding: "Сравнение с моим профилем",
-  screen_supported: "Есть подтверждение в профиле",
-  screen_match: "Есть подтверждение в профиле",
-  screen_possible_conflict: "Возможное несоответствие",
-  screen_search: "Название или компания",
-  screen_filter_hint:
-    "Фильтры сочетаются для одного требования. Поиск — по названию требования. Неизвестное — не причина для отказа.",
-  screen_clear_filters: "Сбросить фильтры",
-  screen_matches: "Под фильтры: {n} · Всего в списке: {m}",
-  screen_work_availability:
-    "У {n} вакансий ещё не разобран характер работы. Фильтры по требованиям уже работают.",
-  screen_page: "Страница {n} из {m}",
-  screen_previous: "Назад",
-  screen_next: "Следующая группа",
-  screen_select_page: "Выбрать эту страницу",
-  screen_flow_title: "Разберите вакансии по характеру работы.",
-  screen_batches: "Группы для отбора",
-  screen_junior: "Младший специалист",
-  screen_mid: "Специалист",
-  screen_senior: "Старший специалист",
-  screen_head: "Руководитель",
-  screen_director: "Директор",
-  screen_executive: "Высшее руководство",
-  screen_work_evidence: "Почему так описана работа",
-  screen_more_requirements: "Ещё требований: {n}",
-};
-Object.assign(LOCAL.ru, {
-  screen_check_requirement: "Проверить требование",
-  screen_check_conflict: "Проверить возможное несоответствие",
-  screen_check_fit: "Соответствие профилю стоит проверить",
-  screen_check_location: "Проверить место работы и остальные требования",
-  screen_past_notes: "История причин",
-  screen_note_reviewed: "Разобрано с ИИ",
-  screen_note_pending: "Ожидает разбора с ИИ",
-  screen_no_notes: "Причин пока нет.",
-  screen_notes_failed: "Не удалось загрузить причины. Попробуйте ещё раз.",
-  screen_review_title: "Разберём несколько вакансий вместе",
-  screen_batch_product: "Продукт",
-  screen_batch_operations: "Операции и управление",
-  screen_batch_research: "Исследования",
-  screen_batch_programmes: "Программы и проекты",
-  screen_batch_partnerships: "Фандрайзинг и партнёрства",
-  screen_batch_other: "Другие роли",
-  screen_batch_reason_product: "Управление и развитие продуктов",
-  screen_batch_reason_operations:
-    "Операционная работа и координация организации",
-  screen_batch_reason_research: "Исследования, анализ и оценка",
-  screen_batch_reason_programmes: "Реализация программ и проектов",
-  screen_batch_reason_partnerships: "Фандрайзинг и внешние партнёрства",
-  screen_batch_reason_other: "Характер работы стоит уточнить",
-  screen_roles: "вакансий",
-  screen_recover_hint: "Решение можно изменить.",
-  screen_batch_showing: "Показаны {start}–{end} из {total} в этой группе",
-  screen_review_later: "Позже · следующие",
-  screen_reason_label: "Почему? Необязательно — сохраним вместе с решением.",
-  screen_feedback_failed:
-    "Решения сохранены, но причина — нет. Повторите сохранение причины.",
-  screen_feedback_saved:
-    "Причина сохранена · ожидает разбора с ИИ. Предпочтения не изменены.",
-  screen_retry: "Повторить",
-  screen_preparation: "Подготовка вакансий",
-  screen_save_failed:
-    "Не удалось завершить сохранение. Проверьте список перед повтором.",
-});
 const LOCAL_STRINGS = { ...LOCAL.en, ...(LOCAL[getLanguage()] || {}) };
 
 function has(table, key) {
@@ -307,8 +193,7 @@ export function applyI18n() {
   // Placeholders (search inputs).
   document.querySelectorAll("[data-i18n-ph]").forEach(function (el) {
     var key = el.getAttribute("data-i18n-ph");
-    if (Object.prototype.hasOwnProperty.call(STRINGS, key)) {
-      el.setAttribute("placeholder", STRINGS[key]);
-    }
+    var text = T(key, null);
+    if (text !== null) el.setAttribute("placeholder", text);
   });
 }

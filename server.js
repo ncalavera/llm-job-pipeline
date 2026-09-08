@@ -485,6 +485,71 @@ async function handleSave(req, res) {
 const FEEDBACK_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// PostgreSQL's row version changes for every writer, including agent/CLI writes.
+// Compare opaque tokens, never timestamps rounded by JavaScript.
+async function handleScreeningDecision(req, res) {
+  if (piiPreamble(req, res, "screening-decision", "POST")) return;
+  if (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] || ""))
+    return sendJson(res, 415, { error: "JSON required" });
+  const { changes, operation_id } = await readJsonBody(req);
+  if (typeof operation_id !== "string" || !FEEDBACK_UUID.test(operation_id))
+    return sendJson(res, 400, { error: "A valid operation_id UUID is required" });
+  if (!Array.isArray(changes) || !changes.length || changes.length > 100 ||
+      new Set(changes.map((c) => c?.id)).size !== changes.length ||
+      changes.some((c) => !c || !FEEDBACK_UUID.test(c.id) ||
+        !VALID_STATUSES.includes(c.status) || !VALID_STATUSES.includes(c.expected_status) ||
+        typeof c.expected_revision !== "string" || !c.expected_revision))
+    return sendJson(res, 400, { error: "Invalid changes or missing revision" });
+  let client;
+  try {
+    client = await getPool().connect();
+    await client.query("BEGIN");
+    const request = JSON.stringify(changes.map(({ id, status, expected_status, expected_revision }) =>
+      ({ id, status, expected_status, expected_revision })).sort((a, b) => a.id.localeCompare(b.id)));
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [operation_id.toLowerCase()]);
+    const receipt = await client.query(
+      "SELECT result, request = $2::jsonb AS same_request FROM screening_decision WHERE operation_id = $1::uuid",
+      [operation_id, request]);
+    if (receipt.rows.length) {
+      await client.query("COMMIT");
+      return receipt.rows[0].same_request
+        ? sendJson(res, 200, receipt.rows[0].result)
+        : sendJson(res, 409, { error: "operation_id already used for different changes" });
+    }
+    const { rows } = await client.query(
+      `SELECT id, status, xmin::text AS revision FROM vacancy
+       WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`, [changes.map((c) => c.id)]);
+    const current = new Map(rows.map((r) => [r.id, r]));
+    const conflicts = changes.filter((c) => {
+      const r = current.get(c.id);
+      return !r || r.status !== c.expected_status || r.revision !== c.expected_revision;
+    }).map((c) => c.id);
+    if (conflicts.length) {
+      await client.query("ROLLBACK");
+      return sendJson(res, 409, { error: "Vacancies changed; refresh and try again", conflicts, rows });
+    }
+    const saved = [];
+    for (const c of changes) {
+      const result = await client.query(
+        `UPDATE vacancy SET status = $2, status_updated_at = clock_timestamp(),
+         applied_at = CASE WHEN $3 THEN COALESCE(applied_at, clock_timestamp()) ELSE applied_at END
+         WHERE id = $1::uuid RETURNING id, status, xmin::text AS revision, status_updated_at`,
+        [c.id, c.status, APPLICATION_STATUSES.includes(c.status)]);
+      saved.push({ ...result.rows[0], previous: current.get(c.id).status });
+    }
+    const result = { ok: true, rows: saved };
+    await client.query(
+      "INSERT INTO screening_decision (operation_id, request, result) VALUES ($1::uuid, $2::jsonb, $3::jsonb)",
+      [operation_id, request, JSON.stringify(result)]);
+    await client.query("COMMIT");
+    return sendJson(res, 200, result);
+  } catch (err) {
+    if (client) await client.query("ROLLBACK").catch(() => {});
+    logError("screening-decision", err, reqMeta(req));
+    return sendJson(res, 500, { error: "Could not save decisions" });
+  } finally { client?.release(); }
+}
+
 async function handleScreeningFeedback(req, res) {
   if (
     piiPreamble(
@@ -579,18 +644,19 @@ async function handleStatuses(req, res) {
   if (wrappedPreamble(req, res, "GET", "statuses")) return;
   try {
     const { rows } = await getPool().query(
-      `SELECT id, status, status_updated_at FROM vacancy
-        WHERE status <> 'unseen' AND status <> 'archived'`,
+      `SELECT id, status, status_updated_at, xmin::text AS revision FROM vacancy`,
     );
     const statuses = {};
     const timestamps = {};
+    const revisions = {};
     for (const row of rows) {
       statuses[row.id] = row.status;
+      revisions[row.id] = row.revision;
       if (row.status_updated_at) {
         timestamps[row.id] = row.status_updated_at;
       }
     }
-    return sendJson(res, 200, { statuses, timestamps });
+    return sendJson(res, 200, { statuses, timestamps, revisions });
   } catch (err) {
     logError("statuses", err, reqMeta(req));
     return sendJson(res, 500, { error: "Database error" });
@@ -1448,6 +1514,7 @@ const API_ROUTES = {
   "/api/vacancies": handleVacancies,
   "/api/companies": handleCompanies,
   "/api/save": handleSave,
+  "/api/screening-decision": handleScreeningDecision,
   "/api/screening-feedback": handleScreeningFeedback,
   "/api/statuses": handleStatuses,
   "/api/company-review": handleCompanyReview,

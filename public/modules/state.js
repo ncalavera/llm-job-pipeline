@@ -212,12 +212,12 @@ export const state = {
   companySortAsc: false,
   statsSortCol: "count",
   statsSortAsc: false,
-  // The active LEAF view (render dispatch keys on this). Today is the default
-  // entry (DHA-348). The six-section chrome derives from it via nav.js.
-  currentMode: "today",
+  // Open prepared screening when available; empty/demo snapshots keep Today.
+  // The six-section chrome derives the active section via nav.js.
+  currentMode: groups.some((g) => g.screening_state === "ready") ? "screen" : "today",
   // Remembered Vacancies sub-view (Browse/Geo/Archive) so re-opening the
   // Vacancies section returns to where the user was.
-  vacancyView: "catalog",
+  vacancyView: groups.some((g) => g.screening_state === "ready") ? "screen" : "catalog",
   companyStatuses: {},
   companyStatusesLoaded: false,
   companySubTab: "approved",
@@ -261,6 +261,8 @@ export function recordSyncOutcome(outcome) {
 for (const g of groups) {
   g.member_ids = Array.isArray(g.member_ids) ? g.member_ids : [];
   state.dbData[g.id] = { status: g.status || "unseen" };
+  for (const id of g.member_ids)
+    state.dbData[id] ||= { status: g.status || "unseen" };
 }
 
 // ---------------------------------------------------------------------------
@@ -413,6 +415,8 @@ export function applySnapshot(payload) {
     // live status already merged in — the snapshot never clobbers a decision.
     if (!state.dbData[g.id])
       state.dbData[g.id] = { status: g.status || "unseen" };
+    for (const id of g.member_ids || [])
+      state.dbData[id] ||= { status: g.status || "unseen" };
     groupsById.set(g.id, g);
   }
 
@@ -497,7 +501,7 @@ export function setStatusLocal(ids, status) {
  * Entries with _optimistic < 5 seconds old are NOT overwritten.
  * Returns count of changed entries.
  */
-export function mergeRemoteStatuses(remote, timestamps) {
+export function mergeRemoteStatuses(remote, timestamps, revisions = {}) {
   let changed = 0;
   const now = Date.now();
   for (const [id, status] of Object.entries(remote)) {
@@ -510,6 +514,7 @@ export function mergeRemoteStatuses(remote, timestamps) {
         continue;
       }
       state.dbData[id].status = status;
+      state.dbData[id].revision = revisions[id];
       delete state.dbData[id]._optimistic;
       if (timestamps[id]) {
         state.dbData[id].status_changed_at = timestamps[id];

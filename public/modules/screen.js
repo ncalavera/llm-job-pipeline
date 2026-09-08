@@ -24,7 +24,7 @@ import {
   setStatusLocal,
   scheduleRender,
 } from "./state.js";
-import { saveToServer } from "./api.js";
+import { loadFromServer } from "./api.js";
 import { escHtml, showToastText } from "./helpers.js";
 import { T } from "./i18n.js";
 import { reviewBatches, batchConcern } from "./screen-batches.js";
@@ -62,7 +62,18 @@ export const view = {
 
 // Bulk operations, newest last: { status, rows: [{ id, member_ids, previous }] }.
 // `previous` maps every member id to the status it had before the action.
-const history = [];
+let history = [];
+let pendingDecision = null;
+try {
+  const saved = JSON.parse(localStorage.getItem("screen-decisions") || "null");
+  if (Array.isArray(saved?.history)) history = saved.history;
+  pendingDecision = saved?.pending || null;
+} catch { /* Browser storage may be unavailable. */ }
+function persistDecisions() {
+  try {
+    localStorage.setItem("screen-decisions", JSON.stringify({ history, pending: pendingDecision }));
+  } catch { /* In-memory retry still works. */ }
+}
 
 export function setList(name) {
   if (view.list === name) return;
@@ -230,36 +241,54 @@ export function fill(template, vars) {
 // Write path
 // ---------------------------------------------------------------------------
 
-const liveIo = {
+export const liveIo = {
   members: (id) => {
     const g = groupsById.get(id);
-    const ids = [id].concat((g && g.member_ids) || []);
-    const seen = new Set();
-    return ids.filter(
-      (mid) => state.dbData[mid] && !seen.has(mid) && seen.add(mid),
-    );
+    return [...new Set([id, ...(g?.member_ids || [])])].filter((mid) => state.dbData[mid]);
   },
-  set: (mid, status) => setStatusLocal([mid], status)[mid],
-  current: (mid) => state.dbData[mid] && state.dbData[mid].status,
-  save: saveToServer,
+  current: (mid) => state.dbData[mid]?.status,
+  revision: (mid) => state.dbData[mid]?.revision,
+  async write(memberIds, targetOf, expected, context) {
+    if (!API_BASE) return null;
+    if (!pendingDecision && memberIds.some((id) => !state.dbData[id]?.revision)) await loadFromServer();
+    const changes = memberIds.map((id) => ({
+      id, status: targetOf(id), expected_status: state.dbData[id]?.status,
+      expected_revision: expected ? expected[id] : state.dbData[id]?.revision,
+    }));
+    if (!pendingDecision && changes.some((c) => !c.expected_revision)) return null;
+    pendingDecision ||= { operation_id: crypto.randomUUID(), changes, ...context,
+      reason: view.reason, batch: view.batch };
+    persistDecisions();
+    // Replaying the same receipt is safe even if the first response was lost.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await fetch(API_BASE + "/api/screening-decision", {
+          method: "POST", credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operation_id: pendingDecision.operation_id, changes: pendingDecision.changes }),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          if (response.status < 500) {
+            pendingDecision = null;
+            persistDecisions();
+            await loadFromServer();
+            return null;
+          }
+          continue;
+        }
+        const previous = {};
+        for (const row of result.rows) {
+          previous[row.id] = row.previous;
+          setStatusLocal([row.id], row.status);
+          state.dbData[row.id].revision = row.revision;
+        }
+        return previous;
+      } catch { /* Keep the receipt for an explicit retry after reconnecting. */ }
+    }
+    return null;
+  },
 };
-
-// Write one row's member ids, await every save, revert the whole row when any
-// member fails (re-saving the members that had already landed). Returns the
-// previous status per member id, or null when the row reverted.
-async function writeRow(memberIds, targetOf, io) {
-  const previous = {};
-  for (const mid of memberIds) previous[mid] = io.set(mid, targetOf(mid));
-  const results = await Promise.all(
-    memberIds.map((mid) => io.save(mid, targetOf(mid))),
-  );
-  if (results.every(Boolean)) return previous;
-  memberIds.forEach((mid, i) => {
-    io.set(mid, previous[mid]);
-    if (results[i]) io.save(mid, previous[mid]);
-  });
-  return null;
-}
 
 /**
  * Keep (liked) or Put aside (passed) the given canonical ids. Pushes one
@@ -268,32 +297,49 @@ async function writeRow(memberIds, targetOf, io) {
 export async function bulkSet(ids, status, io) {
   io = io || liveIo;
   const rows = [];
+  const op = { status, rows };
   for (const id of ids) {
     const members = io.members(id);
     if (!members.length) continue;
-    const previous = await writeRow(members, () => status, io);
-    if (previous) rows.push({ id, member_ids: members, previous });
+    const previous = await io.write(members, () => status, undefined, { id, status });
+    if (previous) {
+      const row = { id, member_ids: members, previous };
+      if (io.revision) row.revisions = Object.fromEntries(members.map((mid) => [mid, io.revision(mid)]));
+      rows.push(row);
+      if (rows.length === 1) history.push(op);
+      if (io === liveIo) pendingDecision = null;
+      persistDecisions();
+    }
+    if (io === liveIo && pendingDecision) break;
   }
-  const op = rows.length ? { status, rows } : null;
-  if (op) history.push(op);
-  return { saved: rows.length, total: ids.length, op };
+  return { saved: rows.length, total: ids.length, op: rows.length ? op : null };
 }
 
-/** Pop the last operation and restore each of its rows to its recorded previous. */
+/** Restore the last operation, retaining failed rows for another Undo attempt. */
 export async function undoLast(io) {
   io = io || liveIo;
-  const op = history.pop();
+  const op = history.at(-1);
   if (!op) return null;
   let restored = 0;
-  for (const row of op.rows) {
+  const total = op.rows.length;
+  for (const row of [...op.rows]) {
     // Only members still carrying this operation's status are restored; a
     // decision made after the bulk action (say, "applied") is never overwritten.
-    const still = row.member_ids.filter((mid) => io.current(mid) === op.status);
-    if (!still.length) continue;
-    const ok = await writeRow(still, (mid) => row.previous[mid], io);
-    if (ok) restored++;
+    const still = io === liveIo && pendingDecision?.undo && pendingDecision.id === row.id
+      ? pendingDecision.changes.map((c) => c.id)
+      : row.member_ids.filter((mid) => io.current(mid) === op.status);
+    const ok = still.length && await io.write(still, (mid) => row.previous[mid], row.revisions, { id: row.id, undo: true });
+    if (ok || !still.length) {
+      if (ok) restored++;
+      op.rows.splice(op.rows.indexOf(row), 1);
+      if (io === liveIo) pendingDecision = null;
+      persistDecisions();
+    }
+    if (io === liveIo && pendingDecision) break;
   }
-  return { restored, total: op.rows.length };
+  if (!op.rows.length) history.pop();
+  persistDecisions();
+  return { restored, total };
 }
 
 // ---------------------------------------------------------------------------
@@ -895,7 +941,10 @@ export function renderScreen() {
         : "") +
     "</p>" +
     '<p class="scr-notice" role="status">' +
-    escHtml(view.notice) +
+    (pendingDecision
+      ? escHtml(T("screen_decision_pending", "A save needs confirmation. Retry to recover it safely.")) +
+        ' <button class="scr-btn" id="scrRetryDecision">' + escHtml(T("screen_retry", "Retry")) + '</button>'
+      : escHtml(view.notice)) +
     "</p>" +
     screenFooterHtml({
       t: T,
@@ -904,8 +953,8 @@ export function renderScreen() {
       list: view.list,
       loaded: state.statusesLoaded,
       busy: view.busy,
-      decisionBlocked: pendingFeedback,
-      canUndo: history.length > 0,
+      decisionBlocked: pendingFeedback || !!pendingDecision,
+      canUndo: history.length > 0 && !pendingDecision,
     }) +
     "</section></div>" +
     '<details class="scr-preparation"><summary>' +
@@ -957,7 +1006,12 @@ function onClick(e) {
   const t = e.target;
   const hit = (sel) => t.closest && t.closest(sel);
   let el;
-  if (hit("#scrLoadNotes")) {
+  if (hit("#scrRetryDecision")) {
+    view.reason = pendingDecision.reason || "";
+    view.batch = pendingDecision.batch;
+    if (pendingDecision.undo) runUndo(true);
+    else runBulk(pendingDecision.status, [pendingDecision.id]);
+  } else if (hit("#scrLoadNotes")) {
     view.busy = true;
     renderScreen();
     fetch(API_BASE + "/api/screening-feedback", { credentials: "same-origin" })
@@ -1024,9 +1078,9 @@ function onClick(e) {
   }
 }
 
-async function runBulk(status) {
-  if (view.busy || view.feedback || !state.statusesLoaded) return;
-  const ids = lastVisible.filter((id) => view.selected.has(id));
+async function runBulk(status, retryIds) {
+  if (view.busy || view.feedback || !state.statusesLoaded || (pendingDecision && !retryIds)) return;
+  const ids = retryIds || lastVisible.filter((id) => view.selected.has(id));
   if (!ids.length) return;
   view.busy = true;
   renderScreen();
@@ -1068,8 +1122,8 @@ async function runBulk(status) {
   renderScreen();
 }
 
-async function runUndo() {
-  if (view.busy || !state.statusesLoaded) return;
+async function runUndo(retry = false) {
+  if (view.busy || !state.statusesLoaded || (pendingDecision && !retry)) return;
   view.busy = true;
   renderScreen();
   const r = await undoLast();

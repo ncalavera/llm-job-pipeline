@@ -19,7 +19,7 @@ globalThis.window = {
     archived_groups: [],
   },
 };
-globalThis.location = { protocol: "file:", origin: "" };
+globalThis.location = { protocol: "https:", origin: "https://dashboard.test" };
 
 const {
   view,
@@ -38,6 +38,32 @@ const {
 
 const t = (k, fb) => fb;
 
+test("real screening IO sends versions and keeps the saved version for Undo", async () => {
+  const { state, groupsById } = await import("./state.js");
+  const { liveIo } = await import("./screen.js");
+  groupsById.set("live", { id: "live", member_ids: [] });
+  state.dbData.live = { status: "unseen", revision: "100" };
+  const requests = [];
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, ...JSON.parse(options.body) });
+    const c = requests.at(-1).changes[0];
+    return { ok: true, json: async () => ({ rows: [{ id: "live", status: c.status,
+      previous: c.expected_status, revision: requests.length === 1 ? "101" : "103" }] }) };
+  };
+  try {
+    await bulkSet(["live"], "liked", liveIo);
+    assert.equal(state.dbData.live.status, "liked");
+    assert.equal(state.dbData.live.revision, "101");
+    // Another device changed away and back. Undo must still send *our* version.
+    state.dbData.live.revision = "102";
+    await undoLast(liveIo);
+    assert.match(requests[0].url, /\/api\/screening-decision$/);
+    assert.equal(requests[0].changes[0].expected_revision, "100");
+    assert.equal(requests[1].changes[0].expected_revision, "101");
+  } finally { globalThis.fetch = oldFetch; groupsById.delete("live"); delete state.dbData.live; }
+});
+
 // --- A fake write path: a status map, member ids, and a save that can fail --
 
 function fakeIo(db, members, failFor) {
@@ -45,15 +71,16 @@ function fakeIo(db, members, failFor) {
   return {
     saved,
     members: (id) => members[id] || [id],
-    set: (mid, status) => {
-      const prev = db[mid];
-      db[mid] = status;
-      return prev;
-    },
     current: (mid) => db[mid],
-    save: async (mid, status) => {
-      saved.push([mid, status]);
-      return !(failFor && failFor.has(mid));
+    write: async (ids, targetOf) => {
+      if (ids.some((id) => failFor?.has(id))) return null;
+      const previous = {};
+      for (const id of ids) {
+        previous[id] = db[id];
+        db[id] = targetOf(id);
+        saved.push([id, targetOf(id)]);
+      }
+      return previous;
     },
   };
 }
@@ -153,12 +180,8 @@ test("a partially failed row reverts the members that had saved", async () => {
   assert.equal(r.saved, 0);
   assert.equal(r.op, null);
   assert.deepEqual(db, { a: "unseen", a2: "unseen" });
-  // a saved 'liked' first, then was re-saved back to 'unseen'.
-  assert.deepEqual(io.saved, [
-    ["a", "liked"],
-    ["a2", "liked"],
-    ["a", "unseen"],
-  ]);
+  // The server transaction leaves the entire canonical role unchanged.
+  assert.deepEqual(io.saved, []);
 });
 
 test("two bulk actions then one Undo: only the second is reverted", async () => {
@@ -287,18 +310,13 @@ test("undo leaves a decision made after the bulk action untouched", async () => 
   assert.equal(r.total, 2);
 });
 
-test("a failing member save re-saves the member that had landed", async () => {
+test("a failing member leaves the whole role unchanged", async () => {
   const db = { a: "unseen", a2: "unseen" };
   const io = fakeIo(db, { a: ["a", "a2"] }, new Set(["a2"]));
   const r = await bulkSet(["a"], "liked", io);
   assert.equal(r.saved, 0);
   assert.deepEqual(db, { a: "unseen", a2: "unseen" });
-  // forward saves for both members, then one compensating save for the member that landed
-  assert.deepEqual(io.saved, [
-    ["a", "liked"],
-    ["a2", "liked"],
-    ["a", "unseen"],
-  ]);
+  assert.deepEqual(io.saved, []);
 });
 
 const { setFilter, setPage, PAGE_SIZE } = await import("./screen.js");
@@ -474,4 +492,51 @@ test("kept and put-aside pages remain navigable after the screening inbox is emp
   }
   view.list = "toScreen";
   view.page = 0;
+});
+
+
+test("lost responses survive reload and replay the same receipt with recoverable Undo", async () => {
+  const { state, groupsById } = await import("./state.js");
+  const oldFetch = globalThis.fetch;
+  const oldStorage = globalThis.localStorage;
+  const storage = new Map();
+  globalThis.localStorage = { getItem: (k) => storage.get(k), setItem: (k, v) => storage.set(k, v) };
+  groupsById.set("retry", { id: "retry", member_ids: [] });
+  state.dbData.retry = { status: "unseen", revision: "200" };
+  const requests = [];
+  try {
+    const first = await import("./screen.js?receipt-first");
+    globalThis.fetch = async (_, opts) => {
+      requests.push(JSON.parse(opts.body));
+      throw new Error("response lost after COMMIT");
+    };
+    assert.equal((await first.bulkSet(["retry"], "liked")).saved, 0);
+    assert.equal(requests[0].operation_id, requests[1].operation_id);
+    assert.ok(JSON.parse(storage.get("screen-decisions")).pending);
+    // The next page load has already fetched the committed status.
+    state.dbData.retry = { status: "liked", revision: "201" };
+    const reloaded = await import("./screen.js?receipt-reloaded");
+    globalThis.fetch = async (_, opts) => {
+      const request = JSON.parse(opts.body);
+      requests.push(request);
+      return { ok: true, json: async () => ({ rows: [{ id: "retry", status: request.changes[0].status,
+        previous: "unseen", revision: "201" }] }) };
+    };
+    assert.equal((await reloaded.bulkSet(["retry"], "liked")).saved, 1);
+    assert.deepEqual(requests[2], requests[0]);
+    assert.equal(JSON.parse(storage.get("screen-decisions")).pending, null);
+    assert.equal((await reloaded.undoLast()).restored, 1);
+    assert.equal(state.dbData.retry.status, "unseen");
+  } finally {
+    globalThis.fetch = oldFetch; globalThis.localStorage = oldStorage;
+    groupsById.delete("retry"); delete state.dbData.retry;
+  }
+});
+
+test("a failed Undo remains available for retry", async () => {
+  const db = { retryUndo: "unseen" };
+  await bulkSet(["retryUndo"], "liked", fakeIo(db, {}));
+  assert.equal((await undoLast(fakeIo(db, {}, new Set(["retryUndo"])))).restored, 0);
+  assert.equal((await undoLast(fakeIo(db, {}))).restored, 1);
+  assert.equal(db.retryUndo, "unseen");
 });

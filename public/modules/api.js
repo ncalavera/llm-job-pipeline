@@ -97,13 +97,13 @@ export function saveToServer(id, status) {
 
 export function loadFromServer() {
   if (!API_BASE) return;
-  fetch(API_BASE + "/api/statuses", { credentials: "same-origin" })
+  return fetch(API_BASE + "/api/statuses", { credentials: "same-origin" })
     .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
     .then((payload) => {
       const remote = payload && payload.statuses ? payload.statuses : payload;
       const timestamps =
         payload && payload.timestamps ? payload.timestamps : {};
-      const changed = mergeRemoteStatuses(remote, timestamps);
+      const changed = mergeRemoteStatuses(remote, timestamps, payload.revisions);
       state.statusesLoaded = true;
       if (changed > 0) {
         console.log("Loaded " + changed + " statuses from Supabase");

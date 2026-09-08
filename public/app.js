@@ -36,7 +36,7 @@ import {
   loadCompanyStatuses,
   loadCompanies,
 } from "./modules/api.js";
-import { VISIBLE_MIN_SCORE, basketCounts } from "./modules/derive.js";
+import { VISIBLE_MIN_SCORE, basketCounts, screenLists } from "./modules/derive.js";
 import {
   initCatalog,
   updateBasketCounts,
@@ -171,7 +171,9 @@ function navVisOpts() {
 
 function updateNavCounts() {
   var vacEl = document.getElementById("navCountVacancies");
-  if (vacEl) vacEl.textContent = basketCounts(groups, navVisOpts()).unseen;
+  if (vacEl) vacEl.textContent = groups.some((g) => g.screening_state === "ready")
+    ? screenLists(groups, getGroupStatus).toScreen.size
+    : basketCounts(groups, navVisOpts()).unseen;
   var compEl = document.getElementById("navCountCompanies");
   if (compEl) compEl.textContent = getCompanies().length;
 }

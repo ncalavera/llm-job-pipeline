@@ -14,14 +14,19 @@
 
 export const ARCHITECTURE_OVERVIEW = `flowchart LR
     SRC[Job boards +<br/>company career sites] -->|fetch daily| DB[(Database)]
-    DB --> SCORE[Filter +<br/>AI scoring]
+    DB --> SCORE[Filter +<br/>evidence preparation]
+    SCORE --> N[File-only night scorers]
+    N -->|quoted facts + profile comparison<br/>polled and saved by Python| DB
+    SCORE --> SCR[Dashboard Screen view<br/>bulk keep / put aside]
+    SCR -->|/api/screening-decision<br/>durable receipt| DB
     SCORE --> YOU[Dashboard / Telegram<br/>you triage]
-    YOU -->|decisions + optional reasons| LEARN[Learning review]
-    LEARN -->|user-approved changes only| DB
+    YOU -->|likes & passes| LEARN[Learning loop]
+    LEARN -->|user-approved changes| DB
     DB --> OBS[Health tab +<br/>run report card]
 
     style DB fill:#1E40AF,color:#fff
     style SCORE fill:#065F46,color:#fff
+    style SCR fill:#7C2D12,color:#fff
     style YOU fill:#7C2D12,color:#fff
     style LEARN fill:#4C1D95,color:#fff
     style OBS fill:#0F766E,color:#fff
@@ -34,18 +39,18 @@ export const ARCHITECTURE_DETAILS = [
     src: `flowchart LR
     V[validate profile] --> P[preflight DB check] --> LR2[learning review]
     LR2 --> F[fetch: career sites + boards] --> EN[enrich blind roles]
-    EN --> FI[filter junk] --> CS[company scoring] --> VS[vacancy scoring<br/>cheap screen, then strong model]
-    VS --> SP[screening prep<br/>facts + work activities + quotes<br/>no score, night only]
-    SP --> VD[your verdicts] --> PU[publish snapshot]
+    EN --> FI[filter junk] --> SP[screening prep<br/>one call: facts + comparison<br/>reuse unchanged results]
+    SP --> TG[one Telegram summary] --> PU[publish snapshot once]
+    PU --> VD[human review in Screen view]
 
     style F fill:#1E40AF,color:#fff
-    style VS fill:#065F46,color:#fff
+    style SP fill:#065F46,color:#fff
     style VD fill:#7C2D12,color:#fff
 `,
   },
   {
     id: "archMoneyValve",
-    title: "Company scoring — where money is spent, and the valve",
+    title: "Optional legacy company scoring — outside the daily path",
     src: `flowchart TB
     J[junk prefilter<br/>free] --> S[relevance screen<br/>cheap AI]
     S -->|pass + a vacancy scored 60+ or liked| U[website search + about scrape<br/>PAID Firecrawl]
