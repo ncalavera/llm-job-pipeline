@@ -34,6 +34,18 @@ export const ARCHITECTURE_OVERVIEW = `flowchart LR
 
 export const ARCHITECTURE_DETAILS = [
   {
+    id: "archMaterials",
+    title: "Private application materials",
+    src: `flowchart LR
+    SOURCES[Saved files + correspondence] --> IMPORT[Explicit import]
+    IMPORT --> FILES[Private immutable files + catalogue]
+    FILES --> API[Authenticated Materials page]
+    FILES --> SEARCH[Agent keyword search for reuse]
+    style FILES fill:#1E40AF,color:#fff
+    style API fill:#065F46,color:#fff
+`,
+  },
+  {
     id: "archDailyRun",
     title: "Daily run — stage by stage",
     src: `flowchart LR

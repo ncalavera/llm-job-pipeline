@@ -109,6 +109,22 @@ dashboard *code* changes.)
 
 ## Health & observability
 
+### Private application materials
+
+`scripts/materials.py` imports original bytes into the existing private zone
+(`JOBSEARCH_PRIVATE_DIR/materials`). Content hashes preserve versions; the
+catalogue retains source, organisation, type, source date and submission evidence.
+Submission is `sent`, `draft`, or `unknown`; importing never infers that a file
+was submitted. Previous wording is not automatically verified career evidence.
+The private catalogue and originals are excluded from git and public snapshots.
+`/materials.html` reads `/api/materials` behind the dashboard's existing Caddy
+authentication. Downloads resolve catalogue IDs, never user-supplied file paths.
+The CLI's `search` command searches the same catalogue for application reuse.
+Back up this private directory together with the database. Imports are explicit;
+the daily pipeline neither collects personal correspondence nor spends tokens
+on the material library.
+
+
 The default daily path is fetch → enrich → dedup → filter → evidence preparation
 → one Telegram summary → publish. Legacy company/vacancy scoring and terminal
 verdict checkpoints are skipped, preserving resumability of old checkpoints.

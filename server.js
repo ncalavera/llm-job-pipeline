@@ -19,7 +19,7 @@
 
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { stat, readFile } from "node:fs/promises";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -1511,6 +1511,7 @@ async function handleContactStatus(req, res) {
 }
 
 const API_ROUTES = {
+  "/api/materials": handleMaterials,
   "/api/vacancies": handleVacancies,
   "/api/companies": handleCompanies,
   "/api/save": handleSave,
@@ -1526,6 +1527,32 @@ const API_ROUTES = {
   "/api/reports": handleReports,
   "/api/contacts": handleContacts,
 };
+
+// Private files stay outside public/. Caddy supplies the dashboard's auth;
+// this endpoint follows the existing no-CORS, no-store PII boundary.
+export async function handleMaterials(req, res) {
+  res.setHeader("Cache-Control", "no-store");
+  if (req.method !== "GET") return sendJson(res, 405, { error: "Method not allowed" });
+  const root = join(process.env.JOBSEARCH_PRIVATE_DIR || join(fileURLToPath(new URL(".", import.meta.url)), "private"), "materials");
+  let rows;
+  try { rows = JSON.parse(await readFile(join(root, "index.json"), "utf8")); }
+  catch (err) {
+    if (err.code === "ENOENT") return sendJson(res, 200, []);
+    throw err;
+  }
+  const id = new URL(req.url, "http://localhost").searchParams.get("id");
+  if (!id) return sendJson(res, 200, rows);
+  const row = rows.find((r) => r.id === id);
+  if (!row || !/^[a-f0-9]{64}$/.test(row.sha256)) return sendJson(res, 404, { error: "Not found" });
+  const data = await readFile(join(root, "objects", row.sha256));
+  res.writeHead(200, {
+    "Content-Type": "application/octet-stream",
+    "Content-Disposition": "attachment; filename*=UTF-8''" + encodeURIComponent(row.filename),
+    "X-Content-Type-Options": "nosniff",
+    "Content-Length": data.length,
+  });
+  res.end(data);
+}
 
 // One report by slug: /api/reports/<slug>. The only path-parameter route on
 // this server, so it is matched explicitly rather than by adding a pattern

@@ -443,6 +443,7 @@ export function vacancyPageHtml(g, company, status, opts) {
     staleBadge +
     statusChip +
     "</div>" +
+    '<a href="/materials.html?vacancy=' + encodeURIComponent(g.id) + '">Materials</a>' +
     '<div class="vac-meta">' +
     orgHtml +
     tierHtml +
