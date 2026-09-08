@@ -333,3 +333,7 @@ rejection. Numerical estimates are Score, while evidence comparisons are Fit.
 Application steps and dated history use the existing `application.notes` field through the authenticated, no-store `/api/application-notes` endpoint. Employer-specific steps are plain text with Planned / In progress / Done / Cancelled labels. The current Kanban stage remains `vacancy.status`. Writes lock the vacancy and dossier, compare the prior notes to reject stale edits, and retain previous note versions in private `application.artifacts.note_history`. Notes and their history are never included in the dashboard snapshot. SQLite's static dashboard does not support this editor.
 
 Migration 0030 records every actual vacancy status change in `vacancy_status_event`, using a database trigger so browser, CLI and daily writers share one history. The timestamp is when the change was recorded, not the date the employer acted. Existing history is reconstructed only from evidence in notes; no historical events are invented.
+
+### Initial-load payload
+
+The self-hosted dashboard requests `/api/vacancies?view=inbox`: all retained IDs, statuses, summaries and filter facts remain, while long vacancy text, company profiles and archived descriptions load from the private `/api/snapshot-detail` endpoint when opened. The full snapshot and static-export contract stay intact. Brotli-capable browsers receive compressed Inbox JSON; other clients retain the existing JSON/gzip path. Company-list refreshes use the same compact projection.

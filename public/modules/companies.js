@@ -33,7 +33,7 @@ import {
   isVacancyExpired,
 } from "./helpers.js";
 import { companyRollup } from "./derive.js";
-import { saveCompanyReview, showSyncStatus } from "./api.js";
+import { saveCompanyReview, showSyncStatus, hydrateDetail } from "./api.js";
 import { T } from "./i18n.js";
 // statusChipLabel is U6's vacancy-status pill vocabulary (Liked/Passed/To
 // apply/…) — reused here so an open role's status reads identically whether
@@ -1381,6 +1381,14 @@ export function renderProfileForSlug(slug) {
   var el = document.getElementById("companyProfile");
   el.innerHTML = buildCompanyProfilePage(c);
   el.classList.add("active");
+  if (c._detailKind) {
+    const notice = document.createElement('p');
+    notice.textContent = T('screen_loading', 'Loading full details…');
+    el.appendChild(notice);
+    hydrateDetail(c).then(() => {
+      if (state.currentProfileSlug === slug) renderProfileForSlug(slug);
+    }).catch(() => { notice.textContent = 'Could not load full details. Reopen to retry.'; });
+  }
 }
 
 export function hideProfile() {

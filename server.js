@@ -23,6 +23,10 @@ import { stat, readFile } from "node:fs/promises";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { brotliCompress, constants as zlibConstants } from "node:zlib";
+import { promisify } from "node:util";
+import { compactSnapshot, compactRecord, DETAIL_FIELDS } from "./public/modules/payload.js";
+const compressBrotli = promisify(brotliCompress);
 
 const PUBLIC_DIR = join(fileURLToPath(new URL(".", import.meta.url)), "public");
 
@@ -266,7 +270,8 @@ async function handleVacancies(req, res) {
       return sendJson(res, 503, { error: "Snapshot not generated yet" });
     }
 
-    const etag = computeETag(meta.rows[0].updated_at);
+    const compact = new URL(req.url, "http://localhost").searchParams.get("view") === "inbox";
+    const etag = compact ? "W/" + computeETag(meta.rows[0].updated_at + ":inbox-v1") : computeETag(meta.rows[0].updated_at);
     if (etag) res.setHeader("ETag", etag);
     if (isNotModified(req.headers["if-none-match"], etag)) {
       return sendEmpty(res, 304);
@@ -278,10 +283,43 @@ async function handleVacancies(req, res) {
     if (data.rowCount === 0) {
       return sendJson(res, 503, { error: "Snapshot not generated yet" });
     }
-    return sendJson(res, 200, data.rows[0].payload);
+    const payload = compact ? compactSnapshot(data.rows[0].payload) : data.rows[0].payload;
+    res.setHeader('Vary', 'Accept-Encoding');
+    const acceptsBr = (req.headers['accept-encoding'] || '').split(',').some(value => {
+      const match = value.trim().match(/^br(?:\s*;\s*q=(0(?:\.\d+)?|1(?:\.0+)?))?$/i);
+      return match && (match[1] === undefined || Number(match[1]) > 0);
+    });
+    if (compact && acceptsBr) {
+      const body = await compressBrotli(JSON.stringify(payload), {params: {[zlibConstants.BROTLI_PARAM_QUALITY]: 4}});
+      res.writeHead(200, {'Content-Type':'application/json; charset=utf-8', 'Content-Encoding':'br', 'Content-Length':body.length});
+      return res.end(body);
+    }
+    return sendJson(res, 200, payload);
   } catch (err) {
     logError("vacancies", err, reqMeta(req));
     return sendJson(res, 500, { error: "Database error" });
+  }
+}
+
+// Load one record's long text only when its detail page opens.
+async function handleSnapshotDetail(req, res) {
+  if (piiPreamble(req, res, "snapshot-detail")) return;
+  const params = new URL(req.url, "http://localhost").searchParams;
+  const kind = params.get("kind"), id = params.get("id");
+  const section = {vacancy: "groups", archive: "archived_groups", company: "companies"}[kind];
+  if (!Object.hasOwn(DETAIL_FIELDS, kind) || !id || id.length > 100)
+    return sendJson(res, 400, {error: "Invalid record"});
+  try {
+    const {rows} = await getPool().query(
+      `SELECT item FROM dashboard_snapshot,
+       LATERAL jsonb_array_elements(payload->$1) AS item
+       WHERE dashboard_snapshot.id = 'current' AND item->>$2 = $3 LIMIT 1`,
+      [section, kind === "company" ? "company_id" : "id", id]);
+    if (!rows.length) return sendJson(res, 404, {error: "Record not found"});
+    return sendJson(res, 200, Object.fromEntries(DETAIL_FIELDS[kind].map(k => [k, rows[0].item[k] ?? null])));
+  } catch (error) {
+    logError("snapshot-detail", error, reqMeta(req));
+    return sendJson(res, 500, {error: "Details unavailable"});
   }
 }
 
@@ -402,7 +440,8 @@ async function handleCompanies(req, res) {
       };
     });
 
-    return sendJson(res, 200, { companies });
+    const compact = new URL(req.url, "http://localhost").searchParams.get("view") === "inbox";
+    return sendJson(res, 200, { companies: compact ? companies.map(c => compactRecord(c, "company")) : companies });
   } catch (err) {
     logError("companies", err, reqMeta(req));
     return sendJson(res, 500, { error: "Database error" });
@@ -1540,6 +1579,7 @@ const API_ROUTES = {
   "/api/application-notes": handleApplicationNotes,
   "/api/materials": handleMaterials,
   "/api/vacancies": handleVacancies,
+  "/api/snapshot-detail": handleSnapshotDetail,
   "/api/companies": handleCompanies,
   "/api/save": handleSave,
   "/api/screening-decision": handleScreeningDecision,

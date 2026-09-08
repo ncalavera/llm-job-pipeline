@@ -1,3 +1,4 @@
+import { hydrateDetail } from "./api.js";
 // =============================================================================
 // vacancy.js — Vacancy detail page (U6, DHA-390).
 //
@@ -631,7 +632,15 @@ export function renderVacancyDetail(id) {
   // parent company by the real shared key instead (post-ship fast fix #6).
   const company = resolveVacancyCompany(g, getCompanies());
   host.innerHTML = vacancyPageHtml(g, company, status, pageOpts());
-  loadApplicationNotes(host, g.id);
+  if (!g._detailKind) loadApplicationNotes(host, g.id);
+  if (g._detailKind) {
+    const notice = document.createElement('p');
+    notice.textContent = T('screen_loading', 'Loading full details…');
+    host.appendChild(notice);
+    hydrateDetail(g).then(() => {
+      if (state.currentVacancyId === id) renderVacancyDetail(id);
+    }).catch(() => { notice.textContent = 'Could not load full details. Reopen to retry.'; });
+  }
 }
 
 // After a verdict from a Browse or Screen review entry, hop to the next STILL-

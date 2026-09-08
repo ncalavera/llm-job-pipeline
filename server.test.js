@@ -1407,3 +1407,27 @@ test("screening writes cannot reset an application even with a matching revision
   assert.equal(res.statusCode,400);
  });
 });
+
+test('compact Inbox defers descriptions and has a distinct snapshot validator', async () => {
+ await withStubDb([
+  ['to_json(updated_at)',[{updated_at:'version'}]],
+  ['SELECT payload',[{payload:{groups:[{id:'v',full_description:'Long text',llm_summary:'Summary'}]}}]],
+ ],async()=>{
+  const res=await call({url:'/api/vacancies?view=inbox',headers:{'accept-encoding':'br;q=0'}});
+  assert.equal(res.statusCode,200);
+  assert.equal(res.headers.ETag,'W/"version:inbox-v1"');
+  assert.equal(JSON.parse(res.body).groups[0].full_description,undefined);
+  assert.equal(JSON.parse(res.body).groups[0].llm_summary,'Summary');
+ });
+});
+
+test('detail reads are parameterized, private and cannot overwrite a decision', async()=>{
+ await withStubDb([['SELECT item',[{item:{id:'v',status:'unseen',full_description:'Complete posting',llm_reasoning:'Evidence'}}]]],async()=>{
+  const res=await call({url:'/api/snapshot-detail?kind=vacancy&id=v'});
+  assert.equal(res.statusCode,200);
+  assert.equal(res.headers['Cache-Control'],'no-store');
+  assert.deepEqual(JSON.parse(res.body),{full_description:'Complete posting',llm_reasoning:'Evidence'});
+  const invalid=await call({url:'/api/snapshot-detail?kind=constructor&id=v'});
+  assert.equal(invalid.statusCode,400);
+ });
+});
