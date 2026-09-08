@@ -363,6 +363,12 @@ def test_screening_json_round_trips_raw(tmp_path, monkeypatch):
     _seed_role(db, "plain", score=70, status="unseen", first_seen=date.today().isoformat())
 
     by_id = {g["id"]: g for g in _payload(monkeypatch)["groups"]}
+    from prepare_screening import posting_fingerprint
+
+    assert "screening_fingerprint" in by_id["ready"]
+    assert by_id["ready"]["posting_fingerprint"] == posting_fingerprint(
+        by_id["ready"]["full_description"]
+    )
     assert by_id["ready"]["screening"] == _SCREENING
     assert by_id["ready"]["screening_state"] == "ready"
     assert by_id["ready"]["screening_prepared_at"] == ""

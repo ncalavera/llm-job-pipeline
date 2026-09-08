@@ -31,6 +31,7 @@ from config import (
     DASHBOARD_TZ,
 )
 from geo import country_banned, is_remote_mode
+from statuses import APPLICATION_STATUSES, DECIDED_STATUSES, VALID_STATUSES
 
 # Json / RealDictCursor come from db_backend so they work under both the
 # Supabase (psycopg2) and the local SQLite backend without importing psycopg2.
@@ -272,19 +273,7 @@ _MIN_DESC_FP_CHARS = 1000
 
 # Statuses that carry a user decision — a renamed/language variant must inherit
 # one of these rather than resurface as 'unseen'.
-_DECIDED_STATUSES = frozenset(
-    {
-        "applied",
-        "interview",
-        "declined",
-        "liked",
-        "to_apply",
-        "to_research",
-        "to_network",
-        "passed",
-        "skipped",
-    }
-)
+_DECIDED_STATUSES = DECIDED_STATUSES
 
 # Common title abbreviations expanded to their long form so a spelled-out role
 # and an abbreviated one collapse to ONE dedup key ("Office of the CEO" ==
@@ -1344,6 +1333,10 @@ def load_vacancies(
             company_cond = "c.status != 'inactive'"
         else:
             company_cond = "c.status = 'active'"
+        decided = sorted(DECIDED_STATUSES)
+        decision_placeholders = ", ".join(["%s"] * len(decided))
+        company_cond = f"({company_cond} OR v.status IN ({decision_placeholders}))"
+        params.extend(decided)
         if score_floor_any_company is not None:
             conditions.append(f"({company_cond} OR v.llm_score > %s)")
             params.append(score_floor_any_company)
@@ -2436,7 +2429,6 @@ def get_vacancy_statuses() -> dict[str, str]:
 #: is the single choke point for status writes and would archive anything it was
 #: asked to. A bulk cleanup, a sweeper, or a well-meaning one-off script would
 #: erase an application without a trace.
-APPLICATION_STATUSES = frozenset({"applied", "interview", "declined"})
 
 
 class ApplicationArchiveBlocked(RuntimeError):
@@ -3668,21 +3660,6 @@ def print_reconciliation_report():
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
-
-VALID_STATUSES = {
-    "unseen",
-    "liked",
-    "passed",
-    "to_apply",
-    "to_research",
-    "to_network",
-    "skipped",
-    "applied",
-    "interview",
-    "declined",
-    "expiring",
-    "archived",
-}
 
 
 def validate_db() -> list[str]:

@@ -1029,6 +1029,9 @@ def test_skip_reasons_are_russian_in_russian(monkeypatch):
 
 def _seed_screening_fixture(db):
     """Load tests/fixtures/screening-ready.json; return its expected ready ids."""
+    from prepare_screening import fingerprint
+
+    description = "A posting with current facts."
     fx = json.loads(SCREENING_READY_FIXTURE.read_text(encoding="utf-8"))
     conn = db.get_conn()
     cur = conn.cursor()
@@ -1041,8 +1044,8 @@ def _seed_screening_fixture(db):
             status=role["status"],
         )
         cur.execute(
-            "UPDATE vacancy SET id = ?, screening_state = ? WHERE id = ?",
-            (role["id"], role["screening_state"], vac_id),
+            "UPDATE vacancy SET id = ?, screening_state = ?, full_description = ?, screening_fingerprint = ? WHERE id = ?",
+            (role["id"], role["screening_state"], description, fingerprint(description), vac_id),
         )
     cur.close()
     conn.commit()
@@ -1087,8 +1090,8 @@ def test_default_summary_is_one_score_free_message(denv, monkeypatch):
     td.cmd_send(_args(details=False))
     texts = _sent_texts(denv.calls)
     assert len(texts) == 1
-    assert "Ready to review: 0" in texts[0]
-    assert "Awaiting preparation:" in texts[0]
+    assert "Vacancies to review: 0." in texts[0]
+    assert "Awaiting preparation:" not in texts[0]
     assert "Secret numeric card" not in texts[0]
     assert "score" not in texts[0].lower()
     assert "&amp;" in texts[0] and "&quot;" in texts[0]
@@ -1109,23 +1112,17 @@ def test_summary_dry_run_and_failed_send_do_not_advance(denv, monkeypatch, capsy
     ) == before
 
 
-def test_summary_separates_failed_and_waiting_and_surfaces_failure(denv):
-    ids = [_seed(denv.db, "Org", "Role " + str(i)) for i in range(3)]
+def test_summary_counts_only_current_preparations_and_surfaces_failure(denv):
+    expected = _seed_screening_fixture(denv.db)
+    assert td.fetch_ready_to_screen(denv.db.get_conn()) == len(expected)
     cur = denv.db.get_conn().cursor()
-    cur.execute("UPDATE vacancy SET screening_state = 'ready' WHERE id = %s", (ids[0],))
-    cur.execute("UPDATE vacancy SET screening_state = 'failed' WHERE id = %s", (ids[1],))
-    denv.db.get_conn().commit()
-    from report.data_prep import _count_screening_processing
-
-    processing = _count_screening_processing()
-    assert td.fetch_screening_counts(denv.db.get_conn()) == {
-        "ready": 1,
-        "failed": processing["failed"],
-        "waiting": processing["unprepared"],
-    }
-    body = td.build_screening_summary(
-        {"ready": 1, "failed": 1, "waiting": 1},
-        3,
-        {"stages": [{"name": "fetch", "status": "error"}]},
+    cur.execute(
+        "UPDATE vacancy SET screening_fingerprint = 'old-profile' WHERE id = %s",
+        (next(iter(expected)),),
     )
-    assert "fetch failed" in body and "Preparation failed, retry next run: 1" in body
+    denv.db.get_conn().commit()
+    assert td.fetch_ready_to_screen(denv.db.get_conn()) == len(expected) - 1
+    body = td.build_screening_summary(2, {"stages": [{"name": "fetch", "status": "error"}]})
+    assert "Vacancies to review: 2." in body
+    assert "fetch failed" in body
+    assert "Awaiting preparation" not in body

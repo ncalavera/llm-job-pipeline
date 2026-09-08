@@ -13,14 +13,15 @@ from config import (
     resolve_canonical_name,
 )
 from company_registry import PARSING_ARTIFACTS
+from prepare_screening import posting_fingerprint
 
 #: Statuses that mean "this role is live work" — the user picked it up, or an
 #: application is running, or it closed with the employer's own answer. These
 #: survive the dashboard score floor at any score. Everything else (unseen below
 #: the floor, passed, skipped) is either noise or history.
-_ACTIVE_STATUSES = frozenset(
-    {"liked", "to_apply", "to_research", "to_network", "applied", "interview", "declined"}
-)
+from statuses import DECIDED_STATUSES
+
+_ACTIVE_STATUSES = DECIDED_STATUSES - {"passed", "skipped"}
 from database_supabase import load_vacancies, load_all_enrichment
 from db_conn import get_conn
 
@@ -263,7 +264,7 @@ def _project_application(app: dict | None) -> dict | None:
     """
     if not app:
         return app
-    artifacts = app.get("artifacts") or {}
+    artifacts = {k: v for k, v in (app.get("artifacts") or {}).items() if k != "note_history"}
     return {
         "status": app.get("status", ""),
         "channel": app.get("channel", ""),
@@ -440,6 +441,8 @@ def _build_group(
         # pre-baked group ships (STRATEGY guardrail 9).
         "screening": v.get("screening"),
         "screening_state": v.get("screening_state"),
+        "screening_fingerprint": v.get("screening_fingerprint"),
+        "posting_fingerprint": posting_fingerprint(v.get("full_description") or ""),
         "screening_prepared_at": v.get("screening_prepared_at") or "",
     }
 
@@ -533,10 +536,11 @@ def prepare_report_data(db: dict = None) -> dict:
         v
         for v in all_vacs.values()
         if v.get("screening_state") == "ready"
+        or v.get("status") in _ACTIVE_STATUSES
         or (
             v.get("llm_score") is not None
             and v.get("llm_score", -1) >= 0
-            and (v.get("status") in _ACTIVE_STATUSES or v.get("llm_score", -1) >= CATALOG_MIN_SCORE)
+            and v.get("llm_score", -1) >= CATALOG_MIN_SCORE
         )
     ]
     # Fetched-but-not-yet-scored vacancies (rows NOT shipped in `groups`) — the one
