@@ -15,12 +15,12 @@
 export const ARCHITECTURE_OVERVIEW = `flowchart LR
     SRC[Job boards +<br/>company career sites] -->|fetch daily| DB[(Database)]
     DB --> SCORE[Filter +<br/>evidence preparation]
-    SCORE --> N[File-only night scorers]
+    SCORE --> N[File-only preparation agents]
     N -->|quoted facts + profile comparison<br/>polled and saved by Python| DB
-    SCORE --> SCR[Dashboard Screen view<br/>bulk keep / put aside]
+    SCORE --> SCR[Dashboard Inbox<br/>Like / Pass]
     SCR -->|/api/screening-decision<br/>durable receipt| DB
-    SCORE --> YOU[Dashboard / Telegram<br/>you triage]
-    YOU -->|likes & passes| LEARN[Learning loop]
+    SCORE --> YOU[Dashboard / Telegram<br/>you review]
+    YOU -->|Like / Pass| LEARN[Learning loop]
     LEARN -->|user-approved changes| DB
     DB --> OBS[Health tab +<br/>run report card]
 
@@ -40,6 +40,8 @@ export const ARCHITECTURE_DETAILS = [
     SOURCES[Saved files + correspondence] --> IMPORT[Explicit import]
     IMPORT --> FILES[Private immutable files + catalogue]
     FILES --> API[Authenticated Materials page]
+    DOSSIER[Private application notes and versions] --> EDITOR[Vacancy steps and history editor]
+    EVENTS[Database status-change history] --> EDITOR
     FILES --> SEARCH[Agent keyword search for reuse]
     style FILES fill:#1E40AF,color:#fff
     style API fill:#065F46,color:#fff
@@ -51,9 +53,9 @@ export const ARCHITECTURE_DETAILS = [
     src: `flowchart LR
     V[validate profile] --> P[preflight DB check] --> LR2[learning review]
     LR2 --> F[fetch: career sites + boards] --> EN[enrich blind roles]
-    EN --> FI[filter junk] --> SP[screening prep<br/>one call: facts + comparison<br/>reuse unchanged results]
-    SP --> TG[one Telegram summary] --> PU[publish snapshot once]
-    PU --> VD[human review in Screen view]
+    EN --> FI[filter junk] --> SP[screening prep<br/>one call: facts + comparison<br/>reuse unchanged results<br/>validate posting + profile identity]
+    SP --> TG[Inbox count + link] --> PU[publish snapshot once]
+    PU --> VD[human review in Inbox]
 
     style F fill:#1E40AF,color:#fff
     style SP fill:#065F46,color:#fff

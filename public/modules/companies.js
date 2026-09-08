@@ -435,7 +435,7 @@ function _getColumns() {
       },
       {
         key: "fit",
-        label: T("col_want", "WANT"),
+        label: T("col_want", "Company score"),
         sortable: true,
         cls: "ct-col-fit ct-col-fit--pending",
       },
@@ -454,7 +454,7 @@ function _getColumns() {
       },
       {
         key: "source",
-        label: T("col_source", "Source"),
+        label: T("col_source", "Connection"),
         sortable: false,
         cls: "ct-col-source",
       },
@@ -482,7 +482,7 @@ function _getColumns() {
       },
       {
         key: "fit",
-        label: T("col_want", "WANT"),
+        label: T("col_want", "Company score"),
         sortable: true,
         cls: "ct-col-fit ct-col-fit--archived",
       },
@@ -522,7 +522,7 @@ function _getColumns() {
     },
     {
       key: "fit",
-      label: T("col_want", "WANT"),
+      label: T("col_want", "Company score"),
       sortable: true,
       cls: "ct-col-fit",
     },
@@ -532,19 +532,19 @@ function _getColumns() {
     // approved tab's default sort with no visible header to click).
     {
       key: "applyable",
-      label: T("col_open", "Open"),
+      label: T("col_open", "Score \u226560, not applied"),
       sortable: true,
       cls: "ct-col-open",
     },
     {
       key: "liked",
-      label: T("col_liked", "Liked"),
+      label: T("col_liked", "Liked & applications"),
       sortable: true,
       cls: "ct-col-liked",
     },
     {
       key: "new",
-      label: T("col_new", "New"),
+      label: T("col_new", "Undecided"),
       sortable: true,
       cls: "ct-col-new",
     },
@@ -555,14 +555,20 @@ function _getColumns() {
       cls: "ct-col-loc",
     },
     {
+      key: "connection",
+      label: T("col_connection", "Connection"),
+      sortable: false,
+      cls: "ct-col-source",
+    },
+    {
       key: "freshness",
-      label: T("col_freshness", "Freshness"),
+      label: T("col_freshness", "Last check"),
       sortable: true,
       cls: "ct-col-freshness",
     },
     {
       key: "monitoring",
-      label: T("col_monitoring", "Monitoring"),
+      label: T("col_monitoring", "Collection check"),
       sortable: true,
       cls: "ct-col-monitoring",
     },
@@ -602,7 +608,7 @@ function _renderStatsCards(filtered) {
       pendingCount +
       "</span>" +
       '<span class="ces-label">' +
-      escHtml(T("stat_pending", "Pending")) +
+      escHtml(T("stat_pending", "To review")) +
       "</span>" +
       "</div>" +
       '<div class="ces-card ces-card--approved">' +
@@ -621,7 +627,7 @@ function _renderStatsCards(filtered) {
       filtered.length +
       "</span>" +
       '<span class="ces-label">' +
-      escHtml(T("stat_rejected", "Rejected")) +
+      escHtml(T("stat_rejected", "Not tracked")) +
       "</span>" +
       "</div>";
   }
@@ -632,7 +638,7 @@ function _renderStatsCards(filtered) {
 // ---------------------------------------------------------------------------
 
 function _getMonitoringStatus(c) {
-  // Priority order: error → no_data → manual → nosource → never → stale → ok
+  // Latest result and freshness only; connection is a separate column.
   if (
     c.fetch_status &&
     c.fetch_status !== "ok" &&
@@ -640,39 +646,15 @@ function _getMonitoringStatus(c) {
   ) {
     return {
       level: "error",
-      label: T("mon_error", "Fetch error"),
+      label: T("mon_error", "Check failed"),
       dotCls: "mon-dot--error",
       tooltip: c.fetch_status,
-    };
-  }
-  if (c.fetch_status === "no_data") {
-    return {
-      level: "nodata",
-      label: T("mon_no_data", "No data"),
-      dotCls: "mon-dot--nodata",
-      tooltip: "Fetch succeeded, but no vacancies found",
-    };
-  }
-  if (c.is_manual_check) {
-    return {
-      level: "manual",
-      label: T("mon_manual", "Manual"),
-      dotCls: "mon-dot--manual",
-      tooltip: "Manual check",
-    };
-  }
-  if (c.needs_source || !c.strategy) {
-    return {
-      level: "nosource",
-      label: T("mon_no_source", "No source"),
-      dotCls: "mon-dot--nosource",
-      tooltip: "Source not configured",
     };
   }
   if (!c.last_fetched) {
     return {
       level: "never",
-      label: T("mon_never", "Never run"),
+      label: T("mon_never", "Never checked"),
       dotCls: "mon-dot--never",
       tooltip: "Fetch never run",
     };
@@ -682,14 +664,22 @@ function _getMonitoringStatus(c) {
   if (daysSince > 7) {
     return {
       level: "stale",
-      label: T("mon_days_ago", "{n}d ago").replace("{n}", daysSince),
+      label: T("mon_days_ago", "Check overdue \u00b7 {n}d").replace("{n}", daysSince),
       dotCls: "mon-dot--stale",
       tooltip: "Last fetch " + daysSince + " days ago",
     };
   }
+  if (c.fetch_status === "no_data") {
+    return {
+      level: "nodata",
+      label: T("mon_no_data", "Succeeded \u00b7 0 vacancies"),
+      dotCls: "mon-dot--nodata",
+      tooltip: "Fetch succeeded, but no vacancies found",
+    };
+  }
   return {
     level: "ok",
-    label: T("mon_working", "Working"),
+    label: T("mon_working", "Check succeeded"),
     dotCls: "mon-dot--ok",
     tooltip: "Last fetch " + _daysSince(c.last_fetched) + "d ago",
   };
@@ -721,6 +711,13 @@ function _freshnessHtml(c) {
   );
 }
 
+function _connectionHtml(c) {
+  const key = c.is_manual_check ? "connection_manual" :
+    c.needs_source || !c.strategy ? "connection_missing" : "connection_automatic";
+  const labels = {connection_manual: "Manual", connection_missing: "Not connected", connection_automatic: "Automatic"};
+  return escHtml(T(key, labels[key]));
+}
+
 function _monitoringHtml(c) {
   var ms = _getMonitoringStatus(c);
   return (
@@ -742,27 +739,21 @@ var MON_CHIP_ORDER = [
   "error",
   "stale",
   "never",
-  "nosource",
   "nodata",
-  "manual",
   "ok",
 ];
 function _monChipLabel(level) {
   switch (level) {
     case "error":
-      return T("monchip_error", "Errors");
+      return T("monchip_error", "Check failed");
     case "stale":
-      return T("monchip_stale", "Stale");
+      return T("monchip_stale", "Check overdue");
     case "never":
-      return T("monchip_never", "Never run");
-    case "nosource":
-      return T("monchip_nosource", "No source");
+      return T("monchip_never", "Never checked");
     case "nodata":
-      return T("monchip_nodata", "No data");
-    case "manual":
-      return T("monchip_manual", "Manual");
+      return T("monchip_nodata", "Succeeded \u00b7 0 vacancies");
     case "ok":
-      return T("monchip_ok", "OK");
+      return T("monchip_ok", "Check succeeded");
     default:
       return level;
   }
@@ -847,7 +838,7 @@ function _renderPendingDisclaimer(pendingCompanies) {
 
   var tpl = T(
     "companies_pending_hidden",
-    "ℹ️ {orgs} companies here have {vacs} vacancies hidden from your job list — approve a company to surface its roles.",
+    "\u2139\ufe0f {orgs} companies have {vacs} vacancies outside Catalog. Track a company to include its vacancies there. Inbox uses preparation readiness separately.",
   );
   var note = document.createElement("div");
   note.id = "companyPendingDisclaimer";
@@ -923,9 +914,9 @@ export function renderCompanies() {
       // Basket-empty: this sub-tab (approved/pending/archived) has none,
       // regardless of filters — same "<tab> — no X" phrasing Browse uses.
       var subTabLabels = {
-        approved: T("subtab_approved", "Approved"),
-        pending: T("subtab_pending", "Pending Review"),
-        archived: T("subtab_archived", "Archived"),
+        approved: T("subtab_approved", "Tracked"),
+        pending: T("subtab_pending", "To review"),
+        archived: T("subtab_archived", "Not tracked"),
       };
       emptyMsg =
         (subTabLabels[subTab] || "") +
@@ -1105,6 +1096,7 @@ function _buildApprovedRow(c) {
     '<td class="ct-td ct-col-loc"><span class="ct-location-text">' +
     locText +
     "</span></td>" +
+    '<td class="ct-td ct-col-source">' + _connectionHtml(c) + "</td>" +
     '<td class="ct-td ct-col-freshness">' +
     _freshnessHtml(c) +
     "</td>" +
@@ -1125,7 +1117,7 @@ function _buildPendingRow(c) {
     c.alignment_score != null ? llmScoreBadge(c.alignment_score) : "\u2014";
   var locText = c.offices ? escHtml(c.offices) : "\u2014";
   var catText = c.category ? escHtml(c.category) : "\u2014";
-  var sourceText = c.strategy ? escHtml(c.strategy) : "\u2014";
+  var sourceText = _connectionHtml(c);
 
   var cid = jsAttr(c.company_id || "");
   var reviewHtml =
@@ -1526,7 +1518,7 @@ function companyFitScoreHtml(c, t) {
   return (
     '<div class="cp-block">' +
     '<div class="vac-section-label">' +
-    escHtml(t("cp_fit_analysis", "Fit analysis")) +
+    escHtml(t("cp_fit_analysis", "Company score explanation")) +
     "</div>" +
     '<div class="cp-fit-row"><span class="cp-fit-score q-' +
     band +
@@ -1579,7 +1571,7 @@ function companyWantBarsHtml(c, t) {
   return (
     '<div class="cp-block">' +
     '<div class="vac-section-label">' +
-    escHtml(t("cp_want_breakdown", "Want breakdown")) +
+    escHtml(t("cp_want_breakdown", "Company score breakdown")) +
     "</div>" +
     rows +
     "</div>"
@@ -1742,11 +1734,6 @@ function companyApplicationsHtml(c, t) {
             : "";
           return (
             '<div class="cp-app-item">' +
-            '<span class="cp-app-status cp-app-status-' +
-            escHtml(a.status) +
-            '">' +
-            escHtml(t("app_status_" + a.status, a.status)) +
-            "</span>" +
             (meta.length
               ? '<span class="cp-app-meta">' + meta.join(" · ") + "</span>"
               : "") +
@@ -1920,7 +1907,7 @@ function companyRolesBlockHtml(c, roles, counts, t) {
       ? '<span class="cp-stat cp-stat-liked"><span class="cp-stat-icon">💚</span> ' +
         counts.liked +
         " " +
-        escHtml(t("cp_stat_liked_suffix", "liked")) +
+        escHtml(t("cp_stat_liked_suffix", "kept & applications")) +
         "</span>"
       : "") +
     (counts.passed > 0
@@ -2034,9 +2021,9 @@ function companyFactsHtml(c, t) {
 
 function companyStatusPillHtml(reviewStatus, t) {
   var STATUS_MAP = {
-    approved: ["q-good-bg", t("cp_review_approved", "Approved")],
-    pending: ["q-moderate-bg", t("cp_review_pending", "Pending review")],
-    rejected: ["q-weak-bg", t("cp_review_archived", "Archived")],
+    approved: ["q-good-bg", t("cp_review_approved", "Tracked")],
+    pending: ["q-moderate-bg", t("cp_review_pending", "To review")],
+    rejected: ["q-weak-bg", t("cp_review_archived", "Not tracked")],
   };
   var m = STATUS_MAP[reviewStatus] || STATUS_MAP.pending;
   return (
@@ -2080,7 +2067,7 @@ function companyMonitoringHtml(c, monStatus, t) {
   if (!rows && !statusRow) return "";
   return (
     '<div class="vac-rail-group"><div class="vac-section-label">' +
-    escHtml(t("col_monitoring", "Monitoring")) +
+    escHtml(t("col_monitoring", "Collection check")) +
     "</div>" +
     rows +
     statusRow +
@@ -2144,17 +2131,17 @@ export function companyProfileHtml(c, roles, opts) {
     banner =
       '<div class="cp-review-banner q-moderate-bg">' +
       '<span class="cp-review-label">' +
-      escHtml(t("cp_review_pending", "Pending review")) +
+      escHtml(t("cp_review_pending", "To review")) +
       "</span>" +
       '<button class="vac-btn vac-btn--like" onclick="reviewCompany(\'' +
       cid +
       "','approve')\">" +
-      escHtml(t("btn_approve", "Approve")) +
+      escHtml(t("btn_approve", "Track company")) +
       "</button>" +
       '<button class="vac-btn vac-btn--pass" onclick="reviewCompany(\'' +
       cid +
       "','reject')\">" +
-      escHtml(t("btn_reject", "Reject")) +
+      escHtml(t("btn_reject", "Stop tracking")) +
       "</button></div>";
     // Approved is a settled state: its status shows once, in the rail pill
     // (companyStatusPillHtml) — no second full-width banner (DHA-412 #6, the
@@ -2167,12 +2154,12 @@ export function companyProfileHtml(c, roles, opts) {
     banner =
       '<div class="cp-review-banner q-weak-bg">' +
       '<span class="cp-review-label">' +
-      escHtml(t("cp_review_archived", "Archived")) +
+      escHtml(t("cp_review_archived", "Not tracked")) +
       "</span>" +
       '<button class="vac-btn vac-btn--like" onclick="reviewCompany(\'' +
       cidR +
       "','approve')\">" +
-      escHtml(t("cp_restore", "Restore to active")) +
+      escHtml(t("cp_restore", "Track company")) +
       "</button></div>";
   }
 

@@ -1345,3 +1345,35 @@ test("feedback rejects cross-origin simple form requests before touching the dat
     assert.equal(seen.length, 0);
   });
 });
+
+test('application notes reject stale edits and preserve previous notes on save', async () => {
+  const previous = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = 'postgres://stub/stub';
+  const seen = [];
+  setPool({connect:async()=>({
+    async query(sql, params) {
+      seen.push({sql,params});
+      if (sql.startsWith('SELECT company_id')) return {rows:[{company_id:randomUUID(),status:'applied',applied_at:null}]};
+      if (sql.startsWith('SELECT notes')) return {rows:[{notes:'previous notes'}]};
+      return {rows:[]};
+    },release(){},
+  })});
+  try {
+    const id = randomUUID();
+    const stale = mockRes();
+    await handleRequest(mockReq({method:'POST',url:'/api/application-notes',headers:{'content-type':'application/json'},body:{id,notes:'draft',expected_notes:'stale'}}),stale);
+    assert.equal(stale.statusCode,409);
+    assert.ok(!seen.some(x=>x.sql.startsWith('UPDATE')));
+    const saved = mockRes();
+    await handleRequest(mockReq({method:'POST',url:'/api/application-notes',headers:{'content-type':'application/json'},body:{id,notes:'new notes',expected_notes:'previous notes'}}),saved);
+    assert.equal(saved.statusCode,200);
+    assert.ok(seen.some(x=>x.sql.includes("'{note_history}'") && x.params[1]==='new notes'));
+    assert.equal(saved.headers['Access-Control-Allow-Origin'],undefined);
+    const invalid = mockRes();
+    await handleRequest(mockReq({method:'POST',url:'/api/application-notes',body:{id,notes:'x',expected_notes:''}}),invalid);
+    assert.equal(invalid.statusCode,400);
+  } finally {
+    setPool(null);
+    if(previous===undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL=previous;
+  }
+});

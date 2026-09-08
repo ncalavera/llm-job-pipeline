@@ -172,7 +172,7 @@ function navVisOpts() {
 function updateNavCounts() {
   var vacEl = document.getElementById("navCountVacancies");
   if (vacEl) vacEl.textContent = groups.some((g) => g.screening_state === "ready")
-    ? screenLists(groups, getGroupStatus).toScreen.size
+    ? screenLists(groups, getGroupStatus, config.screening_prompt_fingerprint).toScreen.size
     : basketCounts(groups, navVisOpts()).unseen;
   var compEl = document.getElementById("navCountCompanies");
   if (compEl) compEl.textContent = getCompanies().length;

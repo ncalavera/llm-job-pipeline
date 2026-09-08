@@ -39,6 +39,7 @@ import {
   resolveVacancyCompany,
 } from "./helpers.js";
 import { T, dateLocale } from "./i18n.js";
+import { applicationNotesHtml, loadApplicationNotes } from "./application-notes.js";
 
 // ---------------------------------------------------------------------------
 // Pure assembly — no DOM, no state; unit-tested directly.
@@ -78,41 +79,29 @@ export function sourceLabel(strategy) {
 // exact status or has been applied to. An archived role is a read-only page
 // (reached from the Archive list) - no decision buttons, only Open posting.
 export function vacancyActions(status) {
-  if (status === "archived") {
-    return {
-      canLike: false,
-      canPass: false,
-      canApply: false,
-      canResearch: false,
-      canNetwork: false,
-    };
-  }
-  const basket = STATUS_BASKET[status] || "unseen";
   return {
-    canLike: basket === "unseen" || basket === "passed",
-    canPass: basket === "unseen" || basket === "liked",
-    canApply: status !== "to_apply" && status !== "applied",
-    canResearch: status !== "to_research" && status !== "applied",
-    canNetwork: status !== "to_network" && status !== "applied",
+    canLike: ["unseen", "passed", "skipped"].includes(status),
+    canPass: ["unseen", "liked", "to_apply", "to_research", "to_network"].includes(status),
+    canApply: ["unseen", "liked", "passed", "skipped"].includes(status),
   };
 }
 
 // Header status chip so a change confirms in place (F3/R18, non-Browse entry).
 // `unseen` (nothing decided) and `expiring` (shown as its own badge) get none.
 export const _STATUS_CHIP_KEYS = {
-  liked: ["vac_status_liked", "Liked"],
+  liked: ["vac_status_liked", "Backlog"],
   passed: ["vac_status_passed", "Passed"],
   skipped: ["vac_status_passed", "Passed"],
-  to_apply: ["vac_status_to_apply", "To apply"],
-  to_research: ["vac_status_to_research", "Research"],
-  to_network: ["vac_status_to_network", "Networking"],
+  to_apply: ["vac_status_to_apply", "In progress"],
+  to_research: ["vac_status_to_research", "In progress"],
+  to_network: ["vac_status_to_network", "In progress"],
   applied: ["vac_status_applied", "Applied"],
   // The stages after `applied`: each is a different answer to "where is this
   // application", so each needs its own chip instead of reading as "Applied".
-  test_task: ["vac_status_test_task", "Test task"],
-  interview: ["vac_status_interview", "Interview"],
-  declined: ["vac_status_declined", "Declined"],
-  accepted: ["vac_status_accepted", "Accepted"],
+  test_task: ["vac_status_test_task", "Interviewing"],
+  interview: ["vac_status_interview", "Interviewing"],
+  declined: ["vac_status_declined", "Rejected"],
+  accepted: ["vac_status_accepted", "Offer / invitation"],
   archived: ["vac_status_archived", "Archived"],
 };
 
@@ -173,24 +162,8 @@ export function buildFactsRail(g, company, opts) {
   if (src)
     facts.push({ label: t("vac_source", "Source"), value: escHtml(src) });
 
-  // The application entity's own status (draft/applied/interview/offer/
-  // rejected/withdrawn — scripts/applications.py VALID_STATUSES) is a finer
-  // lifecycle than the vacancy's coarse review status (_STATUS_CHIP_KEYS has no
-  // entry for offer/rejected/withdrawn/draft at all), so the header
-  // status chip alone can't show it. Relocated from the retired Browse card's
-  // "✉ applied" badge (U5 parity) — same raw status text, applied_at now
-  // formatted via fmtDate instead of a hover-only tooltip.
-  if (g.application && g.application.status) {
-    const appliedDate = g.application.applied_at
-      ? fmtDate(g.application.applied_at, locale)
-      : "";
-    facts.push({
-      label: t("application_marker", "Application"),
-      value:
-        escHtml(g.application.status) +
-        (appliedDate ? " · " + escHtml(appliedDate) : ""),
-    });
-  }
+  const sentDate = g.applied_at || g.application?.applied_at;
+  if (sentDate) facts.push({label: t("apps_col_sent", "Sent on"), value: escHtml(fmtDate(sentDate, locale))});
 
   // safeUrl validates the scheme but does NOT escape quotes; escHtml here so the
   // value is safe to drop straight into href="…" (R14 — matches catalog.js:299,
@@ -345,12 +318,12 @@ export function vacancyPageHtml(g, company, status, opts) {
   if (status === "expiring") {
     stateBadge =
       '<span class="vac-badge vac-badge--expiring">' +
-      escHtml(t("vac_status_expiring", "Expiring")) +
+      escHtml(t("vac_status_expiring", "Needs availability check")) +
       "</span>";
   } else if (isVacancyExpired(g)) {
     stateBadge =
       '<span class="vac-badge vac-badge--expired">' +
-      escHtml(t("vac_status_expired", "Expired")) +
+      escHtml(t("vac_status_expired", "Availability needs review")) +
       "</span>";
   }
   // Source-freshness warning (relocated from the retired Browse card, U5
@@ -388,7 +361,7 @@ export function vacancyPageHtml(g, company, status, opts) {
     ? '<button class="vac-btn vac-btn--apply" onclick="vacancyMoveToApply(\'' +
       idAttr +
       "')\">" +
-      escHtml(t("vac_move_to_apply", "Move to apply")) +
+      escHtml(t("vac_move_to_apply", "In progress")) +
       "</button>"
     : "";
   const likeBtn = acts.canLike
@@ -403,23 +376,6 @@ export function vacancyPageHtml(g, company, status, opts) {
       idAttr +
       "')\">✕ " +
       escHtml(t("vac_pass", "Pass")) +
-      "</button>"
-    : "";
-  // Research / Network: the two triage dispositions that used to be reachable
-  // only from the Triage board. Same inline-onclick + status path as the other
-  // action buttons; gated by vacancyActions above.
-  const researchBtn = acts.canResearch
-    ? '<button class="vac-btn vac-btn--research" onclick="vacancyResearch(\'' +
-      idAttr +
-      "')\">" +
-      escHtml(t("vac_research", "Research")) +
-      "</button>"
-    : "";
-  const networkBtn = acts.canNetwork
-    ? '<button class="vac-btn vac-btn--network" onclick="vacancyNetwork(\'' +
-      idAttr +
-      "')\">" +
-      escHtml(t("vac_network", "Network")) +
       "</button>"
     : "";
 
@@ -454,8 +410,6 @@ export function vacancyPageHtml(g, company, status, opts) {
     "</div>" +
     '<div class="vac-actions">' +
     applyBtn +
-    researchBtn +
-    networkBtn +
     likeBtn +
     passBtn +
     openPosting +
@@ -512,7 +466,7 @@ export function vacancyPageHtml(g, company, status, opts) {
         "</div>",
     );
   }
-  const reading = '<div class="vac-reading">' + readParts.join("") + "</div>";
+  const reading = '<div class="vac-reading">' + readParts.join("") + applicationNotesHtml() + "</div>";
 
   // --- Facts rail ---
   const rail = buildFactsRail(g, company, { t, locale });
@@ -677,6 +631,7 @@ export function renderVacancyDetail(id) {
   // parent company by the real shared key instead (post-ship fast fix #6).
   const company = resolveVacancyCompany(g, getCompanies());
   host.innerHTML = vacancyPageHtml(g, company, status, pageOpts());
+  loadApplicationNotes(host, g.id);
 }
 
 // After a verdict from a Browse or Screen review entry, hop to the next STILL-
@@ -739,15 +694,9 @@ export function vacancyPass(id) {
   advanceBrowseQueue(id);
 }
 
-export function vacancyResearch(id) {
-  const g = groupsById.get(id);
-  if (g) updateStatus(id, g.member_ids || [], "to_research");
-}
 
-export function vacancyNetwork(id) {
-  const g = groupsById.get(id);
-  if (g) updateStatus(id, g.member_ids || [], "to_network");
-}
+
+
 
 export function vacancyMoveToApply(id) {
   const g = groupsById.get(id);

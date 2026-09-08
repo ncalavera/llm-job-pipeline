@@ -36,7 +36,7 @@ globalThis.location = { protocol: "file:", origin: "" };
 const { STATUS_BASKET, TRIAGE_COLUMNS } = await import("./state.js");
 const { NON_APPLYABLE_STATUSES, selectTodayRoles } =
   await import("./derive.js");
-const { TOAST_MESSAGES, computeTriageFunnel } = await import("./helpers.js");
+const { TOAST_MESSAGES, triageBuckets } = await import("./helpers.js");
 const { _STATUS_CHIP_KEYS } = await import("./vacancy.js");
 const { _ROLE_STATUS_GROUP } = await import("./companies.js");
 
@@ -183,7 +183,7 @@ test("R18: companies.js role sort groups every status", () => {
   assert.equal(_ROLE_STATUS_GROUP.accepted, _ROLE_STATUS_GROUP.applied);
 });
 
-test("R18: the triage funnel counts every triaged column", () => {
+test("R18: each progress stage has exactly one column", () => {
   // One approved entry per board column. `liked` is reported separately
   // (liked_queue), so triaged_total must equal every OTHER column.
   const columnKeys = new Set(COLUMN_STATUSES);
@@ -199,11 +199,10 @@ test("R18: the triage funnel counts every triaged column", () => {
     last_seen: new Date().toISOString().slice(0, 10),
     deadline: null,
   }));
-  const { metrics } = computeTriageFunnel(entries, {
+  const buckets = triageBuckets(entries, {
     statusPri: Object.fromEntries(COLUMN_STATUSES.map((s, i) => [s, i])),
     statusBasket: STATUS_BASKET,
     columnKeys,
   });
-  assert.equal(metrics.liked_queue, 1);
-  assert.equal(metrics.triaged_total, COLUMN_STATUSES.length - 1);
+  for (const key of columnKeys) assert.equal(buckets[key].length, 1);
 });

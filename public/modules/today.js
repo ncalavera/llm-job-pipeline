@@ -374,7 +374,7 @@ export function renderToday() {
     : [];
   const decideActions = writable
     ? [
-        { action: "like", label: T("today_act_like", "Like"), cls: "act-like" },
+        { action: "like", label: T("today_act_like", "Keep"), cls: "act-like" },
         passAction,
       ]
     : [];
@@ -461,7 +461,7 @@ export function renderToday() {
       testTaskRows,
     ) +
     todayGroupHtml(T("today_awaiting", "Awaiting reply"), awaitingRows) +
-    todayGroupHtml(T("today_liked", "Liked — decide"), likedRows) +
+    todayGroupHtml(T("today_liked", "Kept \u2014 choose next step"), likedRows) +
     closingBlock +
     todayGroupHtml(T("today_dont_rot", "Don't let good ones rot"), rotRows) +
     todayGroupHtml(T("today_working", "In progress"), workingRows) +

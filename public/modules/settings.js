@@ -68,13 +68,25 @@ export function renderSettings() {
     "</span>" +
     "</div>";
 
+  const glossary = '<details class="stg-group"><summary>' + escHtml(T("concepts_title", "Terms and states")) + '</summary>' + [
+    ["concepts_entities", "Company: the organisation offering a vacancy. Job board: a site publishing vacancies from many companies. Source: the board or careers site where a posting was collected."],
+    ["concepts_tracking", "Company tracking: To review / Tracked / Not tracked. Board collection: Enabled / Disabled. Board visibility: Shown / Hidden. Hiding does not stop collection."],
+    ["concepts_connection", "Connection: Automatic / Manual / Not connected. Last check: Never checked / Succeeded / Failed. A successful check can find zero vacancies. Overdue means the next check is late."],
+    ["concepts_preparation", "Facts quote the posting. Fit compares those facts with your profile. Preparation: Not prepared / Needs update / Ready / Failed. Only current, ready, undecided vacancies enter Inbox."],
+    ["concepts_decision", "Decision: Undecided / Kept / Passed. After Keep, choose a next step: Prepare application / Research company / Contact someone. Archive is storage history, not your decision to Pass."],
+    ["concepts_application", "Application stages: Draft / Applied / Test task / Interview / Offer received / Rejected by employer / Withdrawn. Offer received means the employer said yes; it does not mean you accepted."],
+    ["concepts_availability", "Availability: Deadline passed / Not recently confirmed / No closure signal. These signals never erase your decision or application."],
+    ["concepts_contacts", "Contact: To contact / Awaiting reply / Replied / Met / Declined contact / No longer following up. These describe a conversation, not an application."],
+    ["concepts_counts", "Each count belongs to its named list. Function groups divide Inbox; attribute filters may overlap. Scores are optional numerical estimates, not Facts, Fit, or Decisions. Reports are research documents; the daily update is just the inbox count and link."],
+  ].map(([key, text]) => '<p>' + escHtml(T(key, text)) + '</p>').join('') + '</details>';
+
   if (!groups.length) {
-    root.innerHTML = header + '<div class="stg-sheet stg-empty">—</div>';
+    root.innerHTML = header + glossary + '<div class="stg-sheet stg-empty">—</div>';
     return;
   }
 
   root.innerHTML =
-    header + '<div class="stg-sheet">' + groups.map(_group).join("") + "</div>";
+    header + glossary + '<div class="stg-sheet">' + groups.map(_group).join("") + "</div>";
 }
 
 export function initSettings() {

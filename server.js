@@ -1511,6 +1511,7 @@ async function handleContactStatus(req, res) {
 }
 
 const API_ROUTES = {
+  "/api/application-notes": handleApplicationNotes,
   "/api/materials": handleMaterials,
   "/api/vacancies": handleVacancies,
   "/api/companies": handleCompanies,
@@ -1528,19 +1529,78 @@ const API_ROUTES = {
   "/api/contacts": handleContacts,
 };
 
+// Reuse the existing private application dossier. Vacancy status remains the
+// dashboard's progress state; notes may describe any employer-specific steps.
+export async function handleApplicationNotes(req, res) {
+  if (piiPreamble(req, res, "application-notes", req.method === "GET" ? "GET" : "POST")) return;
+  const body = req.method === "GET"
+    ? Object.fromEntries(new URL(req.url, "http://localhost").searchParams)
+    : await readJsonBody(req);
+  if (!body || typeof body.id !== "string" || !FEEDBACK_UUID.test(body.id)) return sendJson(res, 400, { error: "Invalid vacancy ID" });
+  if (req.method === "POST" && (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] || "") ||
+      typeof body.notes !== "string" || typeof body.expected_notes !== "string" ||
+      body.notes.length > 50000 || body.expected_notes.length > 50000))
+    return sendJson(res, 400, { error: "Notes and their previous value are required (maximum 50,000 characters)" });
+  let client;
+  try {
+    client = await getPool().connect();
+    await client.query("BEGIN");
+    const vacancy = await client.query("SELECT company_id, status, applied_at FROM vacancy WHERE id = $1::uuid FOR UPDATE", [body.id]);
+    if (!vacancy.rows.length) {
+      await client.query("ROLLBACK");
+      return sendJson(res, 404, { error: "Vacancy not found" });
+    }
+    const existing = await client.query("SELECT notes FROM application WHERE vacancy_id = $1::uuid FOR UPDATE", [body.id]);
+    const notes = existing.rows[0]?.notes || "";
+    if (req.method === "GET") {
+      await client.query("COMMIT");
+      const events = await client.query("SELECT previous_status, status, recorded_at FROM vacancy_status_event WHERE vacancy_id = $1::uuid ORDER BY id", [body.id]);
+      return sendJson(res, 200, { notes, events: events.rows });
+    }
+    if (notes !== body.expected_notes) {
+      await client.query("ROLLBACK");
+      return sendJson(res, 409, { error: "Notes changed elsewhere. Copy your draft, then reload to compare before saving." });
+    }
+    if (body.notes === notes) {
+      await client.query("COMMIT");
+      return sendJson(res, 200, { notes });
+    }
+    if (existing.rows.length) {
+      await client.query(`UPDATE application SET notes = $2, updated_at = now(),
+        artifacts = jsonb_set(COALESCE(artifacts, '{}'::jsonb), '{note_history}',
+          COALESCE(artifacts->'note_history', '[]'::jsonb) || jsonb_build_array(jsonb_build_object('recorded_at', now(), 'notes', notes)))
+        WHERE vacancy_id = $1::uuid`, [body.id, body.notes]);
+    } else {
+      const v = vacancy.rows[0];
+      const status = {applied: "applied", test_task: "interview", interview: "interview", accepted: "offer", declined: "rejected"}[v.status] || "draft";
+      await client.query(`INSERT INTO application (vacancy_id, company_id, status, applied_at, notes)
+        VALUES ($1::uuid, $2::uuid, $3, $4, $5)`, [body.id, v.company_id, status, v.applied_at, body.notes]);
+    }
+    await client.query("COMMIT");
+    return sendJson(res, 200, { notes: body.notes });
+  } catch (err) {
+    if (client) await client.query("ROLLBACK").catch(() => {});
+    console.error("application-notes: database request failed", {code: err.code});
+    return sendJson(res, 500, { error: "Could not save or load application notes" });
+  } finally { client?.release(); }
+}
+
 // Private files stay outside public/. Caddy supplies the dashboard's auth;
 // this endpoint follows the existing no-CORS, no-store PII boundary.
 export async function handleMaterials(req, res) {
   res.setHeader("Cache-Control", "no-store");
   if (req.method !== "GET") return sendJson(res, 405, { error: "Method not allowed" });
   const root = join(process.env.JOBSEARCH_PRIVATE_DIR || join(fileURLToPath(new URL(".", import.meta.url)), "private"), "materials");
+  const params = new URL(req.url, "http://localhost").searchParams;
+  const statements = params.get("view") === "statements";
   let rows;
-  try { rows = JSON.parse(await readFile(join(root, "index.json"), "utf8")); }
+  try { rows = JSON.parse(await readFile(join(root, statements ? "statements.json" : "index.json"), "utf8")); }
   catch (err) {
     if (err.code === "ENOENT") return sendJson(res, 200, []);
     throw err;
   }
-  const id = new URL(req.url, "http://localhost").searchParams.get("id");
+  if (statements) return sendJson(res, 200, rows);
+  const id = params.get("id");
   if (!id) return sendJson(res, 200, rows);
   const row = rows.find((r) => r.id === id);
   if (!row || !/^[a-f0-9]{64}$/.test(row.sha256)) return sendJson(res, 404, { error: "Not found" });

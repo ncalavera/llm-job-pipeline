@@ -13,24 +13,16 @@
 // read-only dot with the CLI hint, mirroring how the other write actions
 // (saveToServer / saveCompanyReview) no-op offline.
 //
-// The per-board YIELD funnel (scored → fit → liked) is DERIVED in the browser
-// from the raw shipped roles (each carries source_board + llm_score) + live
-// statuses, via derive.boardYield — never baked (STRATEGY guardrail 9, DHA-360).
-// So it renders in simple mode too and reacts to a like/pass with no run. A
-// board with no scored roles shows an explicit "no data yet", never 0/0/0 read
-// as a verdict.
 // =============================================================================
 
-import { API_BASE, groups, getGroupStatus, STATUS_BASKET } from "./state.js";
+import { API_BASE } from "./state.js";
 import {
   escHtml,
   jsAttr,
   relativeTime,
   safeUrl,
   tierClass,
-  isVacancyExpired,
 } from "./helpers.js";
-import { boardYield } from "./derive.js";
 import { T } from "./i18n.js";
 
 // The GitHub issue-form for proposing a new board (URL / who it serves / what
@@ -153,7 +145,7 @@ function _ttlCell(b) {
 function _enabledControl(b) {
   const onCls = b.enabled ? "brd-dot-on" : "brd-dot-off";
   const title = escHtml(
-    b.enabled ? T("boards_enabled_yes", "On") : T("boards_enabled_no", "Off"),
+    b.enabled ? T("boards_enabled_yes", "Collection enabled") : T("boards_enabled_no", "Collection disabled"),
   );
   if (!API_BASE) {
     return '<span class="brd-dot ' + onCls + '" title="' + title + '"></span>';
@@ -207,72 +199,11 @@ function _nameCell(b) {
   );
 }
 
-// The derived yield cell for one board. `y` is the board's funnel row from
-// boardYield ({ scored, fit, liked, hasData }) or undefined. Empty/absent
-// history renders an explicit "no data yet" rather than 0 → 0 → 0, which would
-// read as a verdict against a board that simply hasn't produced a scored role
-// yet (the ticket's honest-empty requirement). Always present — derived from
-// the baked roles, so it works in simple mode with no /api.
-function _yieldCell(y) {
-  if (!y || !y.hasData) {
-    return (
-      '<td class="brd-td brd-yield"><span class="brd-yield-empty">' +
-      escHtml(T("boards_yield_nodata", "no data yet")) +
-      "</span></td>"
-    );
-  }
-  const scoredLbl = T("boards_yield_scored", "scored");
-  const fitLbl = T("boards_yield_fit", "fit");
-  const likedLbl = T("boards_yield_liked", "liked");
-  const title =
-    y.scored +
-    " " +
-    scoredLbl +
-    " → " +
-    y.fit +
-    " " +
-    fitLbl +
-    " (≥60) → " +
-    y.liked +
-    " " +
-    likedLbl;
-  const stat = (n, lbl, cls) =>
-    '<span class="brd-yield-stat' +
-    (cls ? " " + cls : "") +
-    '"><b>' +
-    n +
-    "</b> <i>" +
-    escHtml(lbl) +
-    "</i></span>";
-  return (
-    '<td class="brd-td brd-yield" title="' +
-    escHtml(title) +
-    '">' +
-    '<span class="brd-yield-funnel">' +
-    stat(y.scored, scoredLbl) +
-    '<span class="brd-yield-arrow">→</span>' +
-    stat(y.fit, fitLbl) +
-    '<span class="brd-yield-arrow">→</span>' +
-    stat(y.liked, likedLbl, "brd-yield-liked") +
-    "</span></td>"
-  );
-}
-
 export function renderBoards() {
   const grid = document.getElementById("boardsGrid");
   if (!grid) return;
 
   const catalog = _bakedCatalog();
-  const hasLive = !!liveByKey;
-
-  // Per-board yield (scored → fit → liked), derived in the browser from the raw
-  // shipped roles + live statuses — never baked (guardrail 9). Keyed by board
-  // display name (== vacancy.source_board == board.name).
-  const yieldByBoard = boardYield(groups, {
-    getStatus: getGroupStatus,
-    isExpired: isVacancyExpired,
-    basketMap: STATUS_BASKET,
-  });
 
   if (!catalog.length) {
     grid.innerHTML =
@@ -315,28 +246,17 @@ export function renderBoards() {
     escHtml(T("boards_col_audience", "Audience")) +
     "</th>" +
     '<th class="brd-th">' +
-    escHtml(T("boards_col_strategy", "Source type")) +
+    escHtml(T("boards_col_strategy", "Connection type")) +
     "</th>" +
     '<th class="brd-th">' +
     escHtml(T("boards_col_tier", "Tier")) +
     "</th>" +
     '<th class="brd-th">' +
-    escHtml(T("boards_col_ttl", "TTL")) +
+    escHtml(T("boards_col_ttl", "Check interval")) +
     "</th>" +
     '<th class="brd-th">' +
-    escHtml(T("boards_col_status", "Status")) +
+    escHtml(T("boards_col_status", "Last check")) +
     "</th>" +
-    '<th class="brd-th brd-th-yield">' +
-    escHtml(T("boards_col_yield", "Yield (your history)")) +
-    "</th>" +
-    (hasLive
-      ? '<th class="brd-th num">' +
-        escHtml(T("boards_col_total", "Vacancies")) +
-        "</th>" +
-        '<th class="brd-th num">' +
-        escHtml(T("boards_col_recent", "Fresh 14d")) +
-        "</th>"
-      : "") +
     "</tr></thead>";
 
   const body = rows
@@ -348,14 +268,6 @@ export function renderBoards() {
           escHtml(b.tier) +
           "</span>"
         : '<span class="ct-dim-empty">—</span>';
-      const liveCells = hasLive
-        ? '<td class="brd-td num">' +
-          ((b._live && b._live.vac_total) || 0) +
-          "</td>" +
-          '<td class="brd-td num">' +
-          ((b._live && b._live.vac_recent) || 0) +
-          "</td>"
-        : "";
       return (
         '<tr class="brd-row' +
         (b.enabled ? "" : " brd-row--off") +
@@ -380,8 +292,6 @@ export function renderBoards() {
         '<td class="brd-td">' +
         _freshnessCell(b) +
         "</td>" +
-        _yieldCell(yieldByBoard[b.name]) +
-        liveCells +
         "</tr>"
       );
     })
@@ -408,25 +318,6 @@ export function renderBoards() {
         ),
       ) +
       "</code></p>";
-  const liveNote = hasLive
-    ? ""
-    : '<p class="boards-live-note">' +
-      escHtml(
-        T(
-          "boards_live_note",
-          "Total and fresh-14d vacancy counts come from the live API.",
-        ),
-      ) +
-      "</p>";
-  const yieldNote =
-    '<p class="boards-yield-note">' +
-    escHtml(
-      T(
-        "boards_yield_note",
-        "Yield is your own history: scored roles this board reached, how many clear the apply bar (≥60), and how many you liked.",
-      ),
-    ) +
-    "</p>";
   const suggestLink =
     '<p class="boards-suggest"><a href="' +
     escHtml(SUGGEST_BOARD_URL) +
@@ -440,8 +331,6 @@ export function renderBoards() {
     "<tbody>" +
     body +
     "</tbody></table></div>" +
-    yieldNote +
     cliHint +
-    liveNote +
     suggestLink;
 }

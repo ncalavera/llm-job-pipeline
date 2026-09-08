@@ -858,26 +858,13 @@ export function isVacancyGone(g) {
   return isVacancyExpired(g) || isVacancyStale(g);
 }
 
-// Statuses pulled into the shared "Expired" column once the role is no longer
-// actual. applied/skipped are terminal decisions and stay in their columns.
-export const EXPIRABLE_STATUSES = new Set([
-  "liked",
-  "to_apply",
-  "to_research",
-  "to_network",
-]);
+// Progress columns follow the recorded stage. Availability stays on the card.
+export function progressStage(status) {
+  return ({to_research: "to_apply", to_network: "to_apply", test_task: "interview"})[status] || status;
+}
 
-// Decide which Triage board column a deduped entry (carrying _status) belongs
-// to, given the set of real column keys. Returns null when the entry has no
-// place on the board:
-//   - DB status 'expiring' lives in Today's Closing-soon block, never on the
-//     board;
-//   - unseen/passed and any unknown status have no column.
-// Gone EXPIRABLE_STATUSES collapse into 'expired'; everything else maps 1:1.
 export function triageColumnFor(entry, columnKeys) {
-  const status = entry && entry._status;
-  if (status === "expiring") return null;
-  if (EXPIRABLE_STATUSES.has(status) && isVacancyGone(entry)) return "expired";
+  const status = progressStage(entry && entry._status);
   return columnKeys && columnKeys.has(status) ? status : null;
 }
 
@@ -1027,71 +1014,15 @@ export function dedupeTriageEntries(entries, statusPri) {
   return deduped;
 }
 
-// ---------------------------------------------------------------------------
-// Triage funnel (DHA-396, U12) — the board header's "in db → liked → triaged →
-// applied" strip must never disagree with the columns it summarizes, so it is
-// derived by the SAME dedupeTriageEntries/triageColumnFor reduction the board
-// itself uses, not a second parallel count. Pure and DOM-free (pipeline.js
-// can't be imported under `node --test` — see the dedupe-lesson doc), so a
-// hand-built fixture can exercise every bucket transition directly.
-//
-// `entries` are plain objects already carrying `_status` (from
-// getGroupStatus) and `_approved` (from isGroupCompanyApproved) — the two
-// state.js-dependent lookups pipeline.js resolves before calling in. `opts`:
-// { statusPri, statusBasket, columnKeys } — the same lookup tables state.js
-// exports (STATUS_PRI / STATUS_BASKET / TRIAGE_COLUMNS keys).
-// ---------------------------------------------------------------------------
-
-export function computeTriageFunnel(entries, opts) {
-  const statusPri = opts.statusPri;
-  const statusBasket = opts.statusBasket;
-  const columnKeys = opts.columnKeys;
-
-  const baseTotal = entries.length;
-  const approved = entries.filter(function (e) {
-    return e._approved;
-  });
-
-  let rejectedTotal = 0;
-  approved.forEach(function (e) {
-    if ((statusBasket[e._status] || "unseen") === "passed") rejectedTotal += 1;
-  });
-
-  const buckets = {};
-  columnKeys.forEach(function (k) {
-    buckets[k] = [];
-  });
-  const deduped = dedupeTriageEntries(approved, statusPri);
-  deduped.forEach(function (entry) {
-    const col = triageColumnFor(entry, columnKeys);
-    if (col && buckets[col] !== undefined) buckets[col].push(entry);
-  });
-
-  const at = (key) => (buckets[key] || []).length;
-  const metrics = {
-    base_total: baseTotal,
-    liked_queue: at("liked"),
-    // Triaged = the user cast a verdict on it. Everything past `applied` on the
-    // board (test_task, interview, declined) is a role that was triaged and
-    // then moved on; leaving them out made the funnel shrink as applications
-    // progressed.
-    triaged_total:
-      at("to_apply") +
-      at("to_research") +
-      at("to_network") +
-      at("skipped") +
-      at("applied") +
-      at("test_task") +
-      at("interview") +
-      at("declined") +
-      at("accepted"),
-    in_work: at("to_apply") + at("to_research") + at("to_network"),
-    applied_total: at("applied"),
-    skipped_total: at("skipped"),
-    rejected_total: rejectedTotal,
-  };
-
-  return { buckets, metrics };
+// Each decided vacancy belongs to at most one progress column. Company
+// tracking does not override an explicit decision or application stage.
+export function triageBuckets(entries, {statusPri, columnKeys}) {
+  const buckets = Object.fromEntries([...columnKeys].map(key => [key, []]));
+  for (const entry of dedupeTriageEntries(entries, statusPri).values()) {
+    const key = triageColumnFor(entry, columnKeys);
+    if (key) buckets[key].push(entry);
+  }
+  return buckets;
 }
 
 // ---------------------------------------------------------------------------

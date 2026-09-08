@@ -94,9 +94,9 @@ def test_SF05_rejected_roles_below_the_floor_are_dropped():
 # ---------------------------------------------------------------------------
 
 
-def test_SF06_unscored_is_dropped_whatever_the_status():
+def test_SF06_unscored_discovery_is_dropped_but_human_decisions_survive():
     assert _keep({"llm_score": None, "status": "unseen"}) is False
-    assert _keep({"llm_score": None, "status": "liked"}) is False
+    assert _keep({"llm_score": None, "status": "liked"}) is True
 
 
 # ---------------------------------------------------------------------------

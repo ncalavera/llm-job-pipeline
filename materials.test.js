@@ -19,3 +19,9 @@ test('private catalogue downloads only known immutable objects and disables cach
   const post=response();await handleMaterials({method:'POST',url:'/api/materials'},post);assert.equal(post.status,405);
  }finally{if(previous===undefined)delete process.env.JOBSEARCH_PRIVATE_DIR;else process.env.JOBSEARCH_PRIVATE_DIR=previous;await rm(dir,{recursive:true,force:true});}
 });
+
+test('sent catalogue excludes drafts, unknown versions and correspondence', async () => {
+ const {sentMaterials, matchingStatements} = await import('./public/modules/materials.js');
+ assert.deepEqual(sentMaterials([{id:1,status:'sent',kind:'answers'},{id:2,status:'unknown',kind:'cv'},{id:3,status:'sent',kind:'notes'}]).map(r=>r.id),[1]);
+ assert.equal(matchingStatements([{text:'Built a team',topic:'Experience',kind:'fact'}],'team','Experience').length,1);
+});

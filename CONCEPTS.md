@@ -2,7 +2,105 @@
 
 Shared domain vocabulary for this project — entities, named processes, and status concepts with project-specific meaning. Seeded with core domain vocabulary, then accretes as ce-compound and ce-compound-refresh process learnings; direct edits are fine. Glossary only, not a spec or catch-all.
 
-## Vacancy triage
+## Daily review language
+
+### Vacancy
+One unique opening. Copies from different sources are the same vacancy; different openings on one careers page are not duplicates.
+*Avoid:* row, result, card, or batch as a synonym for vacancy.
+
+### Facts
+What the posting says, supported by its wording. Missing information stays unknown.
+*Avoid:* facts as a synonym for a model's opinion.
+
+### Fit
+How the facts compare with the candidate's profile: matches, gaps, and unknowns. Fit is an explanation, not a numerical score or a decision.
+
+### Decision
+The user's choice: Like or Pass. Preparation, filtering, and archiving do not manufacture a decision.
+*Avoid:* verdict, keep, skipped, or put aside for these same user-facing choices.
+
+### Inbox
+Vacancies awaiting the user's decision whose facts and fit reflect the current posting and profile. Its count is the number of vacancies in that list; a page or function group is a subset of the same inbox.
+*Avoid:* mixing preparation queues or historical results into the inbox count.
+
+### History
+Older records and past decisions retained for reference and recovery. Moving a record out of the active inbox does not mean the user passed on it.
+
+### Daily update
+A short message linking to the inbox and stating its vacancy count. Preparation details belong to Health; research documents remain Reports.
+
+## Dashboard entities and states
+
+Each state answers one named question. States are mutually exclusive **within that question**; different questions are independent. A company can be tracked while its connection is missing. A vacancy can be liked while its preparation needs updating. Neither is a contradiction.
+
+### Company
+The organisation offering a vacancy. A company can have many vacancies and a direct careers source. Discovering a company on a job board does not connect its careers site.
+
+**Tracking:** To review → Tracked or Not tracked; either choice can be changed later. Tracked means included in the search, not that fetching is working.
+
+### Job board
+A website listing vacancies from multiple companies. A board publishes a vacancy; the company offers it. The same vacancy may appear on several boards and on the company's careers site.
+
+**Collection:** Enabled or Disabled. Enabled participates in scheduled collection; Disabled does not. A one-off explicit collection can override the schedule.
+
+**Visibility:** Shown or Hidden. Hiding a board only changes the catalogue view; it does not disable collection or delete vacancies.
+
+*Avoid:* board alone when referring to job sources; use Progress for the application columns.
+
+### Source
+The place from which a vacancy posting was collected: a job board or a company's careers site. A source is not the company itself.
+
+**Connection:** Automatic (configured collector), Manual (requires a person), or Not connected. Being configured does not imply a successful check.
+
+**Last check:** Never checked, Succeeded, or Failed. A successful check may find zero vacancies; zero is a result, not an error or missing data.
+
+**Check freshness:** Unknown (no successful timestamp), Current (within the source's check interval), or Overdue (outside it). This describes checking the source, not whether an individual vacancy is open.
+
+### Preparation
+The saved Facts and Fit for one vacancy and one candidate profile.
+
+**State:** Not prepared (no attempt), Needs update (saved preparation predates a posting/profile change), Ready (saved preparation matches both), or Failed (latest attempt failed). Processing details belong to Health. A failure never becomes a human Pass decision.
+
+### Vacancy decision
+**State:** Undecided, Liked, or Passed. Like records interest; Pass records the user's choice not to pursue. Undo restores the previous decision. Choosing a next step or submitting an application is later progress, not another synonym for Like.
+
+Historical imports may contain automatic passes. Without a recorded human action, the stored legacy value alone is not evidence that the user personally rejected a vacancy.
+
+### Progress
+One current stage per vacancy: **Backlog → In progress → Applied → Interviewing**, followed by **Offer / invitation**, **Rejected**, or **Passed**. Not every application visits every stage.
+
+Like places a vacancy in Backlog. In progress covers research, contacting people, drafting and preparing to submit. Applied means submitted and awaiting a response. Interviewing includes interviews and test tasks. Offer / invitation records an employer or programme accepting the application, not the candidate accepting an offer. Rejected means the employer declined; Passed means the user stopped pursuing it. Silence never becomes rejection.
+
+Legacy storage aliases remain readable: `to_research` and `to_network` display as In progress; `test_task` displays as Interviewing. These are not additional user-facing stages.
+
+### Application
+The user's attempt to obtain a vacancy, programme place, grant, or another opportunity. Applying is a human action; the tool does not submit automatically. A submitted date is preserved through later progress changes.
+
+Custom employer-specific steps and source-backed historical events belong to the application record; they do not create more Kanban columns. The vacancy page provides a plain-text editor for steps and dated notes; previous notes are preserved. Automatic status history starts when migration 0030 is installed and records when the system learned each change.
+
+### Vacancy availability
+**State:** Deadline passed (a known deadline is past), Not recently confirmed (no passed deadline, but the source has stopped confirming it), or No closure signal (neither condition). No closure signal is not a guarantee that applications are open. Availability never overwrites a decision or an application stage.
+
+### Archive
+Records removed from active collection/review, with a reason where available. Archived is a retention state, not Passed. Restoring a record returns it to review eligibility; it does not fabricate a Like decision. History is the wider collection of previous decisions and activity, including archives; the words are not interchangeable.
+
+### Contact
+A person the user may contact about the search. Companies and vacancies can link to contacts; a contact is not an application.
+
+**Conversation state:** To contact, Awaiting reply, Replied, Met, Declined contact, or No longer following up. A later reply may reopen a conversation. These are contact states, not vacancy outcomes.
+
+### Review note
+A user's reason or correction accompanying a decision. **Review state:** Pending review or Reviewed. Saving a decision and reviewing its note are separate events.
+
+### Score
+An optional numerical model estimate, labelled Score everywhere. Older company scores describe company preference; vacancy scores describe vacancy preference. A score is neither a Fact, a Fit explanation, nor a human Decision. Daily preparation does not require scoring.
+
+### Views and counts
+Inbox is the current, prepared, undecided vacancy list. Catalog is the broader vacancy list; filters can make it smaller. Progress groups liked vacancies and applications by current progress. Applications is the submitted-application table. Companies and Job boards count their own entities, never vacancies. Reports contains research documents; Contacts contains people; Health contains processing and connection details; Settings contains preferences.
+
+A list count names its entity and uses that list's filters. A page count says how many are shown, not how many exist. Function groups partition the inbox, with mixed/unknown functions in Other. Attribute filters (language, location, seniority) may overlap and must never be presented as additive totals. Database record counts include source copies and history; they are not unique-vacancy counts. Cumulative funnel counts overlap and are not current states.
+
+## Vacancy triage (legacy storage vocabulary)
 
 ### Triage
 The review flow where the user turns liked vacancies into decisions — apply, research, network, or skip. Runs on the dashboard's Triage board (and a thin terminal equivalent); each decision is recorded as a stored vacancy status.
@@ -27,11 +125,8 @@ What was applied to: job, programme, advising, consulting, grant, or course. Eve
 ### Send date
 When an application actually went out (`vacancy.applied_at`), written once when a row first enters the application funnel and never overwritten. Distinct from `status_updated_at`, which moves with every stage — on a declined row that one holds the date of the rejection, so it can never stand in for a send date without lying. Where no send date was recorded, the display falls back to the stage date and marks the cell as an estimate.
 
-### Expired (derived state)
-A display-only triage classification: a liked-basket vacancy that is no longer actual, because its deadline has passed or its source stopped confirming it. Computed at render time from the vacancy's own fields and never written to the database — the underlying status survives, nothing can be dragged into the state, and the classification reverses itself if the role reappears at the source.
-*Avoid:* expired as a stored status.
-
-A vacancy in this state is a review queue item, not a verdict: staleness has false positives (see Stale), so the user dismisses each one explicitly.
+### Expired (legacy term)
+A past deadline or a source that has stopped confirming a vacancy. These are availability signals displayed on its card; neither moves a vacancy into a different progress column or changes its decision basket.
 
 ### Expiring (protected status)
 A stored vacancy status for a high-scoring role that disappeared from its source before the user made a decision on it. Protection keeps it visible for an explicit decision (surfaced in Today) instead of letting it be silently archived. Distinct from Expired: expiring is stored and pre-decision; expired is derived and applies after the user has already liked the role.
@@ -85,12 +180,8 @@ A recorded dedup hash of an archived vacancy that blocks the same role from bein
 ### Application dossier
 The application entity's reason to exist (2026-07-04 decision): one record per submitted application that catalogues everything done for it — the stage history, timestamped free-text notes, and links to artifacts (CV version, cover-letter answers, research). A status-only applications view would merely duplicate Triage; the dossier is what the entity adds. Reachable from the company page, the vacancy page, and Triage.
 
-### Stage machine
-The application lifecycle: sent → interview (repeatable; each round is a timeline entry) → offer / rejected / ghosted (terminal). "Sent" is created automatically by "mark applied"; every other transition is a manual user action. Follow-ups are notes on the timeline, not a stage.
-
-### Ghosted
-Terminal application stage meaning the employer went silent and the user gave up waiting. Manual-only: an application silent for more than 21 days shows a derived "mark ghosted?" nudge, but the system never sets the stage itself.
-*Avoid:* auto-ghosting, ghosted as a computed state.
+### Application storage
+Vacancy status is the canonical dashboard progress state. The application dossier stores private notes, custom steps, prior note versions and artifact references. Its legacy status field is not displayed as a second stage. Original submissions remain immutable in the materials catalogue.
 
 ## Company scoring
 
@@ -122,7 +213,7 @@ Two distinct pass signals. **Not mine** is a plain `passed` status: the role was
 The safety check every filter-word proposal must pass before it is offered. A candidate word is **clean** when it matches (whole-word) no title in the liked history AND no title of a vacancy scored ≥ 40 — i.e. adding it to the filter would have killed nothing good. A dirty candidate is not proposed; the exact roles it would have wrongly killed (its collisions) are shown instead. Pure string matching — no LLM.
 
 ### Board-disable archive
-The board lifecycle rule (2026-07-04): disabling a board immediately archives its undecided rows (unseen and unscored) with `status_reason='board_disabled'`; decided rows are untouched; each archived row is individually restorable; re-enabling the board refetches fresh listings. Exists because board rows are outside gone-detection, so a disabled board's leftovers could otherwise never resolve.
+The explicit board cleanup operation archives its undecided rows (unseen and unscored) with `status_reason='board_disabled'`; decided rows are untouched; each archived row is individually restorable; re-enabling the board refetches fresh listings. The dashboard collection toggle only changes collection; cleanup is a separate operation. Exists because board rows are outside gone-detection, so a disabled board's leftovers could otherwise never resolve.
 
 ## Dashboard design
 

@@ -99,6 +99,11 @@ def main():
     imp.add_argument("--date", default="")
     search = sub.add_parser("search")
     search.add_argument("query")
+    search.add_argument(
+        "--originals",
+        action="store_true",
+        help="Search original documents rather than the reusable statement bank",
+    )
     args = parser.parse_args()
     if args.command == "import":
         row = add(
@@ -114,11 +119,17 @@ def main():
         print(row["id"])
     else:
         words = args.query.casefold().split()
+        statements = ROOT / "statements.json"
+        candidates = (
+            load()
+            if args.originals
+            else (json.loads(statements.read_text()) if statements.exists() else [])
+        )
         print(
             json.dumps(
                 [
                     r
-                    for r in load()
+                    for r in candidates
                     if all(w in json.dumps(r, ensure_ascii=False).casefold() for w in words)
                 ],
                 ensure_ascii=False,

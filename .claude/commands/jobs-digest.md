@@ -4,9 +4,10 @@ description: Send or preview the daily screening summary in the configured Teleg
 
 # /jobs-digest
 
-The daily driver sends one short message: new arrivals, roles ready to review,
-roles awaiting preparation, failed preparations, and a link to the Screen view.
-Keep, Put aside, Undo, and optional reasons live in the dashboard.
+The daily driver sends one short message: the Inbox vacancy count and its link.
+Only preparations matching the current posting and profile count. Run failures
+remain visible; preparation queues belong to Health. Keep, Pass, Undo, and
+optional reasons live in the dashboard.
 
 ## Preview or send
 

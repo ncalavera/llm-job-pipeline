@@ -198,8 +198,8 @@ test("companyProfileHtml (scored): renders full reading order without throwing",
   });
   assert.equal(typeof html, "string");
   assert.ok(html.includes("GiveWell"));
-  assert.ok(html.includes("Fit analysis"));
-  assert.ok(html.includes("Want breakdown"));
+  assert.ok(html.includes("Company score explanation"));
+  assert.ok(html.includes("Company score breakdown"));
   assert.ok(html.includes("Strengths"));
   assert.ok(html.includes("Risks"));
   assert.ok(html.includes("Approach"));
@@ -240,7 +240,7 @@ test("companyProfileHtml (approved): status shows once, in the rail pill — no 
   );
   // …but the single source of truth, the rail Status pill, still reads Approved.
   assert.ok(html.includes("cp-status-pill"));
-  assert.ok(html.includes("Approved"));
+  assert.ok(html.includes("Tracked"));
 });
 
 test("companyProfileHtml: pending/rejected keep their action banners (only approved's duplicate went)", () => {
@@ -357,7 +357,7 @@ test("companyProfileHtml (never scored, AE2): renders the evidence-list variant,
   });
   assert.ok(html.includes("Why this tier"));
   assert.ok(html.includes("Mission is squarely EA-aligned"));
-  assert.ok(!html.includes("Want breakdown"));
+  assert.ok(!html.includes("Company score breakdown"));
   assert.ok(!html.includes("cp-fit-score"));
   assert.ok(!html.includes("Run /enrich"));
 });
@@ -619,7 +619,7 @@ test("_buildRow: an XSS payload in the company name is inert in both text and th
     state.companySubTab = "archived"; // fixture has no rejected companies
     renderCompanies();
     assert.ok(
-      grid.innerHTML.includes("Archived") &&
+      grid.innerHTML.includes("Not tracked") &&
         grid.innerHTML.includes("no companies"),
       "expected the sub-tab-labelled basket-empty copy, got: " + grid.innerHTML,
     );
@@ -689,3 +689,11 @@ test("_buildRow: an XSS payload in the company name is inert in both text and th
     );
   });
 }
+
+
+test("company connection and last check remain separate", () => {
+  state.companySubTab = "approved";
+  const html = _buildRow({name: "Company", slug: "company", strategy: null, needs_source: true, fetch_status: "error"});
+  assert.ok(html.includes("Not connected"));
+  assert.ok(html.includes("Check failed"));
+});

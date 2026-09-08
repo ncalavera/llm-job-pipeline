@@ -87,8 +87,8 @@ export function batchConcern(role, t = (key, fallback) => fallback) {
 }
 
 /** Nonempty functional groups of ready, undecided roles. Never mutates input. */
-export function reviewBatches(roles, getStatus) {
-  const { toScreen } = screenLists(roles, getStatus);
+export function reviewBatches(roles, getStatus, promptFingerprint) {
+  const { toScreen } = screenLists(roles, getStatus, promptFingerprint);
   const groups = new Map();
   const seen = new Set();
   for (const role of roles) {

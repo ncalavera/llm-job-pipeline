@@ -124,7 +124,6 @@ Back up this private directory together with the database. Imports are explicit;
 the daily pipeline neither collects personal correspondence nor spends tokens
 on the material library.
 
-
 The default daily path is fetch → enrich → dedup → filter → evidence preparation
 → one Telegram summary → publish. Legacy company/vacancy scoring and terminal
 verdict checkpoints are skipped, preserving resumability of old checkpoints.
@@ -132,11 +131,14 @@ Preparation records the requested fingerprint and the initial attempt timestamp;
 resume counts only a ready/failed save from this attempt for that fingerprint.
 Old ready/failed rows do not masquerade as progress. Failed results retry on the
 next run even when unchanged; successful unchanged results are reused.
-The summary separates ready-to-review roles from the eligible preparation cohort
-(awaiting preparation and failed), contains one screening link and surfaces run
-failures. It never lists numerical scores. `send --details` explicitly requests
-the historical scored lists. Delivery advances last-success only after sending;
-a crash may repeat a summary, but cannot mark an undelivered one successful.
+The daily update contains one current Inbox count and link, plus actionable run
+failures. Preparation queues belong to Health. Readiness requires matching the
+stored screening fingerprint against the current posting and prompt/profile
+fingerprints. The snapshot ships these raw identities; Inbox, its sidebar badge,
+and functional review batches share `screenLists`. The digest validates the same
+identities. `send --details` remains the explicit legacy scoring view.
+Delivery advances last-success only after sending; a crash may repeat a message,
+but cannot mark an undelivered one successful.
 
 
 Nightly scoring agents have file-only tools, restricted payload/result paths,
@@ -155,12 +157,8 @@ reading logs:
   `run_state.json`. `PARTIAL` is a stage that advanced the run but left its own
   work undone — a scoring session that stopped early and carried the remainder
   over; its note says how many of how many. The `screening_prep` stage reports
-  ready / failed counts (`vacancy.screening_state`); the morning digest repeats
-  them as a processing line, separate from the human queue. A second digest
-  line, "N roles ready to screen", links to `?mode=screen` and shares one SQL
-  predicate (`status = 'unseen'`, `screening_state = 'ready'`, company not
-  `inactive`) with the Screen view's To screen list, so the two counts never
-  drift apart.
+  preparation outcomes in Health. The daily update counts current preparations
+  for undecided vacancies; raw `ready` alone is not sufficient.
 - **Health tab** (dashboard) — `public/modules/health.js` renders four blocks
   from the live `api/health-detail.js` endpoint (read-only, no LLM spend):
   - **Boards** — per enabled board: freshness, failure streak, vacancy count,
@@ -215,7 +213,7 @@ conflicts. Compact cards disclose complete evidence on demand; pages contain 20
 roles, and bulk selection applies only to the current page. First-seen age and
 passed deadlines are independent filters; first-seen is not the posting date. Kept and Put aside
 remain filterable. Opening a To screen role carries the page's review queue;
-Keep/Put aside advances through that queue and returns to the filtered list.
+Keep/Pass advances through that queue and returns to the filtered list.
 No filter changes a human status or learns a new exclusion rule.
 
 ## Two backends
@@ -291,7 +289,7 @@ The Screen view groups ready undecided roles by function from posting facts and 
 showing five at a time. Existing profile comparison evidence orders rows inside each
 function (explicit matches before unknowns, required possible conflicts last); it is
 not a new fit score. Unknown functions remain accessible. No score floor or automatic
-personal exclusion is introduced. Keep/Put aside use POST `/api/screening-decision`. Each canonical role and its
+personal exclusion is introduced. Keep/Pass use POST `/api/screening-decision`. Each canonical role and its
 members are saved in one transaction, guarded by the current status and PostgreSQL
 row revision (`xmin`). A later edit on another device makes a stale decision or Undo
 fail safely, including changes away from and back to the same status.
@@ -309,3 +307,16 @@ GET/POST `/api/screening-feedback` share the dashboard authentication boundary.
 Agents read pending feedback and current statuses before proposing any preference
 change. Reviewed feedback records an outcome and session; no automatic consumer or
 preference mutation is enabled. See [review-feedback.md](review-feedback.md).
+
+### Dashboard language
+
+`CONCEPTS.md` defines entities and independent state axes. Settings exposes a
+short Terms and states guide. Job boards shows collection controls and last
+check, without legacy score funnels or raw record counts. Progress counts its
+current columns, without overlapping cumulative funnel totals. Stored status
+keys remain compatible; labels distinguish a user's Pass from an employer's
+rejection. Numerical estimates are Score, while evidence comparisons are Fit.
+
+Application steps and dated history use the existing `application.notes` field through the authenticated, no-store `/api/application-notes` endpoint. Employer-specific steps are plain text with Planned / In progress / Done / Cancelled labels. The current Kanban stage remains `vacancy.status`. Writes lock the vacancy and dossier, compare the prior notes to reject stale edits, and retain previous note versions in private `application.artifacts.note_history`. Notes and their history are never included in the dashboard snapshot. SQLite's static dashboard does not support this editor.
+
+Migration 0030 records every actual vacancy status change in `vacancy_status_event`, using a database trigger so browser, CLI and daily writers share one history. The timestamp is when the change was recorded, not the date the employer acted. Existing history is reconstructed only from evidence in notes; no historical events are invented.

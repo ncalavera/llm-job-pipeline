@@ -164,7 +164,7 @@ function _renderCatalogHiddenNote(grid) {
 
   const tpl = T(
     "catalog_hidden_pending",
-    "ℹ️ {vacs} vacancies from {orgs} not-yet-approved companies are hidden here — approve the company on the Companies tab to see its roles.",
+    "\u2139\ufe0f {vacs} vacancies from {orgs} companies are outside Catalog until those companies are tracked. Inbox uses preparation readiness separately.",
   );
   const note = document.createElement("div");
   note.id = "catalogHiddenNote";
@@ -244,9 +244,9 @@ export function renderCatalog() {
       return;
     }
     const basketLabels = {
-      liked: T("basket_liked", "Liked"),
-      unseen: T("basket_unreviewed", "Unreviewed"),
-      passed: T("basket_passed", "Passed"),
+      liked: T("basket_liked", "Liked & applications"),
+      unseen: T("basket_unreviewed", "Undecided"),
+      passed: T("basket_passed", "Passed & rejected"),
     };
     var basketEmpty =
       (basketLabels[state.currentBasket] || "") +
@@ -469,7 +469,7 @@ export function catalogRowHtml(g, basket, opts) {
     : "";
 
   const mids = jsAttr(JSON.stringify(g.member_ids));
-  const likeLabel = escHtml(t("vac_like", "Like"));
+  const likeLabel = escHtml(t("vac_like", "Keep"));
   const passLabel = escHtml(t("vac_pass", "Pass"));
   const likeBtn =
     '<button class="catalog-row-btn like" onclick="event.stopPropagation();catalogThumbAction(\'' +

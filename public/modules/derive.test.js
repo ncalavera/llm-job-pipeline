@@ -19,7 +19,6 @@ import {
   HOT_MIN_SCORE,
   isApplyable,
   companyRollup,
-  boardYield,
 } from "./derive.js";
 
 // Mirror of STATUS_BASKET in state.js (kept inline so the test imports nothing
@@ -169,7 +168,7 @@ test("visibleGroups drops below-floor roles; a strong unapproved match still sho
 // Basket assignment + counts (DHA-374)
 // ---------------------------------------------------------------------------
 
-test("effectiveBasket re-buckets an expired liked role to passed", () => {
+test("effectiveBasket preserves Keep after the deadline", () => {
   const opts = visOpts({ g4: "liked" });
   const liveLiked = { id: "x" };
   const expiredLiked = { id: "g4", deadline: "2026-06-01" };
@@ -177,14 +176,14 @@ test("effectiveBasket re-buckets an expired liked role to passed", () => {
     effectiveBasket({ ...liveLiked }, visOpts({ x: "liked" })),
     "liked",
   );
-  assert.equal(effectiveBasket(expiredLiked, opts), "passed");
+  assert.equal(effectiveBasket(expiredLiked, opts), "liked");
 });
 
 test("basket counts over the visible set match the sample by hand", () => {
   const opts = visOpts({ g3: "liked", g4: "liked", g6: "passed" });
   const counts = basketCounts(sampleGroups(), opts);
   // liked: g3 | unseen: g1,g7,g5(unapproved 95, ORs past the gate) | passed: g4(expired-liked)+g6
-  assert.deepEqual(counts, { liked: 1, unseen: 3, passed: 2 });
+  assert.deepEqual(counts, { liked: 2, unseen: 3, passed: 1 });
 });
 
 // This is the DHA-374 invariant: a basket badge equals the number of rows its
@@ -295,13 +294,13 @@ test("Nit A: liking/passing a below-floor role puts it in that basket's count+li
   );
 });
 
-test("un-approved company: a strong match shows, a below-floor role stays hidden", () => {
+test("company tracking never hides an explicit decision", () => {
   // ≥ ANY_COMPANY_MIN_SCORE ORs past the approval gate (score_floor_any_company).
   const strong = { id: "np", approved: false, llm_score: 90, locations: [] };
   assert.equal(isVisible(strong, visOpts({ np: "liked" })), true);
-  // Below the floor, approval still gates it — a verdict cannot un-hide it.
+  // A human decision outranks company tracking and scores.
   const weak = { id: "nw", approved: false, llm_score: 20, locations: [] };
-  assert.equal(isVisible(weak, visOpts({ nw: "liked" })), false);
+  assert.equal(isVisible(weak, visOpts({ nw: "liked" })), true);
 });
 
 // ---------------------------------------------------------------------------
@@ -328,7 +327,7 @@ test("Geo buckets by city over the visible set, counting a role once per locatio
   assert.equal(rows["Germany::Berlin"].meanScore, 88.3);
   // Paris: g3 + g4 → count 2; g4 is expired-liked so NOT liked → liked 1.
   assert.equal(rows["France::Paris"].count, 2);
-  assert.equal(rows["France::Paris"].liked, 1);
+  assert.equal(rows["France::Paris"].liked, 2);
   assert.equal(rows["France::Paris"].meanScore, 80);
   // Spain: country-only (raw city ""), one role.
   assert.equal(rows["Spain::"].count, 1);
@@ -348,7 +347,7 @@ test("Geo 'liked' column reacts to a like with no reload", () => {
   assert.equal(after["Germany::Berlin"].liked, 1);
 });
 
-test("Geo drops a liked role from 'liked' once its deadline passes", () => {
+test("Geo preserves a kept vacancy after its deadline", () => {
   // g3 liked, deadline in the near future vs already past.
   const groups = sampleGroups();
   groups.find((g) => g.id === "g3").deadline = "2026-07-10";
@@ -356,7 +355,7 @@ test("Geo drops a liked role from 'liked' once its deadline passes", () => {
   const beforeExpiry = byKey(geoBuckets(groups, opts("2026-07-03")));
   const afterExpiry = byKey(geoBuckets(groups, opts("2026-07-11")));
   assert.equal(beforeExpiry["Germany::Berlin"].liked, 1);
-  assert.equal(afterExpiry["Germany::Berlin"].liked, 0); // expired → not liked
+  assert.equal(afterExpiry["Germany::Berlin"].liked, 1); // decision is unchanged
 });
 
 // ---------------------------------------------------------------------------
@@ -758,74 +757,6 @@ test("companyRollup: empty company → all-zero rollup, never a crash", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// boardYield — per-board funnel (scored → fit → liked) over the user's history.
-// ---------------------------------------------------------------------------
-
-// boardYield needs getStatus + isExpired + basketMap (like the app wires it).
-function yieldOpts(statuses, { today = TODAY } = {}) {
-  return { ...rollupOpts(statuses, { today }), basketMap: STATUS_BASKET };
-}
-
-test("boardYield: buckets roles by source_board and counts scored/fit/liked", () => {
-  const groups = [
-    { id: "a1", source_board: "Alpha", llm_score: 80 }, // fit
-    { id: "a2", source_board: "Alpha", llm_score: 40 }, // scored, not fit
-    { id: "a3", source_board: "Alpha", llm_score: 62 }, // fit + liked
-    { id: "b1", source_board: "Beta", llm_score: 70 }, // fit
-  ];
-  const y = boardYield(groups, yieldOpts({ a3: "liked" }));
-  assert.deepEqual(y.Alpha, { scored: 3, fit: 2, liked: 1, hasData: true });
-  assert.deepEqual(y.Beta, { scored: 1, fit: 1, liked: 0, hasData: true });
-});
-
-test("boardYield: fit uses the ≥60 apply bar (APPLYABLE_MIN_SCORE)", () => {
-  const groups = [
-    { id: "x1", source_board: "Board", llm_score: 59 }, // just under
-    { id: "x2", source_board: "Board", llm_score: 60 }, // exactly the bar
-  ];
-  const y = boardYield(groups, yieldOpts({}));
-  assert.equal(y.Board.scored, 2);
-  assert.equal(y.Board.fit, 1); // only the 60 clears the bar
-});
-
-test("boardYield: direct-ATS roles (no source_board) belong to no board", () => {
-  const groups = [
-    { id: "d1", source_board: "", llm_score: 90 },
-    { id: "d2", llm_score: 90 }, // field absent entirely
-    { id: "d3", source_board: "Board", llm_score: 90 },
-  ];
-  const y = boardYield(groups, yieldOpts({}));
-  assert.deepEqual(Object.keys(y), ["Board"]);
-  assert.equal(y.Board.scored, 1);
-});
-
-test("boardYield: an expired like has lapsed — it no longer counts as liked", () => {
-  const groups = [
-    { id: "e1", source_board: "Board", llm_score: 80, deadline: "2026-06-01" },
-  ];
-  // Status is liked, but the deadline is in the past (< TODAY) → effectiveBasket
-  // rebuckets it to passed, so liked must be 0 (mirrors the badge/list rule).
-  const y = boardYield(groups, yieldOpts({ e1: "liked" }));
-  assert.equal(y.Board.scored, 1);
-  assert.equal(y.Board.liked, 0);
-});
-
-test("boardYield: a board with no shipped roles is simply absent (renders no-data)", () => {
-  const y = boardYield(
-    [{ id: "z", source_board: "Other", llm_score: 70 }],
-    yieldOpts({}),
-  );
-  assert.equal(y.Empty, undefined); // caller shows "no data yet" for absent boards
-  assert.equal(y.Other.hasData, true);
-});
-
-test("boardYield: empty group set → empty map, never a crash", () => {
-  assert.deepEqual(boardYield([], yieldOpts({})), {});
-});
-
-// --- Screen view (bulk screening inbox): lists and groups --------------------
-
 import { screenLists, screenGroups, SCREEN_GROUP_KEYS } from "./derive.js";
 
 const ready = (id, extra) =>
@@ -1137,4 +1068,20 @@ test("requirement search does not borrow another language from a shared quote", 
   );
   g.screening.profile_comparison.push({ requirement: 1, finding: "unknown" });
   assert.equal(screenMatchRequirements(g, { finding: "unknown" }).length, 1);
+});
+
+
+test("inbox requires current posting and profile; previous decisions survive refresh", () => {
+  const roles = [
+    ready("current", { posting_fingerprint: "post", screening_fingerprint: "post:new" }),
+    ready("old-profile", { posting_fingerprint: "post", screening_fingerprint: "post:old" }),
+    ready("edited", { posting_fingerprint: "edited", screening_fingerprint: "post:new" }),
+    ready("kept", { posting_fingerprint: "post", screening_fingerprint: "post:old" }),
+    ready("passed", { posting_fingerprint: "post", screening_fingerprint: "post:old" }),
+  ];
+  const status = g => ({kept: "liked", passed: "passed"}[g.id] || "unseen");
+  const lists = screenLists(roles, status, "new");
+  assert.deepEqual([...lists.toScreen], ["current"]);
+  assert.deepEqual([...lists.kept], ["kept"]);
+  assert.deepEqual([...lists.putAside], ["passed"]);
 });

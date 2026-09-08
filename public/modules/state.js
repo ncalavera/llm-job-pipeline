@@ -117,74 +117,13 @@ export const STATUS_BASKET = {
 };
 
 export const TRIAGE_COLUMNS = [
-  {
-    key: "liked",
-    label: "Liked",
-    color: "var(--gold)",
-    compact: true,
-  },
-  {
-    key: "to_apply",
-    label: "To apply",
-    color: "var(--emerald)",
-  },
-  {
-    key: "to_research",
-    label: "Research",
-    color: "var(--amber)",
-  },
-  {
-    key: "to_network",
-    label: "Networking",
-    color: "var(--lavender)",
-  },
-  {
-    key: "applied",
-    label: "Applied",
-    color: "var(--coral)",
-  },
-  {
-    // The employer sent a take-home assignment. Its own column between Applied
-    // and Interview, because "work is owed" and "waiting for a reply" are
-    // different situations and only one of them needs the user's evening.
-    key: "test_task",
-    label: "Test task",
-    color: "var(--raspberry)",
-  },
-  {
-    key: "interview",
-    label: "Interview",
-    color: "var(--orange)",
-  },
-  {
-    // The employer's own yes: an offer, or a place on a programme. Its own
-    // column right after Interview, because an application that ended well and
-    // one still in flight are different facts, and the count of wins is the
-    // one number the funnel never had.
-    key: "accepted",
-    label: "Accepted",
-    color: "var(--pine)",
-  },
-  {
-    // The employer's own no. Kept on the board (not folded into Passed) so an
-    // application always has somewhere to end, and so the count of real
-    // rejections stays visible next to the count of applications.
-    key: "declined",
-    label: "Declined",
-    color: "var(--slate)",
-  },
-  {
-    // Roles that fell out of actuality (deadline lapsed or gone from source):
-    // surfaced together for an explicit decision instead of silently passing.
-    // Display-only — 'expired' is not a real DB status, so cards can be dragged
-    // OUT to a decision but never dropped IN (see `derived`). Sits next to the
-    // other dead-end column (Skipped) at the end of the board.
-    key: "expired",
-    label: "Expired",
-    color: "var(--terracotta)",
-    derived: true,
-  },
-  { key: "skipped", label: "Skipped", color: "var(--muted)" },
+  {key: "liked", label: "Backlog", color: "var(--gold)", compact: true},
+  {key: "to_apply", label: "In progress", color: "var(--emerald)"},
+  {key: "applied", label: "Applied", color: "var(--coral)"},
+  {key: "interview", label: "Interviewing", color: "var(--orange)"},
+  {key: "accepted", label: "Offer / invitation", color: "var(--pine)"},
+  {key: "declined", label: "Rejected", color: "var(--slate)"},
+  {key: "skipped", label: "Passed", color: "var(--muted)"},
 ];
 
 // ---------------------------------------------------------------------------
@@ -434,19 +373,8 @@ export function applySnapshot(payload) {
 
 export function getCompanyStatusCounts(ids) {
   const counts = { liked: 0, passed: 0, unseen: 0 };
-  const todayStr = new Date().toISOString().slice(0, 10);
   for (const id of ids || []) {
     let status = (state.dbData[id] && state.dbData[id].status) || "unseen";
-    // Expired liked vacancies count as passed
-    if (STATUS_BASKET[status] === "liked") {
-      const g = groupsById.get(id);
-      if (g && g.deadline) {
-        const dl = new Date(g.deadline);
-        if (!isNaN(dl.getTime()) && dl < new Date(todayStr)) {
-          status = "passed";
-        }
-      }
-    }
     counts[status] = (counts[status] || 0) + 1;
   }
   return counts;

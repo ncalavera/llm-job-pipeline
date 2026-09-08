@@ -16,10 +16,10 @@
 
 import {
   state,
+  config,
   API_BASE,
   groups,
   groupsById,
-  stats,
   getGroupStatus,
   setStatusLocal,
   scheduleRender,
@@ -124,7 +124,7 @@ export function screenModel(
   getStatus,
   today = new Date().toISOString().slice(0, 10),
 ) {
-  const lists = screenLists(roles, getStatus);
+  const lists = screenLists(roles, getStatus, config.screening_prompt_fingerprint);
   const cohort = roles.filter((g) => lists[view.list].has(g.id));
   const groupSets = screenGroups(cohort);
   const matching = cohort.filter(
@@ -154,8 +154,8 @@ export function screenModel(
 export const REVIEW_SIZE = 5;
 
 export function reviewModel(roles, getStatus) {
-  const lists = screenLists(roles, getStatus);
-  const batches = reviewBatches(roles, getStatus);
+  const lists = screenLists(roles, getStatus, config.screening_prompt_fingerprint);
+  const batches = reviewBatches(roles, getStatus, config.screening_prompt_fingerprint);
   if (view.list === "toScreen" && !batches.some((b) => b.key === view.batch)) {
     view.batch = batches[0]?.key || null;
     view.page = 0;
@@ -456,7 +456,7 @@ function evidenceHtml(g, reqs, t) {
         "</em>") +
     (notes.length || unknowns.length
       ? '<div class="scr-notes-title">' +
-        escHtml(t("screen_profile_notes", "Compared with your profile")) +
+        escHtml(t("screen_profile_notes", "Fit")) +
         '</div><ul class="scr-notes">' +
         notes.join("") +
         unknowns.join("") +
@@ -555,7 +555,7 @@ export function screenRowHtml(g, opts) {
     '"' +
     (o.open ? " open" : "") +
     "><summary>" +
-    escHtml(t("screen_evidence", "Read posting evidence")) +
+    escHtml(t("screen_evidence", "Facts")) +
     "</summary>" +
     evidenceHtml(g, reqs, t) +
     "</details></article>"
@@ -608,12 +608,12 @@ export function screenFooterHtml(o) {
     '<button type="button" class="scr-btn scr-btn--keep" id="scrKeep"' +
     dis(off || o.decisionBlocked || none || o.list === "kept") +
     ">" +
-    escHtml(t("screen_keep", "Keep")) +
+    escHtml(t("screen_keep", "Like")) +
     "</button>" +
     '<button type="button" class="scr-btn scr-btn--aside" id="scrAside"' +
     dis(off || o.decisionBlocked || none || o.list === "putAside") +
     ">" +
-    escHtml(t("screen_put_aside", "Put aside")) +
+    escHtml(t("screen_put_aside", "Pass")) +
     "</button>" +
     '<button type="button" class="scr-btn" id="scrUndo"' +
     dis(off || !o.canUndo) +
@@ -701,7 +701,7 @@ export const SCREEN_FLOW_TEXT = {
   screen_other: "Other",
   screen_required: "Required",
   screen_preferred: "Preferred",
-  screen_finding: "Compared with my profile",
+  screen_finding: "Fit",
   screen_match: "Evidence in profile",
   screen_possible_conflict: "Possible conflict",
   screen_search: "Title or company",
@@ -721,27 +721,6 @@ export const SCREEN_FLOW_TEXT = {
 function flowLabel(value, t) {
   const key = "screen_" + value;
   return t(key, SCREEN_FLOW_TEXT[key] || String(value).replaceAll("_", " "));
-}
-
-function processingHtml(t) {
-  const p = stats && stats.screening_processing;
-  if (!p) return "";
-  return (
-    '<p class="scr-processing">' +
-    escHtml(
-      fill(
-        t(
-          "screen_processing",
-          "Not prepared yet: {unprepared} · Failed: {failed}",
-        ),
-        {
-          unprepared: p.unprepared || 0,
-          failed: p.failed || 0,
-        },
-      ),
-    ) +
-    "</p>"
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -768,8 +747,8 @@ function notesHtml() {
               " · " +
               escHtml(
                 n.decision === "liked"
-                  ? T("screen_keep", "Keep")
-                  : T("screen_put_aside", "Put aside"),
+                  ? T("screen_keep", "Like")
+                  : T("screen_put_aside", "Pass"),
               ) +
               "</strong><p>" +
               escHtml(n.reason) +
@@ -821,7 +800,7 @@ export function renderScreen() {
   const dis = view.busy ? " disabled" : "";
   el.innerHTML =
     '<div class="scr-head"><h2 class="scr-title">' +
-    escHtml(T("screen_review_title", "Review a few roles together")) +
+    escHtml(T("screen_review_title", "Review vacancies")) +
     "</h2></div>" +
     tabsHtml(model.lists, T) +
     '<div class="scr-review-layout">' +
@@ -957,11 +936,6 @@ export function renderScreen() {
       canUndo: history.length > 0 && !pendingDecision,
     }) +
     "</section></div>" +
-    '<details class="scr-preparation"><summary>' +
-    escHtml(T("screen_preparation", "Preparation status")) +
-    "</summary>" +
-    processingHtml(T) +
-    "</details>" +
     '<button class="scr-btn" id="scrLoadNotes">' +
     escHtml(T("screen_past_notes", "Past review notes")) +
     "</button>" +

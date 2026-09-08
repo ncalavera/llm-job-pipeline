@@ -102,7 +102,7 @@ test("APPLICATION_STATUSES matches the board's own funnel columns", () => {
   // application the table silently omits.
   const columns = TRIAGE_COLUMNS.filter((c) => !c.derived).map((c) => c.key);
   for (const status of APPLICATION_STATUSES) {
-    assert.ok(columns.includes(status), `no board column for ${status}`);
+    assert.ok(columns.includes(status === "test_task" ? "interview" : status), `no board column for ${status}`);
   }
 });
 
@@ -278,7 +278,7 @@ test("the count strip reads as a sentence of plain words", () => {
   });
   assert.equal(
     text,
-    "11 sent · 4 waiting · 1 in progress · 1 accepted · 6 declined",
+    "11 sent · 4 applied · 1 interviewing · 1 offers / invitations · 6 rejected",
   );
 });
 
@@ -292,7 +292,7 @@ test("a zero count is dropped, but the total always shows", () => {
       accepted: 0,
       declined: 0,
     }),
-    "2 sent · 2 waiting",
+    "2 sent · 2 applied",
   );
   assert.equal(
     countStripText({
@@ -364,7 +364,7 @@ test("a row carries the stage label and the board column's own colour", () => {
   // the same colour by construction, not by a second hand-kept list.
   const rows = select([group({ status: "test_task" })]);
   const html = buildApplicationRow(rows[0], { locale: "en-GB" });
-  const col = TRIAGE_COLUMNS.find((c) => c.key === "test_task");
+  const col = TRIAGE_COLUMNS.find((c) => c.key === "interview");
   assert.ok(html.includes(col.label));
   assert.ok(html.includes("background:" + col.color));
 });

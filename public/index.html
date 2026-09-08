@@ -168,7 +168,7 @@
               id="navSubScreen"
               onclick="switchMode('screen')"
             >
-              <span class="nav-label" data-i18n="screen_tab">Screen</span>
+              <span class="nav-label" data-i18n="screen_tab">Inbox</span>
             </button>
             <button
               type="button"
@@ -176,7 +176,7 @@
               id="navSubGeo"
               onclick="switchMode('stats')"
             >
-              <span class="nav-label" data-i18n="tab_geo">Geo</span>
+              <span class="nav-label" data-i18n="tab_geo">Locations</span>
             </button>
             <button
               type="button"
@@ -240,7 +240,7 @@
                   stroke-width="1.2"
                 ></path></svg
             ></span>
-            <span class="nav-label" data-i18n="tab_triage">Triage</span>
+            <span class="nav-label" data-i18n="tab_triage">Progress</span>
           </button>
 
           <button
@@ -279,7 +279,7 @@
                   fill="#7C5CE0"
                 ></rect></svg
             ></span>
-            <span class="nav-label" data-i18n="tab_boards">Boards</span>
+            <span class="nav-label" data-i18n="tab_boards">Job boards</span>
           </button>
 
           <button
@@ -338,7 +338,7 @@
                   opacity=".45"
                 ></path></svg
             ></span>
-            <span class="nav-label" data-i18n="tab_contacts">Networking</span>
+            <span class="nav-label" data-i18n="tab_contacts">Contacts</span>
             <span class="nav-count" id="navCountContacts"></span>
           </button>
           <button
@@ -453,14 +453,14 @@
               id="vsubScreen"
               onclick="switchMode('screen')"
             >
-              <span data-i18n="screen_tab">Screen</span>
+              <span data-i18n="screen_tab">Inbox</span>
             </button>
             <button
               class="vacancy-sub-tab"
               id="vsubGeo"
               onclick="switchMode('stats')"
             >
-              <span data-i18n="tab_geo">Geo</span>
+              <span data-i18n="tab_geo">Locations</span>
             </button>
             <button
               class="vacancy-sub-tab"
@@ -495,7 +495,7 @@
                   data-basket="liked"
                   onclick="switchBasket(this)"
                 >
-                  <span data-i18n="basket_liked">Liked</span>
+                  <span data-i18n="basket_liked">Liked & applications</span>
                   <span class="basket-count" id="countLiked">0</span>
                 </button>
                 <button
@@ -503,7 +503,7 @@
                   data-basket="unseen"
                   onclick="switchBasket(this)"
                 >
-                  <span data-i18n="basket_unreviewed">Unreviewed</span>
+                  <span data-i18n="basket_unreviewed">Undecided</span>
                   <span class="basket-count" id="countUnseen">0</span>
                 </button>
                 <button
@@ -511,7 +511,7 @@
                   data-basket="passed"
                   onclick="switchBasket(this)"
                 >
-                  <span data-i18n="basket_passed">Passed</span>
+                  <span data-i18n="basket_passed">Passed & rejected</span>
                   <span class="basket-count" id="countPassed">0</span>
                 </button>
               </div>
@@ -605,7 +605,7 @@
             <div class="catalog-sheet">
               <div class="catalog-table">
                 <div class="catalog-row-head">
-                  <div data-i18n="browse_col_fit">Fit</div>
+                  <div data-i18n="browse_col_fit">Score</div>
                   <div data-i18n="browse_col_role">Role</div>
                   <div data-i18n="browse_col_company">Company</div>
                   <div data-i18n="browse_col_location">Location</div>
@@ -631,25 +631,19 @@
                 data-subtab="approved"
                 onclick="switchCompanySubTab('approved')"
                 data-i18n="subtab_approved"
-              >
-                Approved
-              </button>
+              >Tracked</button>
               <button
                 class="company-sub-tab"
                 data-subtab="pending"
                 onclick="switchCompanySubTab('pending')"
                 data-i18n="subtab_pending"
-              >
-                Pending Review
-              </button>
+              >To review</button>
               <button
                 class="company-sub-tab"
                 data-subtab="archived"
                 onclick="switchCompanySubTab('archived')"
                 data-i18n="subtab_archived"
-              >
-                Archived
-              </button>
+              >Not tracked</button>
             </div>
             <div class="companies-filters">
               <input
@@ -736,8 +730,7 @@
                 >Job boards</span
               >
               <span class="boards-header-sub" data-i18n="boards_sub"
-                >The board catalogue, each board's enabled state, and
-                freshness.</span
+                >Vacancy sources: collection setting and last check.</span
               >
             </div>
             <div class="boards-grid" id="boardsGrid"></div>
