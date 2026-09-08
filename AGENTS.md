@@ -21,7 +21,7 @@ follow it verbatim when the user asks for that workflow:
 
 | User asks for | Runbook |
 | --- | --- |
-| first-time setup, daily fetch + score, resume, deploy | `.claude/commands/jobs-new.md` |
+| first-time setup, daily fetch + prepare, resume, deploy | `.claude/commands/jobs-new.md` |
 | review liked vacancies, archive low scores, terminal triage | `.claude/commands/jobs-review.md` |
 | check scoring quality against your own labels (golden set) | `.claude/commands/jobs-eval.md` |
 | add a company or job board | `.claude/commands/jobs-add.md` |
@@ -32,7 +32,7 @@ follow it verbatim when the user asks for that workflow:
 The daily loop (`jobs-new.md`) is driven by `scripts/run_daily.py` — a plain
 Python state machine that owns stage ORDER, checkpoints, the heartbeat and the
 publish gate. Any agent runs `python3 scripts/run_daily.py`, watches for exit
-code 10 (a GATE), does the printed judgment task (scoring / verdicts), then
+code 10 (a GATE), does the printed evidence-preparation task, then
 `--resume`s — repeating until exit 0. The agent never orders the stages; it only
 answers the gates. Exit codes: 0 done, 10 gate, 20 abort, 30 stage error.
 
@@ -76,16 +76,17 @@ Claude Code does this with one subagent per vacancy; Codex and others should
 replicate the same one-vacancy-per-request discipline. Scoring quality was
 benchmarked with Claude models; other models work but calibration may differ.
 
-**Two-pass scoring (the daily driver).** To spend the strong model only where it
-matters, the daily driver scores in two passes: a cheap `screen_model` (default
-Haiku) scores every new vacancy, then the strong `scoring_model` re-scores only
-the finalists whose screen score clears `escalate_threshold` (default 50);
-everything below the floor keeps its cheap score. Both passes keep the
-one-vacancy-per-subagent rule. Because model calibration differs, the cheap
-screen uses its own floor, not score parity: the floor was tuned against the
-golden set so the screen drops none of the roles the strong model would surface.
-The direct `score_vacancies.py --local` contract above is the single-pass
-fallback for agents not driven by the daily runner.
+**Default daily screening.** After filtering, the driver prepares undecided
+roles with one LLM call per vacancy: quoted posting facts and profile comparison,
+without a numerical score. Both attended and scheduled runs use this path.
+Unchanged successful results are reused until the posting or profile changes;
+failed results retry next run. Human keep/put-aside decisions happen in the
+Screen view. Telegram sends one compact score-free morning summary.
+
+**Optional legacy scoring.** The explicit `score_vacancies.py --local` contract
+above and `score_companies.py` remain available when the user requests numerical
+scoring. The daily driver skips company scoring, vacancy scoring and terminal
+verdict checkpoints; their checkpoint entries remain for backward compatibility.
 
 ## No direct-API key is a supported setup, not a defect
 

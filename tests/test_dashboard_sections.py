@@ -404,3 +404,23 @@ def test_screening_prepared_at_datetime_becomes_iso_text():
     assert vac is not None
     json.dumps(vac["screening_prepared_at"])
     assert vac["screening_prepared_at"].startswith("2026-09-06T17:51")
+
+
+def test_changed_ready_preparation_is_counted_as_waiting(monkeypatch):
+    import prepare_screening
+    import database_supabase
+    from report.data_prep import _count_screening_processing
+
+    monkeypatch.setattr(database_supabase, "_vacancy_has_column", lambda name: True)
+    monkeypatch.setattr(
+        prepare_screening,
+        "load_pool",
+        lambda days: [
+            {
+                "screening_state": "ready",
+                "screening_fingerprint": "old",
+                "full_description": "A real detailed posting. " * 30,
+            }
+        ],
+    )
+    assert _count_screening_processing() == {"unprepared": 1, "failed": 0}

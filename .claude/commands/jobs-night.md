@@ -2,7 +2,13 @@
 description: Headless nightly scoring session. Invoked by scripts/nightly_run.py as `/jobs-night <gate> <night_dir> <phase>` — one session per scoring gate. Reads payload files from <night_dir>/score_in/, fans them out to night-scorer subagents (file-in/file-out), saves after every wave of five, then stops. The wrapper resumes the driver; the session never runs it. Never asks a question; never writes a verdict.
 ---
 
-# /jobs-night — one scoring gate, unattended
+# /jobs-night — one preparation gate, unattended
+
+The default daily run emits only `prepare_screening`: one call per vacancy for
+quoted facts and profile comparison, no numerical score. Unchanged ready results
+are reused; failed preparations retry next run. The other gate names below are
+retained for explicit legacy scoring. The morning digest is one compact summary
+and a dashboard link; human review happens in the Screen view.
 
 Arguments: `$ARGUMENTS` = `<gate> <night_dir> <phase>` where `<gate>` is one of
 `screen_companies | score_companies | score_vacancies | prepare_screening`,

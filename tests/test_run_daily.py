@@ -1557,27 +1557,31 @@ def test_unattended_verdicts_advance_and_record_the_count(rd, monkeypatch):
     assert "5" in note
 
 
-def test_screening_prep_is_skipped_on_an_attended_run(rd):
-    state = rd._new_state(rd.Opts())
-    kind, note = rd._h_screening_prep(state, rd._stage(state, "screening_prep"), rd.Opts())
-    assert kind == "skip" and "night" in note
-
-
-def test_unattended_screening_prep_emits_the_prepare_gate(rd, monkeypatch, tmp_path):
+@pytest.mark.parametrize("unattended", [False, True])
+def test_unattended_screening_prep_emits_the_prepare_gate(rd, monkeypatch, tmp_path, unattended):
     """the night run hands the cohort to a prepare_screening gate
     (one subagent per role, no score) and records the target ids."""
     import json
     import subprocess
 
     monkeypatch.setattr(rd, "SCREEN_PREP_PAYLOAD_PATH", tmp_path / "prep.json")
-    payload = [{"id": "a1", "org": "Org", "title": "Role", "system_prompt": "s", "user_msg": "u"}]
+    payload = [
+        {
+            "id": "a1",
+            "org": "Org",
+            "title": "Role",
+            "fingerprint": "new",
+            "system_prompt": "s",
+            "user_msg": "u",
+        }
+    ]
 
     def fake_capture(cmd, opts):
         assert "prepare_screening.py" in cmd[1] and "--local" in cmd
         return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
 
     monkeypatch.setattr(rd, "_run_capture", fake_capture)
-    opts = rd.Opts(unattended=True)
+    opts = rd.Opts(unattended=unattended)
     state = rd._new_state(opts)
     entry = rd._stage(state, "screening_prep")
     kind, info = rd._h_screening_prep(state, entry, opts)
@@ -1592,13 +1596,26 @@ def test_unattended_screening_prep_carries_over_when_nothing_progressed(rd, monk
     never stall — and the digest counts are recorded on the stage."""
     monkeypatch.setattr(rd, "SCREEN_PREP_PAYLOAD_PATH", tmp_path / "prep.json")
     monkeypatch.setattr(
-        rd, "_screening_states", lambda ids: {"a1": "ready", "b2": None, "c3": "failed"}
+        rd,
+        "_screening_states",
+        lambda ids: {
+            "a1": {"state": "ready", "fingerprint": "fp", "prepared_at": "2026-09-08"},
+            "b2": {},
+            "c3": {"state": "failed", "fingerprint": "fp", "prepared_at": "2026-09-08"},
+        },
     )
     rd._write_payload(tmp_path / "prep.json", [{"id": "b2"}, {"id": "c3"}])
     opts = rd.Opts(unattended=True)
     state = rd._new_state(opts)
     entry = rd._stage(state, "screening_prep")
-    entry.update({"emitted": True, "target_ids": ["a1", "b2", "c3"]})
+    entry.update(
+        {
+            "emitted": True,
+            "target_ids": ["a1", "b2", "c3"],
+            "fingerprints": {v: "fp" for v in ["a1", "b2", "c3"]},
+            "attempt_started_at": "2026-09-07",
+        }
+    )
     entry["unattended_progress"] = {"prepare": 3}
     # Progress since the emission (3 -> 1 outstanding): re-emit the remainder.
     kind, info = rd._h_screening_prep(state, entry, opts)
@@ -2203,22 +2220,10 @@ def test_dedup_stage_fails_loudly_on_a_bad_exit(rd, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_missing_key_is_recorded_on_both_channels(rd, monkeypatch):
+def test_optional_company_research_key_does_not_degrade_daily_screening(rd, monkeypatch):
     monkeypatch.delenv("EXA_API_KEY", raising=False)
     monkeypatch.setenv("FIRECRAWL_API_KEY", "x")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
-    state = rd._new_state(rd.Opts())
-
-    missing = rd._check_keys(state)
-
-    assert missing == ["exa"]
-    # the digest channel: a capability id, so the message can be translated
-    assert state["degraded"] == ["exa"]
-    # the report-card channel: a warning on the stage that will degrade
-    warning = next(w for w in state["warnings"] if w["stage"] == "company_scoring")
-    assert "could not search the web" in warning["message"]
-    assert "Add the Exa key on the server." in warning["message"]
-    assert not warning.get("blocking")  # the run still finishes
+    assert rd._check_keys(rd._new_state(rd.Opts())) == []
 
 
 def test_every_missing_key_is_recorded(rd, monkeypatch):
@@ -2226,8 +2231,8 @@ def test_every_missing_key_is_recorded(rd, monkeypatch):
         monkeypatch.delenv(name, raising=False)
     state = rd._new_state(rd.Opts())
 
-    assert sorted(rd._check_keys(state)) == ["exa", "firecrawl"]
-    assert len(state["warnings"]) == 2
+    assert sorted(rd._check_keys(state)) == ["firecrawl"]
+    assert len(state["warnings"]) == 1
 
 
 def test_a_missing_anthropic_key_is_not_a_degradation(rd, monkeypatch):
@@ -2257,12 +2262,12 @@ def test_nothing_is_recorded_when_every_key_is_present(rd, monkeypatch):
 
 
 def test_the_report_card_shows_what_did_not_happen(rd, monkeypatch, capsys):
-    monkeypatch.delenv("EXA_API_KEY", raising=False)
-    monkeypatch.setenv("FIRECRAWL_API_KEY", "x")
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+    monkeypatch.setenv("EXA_API_KEY", "x")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
     state = rd._new_state(rd.Opts())
     rd._check_keys(state)
-    rd._stage(state, "company_scoring")["status"] = "done"
+    rd._stage(state, "enrich")["status"] = "done"
 
     rd._print_stage_board(state, verdict=True)
     out = capsys.readouterr().out
@@ -2281,6 +2286,7 @@ def test_the_warning_names_the_capability_not_the_variable(rd, monkeypatch):
 
 
 def test_parked_verdict_gate_rechecks_unseen_rows_before_publishing(rd, monkeypatch):
+    monkeypatch.setitem(rd.HANDLERS, "verdicts", rd._h_verdicts)
     opts = rd.Opts()
     state = rd._new_state(opts)
     state["cursor"] = rd.STAGE_ORDER.index("verdicts")
@@ -2317,3 +2323,39 @@ def test_verdict_count_excludes_unscored_sentinels_and_keeps_zero(rd, monkeypatc
     conn.execute("UPDATE vacancy SET status = 'skipped' WHERE llm_score >= 0")
     assert rd._h_verdicts({}, {"emitted": True}, rd.Opts())[0] == "advance"
     conn.close()
+
+
+@pytest.mark.parametrize("old_state", ["ready", "failed"])
+@pytest.mark.parametrize("old_fingerprint", ["old", "new"])
+def test_screening_resume_does_not_count_previous_attempt(
+    rd, monkeypatch, tmp_path, old_state, old_fingerprint
+):
+    monkeypatch.setattr(rd, "SCREEN_PREP_PAYLOAD_PATH", tmp_path / "prep.json")
+    rd._write_payload(rd.SCREEN_PREP_PAYLOAD_PATH, [{"id": "a", "fingerprint": "new"}])
+    monkeypatch.setattr(
+        rd,
+        "_screening_states",
+        lambda ids: {
+            "a": {
+                "state": old_state,
+                "fingerprint": old_fingerprint,
+                "prepared_at": "2026-09-07T00:00:00+00:00",
+            }
+        },
+    )
+    opts = rd.Opts(unattended=True)
+    entry = {
+        "emitted": True,
+        "target_ids": ["a"],
+        "fingerprints": {"a": "new"},
+        "attempt_started_at": "2026-09-08T00:00:00+00:00",
+    }
+    kind, info = rd._h_screening_prep({}, entry, opts)
+    assert kind == "gate"
+    assert info["count"] == 1
+    assert entry["prepared"] == entry["failed"] == 0
+
+
+def test_daily_skips_legacy_scoring_and_terminal_verdicts(rd):
+    for name in ("company_scoring", "vacancy_scoring", "verdicts"):
+        assert rd.HANDLERS[name]({}, {}, rd.Opts())[0] == "skip"

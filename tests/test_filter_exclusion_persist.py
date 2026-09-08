@@ -599,10 +599,9 @@ def test_filter_note_is_one_partition_of_one_pool(tmp_path, monkeypatch):
     entry, note = _h_filter_note(monkeypatch, payload)
 
     assert note == (
-        "Looked at 448 roles with no score yet: 41 go on to scoring, 128 skipped "
+        "Filter checked 448 roles: 41 can proceed to evidence preparation, 128 skipped "
         "(marked why on 74; nothing deleted — check them in /jobs-review), "
-        "279 need their description fetched again. 20 roles wait to be scored now, "
-        "and 357 more sit behind companies you have not approved yet."
+        "279 need their description fetched again."
     )
     # No internal vocabulary reached the card.
     for word in ("classified", "stamped", "written", "scope", "row", "persisted", "partition"):
@@ -622,7 +621,7 @@ def test_filter_note_is_one_partition_of_one_pool(tmp_path, monkeypatch):
     assert entry["filter"]["waiting_behind_candidates"] == 357
 
 
-def test_filter_note_names_the_parked_backlog_even_when_the_queue_is_small(tmp_path, monkeypatch):
+def test_filter_note_does_not_present_legacy_scoring_backlog_as_a_daily_gate(tmp_path, monkeypatch):
     """357 roles parked behind unapproved companies must not hide behind a
     "20 waiting" figure — nothing else in the run counts them."""
     payload = {
@@ -633,10 +632,9 @@ def test_filter_note_names_the_parked_backlog_even_when_the_queue_is_small(tmp_p
         "scoring_excluded": {"stamped": 0},
     }
     _, note = _h_filter_note(monkeypatch, payload)
-    assert (
-        "20 roles wait to be scored now, and 357 more sit behind companies "
-        "you have not approved yet." in note
-    )
+    assert "can proceed to evidence preparation" in note
+    assert "wait to be scored" not in note
+    assert "companies you have not approved" not in note
 
 
 # ---------------------------------------------------------------------------

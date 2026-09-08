@@ -38,7 +38,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # When run as ``python3 scripts/run_daily.py`` the interpreter puts scripts/ on
@@ -112,10 +112,10 @@ STAGE_ORDER = [
     "enrich",  # AUTO  — backfill blind descriptions (Firecrawl)
     "dedup",  # AUTO  — merge repeated copies of one role; report look-alikes
     "filter",  # AUTO  — quality report; never auto-deletes
-    "company_scoring",  # GATE  — WANT-score new candidate companies
-    "vacancy_scoring",  # GATE  — per-vacancy subagent scoring (1 vac = 1 agent)
-    "screening_prep",  # GATE  — night-only: extraction + profile comparison
-    "verdicts",  # GATE  — show top matches, capture like/pass
+    "company_scoring",  # SKIP — legacy scripts remain available
+    "vacancy_scoring",  # SKIP — no numeric scores in the daily path
+    "screening_prep",  # GATE — one extraction + profile comparison
+    "verdicts",  # SKIP — human review lives in the dashboard
     "digest",  # AUTO  — tiered morning Telegram message (before publish, KTD5:
     #                     a dashboard refresh failure can never cost the digest)
     "publish",  # AUTO  — publish always; warns loudly when the run was not clean
@@ -137,12 +137,6 @@ DEGRADED_WITHOUT_KEY = {
         "enrich",
         "Job pages could not be read, so roles that arrived without a description "
         "stayed empty. Add the Firecrawl key on the server.",
-    ),
-    "exa": (
-        "EXA_API_KEY",
-        "company_scoring",
-        "Company research could not search the web, so companies were judged on "
-        "what was already stored. Add the Exa key on the server.",
     ),
 }
 # ANTHROPIC_API_KEY is deliberately NOT here. Nikita said twice on 2026-08-28
@@ -1558,22 +1552,13 @@ def _h_filter(state, entry, opts):
     # One sentence, plain words, and the three parts add up to the number in
     # front of them. Internal vocabulary stays in the code, not on the card.
     note = (
-        f"Looked at {_roles(scanned)} with no score yet: {ready} go on to scoring, "
+        f"Filter checked {_roles(scanned)}: {ready} can proceed to evidence preparation, "
         f"{excluded} skipped (marked why on {stamped}; nothing deleted \u2014 "
         f"check them in /jobs-review), {reenrich} need their description fetched again."
     )
     parts_sum = ready + excluded + reenrich
     if parts_sum != scanned:
         note += f" That adds up to {parts_sum}, not {scanned} \u2014 the count is off."
-    # "Go on to scoring" is about THIS look; "wait to be scored" is the live
-    # queue, counted the way the digest header counts it (they are not the same
-    # set: this pass also sees roles the scorer refuses). Roles behind
-    # unapproved companies get their own number - nothing else counts them, so
-    # a small queue must not hide a large one parked out of sight.
-    note += (
-        f" {_roles(waiting['active'])} wait to be scored now, and "
-        f"{waiting['candidate']} more sit behind companies you have not approved yet."
-    )
     return "advance", note
 
 
@@ -2025,30 +2010,31 @@ def _h_vacancy_scoring(state, entry, opts):
     )
 
 
-def _screening_states(target_ids: list[str]) -> dict[str, str | None]:
-    """``{vacancy id: screening_state}`` for ``target_ids`` (NULL = never written)."""
+def _screening_states(target_ids: list[str]) -> dict[str, dict]:
+    """Saved attempt identity for each target (an old ready/failed row is not progress)."""
     from db_conn import get_conn
 
     if not target_ids:
         return {}
     cur = get_conn().cursor()
     cur.execute(
-        "SELECT id, screening_state FROM vacancy WHERE id = ANY(%s::uuid[])",
+        "SELECT id, screening_state, screening_fingerprint, screening_prepared_at "
+        "FROM vacancy WHERE id = ANY(%s::uuid[])",
         (list(target_ids),),
     )
-    states = {str(r[0]): r[1] for r in cur.fetchall()}
+    states = {
+        str(r[0]): {"state": r[1], "fingerprint": r[2], "prepared_at": str(r[3] or "")}
+        for r in cur.fetchall()
+    }
     cur.close()
-    return {vid: states.get(vid) for vid in target_ids}
+    return {vid: states.get(vid, {}) for vid in target_ids}
 
 
 def _h_screening_prep(state, entry, opts):
     """Screening preparation: one subagent read per undecided role,
     producing quoted facts and a profile comparison — no score, no status.
-    Night-only: the attended run skips it (run ``prepare_screening.py`` by hand
-    or wait for the night). Same emit / resume / carry-over shape as the
-    scoring gates, keyed on ``screening_state = 'ready'``."""
-    if not opts.unattended:
-        return "skip", "screening prep is a night-run stage (prepare_screening.py --local by hand)"
+    Attended and scheduled runs share the same preparation gate. Resume
+    checks the requested fingerprint and timestamp of this attempt."""
     if not entry.get("emitted"):
         res = _run_capture(_py("prepare_screening.py") + ["--local"], opts)
         if res.returncode != 0:
@@ -2066,6 +2052,8 @@ def _h_screening_prep(state, entry, opts):
             return "advance", "no undecided roles waiting for screening prep"
         _write_payload(SCREEN_PREP_PAYLOAD_PATH, payloads)
         entry["target_ids"] = [str(p["id"]) for p in payloads]
+        entry["fingerprints"] = {str(p["id"]): p["fingerprint"] for p in payloads}
+        entry["attempt_started_at"] = datetime.now(timezone.utc).isoformat()
         _unattended_scoring_gate(entry, "prepare", len(entry["target_ids"]))
         return "gate", {
             "action": "prepare_screening",
@@ -2076,16 +2064,31 @@ def _h_screening_prep(state, entry, opts):
         }
 
     target_ids = entry.get("target_ids", [])
-    states = _screening_states(target_ids)
+    saved = _screening_states(target_ids)
+    # Preserve the initial attempt identity while shrinking the payload on resume.
+    expected = entry.setdefault(
+        "fingerprints",
+        {str(p["id"]): p.get("fingerprint") for p in _read_payload(SCREEN_PREP_PAYLOAD_PATH)},
+    )
+    started = entry.setdefault("attempt_started_at", datetime.now(timezone.utc).isoformat())
+    states = {}
+    for vid in target_ids:
+        row = saved.get(vid) or {}
+        current = (
+            expected.get(vid)
+            and row.get("fingerprint") == expected[vid]
+            and row.get("prepared_at")
+            and datetime.fromisoformat(row["prepared_at"]).astimezone(timezone.utc)
+            >= datetime.fromisoformat(started).astimezone(timezone.utc)
+        )
+        states[vid] = row.get("state") if current else None
     counts = {
         "ready": sum(s == "ready" for s in states.values()),
         "failed": sum(s == "failed" for s in states.values()),
     }
     entry["prepared"] = counts["ready"]
     entry["failed"] = counts["failed"]
-    # A 'failed' row is a finished attempt (stored with its reason, retried on
-    # a later night once the posting or prompt changes) — only never-written
-    # rows are still outstanding tonight.
+    # A failure saved during THIS attempt is complete; retry it next run.
     remaining_ids = {vid for vid, s in states.items() if s is None}
     if remaining_ids:
         remaining = [
@@ -2119,7 +2122,7 @@ def _h_screening_prep(state, entry, opts):
     return (
         "advance",
         f"screening prep complete — {counts['ready']} role(s) ready, {counts['failed']} failed "
-        "(stored with the reason, retried when the posting or prompt changes)",
+        "(stored with the reason, retried next run)",
     )
 
 
@@ -2201,6 +2204,13 @@ def _h_publish(state, entry, opts):
     return "advance", "dashboard refreshed (clean run)"
 
 
+def _h_optional_scoring(state, entry, opts):
+    return (
+        "skip",
+        "Daily screening uses quoted evidence without scores; scoring remains available through score_companies.py / score_vacancies.py.",
+    )
+
+
 HANDLERS = {
     "validate_profile": _h_validate_profile,
     "preflight": _h_preflight,
@@ -2210,10 +2220,13 @@ HANDLERS = {
     "enrich": _h_enrich,
     "dedup": _h_dedup,
     "filter": _h_filter,
-    "company_scoring": _h_company_scoring,
-    "vacancy_scoring": _h_vacancy_scoring,
+    "company_scoring": _h_optional_scoring,
+    "vacancy_scoring": _h_optional_scoring,
     "screening_prep": _h_screening_prep,
-    "verdicts": _h_verdicts,
+    "verdicts": lambda state, entry, opts: (
+        "skip",
+        "Review prepared roles in the dashboard Screen view.",
+    ),
     "digest": _h_digest,
     "publish": _h_publish,
 }

@@ -1,23 +1,9 @@
 #!/usr/bin/env python3
 """Telegram vacancy digest.
 
-One mode:
-  send  — ONE tiered morning message (split when Telegram's size limit forces
-          it, and always before tier 2 and tier 3, so the top matches arrive as
-          their own message instead of scrolling away under the longer lists;
-          parts arrive in order): a counts header
-          ("Night run: F fetched, S scored" for THIS run, then "Backlog now: D
-          dropped, U still to score" counted in the database + "N deadlines this
-          week"), tier 1 top matches with like/pass buttons (fresh rows scoring
-          hot_vacancy_score+ plus strong roles at unreviewed companies), tier 2
-          mid scores as one-liners, tier 3 every dropped vacancy as one line
-          with its skip reason, tier 4 carried-over/rollover lines from the run
-          state. Tiers 1–3 are claim-first per message part: tier 1–2 rows
-          stamp digest_sent_at and tier 3 rows stamp digest_dropped_at just
-          before the part that renders them is sent (recorded in the state
-          file's pending_claim so even a SIGKILL cannot lose them); a failed
-          part releases only its own claims. Tier 4 is gated by the last-digest
-          timestamp in the state file. So a double-fire repeats nothing.
+Default send: one score-free morning summary with new arrivals, roles ready
+for review, roles awaiting preparation, failed preparations, and a dashboard link.
+`send --details` retains the optional historical score-based lists.
 
 The digest is READ-ONLY to the person receiving it: it carries no buttons and
 nothing listens for a tap. Nikita asked for the 👍/👎 buttons to be removed
@@ -998,7 +984,7 @@ def release_pending_claim(conn, state_path):
     update_state_file(state_path, pending_claim=None)
 
 
-def cmd_send(args):
+def cmd_send_details(args):
     token, db_url, chat_id = get_config()
     conn = db_connect(db_url)
     state_path = os.environ.get("DIGEST_STATE_FILE", DEFAULT_STATE_FILE)
@@ -1094,6 +1080,65 @@ def cmd_send(args):
     )
 
 
+def fetch_screening_counts(conn):
+    """Same ready predicate and preparation cohort as the dashboard."""
+    from report.data_prep import _count_screening_processing
+
+    processing = _count_screening_processing()
+    return {
+        "ready": fetch_ready_to_screen(conn),
+        "failed": processing["failed"],
+        "waiting": processing["unprepared"],
+    }
+
+
+def build_screening_summary(counts, arrivals, run_state):
+    lines = [_t("digest_daily_screening", new=arrivals, **counts)]
+    failed_stages = [
+        s["name"] for s in (run_state or {}).get("stages", []) if s.get("status") == "error"
+    ]
+    if failed_stages:
+        lines.append(html.escape(_t("digest_daily_failure", stages=", ".join(failed_stages))))
+    if (run_state or {}).get("no_progress"):
+        lines.append(_t("digest_daily_no_progress"))
+    for cap in (run_state or {}).get("degraded") or []:
+        text = _t(f"digest_degraded_{cap}")
+        if text != f"digest_degraded_{cap}":
+            lines.append(html.escape(text))
+    if DASHBOARD_BASE_URL:
+        url = html.escape(DASHBOARD_BASE_URL + "/?mode=screen", quote=True)
+        lines.append(f'<a href="{url}">{_t("digest_open_screening")}</a>')
+    return "\n".join(lines)
+
+
+def cmd_send(args):
+    if getattr(args, "details", False):
+        return cmd_send_details(args)
+    token, db_url, chat_id = get_config()
+    conn = db_connect(db_url)
+    state_path = os.environ.get("DIGEST_STATE_FILE", DEFAULT_STATE_FILE)
+    last_digest = read_state_file(state_path).get("last_digest_at")
+    run_state = load_run_state(last_digest)
+    since = _since_param(db_url, last_digest or (date.today() - timedelta(days=1)).isoformat())
+    arrivals = fetch_counts_since(conn, since).get("fetched") or 0
+    body = build_screening_summary(fetch_screening_counts(conn), arrivals, run_state)
+    if args.dry_run:
+        print(body)
+        print("[dry-run] 1 message — nothing sent")
+        return
+    # Release any crash journal from a former detailed digest. A summary does
+    # not claim individual roles. Advance last-success only after delivery;
+    # a crash may repeat a summary, but can never silently lose it.
+    release_pending_claim(conn, state_path)
+    tg_call(
+        token,
+        "sendMessage",
+        {"chat_id": chat_id, "text": body, "parse_mode": "HTML", "disable_web_page_preview": True},
+    )
+    update_state_file(state_path, last_digest_at=datetime.now().isoformat(timespec="seconds"))
+    print("Daily screening summary sent (1 message).")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
@@ -1109,6 +1154,7 @@ def main():
         help="floor of the mid-score tier (tier 1 starts at hot_vacancy_score)",
     )
     p_send.add_argument("--dry-run", action="store_true")
+    p_send.add_argument("--details", action="store_true", help="legacy scored vacancy lists")
     p_send.set_defaults(func=cmd_send)
 
     p_alert = sub.add_parser("alert", help="send only the loud expiring-role alerts")

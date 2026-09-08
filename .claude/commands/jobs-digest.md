@@ -1,59 +1,39 @@
 ---
-description: Send a daily Telegram digest of top unseen vacancies and poll button responses back into the database.
+description: Send or preview the daily screening summary in the configured Telegram bot.
 ---
 
 # /jobs-digest
 
-> **Optional, engineer-only setup (full mode).** The digest is a convenience for
-> people comfortable with a bit of server plumbing: it needs a Telegram bot token
-> from [@BotFather](https://t.me/BotFather), a Supabase (`SUPABASE_DB_URL`)
-> backend, and — to actually arrive *daily* — something to run the `send`/`poll`
-> commands on a schedule (e.g. your own cron). Simple mode has no digest. Skip
-> this entirely if you just want the dashboard; nothing else depends on it.
+The daily driver sends one short message: new arrivals, roles ready to review,
+roles awaiting preparation, failed preparations, and a link to the Screen view.
+Keep, Put aside, Undo, and optional reasons live in the dashboard.
 
-Sends the top unseen vacancies to a Telegram chat with inline Like/Pass buttons, then polls button presses back into `vacancy.status`.
-
-## Prerequisites
-
-Environment variables required — set them in your `.env` file or shell environment before running:
-- `TELEGRAM_BOT_TOKEN` — bot token from BotFather
-- `TELEGRAM_CHAT_ID` — target chat or user ID
-- `SUPABASE_DB_URL` — Postgres connection string (legacy name; any Postgres, hosted or self-hosted)
-
-## Commands
-
-### Send digest
+## Preview or send
 
 ```bash
+python3 scripts/telegram_digest.py send --dry-run
 python3 scripts/telegram_digest.py send
 ```
 
-Sends ONE tiered morning message (split only when Telegram's size limit forces it): a counts header ("Night run: F fetched, S scored, D dropped, U not scored yet" + "N deadlines this week"), top matches with Like/Pass buttons, mid scores as one-liners, and every dropped vacancy as one line with its drop reason. Sets `vacancy.digest_sent_at` on top/mid rows so they are not re-sent.
+Preview does not send messages or update delivery state. A successful send advances
+`last_digest_at`; a failed send leaves it unchanged for retry. The summary does not
+mark individual vacancies as delivered.
 
-### Poll responses
+Configuration comes from the existing environment: `TELEGRAM_BOT_TOKEN`,
+`TELEGRAM_CHAT_ID`, the database connection, and `DASHBOARD_BASE_URL` (or the
+`dashboard_base_url` setting). Change the shared bot configuration to route all
+JobSearch notifications together, including nightly failures and mail notifications.
 
-```bash
-python3 scripts/telegram_digest.py poll
-```
+## Optional legacy reports
 
-Calls the Telegram `getUpdates` endpoint and processes callback query responses from the inline buttons. Writes button presses to `vacancy.status` (`liked` for Like, `passed` for Pass).
-
-Run this once per polling cycle (e.g. every 5 minutes via cron) after the digest has been sent.
-
-## Typical setup
-
-Run `send` once a day at a scheduled time, then run `poll` on a short interval to catch responses:
+Only when explicitly requested:
 
 ```bash
-# Example cron entries (ensure TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, SUPABASE_DB_URL are in the environment)
-0 9 * * * cd /path/to/project && python3 scripts/telegram_digest.py send
-*/5 * * * * cd /path/to/project && python3 scripts/telegram_digest.py poll
+python3 scripts/telegram_digest.py send --details --dry-run
+python3 scripts/telegram_digest.py send --details
+python3 scripts/telegram_digest.py alert --dry-run
 ```
 
-Only one process should consume `getUpdates` at a time — running two pollers on the same bot token will cause missed updates.
-
-## Notes
-
-- `digest_sent_at` is set at send time — re-running `send` will not re-send already-sent vacancies.
-- Inline button presses update `vacancy.status` directly in the database; no intermediate storage.
-- The bot must have permission to send messages to the target chat.
+`--details` retains scored vacancy lists and their delivery claims. `alert` checks
+expiring scored roles. Neither is required for daily screening. The digest has no
+response buttons or polling process; decisions are made in the dashboard.

@@ -1,5 +1,5 @@
 ---
-description: The one daily command. A Python driver runs the whole pipeline in a fixed order — validate → fetch → enrich → filter → score → verdicts → publish — with checkpoints, a live progress card, and a publish gate. You (the agent) only supply judgment at the gates it stops on: scoring, WANT-scoring companies, and like/pass verdicts. First run auto-onboards an empty database.
+description: The one daily command. A Python driver runs the whole pipeline in a fixed order — validate → fetch → enrich → filter → prepare evidence → publish — with checkpoints, a live progress card, and a publish gate. You (the agent) only supply judgment at the gates it stops on: quoted evidence preparation and profile comparison. First run auto-onboards an empty database.
 ---
 
 # /jobs-new
@@ -9,8 +9,8 @@ checkpoints, the heartbeat, and the publish gate — lives in
 `scripts/run_daily.py`, NOT in this file. You cannot run the stages out of
 order, because you do not drive them; the driver does. Your job is only the
 JUDGMENT it pauses for. Works with **any** coding agent that runs shell and
-follows this file: the driver does the Python; you do the LLM scoring and talk
-to the user at the gates.
+follows this file: the driver does the Python; you prepare evidence at its gates.
+Human keep/put-aside decisions happen in the dashboard.
 
 **Reply in the user's product language.** Before you say anything to the user,
 read the `## OUTPUT_LANGUAGE` section of `config/user_profile.md` (resolve it
@@ -118,82 +118,24 @@ backtests, rollover) live in `scripts/learning.py` — **no LLM calls**. Your jo
 
 Then `--resume`.
 
-### Company scoring (WANT-score new candidate companies)
-The driver scrapes about-pages and prints scoring payloads to
-`vacancies/score_companies_payload.json`. For **each** company, run **one**
-subagent (`model: "sonnet"`) with the payload's `system_prompt` + `user_msg`;
-**1 company = 1 subagent**, at most **5 at a time** (rolling waves). Save
-incrementally (each `--save` commits):
+### Screening preparation (default daily gate)
+
+`prepare_screening` points to `vacancies/prepare_screening_payload.json` (use the
+actual path printed by the gate). For each payload independently, run ONE
+subagent using its `system_prompt` and `user_msg`; return the requested facts,
+quotes, work profile and profile comparison. Do not produce a numerical score.
+Save each result with its original `id` to a private JSON file, then:
 
 ```bash
-python3 scripts/score_companies.py --save < chunk.json   # wrap each result under "enrichment"
-# or, if each subagent wrote its result to its own file — a malformed file is
-# named and skipped, the rest still save (never one bad file killing the batch):
-python3 scripts/score_companies.py --save --files r1.json r2.json ...
+python3 scripts/prepare_screening.py --save --files r1.json r2.json
+python3 scripts/run_daily.py --resume
 ```
 
-Scored companies land in **Companies → Pending** for approval (deeper review in
-`/jobs-review companies --status candidate`). Then `--resume`.
-
-### Vacancy scoring (the scoring contract — two passes)
-Scoring runs in **two passes** to cut cost: a cheap model screens every new role,
-then the strong model re-scores only the finalists. The driver walks you through
-two gates in order, each printing per-vacancy payloads to
-`vacancies/score_vacancies_payload.json` (already capped for the day). For **each**
-vacancy in either gate, run **one** subagent with the payload's `system_prompt` +
-`user_msg`. **Critical: 1 vacancy = 1 subagent** — batching is untested here.
-At most **5 subagents at a time**. Save incrementally with the flat fields
-(`member_ids`, `score`, `reasoning`, `tags`, `hard_requirements`, `short_summary`):
-
-```bash
-python3 scripts/score_vacancies.py --save < chunk.json
-# or, if each subagent wrote its result to its own file — a malformed file is
-# named and skipped, the rest still save (never one bad file killing the batch):
-python3 scripts/score_vacancies.py --save --files r1.json r2.json ...
-```
-
-1. **Screen** — score every vacancy with `[## VOLUME] screen_model` (default
-   Haiku, the cheapest tier). Fast, cheap first pass.
-2. **Escalate** — the driver keeps only the roles whose screen score clears
-   `[## VOLUME] escalate_threshold` (default 50) and re-scores just those with the
-   strong `scoring_model` (Sonnet on a budget plan, Opus on a bigger one).
-   Everything below the floor keeps its cheap score, sorted out of view. A role
-   already scored by the strong model is never re-sent to it; and when
-   `screen_model` equals `scoring_model`, the driver runs ONE pass and skips the
-   escalate gate entirely (no role is ever scored twice by the same model).
-
-The gate text names the model and pass for you; use exactly the one it prints (do
-not "upgrade" the screen to the strong model — that erases the saving). After each
-gate, `--resume`; the driver re-checks and re-prompts only for anything still
-unscored, then reports "screened N, escalated M, kept-cheap K". Pure-fit scoring:
-the prompt judges role fit only — geography/visa were handled in the filter stage,
-so a great role in the wrong place still scores high.
-
-Saved chunks commit scores without rebuilding the dashboard; the publish stage refreshes it once after verdicts.
-
-### Verdicts (quick daily triage)
-List the freshly scored, still-unseen vacancies (highest score first) and, for
-each, ask like / pass / skip. Write **each** verdict immediately (one commit
-each, so an interruption keeps captured decisions):
-
-```bash
-python3 -c "import sys;sys.path.insert(0,'scripts'); \
-from database_supabase import update_vacancy_status; from db_conn import get_conn; \
-update_vacancy_status('<VACANCY_ID>','liked'); get_conn().commit()"
-```
-
-Statuses: `liked | passed | skipped | to_apply`. A plain `passed` = "not for me"
-and calibrates scoring. If a role is **garbage** — it should never have reached
-scoring (a filter hole) — pass it *and* flag it so next run's learning review can
-propose a filter:
-
-```bash
-python3 scripts/learning.py record-garbage --vacancy <VACANCY_ID> \
-    --title "<title>" --source "<board/ats>" --score <llm_score>
-```
-
-The deep structured review of liked roles lives in `/jobs-review`. Then
-`--resume` to publish.
+The driver reuses successful results until the posting or profile changes.
+Failed preparations retry next run. Review and keep/put aside in the dashboard
+Screen view; the daily command never waits for human verdicts on vacancies.
+Company scoring and vacancy scoring remain available explicitly through
+`score_companies.py` and `score_vacancies.py`, outside the daily path.
 
 ---
 

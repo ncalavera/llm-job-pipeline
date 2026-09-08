@@ -220,7 +220,7 @@ def test_send_expiring_alerts_empty_is_noop():
 
 
 def _args(**over):
-    base = dict(limit=5, min_score=None, dry_run=False)
+    base = dict(limit=5, min_score=None, dry_run=False, details=True)
     base.update(over)
     return SimpleNamespace(**base)
 
@@ -1079,3 +1079,53 @@ def test_ready_line_carries_no_link_without_a_dashboard_base_url(denv, monkeypat
     body = "\n".join(_sent_texts(denv.calls))
     assert "3 roles ready to screen" in body
     assert "mode=screen" not in body
+
+
+def test_default_summary_is_one_score_free_message(denv, monkeypatch):
+    _seed(denv.db, "Org A", "Secret numeric card", score=80)
+    monkeypatch.setattr(td, "DASHBOARD_BASE_URL", 'https://example.com/a?x=1&y="2"')
+    td.cmd_send(_args(details=False))
+    texts = _sent_texts(denv.calls)
+    assert len(texts) == 1
+    assert "Ready to review: 0" in texts[0]
+    assert "Awaiting preparation:" in texts[0]
+    assert "Secret numeric card" not in texts[0]
+    assert "score" not in texts[0].lower()
+    assert "&amp;" in texts[0] and "&quot;" in texts[0]
+
+
+def test_summary_dry_run_and_failed_send_do_not_advance(denv, monkeypatch, capsys):
+    before = Path(denv.state_file).read_bytes() if Path(denv.state_file).exists() else None
+    td.cmd_send(_args(details=False, dry_run=True))
+    assert not denv.calls
+    assert (
+        Path(denv.state_file).read_bytes() if Path(denv.state_file).exists() else None
+    ) == before
+    monkeypatch.setattr(td, "tg_call", lambda *args: (_ for _ in ()).throw(RuntimeError("offline")))
+    with pytest.raises(RuntimeError):
+        td.cmd_send(_args(details=False))
+    assert (
+        Path(denv.state_file).read_bytes() if Path(denv.state_file).exists() else None
+    ) == before
+
+
+def test_summary_separates_failed_and_waiting_and_surfaces_failure(denv):
+    ids = [_seed(denv.db, "Org", "Role " + str(i)) for i in range(3)]
+    cur = denv.db.get_conn().cursor()
+    cur.execute("UPDATE vacancy SET screening_state = 'ready' WHERE id = %s", (ids[0],))
+    cur.execute("UPDATE vacancy SET screening_state = 'failed' WHERE id = %s", (ids[1],))
+    denv.db.get_conn().commit()
+    from report.data_prep import _count_screening_processing
+
+    processing = _count_screening_processing()
+    assert td.fetch_screening_counts(denv.db.get_conn()) == {
+        "ready": 1,
+        "failed": processing["failed"],
+        "waiting": processing["unprepared"],
+    }
+    body = td.build_screening_summary(
+        {"ready": 1, "failed": 1, "waiting": 1},
+        3,
+        {"stages": [{"name": "fetch", "status": "error"}]},
+    )
+    assert "fetch failed" in body and "Preparation failed, retry next run: 1" in body

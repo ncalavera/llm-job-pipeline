@@ -4,9 +4,9 @@ This file is the decision frame for every change in this repo. A feature idea th
 
 ## Three goals, one codebase
 
-1. **A working daily tool.** The maintainer (and any user) runs one command a day and gets scored, deduplicated vacancies worth reading. Reliability of the daily loop beats new features.
+1. **A working daily tool.** The maintainer (and any user) runs one command a day and gets deduplicated vacancies prepared with quoted posting facts and profile comparisons, ready for human review. Reliability of the daily loop beats new features.
 2. **A reference-quality codebase.** The repo doubles as a public portfolio piece. Code, tests, and docs must survive a senior engineer reading them cold.
-3. **Usable by a stranger.** The target user is an ordinary Claude Code user — a smart non-engineer who can follow a README but will not debug Python. The bar is `git clone` → scored dashboard with nothing to debug and no insider knowledge.
+3. **Usable by a stranger.** The target user is an ordinary Claude Code user — a smart non-engineer who can follow a README but will not debug Python. The bar is `git clone` → prepared screening dashboard with nothing to debug and no insider knowledge.
 
 When goals conflict, fix the conflict rather than picking a favorite: a personal convenience that breaks goal 3 becomes a config default; a "just works" shortcut that breaks goal 1 gets a cap or a flag.
 
@@ -16,7 +16,7 @@ Every PR / feature / prompt change must pass all of these:
 
 1. **Neutral by default.** Personal taste — target roles, sectors, boards, queries, salary anchors, worldview — lives ONLY in `config/user_profile.md` (gitignored). Shipped defaults, prompts, runbooks, and examples must work for a nurse, a game designer, and a policy analyst equally. Enforced by `tests/test_no_hardcoded_data.py`; extend the guard when new default surfaces appear.
 2. **Cloud is canonical; SQLite is the honest demo.** Postgres/Supabase (full mode) is the canonical daily path. SQLite (simple mode) is the zero-signup way to try the product, with an explicit, documented list of limitations — never a silent promise of parity. A crash on the demo path is still a bug; a documented difference is not. Product decisions are never keyed off `IS_SQLITE`.
-3. **Cost is a feature, and the model tier is the main dial.** Budget plans default to a cheaper scoring model (Sonnet); higher plans to Opus — chosen at onboarding, changed in one setting. Per-run caps are the spike-day safety net, not the primary lever. Expensive paths (richer evidence, stronger models) are explicit opt-ins. README cost claims must name the real driver: plan tier × model × items scored.
+3. **Cost is a feature, and the model tier is the main dial.** Daily screening uses one evidence extraction + profile comparison per changed posting/profile, with no numerical score. Reuse unchanged preparations. Numerical scoring is optional through explicit scoring commands; it is not a prerequisite for preparing or reviewing roles. Budget plans default to a cheaper scoring model (Sonnet); higher plans to Opus — chosen at onboarding, changed in one setting. Per-run caps are the spike-day safety net, not the primary lever. Expensive paths (richer evidence, stronger models) are explicit opt-ins. README cost claims must name the real driver: plan tier × model × items scored.
 4. **Operable without insider knowledge.** Stage order lives in code, not in the maintainer's head or a 700-line runbook. Each command explains what it will do and what it just did. A claim in README/INSTALL that doesn't match code behavior is a bug of the same severity as a crash.
 5. **The run answers to the user, not to a hosted service; scriptable core, agent on top.** The daily cycle runs with no questions mid-run, progress on disk, and one summary at the end — whether the user starts it by hand or a scheduler on infrastructure the user controls (their own cron/launchd/systemd, their own server) starts it for them (revised 2026-08-27; plan: `docs/plans/2026-08-27-1231-feat-forge-nightly-run-digest-plan.md`). No *hosted* cloud routines — the pipeline never runs as a cron job on infrastructure outside the user's control. The local digest rule stays: `scripts/telegram_digest.py send`/`poll` run off the user's own cron/launchd/systemd (documented in `INSTALL.md` and `.claude/commands/jobs-digest.md`). Deterministic orchestration (ordering, batching, retries, publish gates) belongs in Python; the agent contributes judgment: scoring, verdicts, interviews. This keeps the door open for a possible hosted product — a separate future project, not this repo.
 6. **Never batch scoring.** One vacancy = one LLM request. Batching is untested here; keep one role per request until a golden-set A/B comparison supports a change. Cost work must find other levers (caps, cheaper models for triage, prompt slimming).
@@ -27,7 +27,7 @@ Every PR / feature / prompt change must pass all of these:
 ## What this repo is not
 
 - Not a hosted service, and not the future paid "just works" product — that would be a separate codebase with its own economics.
-- Not an auto-applier. It finds, ranks, and — on explicit request — helps prepare an application (drafts, research, case bank); the human reviews and submits. Application artifacts are private data: they live in the gitignored profile space and the database, never in public code.
+- Not an auto-applier. It finds, prepares evidence, and — on explicit request — helps prepare an application (drafts, research, case bank); the human reviews and submits. Application artifacts are private data: they live in the gitignored profile space and the database, never in public code.
 - Not a general ATS scraper library. Fetchers exist to serve the daily loop.
 
 ## Quick test for any new idea

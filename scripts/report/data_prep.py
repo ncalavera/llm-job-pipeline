@@ -153,7 +153,10 @@ def _count_screening_processing() -> dict:
         for r in prepare_screening.load_pool(window_days)
         if prepare_screening.eligible(r)
     ]
-    return {"unprepared": states.count(None), "failed": states.count("failed")}
+    return {
+        "unprepared": sum(state != "failed" for state in states),
+        "failed": states.count("failed"),
+    }
 
 
 def _count_unscored(all_vacs: dict) -> int:

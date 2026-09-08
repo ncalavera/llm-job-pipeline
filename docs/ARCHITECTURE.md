@@ -64,11 +64,12 @@ not in a runbook and not in anyone's head (STRATEGY guardrail 4).
 | 5 | `fetch` | AUTO | Pull new vacancies from tracked companies + enabled boards (heartbeat to disk). |
 | 6 | `enrich` | AUTO | Backfill blind descriptions via Firecrawl (skips cleanly if unset). |
 | 7 | `filter` | AUTO | Quality report, dedup, geo buckets, gone-from-source archive. Never auto-deletes silently. |
-| 8 | `company_scoring` | GATE | WANT-score new candidate companies (1 company = 1 subagent). |
-| 9 | `vacancy_scoring` | GATE | Two-pass per-vacancy scoring (see below). |
-| 10 | `screening_prep` | GATE | Night-only: one subagent read per undecided role extracts quoted facts and a profile comparison — no score, no status. Attended runs skip it. |
-| 11 | `verdicts` | GATE | Show top fresh matches; capture like / pass / to_apply, each committed immediately. |
-| 12 | `publish` | AUTO | Always publish; warn loudly on a dirty run (see the publish gate). |
+| 8 | `company_scoring` | SKIP | Historical checkpoint retained; optional `score_companies.py` is outside the daily path. |
+| 9 | `vacancy_scoring` | SKIP | Historical checkpoint retained; optional `score_vacancies.py` is outside the daily path. |
+| 10 | `screening_prep` | GATE | One subagent read per changed posting/profile extracts quoted facts and a profile comparison — no score, no status. Both attended and scheduled runs prepare roles directly after filtering. |
+| 11 | `verdicts` | SKIP | Human decisions happen in the dashboard Screen view. |
+| 12 | `digest` | AUTO | One score-free Telegram summary (scheduled runs only), before publish. |
+| 13 | `publish` | AUTO | Always publish; warn loudly on a dirty run (see the publish gate). |
 
 Exit codes the runbook branches on: `0` done, `10` gate, `20` abort
 (bad profile / DB outage — fix, do not retry blindly), `30` stage error
@@ -107,6 +108,20 @@ through the same driver — no mode branching. (`vercel --prod` is only ever for
 dashboard *code* changes.)
 
 ## Health & observability
+
+The default daily path is fetch → enrich → dedup → filter → evidence preparation
+→ one Telegram summary → publish. Legacy company/vacancy scoring and terminal
+verdict checkpoints are skipped, preserving resumability of old checkpoints.
+Preparation records the requested fingerprint and the initial attempt timestamp;
+resume counts only a ready/failed save from this attempt for that fingerprint.
+Old ready/failed rows do not masquerade as progress. Failed results retry on the
+next run even when unchanged; successful unchanged results are reused.
+The summary separates ready-to-review roles from the eligible preparation cohort
+(awaiting preparation and failed), contains one screening link and surfaces run
+failures. It never lists numerical scores. `send --details` explicitly requests
+the historical scored lists. Delivery advances last-success only after sending;
+a crash may repeat a summary, but cannot mark an undelivered one successful.
+
 
 Nightly scoring agents have file-only tools, restricted payload/result paths,
 no shell/MCP tools and no database/provider credentials. Python chooses the
