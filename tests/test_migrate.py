@@ -685,10 +685,12 @@ def test_postgres_init_rolls_back_before_flipping_autocommit(mig, monkeypatch):
 
 def test_failed_postgres_backup_does_not_log_connection_secret(mig, monkeypatch, capsys):
     db = mig.m._Postgres.__new__(mig.m._Postgres)
-    db.url = 'postgresql://user:private-password@example.invalid/db'
-    monkeypatch.setattr(mig.m.shutil, 'which', lambda _: '/usr/bin/pg_dump')
+    db.url = "postgresql://user:private-password@example.invalid/db"
+    monkeypatch.setattr(mig.m.shutil, "which", lambda _: "/usr/bin/pg_dump")
+
     def fail(command, **kwargs):
         raise mig.m.subprocess.CalledProcessError(1, command)
-    monkeypatch.setattr(mig.m.subprocess, 'run', fail)
+
+    monkeypatch.setattr(mig.m.subprocess, "run", fail)
     assert db.backup() is None
-    assert 'private-password' not in capsys.readouterr().err
+    assert "private-password" not in capsys.readouterr().err

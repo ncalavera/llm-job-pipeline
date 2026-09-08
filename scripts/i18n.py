@@ -165,21 +165,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "boards_col_tier": "Tier",
         "boards_col_ttl": "Check interval",
         "boards_col_status": "Last check",
-
-
         "boards_status_never": "Never fetched",
         "boards_enabled_yes": "Collection enabled",
         "boards_enabled_no": "Collection disabled",
         "boards_cli_hint": "Read-only. Enable a board across runs: python3 scripts/sources.py enable-board <id>",
         "boards_toggle_aria": "Toggle enabled for {name}",
         "boards_toggle_note": "Toggling a board changes only its enabled flag — the next run picks it up.",
-
-
-
-
-
-
-
         "boards_suggest": "Know a board worth adding? Suggest one →",
         # Application status labels — shared by the company profile's own
         # applications list (companies.js) and the company review-status pill
@@ -762,21 +753,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "boards_col_tier": "Тир",
         "boards_col_ttl": "Check interval",
         "boards_col_status": "Последняя проверка",
-
-
         "boards_status_never": "Ни разу не собиралась",
         "boards_enabled_yes": "Сбор включён",
         "boards_enabled_no": "Сбор выключен",
         "boards_cli_hint": "Только чтение. Включить доску на все прогоны: python3 scripts/sources.py enable-board <id>",
         "boards_toggle_aria": "Переключить сбор для {name}",
         "boards_toggle_note": "Переключение доски меняет только флаг включения — следующий прогон это подхватит.",
-
-
-
-
-
-
-
         "boards_suggest": "Знаешь доску, которую стоит добавить? Предложи →",
         "apps_col_status": "Статус",
         "app_status_draft": "Черновик",
@@ -1547,19 +1529,33 @@ STRINGS["ru"].update(
 )
 
 # Shared progress vocabulary; historical storage values remain readable.
-STRINGS["en"].update({
-    "vac_status_liked": "Backlog", "vac_status_to_apply": "In progress",
-    "vac_status_to_research": "In progress", "vac_status_to_network": "In progress",
-    "vac_status_test_task": "Interviewing", "vac_status_interview": "Interviewing",
-    "screen_keep": "Like", "screen_list_kept": "Liked", "vac_like": "Like",
-    "concepts_decision": "Decision: Undecided / Like / Pass. Liked vacancies enter Backlog. Research, contacting people and drafting all belong to In progress.",
-    "concepts_application": "Progress: Backlog / In progress / Applied / Interviewing / Offer or invitation / Rejected / Passed. Test tasks are part of Interviewing. Availability and submission history remain separate.",
-})
-STRINGS["ru"].update({
-    "vac_status_liked": "Бэклог", "vac_status_to_apply": "В работе",
-    "vac_status_to_research": "В работе", "vac_status_to_network": "В работе",
-    "vac_status_test_task": "Отбор", "vac_status_interview": "Отбор",
-    "screen_keep": "Нравится", "screen_list_kept": "Понравились", "vac_like": "Нравится",
-    "concepts_decision": "Решение: Не решено / Нравится / Пропустить. Понравившиеся вакансии попадают в бэклог. Изучение, контакты и подготовка отклика — всё в работе.",
-    "concepts_application": "Прогресс: Бэклог / В работе / Отклик отправлен / Отбор / Оффер или приглашение / Отказ / Пропущено. Тестовые входят в отбор. Доступность вакансии и история отправки хранятся отдельно.",
-})
+STRINGS["en"].update(
+    {
+        "vac_status_liked": "Backlog",
+        "vac_status_to_apply": "In progress",
+        "vac_status_to_research": "In progress",
+        "vac_status_to_network": "In progress",
+        "vac_status_test_task": "Interviewing",
+        "vac_status_interview": "Interviewing",
+        "screen_keep": "Like",
+        "screen_list_kept": "Liked",
+        "vac_like": "Like",
+        "concepts_decision": "Decision: Undecided / Like / Pass. Liked vacancies enter Backlog. Research, contacting people and drafting all belong to In progress.",
+        "concepts_application": "Progress: Backlog / In progress / Applied / Interviewing / Offer or invitation / Rejected / Passed. Test tasks are part of Interviewing. Availability and submission history remain separate.",
+    }
+)
+STRINGS["ru"].update(
+    {
+        "vac_status_liked": "Бэклог",
+        "vac_status_to_apply": "В работе",
+        "vac_status_to_research": "В работе",
+        "vac_status_to_network": "В работе",
+        "vac_status_test_task": "Отбор",
+        "vac_status_interview": "Отбор",
+        "screen_keep": "Нравится",
+        "screen_list_kept": "Понравились",
+        "vac_like": "Нравится",
+        "concepts_decision": "Решение: Не решено / Нравится / Пропустить. Понравившиеся вакансии попадают в бэклог. Изучение, контакты и подготовка отклика — всё в работе.",
+        "concepts_application": "Прогресс: Бэклог / В работе / Отклик отправлен / Отбор / Оффер или приглашение / Отказ / Пропущено. Тестовые входят в отбор. Доступность вакансии и история отправки хранятся отдельно.",
+    }
+)
