@@ -595,6 +595,7 @@ test("_buildRow: an XSS payload in the company name is inert in both text and th
       slug: name.toLowerCase(),
       company_id: id,
       review_status: reviewStatus,
+      status_reason: reviewStatus === "approved" ? "approved via dashboard" : "",
       calculated_tier: null,
     };
   }
@@ -696,4 +697,25 @@ test("company connection and last check remain separate", () => {
   const html = _buildRow({name: "Company", slug: "company", strategy: null, needs_source: true, fetch_status: "error"});
   assert.ok(html.includes("Not connected"));
   assert.ok(html.includes("Check failed"));
+});
+
+
+test("selected companies require personal selection, not automatic activation", async () => {
+  const { companyListTab } = await import("./companies.js");
+  assert.equal(companyListTab({review_status: "approved", status_reason: "approved via dashboard"}), "approved");
+  for (const reason of [null, "auto-approved: alignment=82.0", "screening reset approved 2026-09-08"]) {
+    assert.equal(companyListTab({review_status: "approved", status_reason: reason}), "pending");
+  }
+  assert.equal(companyListTab({review_status: "pending", status_reason: "approved via dashboard"}), "pending");
+  assert.equal(companyListTab({review_status: "rejected", status_reason: "approved via dashboard"}), "archived");
+});
+
+test("catalogue keeps application history and open unseen roles, hides discarded or expired unseen roles", async () => {
+  const { companyHasRelevantRoles: has } = await import("./companies.js");
+  const check = (status, expired = false) => has([{status, expired}], g => g.status, g => g.expired);
+  assert.equal(has([], g => g.status, () => false), false);
+  assert.equal(check("unseen"), true);
+  assert.equal(check("unseen", true), false);
+  for (const status of ["passed", "skipped", "archived"]) assert.equal(check(status), false);
+  for (const status of ["liked", "applied", "declined", "accepted"]) assert.equal(check(status, true), true);
 });

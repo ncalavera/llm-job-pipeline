@@ -169,6 +169,7 @@ export function loadCompanyStatuses() {
     .then((payload) => {
       var remote = payload && payload.statuses ? payload.statuses : {};
       state.companyStatuses = remote;
+      state.companyStatusReasons = payload.reasons || {};
       state.companyStatusesLoaded = true;
       emit("companyStatusesLoaded");
     })

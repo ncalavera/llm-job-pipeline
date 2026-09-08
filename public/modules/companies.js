@@ -162,6 +162,33 @@ function _getReviewStatus(c) {
   return c.review_status || "pending";
 }
 
+// Selection requires an explicit personal action, never an automatic score.
+export function companyListTab(c, reviewStatus = c.review_status) {
+  if (reviewStatus === "rejected") return "archived";
+  return reviewStatus === "approved" && c.status_reason === "approved via dashboard"
+    ? "approved" : "pending";
+}
+
+function _listTab(c) {
+  const reason = state.companyStatusReasons?.[c.company_id] ?? c.status_reason;
+  return companyListTab({ ...c, status_reason: reason }, _getReviewStatus(c));
+}
+
+export function companyHasRelevantRoles(roles, getStatus, isExpired) {
+  return roles.some((g) => {
+    const status = getStatus(g);
+    if (["archived", "passed", "skipped"].includes(status)) return false;
+    return status !== "unseen" || !isExpired(g);
+  });
+}
+
+function _catalogueVisible(c) {
+  return !!document.getElementById("companyIncludeEmpty")?.checked ||
+    !!document.getElementById("companySearch")?.value.trim() ||
+    !!(c.applications || []).length ||
+    companyHasRelevantRoles(_companyRoles(c), getGroupStatus, isVacancyExpired);
+}
+
 // Companies belonging to `subTab` before any search/tier/card/chip filter —
 // the basket size a sub-tab would show with every filter cleared. Shared by
 // the "N shown" label and the empty-state flavor check below (R11).
@@ -169,10 +196,10 @@ function _subTabTotal(subTab) {
   var all = getCompanies();
   var n = 0;
   for (var i = 0; i < all.length; i++) {
-    var rs = _getReviewStatus(all[i]);
+    var rs = _listTab(all[i]);
     if (subTab === "approved" && rs === "approved") n++;
-    else if (subTab === "pending" && rs === "pending") n++;
-    else if (subTab === "archived" && rs === "rejected") n++;
+    else if (subTab === "pending" && rs === "pending" && _catalogueVisible(all[i])) n++;
+    else if (subTab === "archived" && rs === "archived") n++;
   }
   return n;
 }
@@ -189,11 +216,12 @@ function getFilteredSortedCompanies() {
   var subTab = state.companySubTab;
 
   var filtered = getCompanies().filter(function (c) {
-    var reviewSt = _getReviewStatus(c);
+    var reviewSt = _listTab(c);
     // Sub-tab filter
     if (subTab === "approved" && reviewSt !== "approved") return false;
     if (subTab === "pending" && reviewSt !== "pending") return false;
-    if (subTab === "archived" && reviewSt !== "rejected") return false;
+    if (subTab === "archived" && reviewSt !== "archived") return false;
+    if (subTab === "pending" && !_catalogueVisible(c)) return false;
     // Tier filter
     if (tierFilter === "__unscored") {
       if (c.calculated_tier != null) return false;
@@ -838,7 +866,7 @@ function _renderPendingDisclaimer(pendingCompanies) {
 
   var tpl = T(
     "companies_pending_hidden",
-    "\u2139\ufe0f {orgs} companies have {vacs} vacancies outside Catalog. Track a company to include its vacancies there. Inbox uses preparation readiness separately.",
+    "{orgs} companies have {vacs} vacancies. Discovering a company does not select it or enable separate collection.",
   );
   var note = document.createElement("div");
   note.id = "companyPendingDisclaimer";
@@ -914,8 +942,8 @@ export function renderCompanies() {
       // Basket-empty: this sub-tab (approved/pending/archived) has none,
       // regardless of filters — same "<tab> — no X" phrasing Browse uses.
       var subTabLabels = {
-        approved: T("subtab_approved", "Tracked"),
-        pending: T("subtab_pending", "To review"),
+        approved: T("subtab_approved", "Selected"),
+        pending: T("subtab_pending", "Catalogue"),
         archived: T("subtab_archived", "Not tracked"),
       };
       emptyMsg =
@@ -995,10 +1023,10 @@ function _updateSubTabCounts() {
   var counts = { approved: 0, pending: 0, rejected: 0 };
   var allCompanies = getCompanies();
   for (var i = 0; i < allCompanies.length; i++) {
-    var rs = _getReviewStatus(allCompanies[i]);
+    var rs = _listTab(allCompanies[i]);
     if (rs === "approved") counts.approved++;
-    else if (rs === "pending") counts.pending++;
-    else if (rs === "rejected") counts.rejected++;
+    else if (rs === "pending" && _catalogueVisible(allCompanies[i])) counts.pending++;
+    else if (rs === "archived") counts.rejected++;
   }
   document.querySelectorAll(".company-sub-tab").forEach(function (btn) {
     var tab = btn.dataset.subtab;
@@ -1248,6 +1276,9 @@ export function reviewCompany(companyId, action) {
     return c.company_id === companyId;
   });
   var prevStatus = prevCompany ? _getReviewStatus(prevCompany) : "pending";
+  var prevReason = prevCompany && prevCompany.status_reason;
+  state.companyStatusReasons ||= {};
+  var prevLiveReason = state.companyStatusReasons[companyId];
 
   // Capture current position BEFORE optimistic update (for auto-nav in pending tab)
   var shouldAutoNav =
@@ -1275,6 +1306,10 @@ export function reviewCompany(companyId, action) {
   }
 
   // Optimistic update
+  state.companyStatusReasons[companyId] = action === "approve"
+    ? "approved via dashboard" : "rejected via dashboard";
+  if (prevCompany) prevCompany.status_reason = action === "approve"
+    ? "approved via dashboard" : "rejected via dashboard";
   state.companyStatuses[companyId] = newStatus;
   renderCompanies();
   scheduleRender();
@@ -1294,6 +1329,9 @@ export function reviewCompany(companyId, action) {
   // Persist to server
   saveCompanyReview(companyId, action).then(function (ok) {
     if (!ok) {
+      if (prevLiveReason === undefined) delete state.companyStatusReasons[companyId];
+      else state.companyStatusReasons[companyId] = prevLiveReason;
+      if (prevCompany) prevCompany.status_reason = prevReason;
       state.companyStatuses[companyId] = prevStatus;
       renderCompanies();
       scheduleRender();

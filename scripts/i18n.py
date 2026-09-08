@@ -238,8 +238,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "keys_pass": "pass",
         "keys_open": "open",
         # Companies sub-tabs
-        "subtab_approved": "Tracked",
-        "subtab_pending": "To review",
+        "subtab_approved": "Selected",
+        "subtab_pending": "Catalogue",
+        "company_include_empty": "Include companies without relevant vacancies in Catalogue",
         "subtab_archived": "Not tracked",
         # Companies filters
         "search_companies_ph": "Search by company, description, location...",
@@ -372,7 +373,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "archive_empty": "The archive is empty",
         # Hidden-vacancy notes (candidate companies not yet approved). {orgs}
         # and {vacs} are substituted on the client.
-        "companies_pending_hidden": "ℹ️ {orgs} companies have {vacs} vacancies outside Catalog. Track a company to include its vacancies there. Inbox uses preparation readiness separately.",
+        "companies_pending_hidden": "{orgs} companies have {vacs} vacancies. Discovery does not select companies or enable separate collection.",
         "catalog_hidden_pending": "ℹ️ {vacs} vacancies from {orgs} companies are outside Catalog until those companies are tracked. Inbox uses preparation readiness separately.",
         # Settings — product language row. One choice, changed in one place.
         "settings_grp_product": "Product",
@@ -824,8 +825,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "keys_like": "оставить",
         "keys_pass": "пропустить",
         "keys_open": "открыть",
-        "subtab_approved": "Отслеживаемые",
-        "subtab_pending": "На рассмотрении",
+        "subtab_approved": "Выбранные",
+        "subtab_pending": "Каталог компаний",
+        "company_include_empty": "Показать в каталоге также компании без актуальных вакансий",
         "subtab_archived": "Не отслеживаемые",
         "search_companies_ph": "Поиск по компании, описанию, локации...",
         "all_tiers": "Все тиры",
@@ -952,7 +954,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "archive_sub": "Старые вакансии из прошлых запусков. Только просмотр.",
         "archive_no_match": "Ничего не найдено по фильтрам",
         "archive_empty": "Архив пуст",
-        "companies_pending_hidden": "ℹ️ У {orgs} компаний есть {vacs} вакансий вне каталога. Включите отслеживание компании, чтобы добавить их в каталог. Входящие отдельно отбираются по готовности разбора.",
+        "companies_pending_hidden": "У {orgs} компаний есть {vacs} вакансий. Обнаружение не выбирает компанию и не включает отдельный сбор.",
         "catalog_hidden_pending": "ℹ️ {vacs} вакансий от {orgs} компаний не входят в каталог, пока компании не отслеживаются. Входящие отдельно отбираются по готовности разбора.",
         # Settings — product language row.
         "settings_grp_product": "Продукт",

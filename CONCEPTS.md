@@ -229,3 +229,11 @@ The UX stance adopted 2026-07-04: the dashboard is a calm coach, not a control p
 ## Flagged ambiguities
 
 - "Expiring" had been used for both the stored protected status and for liked roles past their deadline (one Triage column mixed both) — these are distinct concepts; the derived display state is now called Expired.
+
+### Company list views
+
+- **Selected:** companies with an explicit personal dashboard selection. Automatic activation or board discovery does not count as selection. Historical records without confirmed personal selection remain in the catalogue.
+- **Catalogue:** other eligible companies, initially showing those with relevant vacancies or application history. Search or “Include companies without relevant vacancies” exposes preserved research entries.
+- **Not tracked:** inactive records, including personal exclusions and retained invalid records.
+
+These views do not change collection configuration: restoring a company to board eligibility does not enable direct collection.

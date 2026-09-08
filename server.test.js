@@ -449,9 +449,9 @@ test("/api/company-statuses maps company status to a review verdict", async () =
   await withStubDb(
     [
       [
-        "SELECT id, status FROM company",
+        "SELECT id, status, status_reason FROM company",
         [
-          { id: "c1", status: "active" },
+          { id: "c1", status: "active", status_reason: "approved via dashboard" },
           { id: "c2", status: "candidate" },
           { id: "c3", status: "inactive" },
           { id: "c4", status: "something-else" },
@@ -461,6 +461,7 @@ test("/api/company-statuses maps company status to a review verdict", async () =
     async () => {
       const res = await call({ url: "/api/company-statuses" });
       assert.equal(res.statusCode, 200);
+      assert.equal(JSON.parse(res.body).reasons.c1, "approved via dashboard");
       assert.deepEqual(JSON.parse(res.body).statuses, {
         c1: "approved",
         c2: "pending",

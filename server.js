@@ -305,7 +305,7 @@ async function handleCompanies(req, res) {
     const pool = getPool();
     // Plain SQL — no PostgREST 1000-row paging loops needed.
     const { rows } = await pool.query(
-      `SELECT id, canonical_name, status, tier, alignment_score, mission_fit,
+      `SELECT id, canonical_name, status, status_reason, tier, alignment_score, mission_fit,
               about, notes, experience_match, personal_interest,
               website, careers_url,
               offices, category, fetch_strategy, fetch_status, last_fetched
@@ -358,6 +358,7 @@ async function handleCompanies(req, res) {
         slug: slugify(c.canonical_name),
         status: (c.status || "").toLowerCase(),
         review_status: REVIEW_MAP[(c.status || "").toLowerCase()] || "pending",
+        status_reason: c.status_reason || "",
         calculated_tier: c.tier || null,
         alignment_score: alignmentScore,
         // Emit undefined (not "") when absent so the client's snapshot merge
@@ -714,12 +715,14 @@ async function handleCompanyReview(req, res) {
 async function handleCompanyStatuses(req, res) {
   if (wrappedPreamble(req, res, "GET", "company-statuses")) return;
   try {
-    const { rows } = await getPool().query("SELECT id, status FROM company");
+    const { rows } = await getPool().query("SELECT id, status, status_reason FROM company");
     const statuses = {};
+    const reasons = {};
     for (const row of rows) {
+      reasons[row.id] = row.status_reason || "";
       statuses[row.id] = REVIEW_MAP[row.status] || "pending";
     }
-    return sendJson(res, 200, { statuses });
+    return sendJson(res, 200, { statuses, reasons });
   } catch (err) {
     logError("company-statuses", err, reqMeta(req));
     return sendJson(res, 500, { error: "Database error" });
