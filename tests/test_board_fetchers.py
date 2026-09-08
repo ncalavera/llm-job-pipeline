@@ -1219,4 +1219,7 @@ def test_board_merge_sets_remote_work_mode(sqlite_dal):
 
 
 def test_hn_skips_job_seeker_advertisements():
-    assert _parse_hn_comment({"id": 1, "text": "SEEKING WORK | Poland / EU | Senior Developer"}) is None
+    assert (
+        _parse_hn_comment({"id": 1, "text": "SEEKING WORK | Poland / EU | Senior Developer"})
+        is None
+    )
