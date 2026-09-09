@@ -532,3 +532,75 @@ def test_company_health_telemetry_tracks_failure_streak(backend):
     err, streak, success = cur.fetchone()
     assert err is None and streak == 0 and success is not None
     cur.close()
+
+
+# ---------------------------------------------------------------------------
+# 6. Targeted score read + batched score write
+# ---------------------------------------------------------------------------
+
+
+def test_vacancy_score_rows_reads_only_the_ids_asked_for(backend):
+    """The targeted read that replaced load_vacancies() in the two-pass driver
+    must answer identically on both backends: the wanted ids only, three
+    fields, and silence about ids that are not there."""
+    dal = backend
+    dal.ensure_company("Northwind Aid Trust", status="active")
+    dal.save_vacancies(
+        "Northwind Aid Trust", "B", [_job("Programme Officer"), _job("Finance Lead")]
+    )
+    _commit(dal)
+    wanted = _by_title(dal, "Programme Officer")
+    other = _by_title(dal, "Finance Lead")
+
+    assert dal.vacancy_score_rows([]) == {}
+
+    rows = dal.vacancy_score_rows([wanted, "00000000-0000-0000-0000-0000000000ff"])
+    assert set(rows) == {wanted}
+    assert rows[wanted] == {"llm_score": None, "status": "unseen", "scored_by": None}
+    assert other not in rows
+
+    dal.update_llm_score(
+        wanted,
+        {
+            "llm_score": 71,
+            "llm_reasoning": "Fits the profile.",
+            "llm_summary": "A genuine match for the search.",
+            "scored_by": "screen-model",
+        },
+    )
+    _commit(dal)
+    rows = dal.vacancy_score_rows([wanted, other])
+    assert rows[wanted] == {"llm_score": 71, "status": "unseen", "scored_by": "screen-model"}
+    assert rows[other]["llm_score"] is None
+
+
+def test_update_llm_score_many_writes_every_id_in_one_statement(backend):
+    """One score, several rows of the same role — and the ids that are gone
+    come back unwritten rather than as a silent no-op."""
+    dal = backend
+    dal.ensure_company("Northwind Aid Trust", status="active")
+    dal.save_vacancies(
+        "Northwind Aid Trust", "B", [_job("Programme Officer"), _job("Finance Lead")]
+    )
+    _commit(dal)
+    a = _by_title(dal, "Programme Officer")
+    b = _by_title(dal, "Finance Lead")
+    missing = "00000000-0000-0000-0000-0000000000ff"
+
+    assert dal.update_llm_score_many([], {"llm_score": 50}) == []
+
+    written = dal.update_llm_score_many(
+        [a, b, missing],
+        {
+            "llm_score": 64,
+            "llm_reasoning": "Same role, two board listings.",
+            "llm_summary": "One score written to every member row.",
+            "scored_by": "screen-model",
+        },
+    )
+    _commit(dal)
+
+    assert sorted(written) == sorted([a, b])
+    rows = dal.vacancy_score_rows([a, b])
+    assert rows[a]["llm_score"] == 64 and rows[b]["llm_score"] == 64
+    assert rows[a]["scored_by"] == "screen-model"

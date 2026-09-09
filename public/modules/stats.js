@@ -100,7 +100,7 @@ const COLUMNS = [
   { key: "city", label: T("geo_city", "City") },
   { key: "country", label: T("geo_country", "Country") },
   { key: "count", label: T("geo_count", "Count") },
-  { key: "liked", label: T("geo_liked", "Liked") },
+  { key: "liked", label: T("geo_liked", "Liked & applications") },
   { key: "score", label: T("geo_mean_score", "Mean score") },
 ];
 

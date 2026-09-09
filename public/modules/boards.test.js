@@ -67,7 +67,7 @@ function setCatalog(next) {
   catalog.push(...next);
 }
 
-test("renders every board with a name, tier badge and TTL", () => {
+test("renders every board with its name and collection state", () => {
   setCatalog([
     boardRow({ id: "a", name: "Alpha", enabled: true, tier: "A" }),
     boardRow({ id: "b", name: "Beta", enabled: false, tier: "C" }),
@@ -80,15 +80,7 @@ test("renders every board with a name, tier badge and TTL", () => {
     html.includes("Alpha") && html.includes("Beta"),
     "both boards render",
   );
-  assert.ok(
-    html.includes("vac-tier tier-a"),
-    "tier A badge uses the shared tier helper",
-  );
-  assert.ok(
-    html.includes("vac-tier tier-c"),
-    "tier C badge uses the shared tier helper",
-  );
-  assert.ok(html.includes(">3d<"), "TTL renders as a day count");
+
 });
 
 test("the enabled dot distinguishes on/off boards, and off dims the row", () => {
@@ -235,55 +227,13 @@ test("an unsafe URL scheme never reaches an href", () => {
   );
 });
 
-// ---------------------------------------------------------------------------
-// Per-board yield (scored → fit → liked) — DERIVED in the browser, so it renders
-// in this baked-only (file://) test with no live API.
-// ---------------------------------------------------------------------------
-
-test("the yield column renders in simple mode (derived, not live-gated)", () => {
-  setCatalog([boardRow({ id: "y", name: "YieldBoard" })]);
-  setGroups([]);
+test("job boards show collection controls without overlapping score or database counts", () => {
+  setCatalog([boardRow({ name: "Alpha" })]);
+  setGroups([{ id: "one", source_board: "Alpha", llm_score: 80 }]);
   renderBoards();
-  const html = grid.innerHTML;
-  assert.ok(
-    html.includes("brd-th-yield"),
-    "the yield header column is present",
-  );
-  // It is NOT a live-only column, so it survives even with no /api reachable.
-  assert.ok(!html.includes("brd-th num"), "live count columns still omitted");
-});
-
-test("a board with matching scored roles shows its funnel numbers", () => {
-  setCatalog([boardRow({ id: "alpha", name: "Alpha" })]);
-  setGroups([
-    { id: "a1", source_board: "Alpha", llm_score: 80, member_ids: [] }, // fit
-    { id: "a2", source_board: "Alpha", llm_score: 40, member_ids: [] }, // scored, not fit
-    { id: "b1", source_board: "Other", llm_score: 70, member_ids: [] }, // different board
-  ]);
-  renderBoards();
-  const html = grid.innerHTML;
-  assert.ok(html.includes("brd-yield-funnel"), "the funnel renders");
-  assert.ok(
-    !html.includes("brd-yield-empty"),
-    "no empty state when data exists",
-  );
-  // 2 scored / 1 fit; the numbers ride in <b> tags.
-  assert.ok(html.includes("<b>2</b>"), "scored count is shown");
-  assert.ok(html.includes("<b>1</b>"), "fit count is shown");
-});
-
-test("a board with no matching roles shows an honest 'no data yet', not 0/0/0", () => {
-  setCatalog([boardRow({ id: "cold", name: "ColdBoard" })]);
-  setGroups([
-    { id: "x", source_board: "SomeOtherBoard", llm_score: 90, member_ids: [] },
-  ]);
-  renderBoards();
-  const html = grid.innerHTML;
-  assert.ok(
-    html.includes("brd-yield-empty"),
-    "cold board gets the no-data state",
-  );
-  assert.ok(!html.includes("brd-yield-funnel"), "and not a 0/0/0 funnel");
+  assert.ok(grid.innerHTML.includes("Alpha"));
+  assert.ok(!grid.innerHTML.includes("brd-yield"));
+  assert.ok(!grid.innerHTML.includes("brd-th num"));
 });
 
 test("a hidden board is filtered out of the render (baked hidden flag)", () => {

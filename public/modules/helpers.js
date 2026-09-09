@@ -46,6 +46,32 @@ export function safeUrl(url) {
 }
 
 // ---------------------------------------------------------------------------
+// Plurals
+// ---------------------------------------------------------------------------
+
+/**
+ * Which plural form a count takes: "one", "few" or "many".
+ *
+ * English needs two forms and could pick them with `n === 1`. Several Slavic
+ * languages need three, and the boundary is not the size of the number but its
+ * last digit: one form for 1, 21, 31; a second for 2-4, 22-24; a third for
+ * 5-20 and for anything ending in 0. A two-form rule gets the majority of
+ * on-screen counts wrong in those languages.
+ *
+ * Callers translate `<base>_one` / `_few` / `_many`. English simply gives the
+ * same word to "few" and "many", so it costs nothing there.
+ */
+export function pluralForm(n) {
+  const abs = Math.abs(Number(n) || 0);
+  if (!Number.isInteger(abs)) return "many";
+  const mod10 = abs % 10;
+  const mod100 = abs % 100;
+  if (mod10 === 1 && mod100 !== 11) return "one";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "few";
+  return "many";
+}
+
+// ---------------------------------------------------------------------------
 // Time formatting
 // ---------------------------------------------------------------------------
 
@@ -832,26 +858,13 @@ export function isVacancyGone(g) {
   return isVacancyExpired(g) || isVacancyStale(g);
 }
 
-// Statuses pulled into the shared "Expired" column once the role is no longer
-// actual. applied/skipped are terminal decisions and stay in their columns.
-export const EXPIRABLE_STATUSES = new Set([
-  "liked",
-  "to_apply",
-  "to_research",
-  "to_network",
-]);
+// Progress columns follow the recorded stage. Availability stays on the card.
+export function progressStage(status) {
+  return ({to_research: "to_apply", to_network: "to_apply", test_task: "interview"})[status] || status;
+}
 
-// Decide which Triage board column a deduped entry (carrying _status) belongs
-// to, given the set of real column keys. Returns null when the entry has no
-// place on the board:
-//   - DB status 'expiring' lives in Today's Closing-soon block, never on the
-//     board;
-//   - unseen/passed and any unknown status have no column.
-// Gone EXPIRABLE_STATUSES collapse into 'expired'; everything else maps 1:1.
 export function triageColumnFor(entry, columnKeys) {
-  const status = entry && entry._status;
-  if (status === "expiring") return null;
-  if (EXPIRABLE_STATUSES.has(status) && isVacancyGone(entry)) return "expired";
+  const status = progressStage(entry && entry._status);
   return columnKeys && columnKeys.has(status) ? status : null;
 }
 
@@ -1001,70 +1014,104 @@ export function dedupeTriageEntries(entries, statusPri) {
   return deduped;
 }
 
-// ---------------------------------------------------------------------------
-// Triage funnel (DHA-396, U12) — the board header's "in db → liked → triaged →
-// applied" strip must never disagree with the columns it summarizes, so it is
-// derived by the SAME dedupeTriageEntries/triageColumnFor reduction the board
-// itself uses, not a second parallel count. Pure and DOM-free (pipeline.js
-// can't be imported under `node --test` — see the dedupe-lesson doc), so a
-// hand-built fixture can exercise every bucket transition directly.
-//
-// `entries` are plain objects already carrying `_status` (from
-// getGroupStatus) and `_approved` (from isGroupCompanyApproved) — the two
-// state.js-dependent lookups pipeline.js resolves before calling in. `opts`:
-// { statusPri, statusBasket, columnKeys } — the same lookup tables state.js
-// exports (STATUS_PRI / STATUS_BASKET / TRIAGE_COLUMNS keys).
-// ---------------------------------------------------------------------------
-
-export function computeTriageFunnel(entries, opts) {
-  const statusPri = opts.statusPri;
-  const statusBasket = opts.statusBasket;
-  const columnKeys = opts.columnKeys;
-
-  const baseTotal = entries.length;
-  const approved = entries.filter(function (e) {
-    return e._approved;
-  });
-
-  let rejectedTotal = 0;
-  approved.forEach(function (e) {
-    if ((statusBasket[e._status] || "unseen") === "passed") rejectedTotal += 1;
-  });
-
-  const buckets = {};
-  columnKeys.forEach(function (k) {
-    buckets[k] = [];
-  });
-  const deduped = dedupeTriageEntries(approved, statusPri);
-  deduped.forEach(function (entry) {
-    const col = triageColumnFor(entry, columnKeys);
-    if (col && buckets[col] !== undefined) buckets[col].push(entry);
-  });
-
-  const at = (key) => (buckets[key] || []).length;
-  const metrics = {
-    base_total: baseTotal,
-    liked_queue: at("liked"),
-    triaged_total:
-      at("to_apply") +
-      at("to_research") +
-      at("to_network") +
-      at("skipped") +
-      at("applied"),
-    in_work: at("to_apply") + at("to_research") + at("to_network"),
-    applied_total: at("applied"),
-    skipped_total: at("skipped"),
-    rejected_total: rejectedTotal,
-  };
-
-  return { buckets, metrics };
+// Each decided vacancy belongs to at most one progress column. Company
+// tracking does not override an explicit decision or application stage.
+export function triageBuckets(entries, {statusPri, columnKeys}) {
+  const buckets = Object.fromEntries([...columnKeys].map(key => [key, []]));
+  for (const entry of dedupeTriageEntries(entries, statusPri).values()) {
+    const key = triageColumnFor(entry, columnKeys);
+    if (key) buckets[key].push(entry);
+  }
+  return buckets;
 }
 
 // ---------------------------------------------------------------------------
 // Minimal markdown renderer
 // ---------------------------------------------------------------------------
 
-export function inlineFormat(text) {
+// A link to a heading inside the SAME document — "[Career advising](#career-
+// advising)", which is how every report writes its own contents list. safeUrl
+// only passes http(s)/mailto, so these were dropped to plain text and the whole
+// contents list of a long report stopped being clickable.
+//
+// A fragment is inert by construction: it cannot navigate off the page and
+// carries no scheme to smuggle. The pattern is still restricted to the
+// characters headingSlug can produce, so nothing else gets through, and the
+// link opens IN PLACE — target="_blank" on a same-page anchor would open a
+// second copy of the dashboard.
+const SAFE_FRAGMENT = /^#[A-Za-z0-9][A-Za-z0-9_-]*$/;
+
+export function isSafeFragment(url) {
+  return SAFE_FRAGMENT.test(String(url || ""));
+}
+
+// A money amount with its currency symbol: "$23,658", "€1,000", "£450.50".
+// This is the only pattern used in a LIST item, and the reason is the real
+// EAIF report: its bullets open as data ("**Name** — $21,739 — 2025 Q1 —") and
+// then continue as an ordinary sentence. A rule wide enough to catch every
+// grouped number also catches the prose in the tail of that same bullet —
+// "80,000 Hours Guide in Polish", "a 100 page book", "the Fall 2023 app
+// cycle" — and sets three typefaces in one line. The amounts are what a reader
+// compares down the list; the numbers inside the sentence are words.
+const MONEY_TOKEN = /([$€£]\d[\d,]*(?:\.\d+)?)/g;
+
+// Money OR any grouped/large bare number: adds "12,206,029" and "226". Used
+// only in TABLE cells, where a column really is a column of figures and the
+// surrounding text cannot be prose.
+const NUMBER_TOKEN =
+  /([$€£]\d[\d,]*(?:\.\d+)?|\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b|\b\d{3,}(?:\.\d+)?\b)/g;
+
+/**
+ * Set every money amount and grouped number in the monospace face.
+ *
+ * A report like the EAIF grant list is 226 bullets of "**Name** — $6,430 —
+ * 2026 Q1 — …". In the body face those amounts are different widths per digit,
+ * so the eye cannot compare them down the column; in mono with tabular figures
+ * they line up and the list becomes scannable. (design-styles §4: numbers in
+ * mono, tabular-nums.)
+ *
+ * Operates only on text OUTSIDE tags, so it can never rewrite an href, a class
+ * name, or an id — the input at this point already contains the <a> elements
+ * the link rule produced.
+ */
+// A cell holding nothing but a number: money, a percentage, a count, a range,
+// or an em-dash placeholder. Anything with words in it is prose and stays left.
+const NUMERIC_CELL = /^[$€£]?[\d,. %+\u2013\u2014-]+$/;
+
+// Passed to inlineFormat where the reader scans rather than reads. "all" is for
+// table cells; "money" is for list items, whose tail is usually a sentence.
+const NUMERIC = { numbers: "all" };
+const MONEY_ONLY = { numbers: "money" };
+
+export function isNumericCell(text) {
+  const value = String(text == null ? "" : text).trim();
+  if (!value) return false;
+  return /\d/.test(value) && NUMERIC_CELL.test(value);
+}
+
+export function wrapNumbers(html, mode) {
+  const token = mode === "money" ? MONEY_TOKEN : NUMBER_TOKEN;
+  return String(html == null ? "" : html)
+    .split(/(<[^>]*>)/)
+    .map((part) =>
+      part.startsWith("<")
+        ? part
+        : part.replace(token, '<span class="md-num">$1</span>'),
+    )
+    .join("");
+}
+
+/**
+ * Inline markdown to HTML: bold, italic, code, links.
+ *
+ * `opts.numbers` additionally sets money amounts and grouped numbers in the
+ * monospace face. It is ON for list items and table cells — the places a
+ * reader SCANS, where mono digits of equal width line up down the column — and
+ * OFF for paragraphs and headings, where a sentence like "in 2022 it made 293
+ * grants totaling $12,206,029" would come out speckled with three different
+ * typefaces and read worse, not better.
+ */
+export function inlineFormat(text, opts) {
   text = text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   text = text.replace(/__(.+?)__/g, "<strong>$1</strong>");
   text = text.replace(/(?<!\w)\*([^\*]+?)\*(?!\w)/g, "<em>$1</em>");
@@ -1074,6 +1121,10 @@ export function inlineFormat(text) {
     // `text` was already escHtml'd by mdToHtml before inlineFormat runs, so
     // `url` here is HTML-escaped, not raw — safeUrl still works (the scheme
     // itself has no HTML-special chars) but it must not be escHtml'd again.
+    if (isSafeFragment(url)) {
+      // Same-page jump (a report's own contents list): stays in this tab.
+      return '<a class="md-jump" href="' + url + '">' + label + "</a>";
+    }
     const href = safeUrl(url);
     return href
       ? '<a href="' +
@@ -1083,66 +1134,180 @@ export function inlineFormat(text) {
           "</a>"
       : label;
   });
-  return text;
+  return opts && opts.numbers ? wrapNumbers(text, opts.numbers) : text;
 }
 
-export function mdToHtml(text) {
+/**
+ * A URL-safe id for a heading, so a long report can be linked section by
+ * section. Built from the heading's own words, lowercased, with runs of
+ * anything else collapsed to a single dash.
+ *
+ * The input has already been escHtml'd by mdToHtml, so entities (&amp;, &#39;)
+ * are stripped first — otherwise "R&D" would slug as "r-amp-d".
+ */
+export function headingSlug(text) {
+  return String(text || "")
+    .replace(/&[a-z]+;|&#\d+;/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Markdown to HTML. Input is escaped FIRST, so no source can inject markup —
+ * every feature below builds tags around already-inert text.
+ *
+ * `opts.anchors` gives every heading an `id` and a clickable link to itself.
+ * Off by default and on only for stored reports: the same renderer draws short
+ * job descriptions and scoring reasoning, where a page full of duplicate ids
+ * ("summary", "risks", one per role) would be invalid HTML and the anchor
+ * furniture would be noise.
+ */
+export function mdToHtml(text, opts) {
   if (!text) return "";
+  var anchors = !!(opts && opts.anchors);
+  var seenIds = Object.create(null);
   var html = escHtml(text);
   var lines = html.split("\n");
   var out = [];
   var inList = false;
+  var inOrderedList = false;
   var inTable = false;
+  // A table is buffered, not streamed. Alignment is a property of the COLUMN,
+  // not of the cell: a money column with one "—" in it must not swing that row
+  // back to the left, and the header has to move with the figures it names.
+  // Neither can be decided while the header is being written, because no body
+  // row has been read yet — so the rows are collected and the whole table is
+  // emitted by flushTable() once its extent is known.
+  var tableHead = null;
+  var tableRows = [];
+  var inCode = false;
+  var codeLines = [];
+
+  // A heading, with an id and a self-link when anchors are on. Ids are made
+  // unique by suffixing a counter: two sections called "Risks" in one report
+  // would otherwise share an id, and the second would be unreachable.
+  function heading(level, body) {
+    if (!anchors) return "<h" + level + ">" + body + "</h" + level + ">";
+    var base = headingSlug(body) || "section";
+    var id = base;
+    if (seenIds[base]) id = base + "-" + seenIds[base];
+    seenIds[base] = (seenIds[base] || 0) + 1;
+    return (
+      "<h" +
+      level +
+      ' id="' +
+      id +
+      '">' +
+      '<a class="md-anchor" href="#' +
+      id +
+      '" aria-hidden="true">#</a>' +
+      body +
+      "</h" +
+      level +
+      ">"
+    );
+  }
+
+  /**
+   * Emit the buffered table.
+   *
+   * A column counts as numeric when it has at least one number in it and no
+   * cell that is anything else — so "1,673 / 293 / 226" aligns right, and a
+   * column of names with a stray year in it does not. Header and body cells
+   * get the same class, so the label sits over its own figures.
+   */
+  function flushTable() {
+    if (!inTable) return;
+    var width = tableHead ? tableHead.length : 0;
+    var numericCol = [];
+    for (var c = 0; c < width; c++) {
+      var sawNumber = false;
+      var allNumeric = true;
+      for (var r = 0; r < tableRows.length; r++) {
+        var cell = tableRows[r][c];
+        if (cell === undefined || cell === "") continue;
+        if (isNumericCell(cell)) sawNumber = true;
+        else allNumeric = false;
+      }
+      numericCol[c] = sawNumber && allNumeric;
+    }
+    var cls = function (c) {
+      return numericCol[c] ? ' class="md-td-num"' : "";
+    };
+    var html = "<table><thead><tr>";
+    for (var h = 0; h < width; h++) {
+      html += "<th" + cls(h) + ">" + inlineFormat(tableHead[h]) + "</th>";
+    }
+    html += "</tr></thead><tbody>";
+    for (var i2 = 0; i2 < tableRows.length; i2++) {
+      html += "<tr>";
+      for (var j = 0; j < tableRows[i2].length; j++) {
+        html +=
+          "<td" +
+          cls(j) +
+          ">" +
+          inlineFormat(tableRows[i2][j], NUMERIC) +
+          "</td>";
+      }
+      html += "</tr>";
+    }
+    // Wrapped, so a table too wide for the column scrolls inside its own box
+    // instead of pushing the whole page sideways. The scroll has to live on a
+    // wrapper: putting overflow on the <table> itself requires display:block,
+    // which drops the internal table layout and collapses the table to the
+    // width of its text rather than filling the measure.
+    out.push('<div class="md-table-wrap">' + html + "</tbody></table></div>");
+    inTable = false;
+    tableHead = null;
+    tableRows = [];
+  }
+
+  function closeBlocks() {
+    if (inList) {
+      out.push("</ul>");
+      inList = false;
+    }
+    if (inOrderedList) {
+      out.push("</ol>");
+      inOrderedList = false;
+    }
+    flushTable();
+  }
 
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
 
-    if (/^### (.+)$/.test(line)) {
-      if (inList) {
-        out.push("</ul>");
-        inList = false;
+    // A fenced code block swallows every line until its closing fence, so it
+    // comes first: a report's shell snippet or SQL must not be re-read as
+    // headings, lists and tables.
+    if (/^```/.test(line.trim())) {
+      if (inCode) {
+        out.push("<pre><code>" + codeLines.join("\n") + "</code></pre>");
+        codeLines = [];
+        inCode = false;
+      } else {
+        closeBlocks();
+        inCode = true;
       }
-      if (inTable) {
-        out.push("</tbody></table>");
-        inTable = false;
-      }
-      out.push("<h3>" + RegExp.$1 + "</h3>");
       continue;
     }
-    if (/^## (.+)$/.test(line)) {
-      if (inList) {
-        out.push("</ul>");
-        inList = false;
-      }
-      if (inTable) {
-        out.push("</tbody></table>");
-        inTable = false;
-      }
-      out.push("<h2>" + RegExp.$1 + "</h2>");
+    if (inCode) {
+      codeLines.push(line);
       continue;
     }
-    if (/^# (.+)$/.test(line)) {
-      if (inList) {
-        out.push("</ul>");
-        inList = false;
-      }
-      if (inTable) {
-        out.push("</tbody></table>");
-        inTable = false;
-      }
-      out.push("<h1>" + RegExp.$1 + "</h1>");
+
+    // h1-h6, longest marker first so "### x" is not read as "# ## x".
+    var atx = /^(#{1,6}) (.+)$/.exec(line);
+    if (atx) {
+      closeBlocks();
+      out.push(heading(atx[1].length, inlineFormat(atx[2])));
       continue;
     }
 
     if (/^---+$/.test(line.trim())) {
-      if (inList) {
-        out.push("</ul>");
-        inList = false;
-      }
-      if (inTable) {
-        out.push("</tbody></table>");
-        inTable = false;
-      }
+      closeBlocks();
       out.push("<hr>");
       continue;
     }
@@ -1151,6 +1316,10 @@ export function mdToHtml(text) {
       if (inList) {
         out.push("</ul>");
         inList = false;
+      }
+      if (inOrderedList) {
+        out.push("</ol>");
+        inOrderedList = false;
       }
       var cells = line
         .trim()
@@ -1167,46 +1336,52 @@ export function mdToHtml(text) {
         continue;
       if (!inTable) {
         inTable = true;
-        out.push(
-          "<table><thead><tr>" +
-            cells
-              .map(function (c) {
-                return "<th>" + inlineFormat(c) + "</th>";
-              })
-              .join("") +
-            "</tr></thead><tbody>",
-        );
+        tableHead = cells;
+        tableRows = [];
       } else {
-        out.push(
-          "<tr>" +
-            cells
-              .map(function (c) {
-                return "<td>" + inlineFormat(c) + "</td>";
-              })
-              .join("") +
-            "</tr>",
-        );
+        tableRows.push(cells);
       }
       continue;
     }
 
-    if (inTable) {
-      out.push("</tbody></table>");
-      inTable = false;
-    }
+    flushTable();
 
     if (/^[\s]*[-*]\s+(.+)$/.test(line)) {
+      if (inOrderedList) {
+        out.push("</ol>");
+        inOrderedList = false;
+      }
       if (!inList) {
         out.push("<ul>");
         inList = true;
       }
-      out.push("<li>" + inlineFormat(RegExp.$1) + "</li>");
+      out.push("<li>" + inlineFormat(RegExp.$1, MONEY_ONLY) + "</li>");
+      continue;
+    }
+
+    // A numbered list. Reports lean on these — findings, steps, ranked options
+    // — and without this branch every "1." line rendered as its own paragraph,
+    // losing both the numbering and the fact that the lines belong together.
+    if (/^[\s]*\d+[.)]\s+(.+)$/.test(line)) {
+      if (inList) {
+        out.push("</ul>");
+        inList = false;
+      }
+      if (!inOrderedList) {
+        out.push("<ol>");
+        inOrderedList = true;
+      }
+      out.push("<li>" + inlineFormat(RegExp.$1, MONEY_ONLY) + "</li>");
       continue;
     }
 
     if (inList) {
       out.push("</ul>");
       inList = false;
+    }
+    if (inOrderedList) {
+      out.push("</ol>");
+      inOrderedList = false;
     }
 
     if (/^&gt;\s?(.*)$/.test(line)) {
@@ -1219,8 +1394,14 @@ export function mdToHtml(text) {
     out.push("<p>" + inlineFormat(line) + "</p>");
   }
 
+  // Flush anything the document left open — an unterminated list, table or
+  // code fence is common in a half-written report and must still render.
+  if (inCode && codeLines.length) {
+    out.push("<pre><code>" + codeLines.join("\n") + "</code></pre>");
+  }
   if (inList) out.push("</ul>");
-  if (inTable) out.push("</tbody></table>");
+  if (inOrderedList) out.push("</ol>");
+  flushTable();
   return out.join("\n");
 }
 
@@ -1247,7 +1428,12 @@ export function initUI() {
   window.addEventListener(
     "scroll",
     function () {
-      if (window.scrollY > 300) {
+      // Not on the review screen: its command bar is pinned, so the button
+      // buys nothing there and its 56px circle lands on a row's Pass button.
+      const review = document
+        .getElementById("catalogSection")
+        ?.classList.contains("active");
+      if (window.scrollY > 300 && !review) {
         scrollTopBtn.classList.add("visible");
       } else {
         scrollTopBtn.classList.remove("visible");
@@ -1267,6 +1453,10 @@ export const TOAST_MESSAGES = {
   liked: { key: "toast_liked", fallback: "\u2705 Added to favorites" },
   passed: { key: "toast_passed", fallback: "\uD83D\uDC4E Skipped" },
   skipped: { key: "toast_skipped", fallback: "\uD83D\uDC4E Skipped" },
+  unsure: {
+    key: "toast_unsure",
+    fallback: "\uD83D\uDD52 Back in the inbox tomorrow",
+  },
   to_apply: { key: "toast_to_apply", fallback: "\uD83D\uDCE5 Moved to apply" },
   to_research: {
     key: "toast_to_research",
@@ -1277,6 +1467,16 @@ export const TOAST_MESSAGES = {
     fallback: "\uD83E\uDD1D Marked for networking",
   },
   applied: { key: "toast_applied", fallback: "\u2705 Marked as applied" },
+  test_task: {
+    key: "toast_test_task",
+    fallback: "\uD83D\uDCDD Test task received",
+  },
+  interview: {
+    key: "toast_interview",
+    fallback: "\uD83D\uDCC5 Interview stage",
+  },
+  declined: { key: "toast_declined", fallback: "\uD83D\uDEAB Declined" },
+  accepted: { key: "toast_accepted", fallback: "\uD83C\uDF89 Accepted" },
 };
 
 // Resolve a status to its toast copy, or null when the status is not one a UI
@@ -1289,12 +1489,18 @@ export function toastMessage(status) {
 // (in English) when called without it.
 export function showToast(status, t) {
   const m = toastMessage(status);
-  if (!m || !toastEl) return;
+  if (!m) return;
   const translate = t || ((key, fallback) => fallback);
-  const msg = translate(m.key, m.fallback);
+  showToastText(translate(m.key, m.fallback), status);
+}
+
+// The display mechanics behind showToast, for callers whose message is
+// dynamic (the Screen view's "N of M saved") rather than a TOAST_MESSAGES key.
+export function showToastText(text, cls, ms) {
+  if (!toastEl) return;
   if (toastTimer) clearTimeout(toastTimer);
-  toastEl.className = "toast toast-" + status;
-  toastEl.textContent = msg;
+  toastEl.className = "toast toast-" + cls;
+  toastEl.textContent = text;
   requestAnimationFrame(function () {
     requestAnimationFrame(function () {
       toastEl.classList.add("visible");
@@ -1302,5 +1508,5 @@ export function showToast(status, t) {
   });
   toastTimer = setTimeout(function () {
     toastEl.classList.remove("visible");
-  }, 2000);
+  }, ms || 2000);
 }

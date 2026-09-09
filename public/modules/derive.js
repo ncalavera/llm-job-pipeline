@@ -39,22 +39,26 @@ export function hasVerdict(g, opts) {
 // such roles when they clear this bar, so client and server agree on the set.
 export const ANY_COMPANY_MIN_SCORE = VISIBLE_MIN_SCORE;
 
-// The shared visibility filter. A role is visible when its company is approved —
-// OR the role scores above ANY_COMPANY_MIN_SCORE, a strong match that ORs past
-// the approval gate (same rule the pipeline applies server-side) — AND (the user
-// has already acted on it OR it clears the score floor). An explicit verdict
-// overrides the floor — a liked role always shows in Liked and a passed role in
-// Passed regardless of score, the same principle the Today tab uses (a role you
-// acted on must never silently vanish under the discovery floor). Only undecided
-// ("unseen") roles are subject to the floor, which keeps the Catalog/Geo browse
-// surfaces focused on high-fit unreviewed roles. Expiry is deliberately NOT a
-// visibility gate — an expired liked role stays "visible", it is only re-bucketed
-// to Passed (see effectiveBasket), so it is counted and surfaced rather than
-// vanishing.
+// Decisions and applications stay visible regardless of company tracking or
+// score. Availability is shown separately and never changes the decision
+// basket.
+//
+// Prepared facts lift the COMPANY gate: an unscored role from a company the
+// user has not vetted is still worth reading once its requirements are
+// extracted. They do NOT lift the score floor. They used to, and that made the
+// review screen's score band inert — 868 of 1288 roles are prepared, so
+// "Score 60 and up" moved the tab count while the list stayed put. Recall-first
+// is preserved by the band's own default, "All scores", which sets no floor at
+// all; the floor now only exists when the user asked for one.
 export function isVisible(g, opts) {
-  if (!opts.isApproved(g) && !clearsScoreFloor(g, ANY_COMPANY_MIN_SCORE))
-    return false;
   if (hasVerdict(g, opts)) return true;
+  const prepared = g.screening_state === "ready";
+  if (
+    !prepared &&
+    !opts.isApproved(g) &&
+    !clearsScoreFloor(g, ANY_COMPANY_MIN_SCORE)
+  )
+    return false;
   return clearsScoreFloor(g, opts.minScore);
 }
 
@@ -62,14 +66,10 @@ export function visibleGroups(groups, opts) {
   return groups.filter((g) => isVisible(g, opts));
 }
 
-// The basket a group belongs to right now. An expired role that would sit in
-// the "liked" basket moves to "passed" — a lapsed like is no longer an active
-// like. This is the single rule the badge, the list and the Geo "liked" column
-// all read, so they cannot drift apart.
+// Availability is independent of the user's decision. A passed deadline
+// never turns Like or an application into Pass.
 export function effectiveBasket(g, opts) {
-  const basket = opts.basketMap[opts.getStatus(g)] || "unseen";
-  if (basket === "liked" && opts.isExpired(g)) return "passed";
-  return basket;
+  return opts.basketMap[opts.getStatus(g)] || "unseen";
 }
 
 // Basket counts over the visible set — exactly the rows each basket list would
@@ -172,15 +172,24 @@ export const HOT_MIN_SCORE = 55;
 
 // Statuses that disqualify a role from "applyable now" — already decided
 // (passed), removed (archived), already applied, skipped, or protected-but-
-// disappearing (expiring). Mirrors _NON_APPLYABLE_STATUSES in
-// scripts/report/data_prep.py; deadline-in-the-past is handled via
-// opts.isExpired so expiry stays the one shared notion across the dashboard.
-const NON_APPLYABLE_STATUSES = new Set([
+// disappearing (expiring). Everything past `applied` on the board is an
+// application already in flight (test_task, interview) or one the employer
+// closed (declined): none of them is a role still waiting to be applied to.
+// deadline-in-the-past is handled via opts.isExpired so expiry stays the one
+// shared notion across the dashboard.
+export const NON_APPLYABLE_STATUSES = new Set([
   "archived",
   "passed",
   "expiring",
   "applied",
+  "test_task",
+  "interview",
+  "declined",
+  // An offer already accepted: the application ended, and it ended well.
+  "accepted",
   "skipped",
+  // Deferred by the reviewer today; it returns to the Inbox tomorrow.
+  "unsure",
 ]);
 
 // A role is worth applying to right now when it clears APPLYABLE_MIN_SCORE, the
@@ -231,47 +240,6 @@ export function companyRollup(roles, opts) {
 }
 
 // ---------------------------------------------------------------------------
-// Per-board yield — "is this board earning its place?" over the user's own
-// history. Each board's funnel (scored → fit → liked) is a pure function of the
-// raw shipped roles (each carries source_board + llm_score) plus live statuses,
-// so it needs no /api and reacts to a like/pass or a passing deadline with no
-// run — the same derive-never-bake path the company rollups take (DHA-360).
-//
-// The dashboard payload ships only SCORED roles, so "scored" here means
-// "reached your scored catalogue"; the total-saved and fresh-14d numbers (which
-// also count unscored/archived rows) stay on the live /api/board-statuses feed.
-// A board with zero shipped roles reports hasData:false so the renderer can show
-// an honest "no data yet" instead of 0/0/0 read as a verdict.
-// ---------------------------------------------------------------------------
-
-// Fold the shipped roles into a per-board funnel keyed by source_board (== the
-// board's display name / board.name). Returns { [boardName]: { scored, fit,
-// liked, hasData } }. `roles` with no source_board are skipped (direct ATS
-// fetches belong to no board). `fit` counts roles at/above APPLYABLE_MIN_SCORE;
-// `liked` counts roles whose effective basket is "liked" (an expired like has
-// already lapsed to "passed", see effectiveBasket), so the funnel narrows
-// honestly. `opts` injects getStatus + isExpired + basketMap, exactly like the
-// other derivations here.
-export function boardYield(groups, opts) {
-  const out = {};
-  for (const g of groups) {
-    const board = (g.source_board || "").trim();
-    if (!board) continue;
-    let row = out[board];
-    if (!row) {
-      row = { scored: 0, fit: 0, liked: 0, hasData: true };
-      out[board] = row;
-    }
-    row.scored += 1;
-    if (typeof g.llm_score === "number" && g.llm_score >= APPLYABLE_MIN_SCORE) {
-      row.fit += 1;
-    }
-    if (effectiveBasket(g, opts) === "liked") row.liked += 1;
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
 // Today cockpit — the few things that need a decision now (DHA-410 rework).
 //
 // Six ordered, hide-when-empty populations replace the old three-list cockpit.
@@ -298,7 +266,12 @@ function _undecidedAge(g, opts) {
 //   committed:   [{ g, overdue }]  status to_apply. Never dropped for lapsing —
 //                                  a committed role whose deadline passed or
 //                                  whose source went stale stays, flagged.
-//   awaiting:    [g]               status applied (awaiting a reply)
+//   testTask:    [g]               status test_task — work is owed. Its own
+//                                  population, because "finish the assignment"
+//                                  needs an evening and "wait for a reply"
+//                                  needs nothing.
+//   awaiting:    [g]               status applied or interview (an application
+//                                  in flight, waiting on the employer)
 //   liked:       [g]               status liked, still live (expired ones drop)
 //   closingSoon: [{ g, expiring }] "about to disappear, decide now": protected
 //                                  status='expiring' roles lead (expiring:true —
@@ -313,6 +286,7 @@ function _undecidedAge(g, opts) {
 //   working:     [g]               status to_research / to_network, still live
 export function selectTodayRoles(groups, opts) {
   const committed = [];
+  const testTask = [];
   const awaiting = [];
   const liked = [];
   const closingSoon = [];
@@ -331,7 +305,15 @@ export function selectTodayRoles(groups, opts) {
       committed.push({ g, overdue: !opts.isLiveRole(g) });
       continue;
     }
-    if (status === "applied") {
+    if (status === "test_task") {
+      // Work is owed, so this never drops for a lapsed deadline or a stale
+      // source: the employer asked, and the answer is still due.
+      testTask.push(g);
+      continue;
+    }
+    if (status === "applied" || status === "interview") {
+      // Both are "sent, now waiting" — the difference is how far it got, not
+      // what the user has to do today.
       awaiting.push(g);
       continue;
     }
@@ -380,6 +362,8 @@ export function selectTodayRoles(groups, opts) {
   };
 
   committed.sort((a, b) => byDeadline(a.g, b.g));
+  // Soonest deadline first — a take-home usually comes with one.
+  testTask.sort(byDeadline);
   awaiting.sort(byScoreDesc);
   liked.sort(byDeadline);
   // Protected expiring rows lead (they're already lapsing), then soonest
@@ -393,11 +377,291 @@ export function selectTodayRoles(groups, opts) {
 
   return {
     committed,
+    testTask,
     awaiting,
     liked,
     closingSoon,
     closingSoonHidden,
     dontRot,
     working,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Screen view (bulk screening inbox, DHA-603). The payload ships raw screening
+// facts per role; lists and groups derive here, never on the server.
+// ---------------------------------------------------------------------------
+
+// Decision baskets are shared by every vacancy view. Progress is independent:
+// an employer rejection preserves the user's interest, not a manufactured Pass.
+export const VACANCY_BASKETS = {
+  unseen: "unseen",
+  expiring: "unseen",
+  liked: "liked",
+  to_apply: "liked",
+  to_research: "liked",
+  to_network: "liked",
+  applied: "liked",
+  test_task: "liked",
+  interview: "liked",
+  accepted: "liked",
+  declined: "liked",
+  passed: "passed",
+  skipped: "passed",
+  // Deferred for the rest of the day: in no basket. getGroupStatus turns a
+  // stale "unsure" back into "unseen", so only today's deferrals land here.
+  unsure: "deferred",
+};
+
+/** Same collected records, regardless of preparation readiness. */
+export function screenLists(roles, getStatus) {
+  const lists = { toScreen: new Set(), kept: new Set(), putAside: new Set() };
+  const keys = { unseen: "toScreen", liked: "kept", passed: "putAside" };
+  for (const g of roles) {
+    if (!g) continue;
+    const key = keys[VACANCY_BASKETS[getStatus(g) || "unseen"]];
+    if (key) lists[key].add(g.id);
+  }
+  return lists;
+}
+
+// The fixed group vocabulary, in chooser order. Overlap is allowed: one role
+// can sit in several groups; each group is a Set so a list counts it once.
+export const SCREEN_GROUP_KEYS = [
+  "language",
+  "onsite",
+  "seniority",
+  "unclear",
+  "all",
+];
+
+/** Requirements array of a role's screening facts, always an array. */
+export function screenRequirements(g) {
+  const facts = g && g.screening && g.screening.posting_facts;
+  return facts && Array.isArray(facts.requirements) ? facts.requirements : [];
+}
+
+/**
+ * Group the ready roles by validated facts:
+ *   language  – any requirement of kind "language"
+ *   onsite    – work_mode onsite, or a requirement of kind location/authorisation
+ *   seniority – seniority stated (not null / "unknown")
+ *   unclear   – unknowns present
+ *   all       – every role given
+ * @returns {Object<string, Set>} group key → canonical id set
+ */
+export function screenGroups(roles) {
+  const out = {};
+  for (const k of SCREEN_GROUP_KEYS) out[k] = new Set();
+  for (const g of roles) {
+    if (!g) continue;
+    const s = g.screening || {};
+    const facts = s.posting_facts || {};
+    const reqs = screenRequirements(g).filter(Boolean);
+    const mode = String(facts.work_mode || "").toLowerCase();
+    if (reqs.some((r) => r.kind === "language")) out.language.add(g.id);
+    if (
+      /on.?site/.test(mode) ||
+      reqs.some((r) => r.kind === "location" || r.kind === "authorisation")
+    )
+      out.onsite.add(g.id);
+    if (facts.seniority && String(facts.seniority).toLowerCase() !== "unknown")
+      out.seniority.add(g.id);
+    if (Array.isArray(s.unknowns) && s.unknowns.length) out.unclear.add(g.id);
+    out.all.add(g.id);
+  }
+  return out;
+}
+
+export const SCREEN_ACTIVITIES = [
+  "building",
+  "running",
+  "selling",
+  "specialist",
+];
+
+// Topic shortcuts search quoted requirements, not titles or company geography.
+// These are review aids, never automatic eligibility decisions.
+const REQUIREMENT_TOPICS = {
+  investment:
+    /\b(invest(?:ment|ing|or)|venture capital|private equity|portfolio|financial instruments)\b/i,
+  regional:
+    /\b(africa|african|asia|asian|pacific|sids|latin america|caribbean|middle east|europe|european|regional|country experience)\b/i,
+  management:
+    /\b(manag(?:e|ing|ement)|leadership|supervis|direct reports|team lead)/i,
+  fundraising: /\b(fundrais|donor|grant|philanthrop)/i,
+  technical:
+    /\b(programming|software|engineering|python|sql|machine learning|data science|technical)\b/i,
+  travel: /\b(travel|relocat|driving licen)/i,
+  certification: /\b(certif|licen[cs]|accredit|registration|chartered)/i,
+};
+
+/** Every requirement predicate binds to the same piece of posting evidence. */
+export function screenMatchRequirements(g, filters = {}) {
+  const needle = String(filters.requirementText || "")
+    .trim()
+    .toLowerCase();
+  return screenRequirements(g).filter(
+    (r, index) =>
+      r &&
+      (!filters.kind || r.kind === filters.kind) &&
+      (!filters.strength || (r.strength || "unknown") === filters.strength) &&
+      // Both searches read the requirement's OWN text. A quote is often one
+      // sentence covering several requirements ("English is required; German is
+      // preferred"), so searching it makes one requirement match on another
+      // one's words.
+      (!filters.topic ||
+        REQUIREMENT_TOPICS[filters.topic]?.test(String(r.value || ""))) &&
+      (!needle ||
+        String(r.value || "")
+          .toLowerCase()
+          .includes(needle)) &&
+      (!filters.finding ||
+        (g.screening?.profile_comparison || []).some(
+          (c) => c.requirement === index && c.finding === filters.finding,
+        ) ||
+        (filters.finding === "unknown" &&
+          !(g.screening?.profile_comparison || []).some(
+            (c) => c.requirement === index,
+          ))),
+  );
+}
+
+/** Interpret only extracted facts: missing work_profile stays unclassified. */
+export function screenMatches(
+  g,
+  filters = {},
+  today = new Date().toISOString().slice(0, 10),
+) {
+  const dates =
+    filters.added || filters.age || filters.deadline
+      ? screenDateFacts(g, today)
+      : null;
+  if (
+    filters.employment &&
+    (g.screening?.posting_facts?.employment_type || "unknown") !==
+      filters.employment
+  )
+    return false;
+  const current =
+    !!g.screening &&
+    g.screening_state === "ready" &&
+    (!filters.promptFingerprint ||
+      g.screening_fingerprint ===
+        `${g.posting_fingerprint}:${filters.promptFingerprint}`);
+  if (filters.preparation === "current" && !current) return false;
+  if (filters.preparation === "stale" && (!g.screening || current))
+    return false;
+  if (filters.preparation === "missing" && g.screening) return false;
+  if (filters.preparation === "failed" && g.screening_state !== "failed")
+    return false;
+  if (filters.unknowns === "yes" && !g.screening?.unknowns?.length)
+    return false;
+  if (
+    filters.unknowns === "no" &&
+    (!g.screening || g.screening.unknowns?.length)
+  )
+    return false;
+  const score = g.llm_score;
+  if (filters.score === "unscored" && score != null) return false;
+  if (
+    filters.score &&
+    filters.score !== "unscored" &&
+    (score == null ||
+      (filters.score === "below40" && score >= 40) ||
+      (filters.score === "40to69" && (score < 40 || score >= 70)) ||
+      (filters.score === "70plus" && score < 70))
+  )
+    return false;
+  if (filters.source && g.source_board !== filters.source) return false;
+  if (filters.added && dates.firstSeen !== filters.added) return false;
+  if (filters.place) {
+    const locations = (g.locations || [])
+      .map((l) => l.location || "")
+      .filter((l) => !/^HQ:/i.test(l));
+    const place = [g.screening?.posting_facts?.location || "", ...locations]
+      .join(" ")
+      .toLowerCase();
+    if (!place.includes(filters.place.trim().toLowerCase())) return false;
+  }
+  if (filters.age) {
+    const limit = { last7: 7, last14: 14, last30: 30 }[filters.age];
+    if (
+      dates.age == null ||
+      dates.age < 0 ||
+      (filters.age === "older30" ? dates.age <= 30 : dates.age > limit)
+    )
+      return false;
+  }
+  if (filters.deadline === "expired" && !dates.expired) return false;
+  if (filters.deadline === "open" && dates.expired) return false;
+  if (filters.deadline === "unknown" && dates.deadline) return false;
+  const facts = g.screening?.posting_facts || {};
+  const work = g.screening?.work_profile;
+  const unknown = (v) => v || "unknown";
+  if (
+    filters.activity === "unclassified"
+      ? !!work
+      : filters.activity === "unknown"
+        ? !work || !!work.activities?.length
+        : filters.activity &&
+          !work?.activities?.some((a) => a.kind === filters.activity)
+  )
+    return false;
+  if (filters.workMode && unknown(facts.work_mode) !== filters.workMode)
+    return false;
+  if (filters.seniority && unknown(facts.seniority) !== filters.seniority)
+    return false;
+  if (
+    filters.technical &&
+    unknown(work?.technical_depth?.level) !== filters.technical
+  )
+    return false;
+  if (filters.purpose && unknown(work?.purpose?.kind) !== filters.purpose)
+    return false;
+  if (
+    filters.search &&
+    !`${g.title || ""} ${g.company_name || g.org || ""}`
+      .toLowerCase()
+      .includes(filters.search.trim().toLowerCase())
+  )
+    return false;
+  if (
+    (filters.kind ||
+      filters.topic ||
+      filters.strength ||
+      filters.requirementText?.trim() ||
+      filters.finding) &&
+    !screenMatchRequirements(g, filters).length
+  )
+    return false;
+  return true;
+}
+
+/** Calendar dates use UTC, matching the existing dashboard deadline convention. */
+export function screenDateFacts(
+  g,
+  today = new Date().toISOString().slice(0, 10),
+) {
+  const dateOnly = (value) => {
+    const day = String(value || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+    const date = new Date(day);
+    return Number.isFinite(date.getTime()) &&
+      date.toISOString().slice(0, 10) === day
+      ? day
+      : null;
+  };
+  const seen = dateOnly(g.first_seen);
+  const lastSeen = dateOnly(g.last_seen);
+  const deadline = dateOnly(g.deadline);
+  return {
+    firstSeen: seen,
+    lastSeen,
+    age: seen
+      ? Math.round((Date.parse(today) - Date.parse(seen)) / 86400000)
+      : null,
+    deadline,
+    expired: !!deadline && deadline < today,
   };
 }

@@ -15,7 +15,7 @@
 // here, never at boot).
 // =============================================================================
 
-import { API_BASE } from "./state.js";
+import { API_BASE, stats } from "./state.js";
 import { escHtml, relativeTime } from "./helpers.js";
 import { T } from "./i18n.js";
 import {
@@ -390,8 +390,12 @@ export function renderHealth() {
 
   const d = healthData;
   _renderVerdict(d);
-  grid.innerHTML =
-    _card(T("health_boards_title", "Boards"), _boardsBlock(d.boards)) +
+  const prep = stats?.screening_processing;
+  const preparation = prep ? _card(T("screen_preparation", "Preparation status"),
+    '<p>' + escHtml(T("screen_processing", "Awaiting preparation or update: {unprepared} \u00b7 Failed: {failed}")
+      .replace("{unprepared}", prep.unprepared || 0).replace("{failed}", prep.failed || 0)) + '</p>') : "";
+  grid.innerHTML = preparation +
+    _card(T("health_boards_title", "Job boards"), _boardsBlock(d.boards)) +
     _card(
       T("health_companies_title", "Companies"),
       _companiesBlock(d.companies),

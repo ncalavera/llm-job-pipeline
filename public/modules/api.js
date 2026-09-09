@@ -1,3 +1,4 @@
+import { DETAIL_FIELDS } from "./payload.js";
 // =============================================================================
 // api.js — Server communication (save/load), offline detection
 // =============================================================================
@@ -97,13 +98,13 @@ export function saveToServer(id, status) {
 
 export function loadFromServer() {
   if (!API_BASE) return;
-  fetch(API_BASE + "/api/statuses", { credentials: "same-origin" })
+  return fetch(API_BASE + "/api/statuses", { credentials: "same-origin" })
     .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
     .then((payload) => {
       const remote = payload && payload.statuses ? payload.statuses : payload;
       const timestamps =
         payload && payload.timestamps ? payload.timestamps : {};
-      const changed = mergeRemoteStatuses(remote, timestamps);
+      const changed = mergeRemoteStatuses(remote, timestamps, payload.revisions);
       state.statusesLoaded = true;
       if (changed > 0) {
         console.log("Loaded " + changed + " statuses from Supabase");
@@ -169,6 +170,7 @@ export function loadCompanyStatuses() {
     .then((payload) => {
       var remote = payload && payload.statuses ? payload.statuses : {};
       state.companyStatuses = remote;
+      state.companyStatusReasons = payload.reasons || {};
       state.companyStatusesLoaded = true;
       emit("companyStatusesLoaded");
     })
@@ -223,7 +225,7 @@ const DEEP_PROFILE_FIELDS = [
 
 export function loadCompanies() {
   if (!API_BASE) return;
-  fetch(API_BASE + "/api/companies", { credentials: "same-origin" })
+  fetch(API_BASE + "/api/companies?view=inbox", { credentials: "same-origin" })
     .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
     .then((payload) => {
       var live =
@@ -263,4 +265,23 @@ export function initApi() {
   on("statusChanged", ({ ids, status }) => {
     ids.forEach((id) => saveToServer(id, status));
   });
+}
+
+
+// Coalesce repeat renders without caching stale text across snapshot objects.
+const detailRequests = new WeakMap();
+export function hydrateDetail(record) {
+  if (!record._detailKind) return Promise.resolve();
+  if (detailRequests.has(record)) return detailRequests.get(record);
+  const kind = record._detailKind;
+  const query = new URLSearchParams({kind, id: kind === 'company' ? record.company_id : record.id});
+  const request = fetch(API_BASE + '/api/snapshot-detail?' + query, {credentials:'same-origin'})
+    .then(r => { if (!r.ok) throw new Error('Details unavailable'); return r.json(); })
+    .then(data => {
+      if (!data || !DETAIL_FIELDS[kind].every(key => Object.hasOwn(data, key))) throw new Error("Invalid details");
+      for (const key of DETAIL_FIELDS[kind]) record[key] = data[key];
+      delete record._detailKind;
+    }).finally(() => detailRequests.delete(record));
+  detailRequests.set(record, request);
+  return request;
 }

@@ -8,6 +8,7 @@ from config import (
     COMPANIES,
     PROJECT_ROOT,
     APPLYABLE_SCORE,
+    CATALOG_MIN_SCORE,
     DASHBOARD_TZ,
     resolve_canonical_name,
 )
@@ -18,9 +19,53 @@ from prepare_screening import posting_fingerprint
 #: application is running, or it closed with the employer's own answer. These
 #: survive the dashboard score floor at any score. Everything else (unseen below
 #: the floor, passed, skipped) is either noise or history.
+_ACTIVE_STATUSES = frozenset(
+    {
+        "liked",
+        "to_apply",
+        "to_research",
+        "to_network",
+        "applied",
+        "test_task",
+        "interview",
+        "declined",
+        "accepted",
+    }
+)
 from database_supabase import load_vacancies, load_all_enrichment
 from db_conn import get_conn
 from source_observations import recent_source_runs
+
+
+def keep_on_dashboard(vacancy: dict) -> bool:
+    """Does this role reach the dashboard at all?
+
+    One floor, applied once, before the data leaves Python. A role is kept when
+    it is scored AND (it is live work, or it clears CATALOG_MIN_SCORE). The 40
+    floor used to live only in the Catalog tab's client-side filter and in
+    ``score_floor_any_company``, which gates unapproved companies — so a weak
+    role at an APPROVED company shipped and showed up everywhere else.
+
+    An ACTIVE decision outranks the score: the weakest role in the liked basket
+    scores 15, and a role being worked cannot be hidden by a number. 'passed' /
+    'skipped' are NOT such decisions — they are dead ends, and keeping every one
+    of them shipped the whole rejected pile back onto the board. Below the floor
+    they are history, not work; the Archive tab still has them.
+
+    An APPLICATION outranks even the presence of a score. The unscored gate below
+    exists to keep roles awaiting scoring out of view — but a row he actually
+    sent is not awaiting anything, and some were never scored at all: a course,
+    a career-advising session, a programme, added by hand through ``vac add``
+    and never seen by the scorer. Dropping those would make the Applications
+    table miss exactly the applications the board could not already show.
+    """
+    if vacancy.get("status") in _ACTIVE_STATUSES:
+        return True
+    score = vacancy.get("llm_score")
+    if score is None or score < 0:
+        return False
+    return vacancy.get("status") in _ACTIVE_STATUSES or score >= CATALOG_MIN_SCORE
+
 
 # Per-company vacancy NUMBERS (vacancy_count, applyable_count, avg score and the
 # hot-vacancy signal) are no longer baked here — they derive in the browser from
@@ -427,6 +472,25 @@ def _build_group(
         # fit / liked) in boards.js — the same "derive, never bake" path the
         # company rollups and Geo table take (STRATEGY guardrail 9).
         "source_board": v.get("source_board") or "",
+        # --- Applications table (the Triage tab's second view) ---------------
+        # When the application went out. NOT status_updated_at, which moves with
+        # every stage: on a declined row that one holds the date of the
+        # rejection. Empty on rows that predate migration 0022 — the table falls
+        # back to status_updated_at and labels the column honestly.
+        "applied_at": _iso_or_blank(v.get("applied_at")),
+        # When the row last changed stage. Two columns rest on it — "Stage
+        # since" and the waiting-days count — and it was NOT shipped before,
+        # so both rendered empty for every row on the live dashboard while
+        # every fixture-built test passed.
+        "status_updated_at": _iso_or_blank(v.get("status_updated_at")),
+        # What was applied to. Every real vacancy is a 'job'; the other kinds
+        # (course, programme, advising, consulting, grant) are applications he
+        # sent that are stored as ordinary vacancy rows.
+        "kind": v.get("kind") or "job",
+        # The one line of "what happens next", read from the private triage
+        # blob. `next_step` if he wrote one, else the free note. Both are
+        # free text he types, so the browser escapes them before rendering.
+        "next_step": _next_step(v.get("triage")),
         # The application attached to this vacancy (1:1), or None. Card shows a
         # small "applied · <status>" block; the full section is a later ticket.
         # Projected to the display shape — artifact values and notes stay private.
@@ -442,6 +506,30 @@ def _build_group(
         "posting_fingerprint": posting_fingerprint(v.get("full_description") or ""),
         "screening_prepared_at": v.get("screening_prepared_at") or "",
     }
+
+
+def _iso_or_blank(value) -> str:
+    """A date/datetime (Postgres) or an ISO string (SQLite) as one ISO string,
+    "" when absent. The DAL already normalizes vacancy timestamps, so this is
+    the belt to that braces — a datetime reaching JSON would serialize as a
+    Python repr the browser cannot parse."""
+    if not value:
+        return ""
+    iso = getattr(value, "isoformat", None)
+    return iso() if callable(iso) else str(value)
+
+
+def _next_step(triage) -> str:
+    """The 'what happens next' line for one row: the explicit ``next_step`` the
+    user wrote, else the free-text ``note``. Anything else in the blob is not a
+    next step and must not be shown as one."""
+    if not isinstance(triage, dict):
+        return ""
+    for key in ("next_step", "note"):
+        value = triage.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
 
 
 def _company_hq_map():

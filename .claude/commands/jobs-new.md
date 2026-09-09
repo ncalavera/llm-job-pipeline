@@ -151,7 +151,7 @@ signature of a truncated fetch). A dirty run keeps the previous good snapshot;
 the driver says so in the summary. In full mode publish refreshes the live
 dashboard snapshot (browser refresh, no deploy); in simple mode it rewrites the
 local `public/data.js`. Both go through the same driver — no mode branching.
-`vercel --prod` is only for dashboard **code** changes and is never run here.
+Deploying dashboard **code** to forge is a separate action and is never run here.
 
 ---
 

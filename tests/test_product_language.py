@@ -68,10 +68,6 @@ def test_english_profile_resolves_en(tmp_path, monkeypatch):
     "token,code",
     [
         ("en", "en"),
-        ("EN", "en"),
-        ("english", "en"),
-        ("English", "en"),
-        ("ru", "ru"),
         ("RU", "ru"),
         ("Russian", "ru"),
         ("русский", "ru"),

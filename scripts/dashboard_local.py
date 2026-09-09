@@ -1,8 +1,9 @@
-"""Local dashboard server — easy mode, no Vercel, stdlib only.
+"""Local dashboard server — easy mode, no hosting account, stdlib only.
 
 Serves the existing ``public/`` dashboard on localhost and implements the
 API endpoints the dashboard JS calls (``/api/statuses``, ``/api/company-statuses``,
-``/api/save``, ``/api/company-review``, ``/api/board-toggle``) directly against
+``/api/save``, ``/api/screening-decision``, ``/api/company-review``,
+``/api/board-toggle``) directly against
 the data-access layer.
 Works on the SQLite backend out of the box; if SUPABASE_DB_URL is set it talks
 to Supabase instead — same code path.
@@ -42,9 +43,12 @@ VALID_STATUSES = {
     "to_research",
     "to_network",
     "skipped",
+    "unsure",
     "applied",
+    "test_task",
     "interview",
     "declined",
+    "accepted",
     "expiring",
     "archived",
 }
@@ -118,6 +122,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/api/save":
             return self._api_save()
+        if path == "/api/screening-decision":
+            return self._api_screening_decision()
         if path == "/api/company-review":
             return self._api_company_review()
         if path == "/api/board-toggle":
@@ -155,16 +161,25 @@ class Handler(BaseHTTPRequestHandler):
 
             with _db_lock:
                 vacs = load_vacancies(include_inactive_companies=True, light=True)
-            statuses, timestamps = {}, {}
+            statuses, timestamps, revisions = {}, {}, {}
             for vid, v in vacs.items():
                 st = v.get("status")
-                if st in ("unseen", "archived"):
+                if st == "archived":
                     continue
                 statuses[vid] = st
                 ts = v.get("status_updated_at")
                 if ts:
                     timestamps[vid] = ts
-            return self._send_json(200, {"statuses": statuses, "timestamps": timestamps})
+                # The dashboard's durable write path refuses to send a change
+                # without a revision. SQLite has no xmin, and easy mode is one
+                # process behind one lock, so the last write time is revision
+                # enough: it changes on every status write and nothing else
+                # can interleave.
+                revisions[vid] = str(ts or "0")
+            return self._send_json(
+                200,
+                {"statuses": statuses, "timestamps": timestamps, "revisions": revisions},
+            )
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"  statuses error: {exc}\n")
             return self._send_json(500, {"error": "Database error"})
@@ -211,6 +226,66 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"  save error: {exc}\n")
             return self._send_json(500, {"error": "Database error"})
+
+    def _api_screening_decision(self):
+        """The durable decision path the review screen writes through.
+
+        Same request and response shape as ``server.js``'s handler, minus the
+        Postgres machinery it cannot have: no advisory lock and no receipt
+        table, because easy mode is one process holding ``_db_lock`` and there
+        is no second writer to race. The status precondition is still checked,
+        so a stale tab is rejected rather than silently overwriting, and the
+        response still carries ``previous`` per row so Undo works.
+        """
+        body = self._read_body()
+        changes = body.get("changes")
+        if not isinstance(changes, list) or not 1 <= len(changes) <= 100:
+            return self._send_json(400, {"error": "Invalid changes"})
+        for c in changes:
+            if not isinstance(c, dict) or not c.get("id"):
+                return self._send_json(400, {"error": "Invalid changes"})
+            if c.get("status") not in VALID_STATUSES:
+                return self._send_json(400, {"error": "Invalid status"})
+        try:
+            from db_conn import get_conn
+            from database_supabase import update_vacancy_status
+
+            rows = []
+            with _db_lock:
+                conn = get_conn()
+                cur = conn.cursor()
+                for c in changes:
+                    cur.execute("SELECT status FROM vacancy WHERE id = %s", (c["id"],))
+                    row = cur.fetchone()
+                    if not row:
+                        cur.close()
+                        return self._send_json(404, {"error": "Vacancy not found"})
+                    if c.get("expected_status") and row[0] != c["expected_status"]:
+                        cur.close()
+                        return self._send_json(
+                            409,
+                            {"error": "Vacancy changed; refresh and try again"},
+                        )
+                    rows.append({"id": c["id"], "previous": row[0]})
+                cur.close()
+                for c, out in zip(changes, rows):
+                    update_vacancy_status(c["id"], c["status"])
+                    out["status"] = c["status"]
+                cur = conn.cursor()
+                for out in rows:
+                    cur.execute(
+                        "SELECT status_updated_at FROM vacancy WHERE id = %s",
+                        (out["id"],),
+                    )
+                    stamp = cur.fetchone()
+                    out["status_updated_at"] = str(stamp[0]) if stamp and stamp[0] else ""
+                    out["revision"] = out["status_updated_at"] or "0"
+                cur.close()
+                conn.commit()
+            return self._send_json(200, {"ok": True, "rows": rows})
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(f"  screening-decision error: {exc}\n")
+            return self._send_json(500, {"error": "Could not save decisions"})
 
     def _api_company_review(self):
         body = self._read_body()

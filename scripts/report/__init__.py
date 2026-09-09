@@ -254,7 +254,7 @@ def generate_dashboard(db: dict = None) -> None:
             # the fallback banner's 48h staleness check by up to
             # ±14h depending on the viewer's timezone.
             "last_updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "api_base": "",  # Vercel uses relative paths
+            "api_base": "",  # the dashboard server answers on relative paths
             "dashboard_style": _resolve_dashboard_style(),
             "language": language,
             "i18n": i18n.strings(language),
@@ -290,7 +290,7 @@ def _upsert_dashboard_snapshot(vacancy_data: dict, conn) -> None:
     """Upsert the assembled payload into the dashboard_snapshot 'current' row.
 
     Full mode only. /api/vacancies reads the 'current' row, so a browser refresh
-    shows current data without a Vercel redeploy.
+    shows current data without redeploying the server.
 
     Before overwriting, the existing 'current' payload is copied to a 'previous'
     row so a bad run (e.g. a truncated fetch that mass-archived real vacancies)

@@ -459,6 +459,11 @@ def is_recently_archived(archived_hashes: set[str], dedup_hash: str) -> bool:
 # ---------------------------------------------------------------------------
 
 _FUZZY_THRESHOLD: float = 0.85
+#: Never delete, never tombstone: every status that records a user decision,
+#: plus 'archived'. Imported from statuses.py rather than listed here — the
+#: hand-written copy this replaces was missing 'test_task', 'interview' and
+#: 'declined', so the filter stage deleted and tombstoned applications that
+#: were still in flight.
 _PROTECTED_STATUSES: frozenset[str] = PROTECTED_STATUSES
 
 

@@ -98,8 +98,10 @@ CREATE TABLE IF NOT EXISTS vacancy (
     status                TEXT NOT NULL DEFAULT 'unseen'
                           CHECK (status IN ('unseen', 'liked', 'passed',
                                             'to_apply', 'to_research',
-                                            'to_network', 'skipped', 'applied',
-                                            'interview', 'declined',
+                                            'to_network', 'skipped', 'unsure',
+                                            'applied',
+                                            'test_task', 'interview',
+                                            'declined', 'accepted',
                                             'expiring', 'archived')),
     status_updated_at     TIMESTAMPTZ,
 
@@ -171,8 +173,8 @@ CREATE TABLE IF NOT EXISTS dashboard_snapshot (
 --   - service_role: full access (used by /api/* and Python scripts)
 --
 -- Uncomment the block below if you want RLS. By default this schema leaves
--- RLS disabled and assumes the dashboard reaches the DB through the Vercel
--- API endpoints (which use the service role key).
+-- RLS disabled and assumes the dashboard reaches the DB through server.js,
+-- which holds the only credentials.
 -- ---------------------------------------------------------------------------
 
 -- ALTER TABLE company ENABLE ROW LEVEL SECURITY;

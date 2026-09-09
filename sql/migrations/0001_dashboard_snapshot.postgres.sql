@@ -3,7 +3,7 @@
 -- Holds the latest assembled VACANCY_DATA payload as a single row so the
 -- dashboard can read it live via /api/vacancies on every refresh, with no
 -- redeploy. The pipeline's generate_dashboard() upserts this row instead of
--- baking public/data.js + vercel --prod.
+-- baking public/data.js and redeploying.
 --
 -- Postgres only (.postgres.sql): simple/SQLite mode keeps writing and serving
 -- public/data.js and never reads this table, so there is no SQLite variant —

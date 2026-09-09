@@ -20,8 +20,7 @@ The user's choice: Like or Pass. Preparation, filtering, and archiving do not ma
 *Avoid:* verdict, keep, skipped, or put aside for these same user-facing choices.
 
 ### Inbox
-Vacancies awaiting the user's decision whose facts and fit reflect the current posting and profile. Its count is the number of vacancies in that list; a page or function group is a subset of the same inbox.
-*Avoid:* mixing preparation queues or historical results into the inbox count.
+The main scored catalogue of collected vacancies, with Undecided, Liked and Passed views. Rows sort by score by default; a missing score stays blank, never becomes zero. Preparation is a labelled property, never an inclusion gate. Bulk review uses the same records and content; filtered or paginated views are subsets of that table. Low-score reason batches are optional subsets: current, quoted required conditions with a possible profile conflict, grouped first by location/language/authorisation, otherwise experience/qualifications. Unclassified roles remain in All. Passing requires explicit selection; it preserves decided duplicate members and supports Undo. Application outcomes do not manufacture a Pass. Archives preserve historical records outside the active table.
 
 ### History
 Older records and past decisions retained for reference and recovery. Moving a record out of the active inbox does not mean the user passed on it.
@@ -107,7 +106,7 @@ vacancies scored at 40 or above are left untouched. Discovery never changes a
 human Decision and never creates an exclusion rule.
 
 ### Views and counts
-Inbox is the single retained vacancy list, including rows not yet prepared. Catalog and screening are views of the same records and decisions; filters can make a view smaller. Progress groups liked vacancies and applications by current progress. Applications is the submitted-application table. Companies and Job boards count their own entities, never vacancies. Reports contains research documents; Contacts contains people; Health contains processing and connection details; Settings contains preferences.
+Inbox and Catalog refer to the same main scored vacancy table; filters can make it smaller. Preparation never determines inclusion. Progress groups liked vacancies and applications by current progress. Applications is the submitted-application table. Companies and Job boards count their own entities, never vacancies. Reports contains research documents; Contacts contains people; Health contains processing and connection details; Settings contains preferences.
 
 A list count names its entity and uses that list's filters. A page count says how many are shown, not how many exist. Function groups partition the inbox, with mixed/unknown functions in Other. Attribute filters (language, location, seniority) may overlap and must never be presented as additive totals. Database record counts include source copies and history; they are not unique-vacancy counts. Cumulative funnel counts overlap and are not current states.
 
@@ -244,3 +243,10 @@ The UX stance adopted 2026-07-04: the dashboard is a calm coach, not a control p
 ## Inbox contract (2026-09-08)
 
 Inbox is one view over every retained vacancy, before relevance filtering. Screening preparation is optional content, never a visibility gate. Like and Pass are user decisions; employer rejection remains an application outcome. Main navigation is Inbox, Applications, Companies and Sources; Materials belongs under Applications.
+### Company list views
+
+- **Selected:** companies with an explicit personal dashboard selection. Automatic activation or board discovery does not count as selection. Historical records without confirmed personal selection remain in the catalogue.
+- **Catalogue:** other eligible companies, initially showing those with relevant vacancies or application history. Search or “Include companies without relevant vacancies” exposes preserved research entries.
+- **Excluded:** inactive records, including personal exclusions and retained invalid records.
+
+These views do not change collection configuration: restoring a company to board eligibility does not enable direct collection.

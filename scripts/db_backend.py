@@ -23,6 +23,7 @@ import re
 import sqlite3
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 # ---------------------------------------------------------------------------
 # Backend selection
@@ -101,8 +102,35 @@ def _supabase_url() -> str | None:
     return os.environ.get("SUPABASE_DB_URL") or os.environ.get("SUPABASE_DIRECT_URL")
 
 
-#: True when running on the local SQLite backend (no Supabase configured).
+#: True when running on the local SQLite backend (no Postgres URL configured).
 IS_SQLITE = _supabase_url() is None
+
+
+def _pg_host_label() -> str:
+    """Human-readable host of the configured Postgres URL, for banners only.
+
+    The env var is still named SUPABASE_DB_URL for compatibility, but since the
+    2026-08 self-host migration it points at a self-hosted Postgres (usually
+    through an SSH tunnel on 127.0.0.1), so banners must not claim "Supabase" —
+    they print the actual host instead.
+
+    Parsed with urlsplit, not a regex: the hand-rolled pattern needed a
+    trailing "/dbname" and returned the useless "postgres" for the perfectly
+    valid ``postgresql://user:pw@host:5432`` — the banner then hid the very
+    thing it exists to show. urlsplit also splits user:pw@host correctly when
+    the password itself contains an "@".
+    """
+    url = _supabase_url() or ""
+    try:
+        parts = urlsplit(url)
+        host, port = parts.hostname, parts.port
+    except ValueError:  # non-numeric port, or otherwise malformed
+        host, port = None, None
+    if not host:
+        return "postgres"
+    if host in ("127.0.0.1", "localhost"):
+        return f"local tunnel {host}:{port or 5432}"
+    return host
 
 
 def _psycopg2_missing(exc: ImportError) -> None:
@@ -140,7 +168,7 @@ def print_backend_banner(stream=None) -> None:
     if IS_SQLITE:
         print(f"Backend: local SQLite ({sqlite_db_path()})", file=out, flush=True)
     else:
-        print("Backend: Postgres (Supabase)", file=out, flush=True)
+        print(f"Backend: Postgres ({_pg_host_label()})", file=out, flush=True)
     _warn_backend_mismatch(out)
 
 
@@ -162,14 +190,14 @@ def _warn_backend_mismatch(out) -> None:
     banner = None
     if env_declares_supabase and IS_SQLITE:
         banner = (
-            "WARNING: .env is configured for Supabase, but this run is on local SQLite.\n"
+            "WARNING: .env is configured for Postgres, but this run is on local SQLite.\n"
             "  Reason: SUPABASE_DB_URL is empty/unset in the active environment and\n"
             "  overrides the .env value (an already-exported shell var wins over .env).\n"
             "  Fix: unset the empty SUPABASE_DB_URL in this shell, or export a real one."
         )
     elif not env_declares_supabase and not IS_SQLITE:
         banner = (
-            "WARNING: .env is NOT configured for Supabase, but this run connects to Postgres.\n"
+            "WARNING: .env is NOT configured for Postgres, but this run connects to Postgres.\n"
             "  Reason: SUPABASE_DB_URL is set in your shell environment (inherited from\n"
             "  another project) and takes priority over .env.\n"
             "  Fix: `unset SUPABASE_DB_URL SUPABASE_DIRECT_URL` to use the local SQLite demo."
@@ -270,6 +298,16 @@ _DATETIME_COLUMNS = frozenset(
         "archived_at",
     }
 )
+
+# NOT here: ``applied_at``. Two different tables own a column by that name —
+# ``application.applied_at`` is a DATE (psycopg2 returns date, and the whole
+# applications surface compares it as a plain "YYYY-MM-DD") while
+# ``vacancy.applied_at`` (migration 0022) is a TIMESTAMPTZ. This set is keyed on
+# column NAME with no table, so listing it would decode the application table's
+# dates into datetimes and break every one of those comparisons. The vacancy
+# column needs no entry: Postgres hands back a datetime that _row_to_vacancy
+# already ISO-formats, and SQLite hands back the ISO string it stored, so both
+# backends leave the DAL with the same string shape.
 _DATE_COLUMNS = frozenset({"first_seen", "last_seen", "deadline"})
 
 
@@ -830,7 +868,7 @@ def _connect_supabase():
             conn.commit()
             cur.execute("SELECT current_database(), current_user")
             db_name, db_user = cur.fetchone()
-            print(f"  Postgres: connected ({db_name}, {db_user}) at {_url_host(db_url)}")
+            print(f"  Postgres: connected ({db_name}, {db_user} @ {_pg_host_label()})")
             cur.close()
             return conn
         except psycopg2.OperationalError:

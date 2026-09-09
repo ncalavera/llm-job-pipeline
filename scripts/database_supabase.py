@@ -272,7 +272,8 @@ _PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
 _MIN_DESC_FP_CHARS = 1000
 
 # Statuses that carry a user decision — a renamed/language variant must inherit
-# one of these rather than resurface as 'unseen'.
+# one of these rather than resurface as 'unseen'. Re-exported from statuses.py
+# (the one vocabulary) under the name the DAL's callers already use.
 _DECIDED_STATUSES = DECIDED_STATUSES
 
 # Common title abbreviations expanded to their long form so a spelled-out role
@@ -1172,6 +1173,35 @@ def ensure_company(org_name: str, status: str = "candidate"):
     return cid
 
 
+def activate_company(company_id, reason: str) -> bool:
+    """Force a company to 'active'. Returns True if the status actually changed.
+
+    Deliberately NOT folded into ensure_company: that function returns an
+    existing company untouched on purpose, so a board variant merging into a
+    tracked company can never flip its status or its WANT score, and a nightly
+    fetch can never silently re-approve a company that was rejected.
+
+    Applying is the one event that DOES justify overriding it. He decided about
+    that company by sending the application, so leaving it 'inactive' — or
+    'candidate', awaiting a review that has been overtaken — makes the company
+    filter hide his own application from the board and from `vac list`.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT status FROM company WHERE id = %s", (company_id,))
+    row = cur.fetchone()
+    current = row[0] if row else None
+    if current == "active":
+        cur.close()
+        return False
+    cur.execute(
+        "UPDATE company SET status = 'active', status_reason = %s WHERE id = %s",
+        (reason, company_id),
+    )
+    cur.close()
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Vacancy CRUD
 # ---------------------------------------------------------------------------
@@ -1243,14 +1273,27 @@ def _scored_by_supported() -> bool:
     return _scored_by_supported_cache
 
 
+#: {(table, column): exists} — memo for _table_has_column, same one-shot
+#: lifetime as _scored_by_supported_cache above: the schema does not change
+#: under a running pipeline (migrate.py runs as its own process), and without a
+#: cache every write that guards an optional column paid a catalogue round trip.
+_table_column_cache: dict[tuple[str, str], bool] = {}
+
+
 def _table_has_column(table: str, col: str) -> bool:
     """True when ``table`` has ``col`` on the active backend.
 
     Lets a write degrade gracefully on a pre-migration schema (a fresh
     simple-mode SQLite DB is baseline-only until ``migrate.py`` runs) instead of
     raising "no such column". Same pattern as the migration-0013 source_board
-    gate; also used for the 0015 fetch-health telemetry columns."""
+    gate; also used for the 0015 fetch-health telemetry columns.
+
+    Cached per (table, column) for the life of the process."""
     from db_backend import IS_SQLITE
+
+    key = (table, col)
+    if key in _table_column_cache:
+        return _table_column_cache[key]
 
     conn = get_conn()
     cur = conn.cursor()
@@ -1264,11 +1307,13 @@ def _table_has_column(table: str, col: str) -> bool:
                 (table,),
             )
             cols = {row[0] for row in cur.fetchall()}
-        return col in cols
+        answer = col in cols
     except Exception:
-        return False
+        answer = False
     finally:
         cur.close()
+    _table_column_cache[key] = answer
+    return answer
 
 
 def _vacancy_has_column(col: str) -> bool:
@@ -1289,6 +1334,19 @@ def _scoring_excluded_supported() -> bool:
     if _scoring_excluded_supported_cache is None:
         _scoring_excluded_supported_cache = _vacancy_has_column("scoring_excluded_reason")
     return _scoring_excluded_supported_cache
+
+
+#: Migration-only vacancy columns a light read WANTS but must not require.
+#: Same rule as ``scored_by`` above: an install that has not run migrate.py yet
+#: degrades to reading without them instead of failing every read with
+#: "no such column". ``applied_at`` / ``kind`` arrive in migration 0022.
+_OPTIONAL_LIGHT_COLUMNS = ("applied_at", "kind")
+
+
+def _optional_light_columns() -> tuple[str, ...]:
+    """The optional light-read columns this database actually has."""
+    cols = ("scored_by",) if _scored_by_supported() else ()
+    return cols + tuple(c for c in _OPTIONAL_LIGHT_COLUMNS if _vacancy_has_column(c))
 
 
 def load_vacancies(
@@ -1379,7 +1437,7 @@ def load_vacancies(
     where = " AND ".join(conditions) if conditions else "TRUE"
 
     if light:
-        light_cols = _VACANCY_LIGHT_COLUMNS + (("scored_by",) if _scored_by_supported() else ())
+        light_cols = _VACANCY_LIGHT_COLUMNS + _optional_light_columns()
         vacancy_cols = ", ".join(f"v.{c}" for c in light_cols)
     else:
         vacancy_cols = "v.*"
@@ -1430,6 +1488,7 @@ def _row_to_vacancy(row) -> dict:
         "updated_at",
         "llm_scored_at",
         "screening_prepared_at",
+        "applied_at",
     ):
         if isinstance(vac.get(df), datetime):
             vac[df] = vac[df].isoformat()
@@ -1793,10 +1852,17 @@ def _print_merge_summary(
         )
 
 
-def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
+def save_vacancies(
+    org_name: str, tier, jobs: list[dict], archived_hashes: set[str] | None = None
+) -> int:
     """Save fetched jobs into the DB. Returns count of new vacancies.
 
     Same role (org + title) at different locations → one entry with locations[].
+
+    ``archived_hashes`` — the ``get_archived_hashes(include_gone=False)`` set.
+    A multi-company run (fetch_vacancies.main) loads it ONCE and passes it in;
+    loading it here per company re-pulled the whole tombstone table for every
+    org. When omitted (tests, one-off callers) it is loaded here as before.
     """
     org_name = resolve_canonical_name(org_name)
     company_id = resolve_company_id(org_name)
@@ -1811,9 +1877,10 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     # company's own re-listing resurrects a role the source had merely dropped.
     # Every OTHER tombstone reason — crucially 'score_below_threshold' — STAYS in
     # the set, so a role we buried for a low score is NOT re-imported / re-scored /
-    # re-archived each run when the ATS still lists it. Loaded
-    # once (not per row).
-    archived_hashes = get_archived_hashes(include_gone=False)
+    # re-archived each run when the ATS still lists it. Loaded once per RUN by
+    # the caller when possible (see docstring), not per company, never per row.
+    if archived_hashes is None:
+        archived_hashes = get_archived_hashes(include_gone=False)
     # Resurrects must clear a machine-archival reason (board_stale /
     # board_disabled) so it never sits on a live row. Guarded once (0014).
     has_status_reason = _vacancy_has_column("status_reason")
@@ -1982,11 +2049,17 @@ def save_vacancies(org_name: str, tier, jobs: list[dict]) -> int:
     return new_count
 
 
-def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
+def save_board_vacancies(
+    board_cfg: dict, jobs: list[dict], archived_hashes: set[str] | None = None
+) -> int:
     """Save job board results into the DB. Returns count of new vacancies.
 
     Unknown orgs → ensure_company(status=_auto_discovery_status()), "candidate"
     by default (see that function). Skips inactive companies.
+
+    ``archived_hashes`` — the ``get_archived_hashes(include_gone=True)`` set.
+    A multi-board run (fetch_vacancies.main) loads it ONCE and passes it in;
+    when omitted (tests, one-off callers) it is loaded here as before.
     """
     from source_observations import record_import_outcome
 
@@ -2006,8 +2079,10 @@ def save_board_vacancies(board_cfg: dict, jobs: list[dict]) -> int:
     has_status_reason = _vacancy_has_column("status_reason")
 
     # Board path: full archived set (include_gone=True) so a lagging feed cannot
-    # resurrect a posting the source already closed. Loaded once (not per row).
-    archived_hashes = get_archived_hashes(include_gone=True)
+    # resurrect a posting the source already closed. Loaded once per RUN by the
+    # caller when possible (see docstring), not per board, never per row.
+    if archived_hashes is None:
+        archived_hashes = get_archived_hashes(include_gone=True)
     # Per-company dedup index, built lazily (a board batch spans many orgs) so a
     # renamed / re-punctuated / language variant merges onto the live row.
     dedup_index_cache: dict = {}
@@ -2428,16 +2503,16 @@ def get_vacancy_statuses() -> dict[str, str]:
     return result
 
 
-#: An application, once made, is permanent history. These statuses record that
-#: the user put his name in front of an employer — the record of what he tried,
-#: how far he got, and what came back. Losing one silently corrupts the only
-#: honest statistics he has about his own search.
-#:
-#: Every AUTOMATIC archival path already scopes itself to ``status = 'unseen'``,
-#: so none of them can reach these. The hole was here: ``update_vacancy_status``
-#: is the single choke point for status writes and would archive anything it was
-#: asked to. A bulk cleanup, a sweeper, or a well-meaning one-off script would
-#: erase an application without a trace.
+# APPLICATION_STATUSES (imported at the top of this module, defined in
+# statuses.py) is what the guard below refuses to archive. An application, once
+# made, is permanent history: the record of what was tried, how far it got, and
+# what came back. Losing one silently corrupts the search's own statistics.
+#
+# Every AUTOMATIC archival path already scopes itself to ``status = 'unseen'``,
+# so none of them can reach these. The hole was here: ``update_vacancy_status``
+# is the single choke point for status writes and would archive anything it was
+# asked to. A bulk cleanup, a sweeper, or a well-meaning one-off script would
+# erase an application without a trace.
 
 
 class ApplicationArchiveBlocked(RuntimeError):
@@ -2466,11 +2541,40 @@ def update_vacancy_status(vacancy_uuid: str, status: str, *, force: bool = False
                 "the board — they are the search statistics. Pass force=True only "
                 "for a deliberate correction."
             )
-    cur.execute(
-        "UPDATE vacancy SET status = %s, status_updated_at = now() WHERE id = %s",
-        (status, vacancy_uuid),
-    )
+    _write_status(cur, vacancy_uuid, status)
     cur.close()
+
+
+#: The UPDATE that moves a vacancy's status, in two shapes: with and without the
+#: applied_at stamp. See _write_status.
+_STATUS_SQL = "UPDATE vacancy SET status = %s, status_updated_at = now() WHERE id = %s"
+_STATUS_SQL_STAMPED = (
+    "UPDATE vacancy SET status = %s, status_updated_at = now(), "
+    "applied_at = COALESCE(applied_at, now()) WHERE id = %s"
+)
+
+
+def _write_status(cur, vacancy_uuid: str, status: str) -> None:
+    """Move one vacancy to ``status``, stamping ``applied_at`` the first time it
+    enters the application funnel.
+
+    ``status_updated_at`` moves with every stage, so it answers "when did this
+    last change", never "when did I send this" — on a declined row it holds the
+    date of the rejection. ``applied_at`` answers the second question, and only
+    the first write may set it: COALESCE keeps the original send date through
+    every later stage, so a role that goes applied -> test_task -> accepted
+    still reports the day it went out.
+
+    The stamp fires for EVERY application status, not only 'applied'. An
+    application reaches the board by whatever route the employer took — a role
+    logged straight to 'interview', a programme recorded as 'accepted' after the
+    fact — and each of those WAS sent. Stamping only on 'applied' would leave
+    exactly those rows with no send date forever.
+
+    Degrades on a pre-0022 schema: without the column, the plain UPDATE runs.
+    """
+    stamp = status in APPLICATION_STATUSES and _vacancy_has_column("applied_at")
+    cur.execute(_STATUS_SQL_STAMPED if stamp else _STATUS_SQL, (status, vacancy_uuid))
 
 
 def batch_update_statuses(updates: dict[str, str]):
@@ -2480,10 +2584,7 @@ def batch_update_statuses(updates: dict[str, str]):
     conn = get_conn()
     cur = conn.cursor()
     for uid, status in updates.items():
-        cur.execute(
-            "UPDATE vacancy SET status = %s, status_updated_at = now() WHERE id = %s",
-            (status, uid),
-        )
+        _write_status(cur, uid, status)
     cur.close()
 
 
@@ -2528,14 +2629,36 @@ def _geo_hard_banned(country: str, work_mode: str) -> bool:
 
 
 def update_llm_score(vacancy_uuid: str, score_data: dict):
-    """Update LLM score fields for a vacancy.
+    """Update LLM score fields for ONE vacancy. Returns the row count (0/1).
+
+    Thin wrapper over ``update_llm_score_many`` — see it for the contract.
+    """
+    return len(update_llm_score_many([vacancy_uuid], score_data))
+
+
+def update_llm_score_many(vacancy_uuids, score_data: dict) -> list[str]:
+    """Write ONE score onto every id in ``vacancy_uuids``, in one statement.
+
+    A scored payload names every DB row that shares the role (its
+    ``member_ids``), and the caller used to loop ``update_llm_score`` over them
+    — a full round trip each, over an SSH tunnel, for identical values. One
+    ``id = ANY(...)`` write costs one.
+
+    Returns the ids actually written, so a caller can name the ones that no
+    longer exist instead of inferring it from a row count.
 
     ``score_data["scored_by"]`` (optional) records which model tier produced
     this score — the two-pass driver's screen pass writes the cheap model's
     name here, and an escalation overwrites it with the strong model's name
     on re-score. Omitted/absent writes NULL (unchanged behaviour for callers
     that predate two-pass scoring).
+
+    Like the other DAL writers this does NOT commit — the caller owns the
+    transaction (see AGENTS.md).
     """
+    ids = [str(v) for v in vacancy_uuids]
+    if not ids:
+        return []
     conn = get_conn()
     cur = conn.cursor()
     hard_reqs = score_data.get("llm_hard_requirements", [])
@@ -2578,7 +2701,7 @@ def update_llm_score(vacancy_uuid: str, score_data: dict):
                llm_score = %s, llm_reasoning = %s, llm_summary = %s,
                llm_hard_requirements = %s, llm_scored_at = now()
                {dl_clause}{elig_clause}{sb_clause}
-           WHERE id = %s""",
+           WHERE id = ANY(%s::uuid[]) RETURNING id""",
         (
             score_data.get("llm_score"),
             score_data.get("llm_reasoning"),
@@ -2587,10 +2710,10 @@ def update_llm_score(vacancy_uuid: str, score_data: dict):
             *dl_params,
             *elig_params,
             *sb_params,
-            vacancy_uuid,
+            ids,
         ),
     )
-    rowcount = cur.rowcount
+    written = [str(r[0]) for r in cur.fetchall()]
 
     # Drop roles that geography makes unreachable: US/Canada-bound (us_only, only
     # when the profile opts in via ban_us_only) or a banned-region country the
@@ -2602,12 +2725,46 @@ def update_llm_score(vacancy_uuid: str, score_data: dict):
     if geo_ban:
         cur.execute(
             """UPDATE vacancy SET status = 'archived', status_updated_at = now()
-               WHERE id = %s AND status = 'unseen'""",
-            (vacancy_uuid,),
+               WHERE id = ANY(%s::uuid[]) AND status = 'unseen'""",
+            (ids,),
         )
 
     cur.close()
-    return rowcount
+    return written
+
+
+def vacancy_score_rows(vacancy_uuids) -> dict[str, dict]:
+    """``{id: {llm_score, status, scored_by}}`` for the ids given.
+
+    The targeted read behind the two-pass driver's three lookups. They used to
+    call ``load_vacancies()`` — the whole vacancy table, full_description
+    included, tens of megabytes over the tunnel — to read three small fields off
+    a few dozen rows, four times per run. Ids that do not exist are simply
+    absent from the result, so a row deleted mid-run reads as "gone" instead of
+    wedging a gate.
+
+    ``scored_by`` is None on an install that has not run migration 0009.
+    """
+    ids = [str(v) for v in vacancy_uuids]
+    if not ids:
+        return {}
+    scored_by = ", scored_by" if _scored_by_supported() else ""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        f"SELECT id, llm_score, status{scored_by} FROM vacancy WHERE id = ANY(%s::uuid[])",
+        (ids,),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    return {
+        str(r[0]): {
+            "llm_score": r[1],
+            "status": r[2],
+            "scored_by": r[3] if scored_by else None,
+        }
+        for r in rows
+    }
 
 
 def reset_llm_scores(member_ids: list[str]) -> int:
@@ -3669,6 +3826,9 @@ def print_reconciliation_report():
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
+
+# VALID_STATUSES is imported from statuses.py at the top of this module — the
+# one vocabulary shared with the filter stage, the sweep and the SQL CHECK.
 
 
 def validate_db() -> list[str]:

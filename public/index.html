@@ -14,6 +14,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="style.css" />
+      <link rel="modulepreload" href="./app.js" />
   </head>
   <body>
     <div class="app-shell">
@@ -114,7 +115,7 @@
           <button
             type="button"
             class="nav-item"
-            id="navVacancies"
+            id="navVacancies" aria-label="Inbox"
             data-section="vacancies"
             onclick="switchVacancies()"
           >
@@ -147,7 +148,7 @@
                   opacity=".35"
                 ></rect></svg
             ></span>
-            <span class="nav-label" data-i18n="tab_vacancies">Vacancies</span>
+            <span class="nav-label" data-i18n="nav_inbox">Inbox</span>
             <span
               class="nav-count nav-count--cobalt"
               id="navCountVacancies"
@@ -165,10 +166,18 @@
             <button
               type="button"
               class="nav-subitem"
+              id="navSubScreen"
+              onclick="switchMode('screen')"
+            >
+              <span class="nav-label" data-i18n="screen_tab">Inbox</span>
+            </button>
+            <button
+              type="button"
+              class="nav-subitem"
               id="navSubGeo"
               onclick="switchMode('stats')"
             >
-              <span class="nav-label" data-i18n="tab_geo">Geo</span>
+              <span class="nav-label" data-i18n="tab_geo">Locations</span>
             </button>
             <button
               type="button"
@@ -183,7 +192,7 @@
           <button
             type="button"
             class="nav-item"
-            id="navCompanies"
+            id="navCompanies" aria-label="Companies"
             data-section="companies"
             onclick="switchMode('companies')"
           >
@@ -214,7 +223,7 @@
           <button
             type="button"
             class="nav-item"
-            id="navTriage"
+            id="navTriage" aria-label="Applications"
             data-section="triage"
             onclick="switchMode('pipeline')"
           >
@@ -232,13 +241,13 @@
                   stroke-width="1.2"
                 ></path></svg
             ></span>
-            <span class="nav-label" data-i18n="tab_triage">Triage</span>
+            <span class="nav-label" data-i18n="nav_applications">Applications</span>
           </button>
 
           <button
             type="button"
             class="nav-item"
-            id="navBoards"
+            id="navBoards" aria-label="Sources"
             data-section="boards"
             onclick="switchMode('boards')"
           >
@@ -271,9 +280,68 @@
                   fill="#7C5CE0"
                 ></rect></svg
             ></span>
-            <span class="nav-label" data-i18n="tab_boards">Boards</span>
+            <span class="nav-label" data-i18n="nav_sources">Sources</span>
           </button>
 
+          <button
+            type="button"
+            class="nav-item"
+            id="navReports"
+            data-section="reports"
+            onclick="switchMode('reports')"
+          >
+            <span class="nav-icon" aria-hidden="true"
+              ><svg width="15" height="15" viewBox="0 0 14 14">
+                <rect
+                  x="2.2"
+                  y="1.8"
+                  width="9.6"
+                  height="10.4"
+                  rx="1"
+                  fill="#2545D3"
+                  opacity=".85"
+                ></rect>
+                <path
+                  d="M4.4 4.6h5.2M4.4 6.8h5.2M4.4 9h3.2"
+                  fill="none"
+                  stroke="#fff"
+                  stroke-width="1"
+                  stroke-linecap="round"
+                ></path></svg
+            ></span>
+            <span class="nav-label" data-i18n="tab_reports">Reports</span>
+          </button>
+
+          <button
+            type="button"
+            class="nav-item"
+            id="navContacts"
+            data-section="contacts"
+            onclick="switchMode('contacts')"
+          >
+            <span class="nav-icon" aria-hidden="true"
+              ><svg width="15" height="15" viewBox="0 0 14 14">
+                <circle cx="5" cy="4.6" r="2.3" fill="#0E7A55" opacity=".85"></circle>
+                <path
+                  d="M1.4 12c0-2 1.6-3.4 3.6-3.4S8.6 10 8.6 12"
+                  fill="none"
+                  stroke="#0E7A55"
+                  stroke-width="1.3"
+                  stroke-linecap="round"
+                ></path>
+                <circle cx="10.6" cy="5.6" r="1.7" fill="#0E7A55" opacity=".45"></circle>
+                <path
+                  d="M9 12c0-1.6 1.2-2.7 2.8-2.7 0.5 0 1 .1 1.4.3"
+                  fill="none"
+                  stroke="#0E7A55"
+                  stroke-width="1.2"
+                  stroke-linecap="round"
+                  opacity=".45"
+                ></path></svg
+            ></span>
+            <span class="nav-label" data-i18n="tab_contacts">Contacts</span>
+            <span class="nav-count" id="navCountContacts"></span>
+          </button>
           <button
             type="button"
             class="nav-item"
@@ -294,13 +362,14 @@
             ></span>
             <span class="nav-label" data-i18n="tab_health">Health</span>
           </button>
+
         </nav>
 
         <div class="sidebar-footer">
           <button
             type="button"
             class="nav-item"
-            id="navSettings"
+            id="navSettings" aria-label="Settings"
             data-section="settings"
             onclick="switchMode('settings')"
           >
@@ -382,10 +451,17 @@
             </button>
             <button
               class="vacancy-sub-tab"
+              id="vsubScreen"
+              onclick="switchMode('screen')"
+            >
+              <span data-i18n="screen_tab">Inbox</span>
+            </button>
+            <button
+              class="vacancy-sub-tab"
               id="vsubGeo"
               onclick="switchMode('stats')"
             >
-              <span data-i18n="tab_geo">Geo</span>
+              <span data-i18n="tab_geo">Locations</span>
             </button>
             <button
               class="vacancy-sub-tab"
@@ -409,141 +485,161 @@
               </p>
             </div>
 
-            <!-- Header on the material (design-protocol.md #6): title,
-                 basket tabs, location pills, search + sort + show-all. -->
-            <div class="browse-header">
-              <span class="browse-title" data-i18n="vsub_browse">Browse</span>
+            <!-- Everything that must stay visible while deciding rides in ONE
+                 sticky block, so there is a single offset to get right. -->
+            <div class="review-sticky">
 
-              <div class="basket-tabs">
-                <button
-                  class="basket-tab"
-                  data-basket="liked"
-                  onclick="switchBasket(this)"
-                >
-                  <span data-i18n="basket_liked">Liked</span>
-                  <span class="basket-count" id="countLiked">0</span>
-                </button>
+            <!-- Command bar, one row, as the canvas: search, score band, the
+                 deadline chip, the drawer. The basket switch is a compact
+                 segmented control at the far end, so it reads as a view
+                 switch rather than a fifth filter. -->
+            <div class="review-bar">
+              <label class="review-search">
+                <span class="review-search-icon" aria-hidden="true">&#128269;</span>
+                <input
+                  type="search"
+                  id="catalogSearch"
+                  placeholder="Search title or employer"
+                  aria-label="Search title or employer"
+                  oninput="reviewSearchInput()"
+                />
+              </label>
+
+              <label class="review-band">
+                <span class="visually-hidden">Score band</span>
+                <select id="reviewScoreBand" onchange="reviewSetBand(this.value)">
+                  <option value="40" selected>Score 40 and up</option>
+                  <option value="60">Score 60 and up</option>
+                  <option value="">All scores</option>
+                </select>
+              </label>
+
+              <button
+                type="button"
+                class="review-chip"
+                id="reviewDeadlineChip"
+                aria-pressed="false"
+                onclick="reviewToggleDeadline()"
+              >
+                Deadline within 7 days
+              </button>
+
+              <button
+                type="button"
+                class="review-more"
+                id="reviewMoreFilters"
+                onclick="reviewOpenFilters()"
+              >
+                More filters<span class="review-more-count" id="reviewMoreCount" hidden></span>
+              </button>
+
+              <span class="review-bar-spacer"></span>
+
+              <div class="basket-switch" role="group" aria-label="Which list">
                 <button
                   class="basket-tab active"
                   data-basket="unseen"
                   onclick="switchBasket(this)"
                 >
-                  <span data-i18n="basket_unreviewed">Unreviewed</span>
+                  <span>Inbox</span>
                   <span class="basket-count" id="countUnseen">0</span>
+                </button>
+                <button
+                  class="basket-tab"
+                  data-basket="liked"
+                  onclick="switchBasket(this)"
+                >
+                  <span>Liked</span>
+                  <span class="basket-count" id="countLiked">0</span>
                 </button>
                 <button
                   class="basket-tab"
                   data-basket="passed"
                   onclick="switchBasket(this)"
                 >
-                  <span data-i18n="basket_passed">Passed</span>
+                  <span>Passed</span>
                   <span class="basket-count" id="countPassed">0</span>
                 </button>
-              </div>
-
-              <div class="browse-loc-chips">
                 <button
-                  class="browse-loc-chip"
-                  data-cloc="europe"
-                  onclick="toggleCatalogLoc(this)"
-                  data-i18n="loc_europe"
+                  class="basket-tab"
+                  data-basket="deferred"
+                  onclick="switchBasket(this)"
                 >
-                  Europe
-                </button>
-                <button
-                  class="browse-loc-chip"
-                  data-cloc="remote"
-                  onclick="toggleCatalogLoc(this)"
-                  data-i18n="loc_remote"
-                >
-                  Remote
-                </button>
-                <button
-                  class="browse-loc-chip"
-                  data-cloc="other"
-                  onclick="toggleCatalogLoc(this)"
-                  data-i18n="loc_other"
-                >
-                  Other
-                </button>
-              </div>
-
-              <div class="browse-header-right">
-                <input
-                  type="text"
-                  class="browse-search"
-                  id="catalogSearch"
-                  placeholder="Search by title, organization, location..."
-                  data-i18n-ph="search_vacancies_ph"
-                  oninput="renderCatalog()"
-                />
-                <select
-                  class="browse-org-filter"
-                  id="catalogOrgFilter"
-                  onchange="renderCatalog()"
-                >
-                  <option value="" data-i18n="all_companies">
-                    All companies
-                  </option>
-                </select>
-                <button
-                  class="browse-sort-btn active"
-                  onclick="toggleCatalogSort(this)"
-                >
-                  <span data-i18n="sort_score">Score</span>&#160;&#8595;
-                </button>
-                <button
-                  class="browse-showall-btn"
-                  onclick="toggleCatalogShowAll(this)"
-                  data-i18n="catalog_show_all"
-                >
-                  Show all
+                  <span>Set aside</span>
+                  <span class="basket-count" id="countDeferred">0</span>
                 </button>
               </div>
             </div>
 
-            <!-- Keyboard-triage affordance (U15, DHA-399; design-protocol #4 —
-                 keep j/k/l/x/Enter visible). Keys are literal mono; the action
-                 words go through i18n (EN in markup, RU baked). -->
-            <div class="browse-keyhint">
-              <span class="browse-key">j</span><span class="browse-key">k</span>
-              <span class="browse-keyhint-label" data-i18n="keys_move"
-                >move</span
-              >
-              <span class="browse-key">l</span>
-              <span class="browse-keyhint-label" data-i18n="keys_like"
-                >like</span
-              >
-              <span class="browse-key">x</span>
-              <span class="browse-keyhint-label" data-i18n="keys_pass"
-                >pass</span
-              >
-              <span class="browse-key">&#8629;</span>
-              <span class="browse-keyhint-label" data-i18n="keys_open"
-                >open</span
-              >
-            </div>
-
-            <!-- Data as a sheet (design-protocol.md #2, #6). min-width guards
-                 the scroll (AE4): below 920px the table scrolls inside the
-                 sheet, never the page body. -->
-            <div class="catalog-sheet">
-              <div class="catalog-table">
-                <div class="catalog-row-head">
-                  <div data-i18n="browse_col_fit">Fit</div>
-                  <div data-i18n="browse_col_role">Role</div>
-                  <div data-i18n="browse_col_company">Company</div>
-                  <div data-i18n="browse_col_location">Location</div>
-                  <div data-i18n="browse_col_comp">Comp</div>
-                  <div data-i18n="browse_col_seen">Seen</div>
-                  <div></div>
+            <!-- The drawer. Native <dialog>: focus trap, Esc and the backdrop
+                 come from the platform, not from us. -->
+            <dialog class="review-drawer" id="reviewDrawer" aria-label="More filters">
+              <form method="dialog" class="review-drawer-form">
+                <div class="review-drawer-head">
+                  <strong>More filters</strong>
+                  <span class="review-drawer-note"
+                    >Filters add up. A filter never rejects a role for you;
+                    &ldquo;unknown&rdquo; stays in the list.</span
+                  >
+                  <button
+                    type="button"
+                    class="review-drawer-clear"
+                    id="reviewFiltersClear"
+                  >
+                    Clear all
+                  </button>
+                  <button
+                    class="review-drawer-close"
+                    value="close"
+                    aria-label="Close the filters"
+                  >
+                    &#10005;
+                  </button>
                 </div>
-                <div class="browse-rows" id="catalogGrid"></div>
-                <div
-                  class="browse-results-count"
-                  id="catalogResultsCount"
-                ></div>
+                <div id="reviewDrawerBody"></div>
+                <div class="review-drawer-foot">
+                  <button class="review-drawer-apply" value="close" id="reviewDrawerApply">
+                    Show the roles
+                  </button>
+                  <span class="review-drawer-count" id="reviewDrawerCount"></span>
+                </div>
+              </form>
+            </dialog>
+
+              <div class="review-head">
+                <div>Default</div>
+                <div>Role &middot; employer</div>
+                <div>Score</div>
+                <div>Deadline</div>
+                <div>Top conflict with profile</div>
+                <div>Source</div>
+                <div>Age</div>
+                <div>Decide</div>
               </div>
+            </div>
+            <!-- /review-sticky -->
+
+            <!-- One list. Sections are batch headers; rows paint in windows of
+                 REVIEW_WINDOW as the sentinel scrolls into view. -->
+            <div class="review-table">
+              <div class="review-rows" id="catalogGrid"></div>
+              <div class="review-sentinel" id="reviewSentinel" aria-hidden="true"></div>
+            </div>
+
+            <!-- The undo toast: transient, near the rows it undoes. -->
+            <div class="review-toast" id="reviewToast" role="status" aria-live="polite" hidden></div>
+
+            <!-- Keyboard hints. Desktop only: the phone has no keyboard. -->
+            <div class="review-keyhint">
+              <span><span class="browse-key">j</span><span class="browse-key">k</span> move</span>
+              <span><span class="browse-key">L</span> like</span>
+              <span><span class="browse-key">P</span> pass</span>
+              <span><span class="browse-key">S</span> unsure, back tomorrow</span>
+              <span><span class="browse-key">U</span> undo</span>
+              <span><span class="browse-key">&#8629;</span> show the requirements</span>
+              <span><span class="browse-key">A</span> accept batch default</span>
+              <span class="review-keyhint-spacer"></span>
+              <span class="browse-results-count" id="catalogResultsCount"></span>
             </div>
           </div>
           <!-- /catalog-section -->
@@ -556,25 +652,19 @@
                 data-subtab="approved"
                 onclick="switchCompanySubTab('approved')"
                 data-i18n="subtab_approved"
-              >
-                Approved
-              </button>
+              >Selected</button>
               <button
                 class="company-sub-tab"
                 data-subtab="pending"
                 onclick="switchCompanySubTab('pending')"
                 data-i18n="subtab_pending"
-              >
-                Pending Review
-              </button>
+              >Catalogue</button>
               <button
                 class="company-sub-tab"
                 data-subtab="archived"
                 onclick="switchCompanySubTab('archived')"
                 data-i18n="subtab_archived"
-              >
-                Archived
-              </button>
+              >Excluded</button>
             </div>
             <div class="companies-filters">
               <input
@@ -600,6 +690,9 @@
                 </option>
               </select>
             </div>
+            <label><input type="checkbox" id="companyIncludeEmpty" onchange="renderCompanies()" />
+              <span data-i18n="company_include_empty">Include companies without relevant vacancies in Catalogue</span>
+            </label>
             <div
               class="company-enrichment-stats"
               id="companyEnrichmentStats"
@@ -611,6 +704,9 @@
 
           <!-- === STATS MODE === -->
           <div class="stats-section" id="statsSection"></div>
+
+          <!-- === SCREEN MODE (bulk screening inbox, DHA-603) === -->
+          <div class="screen-section" id="screenSection"></div>
 
           <!-- === ARCHIVE MODE === -->
           <div class="archive-section" id="archiveSection">
@@ -654,12 +750,11 @@
            the sheet below (U14, DHA-398). -->
           <div class="boards-section" id="boardsSection">
             <div class="boards-header">
-              <span class="boards-header-title" data-i18n="boards_title"
+              <span class="boards-header-title" data-i18n="nav_sources"
                 >Job boards</span
               >
               <span class="boards-header-sub" data-i18n="boards_sub"
-                >The board catalogue, each board's enabled state, and
-                freshness.</span
+                >Vacancy sources: collection setting and last check.</span
               >
             </div>
             <div class="boards-grid" id="boardsGrid"></div>
@@ -694,16 +789,37 @@
           <!-- /health-section -->
 
           <!-- === TRIAGE MODE (pipeline) ===
-           The stage board for liked vacancies (unreviewed → applied →
-           interview/offer/rejected/expired). The "applied" column is the
-           tracker for what you've sent (DHA-413 — the old Applications
+           The stage board for liked vacancies (unreviewed → applied → test
+           task → interview/offer/rejected/expired). The "applied" column is
+           the tracker for what you've sent (DHA-413 — the old Applications
            section duplicated this with 0 real data and was deleted). -->
           <div class="pipeline-section" id="pipelineSection">
             <div class="triage-funnel" id="triageFunnel"></div>
+            <!-- Board | Table. Two views of the same data: the board answers
+                 "where is each application", the table answers "what have I
+                 sent, and what is waiting on whom". The choice is remembered
+                 (applications.js, localStorage). -->
+            <div id="triageViewToggle"></div>
             <div class="triage-board-controls" id="triageBoardControls"></div>
             <div class="pipeline-board" id="pipelineBoard"></div>
+            <div class="applications-section" id="applicationsTable"></div>
           </div>
           <!-- /pipeline-section -->
+
+          <!-- === REPORTS MODE ===
+           The research behind the search: every report written for it, stored
+           in the database and rendered here from its markdown. Live-only — a
+           research library is not part of the vacancy snapshot, so it is
+           fetched from /api/reports rather than baked into the payload. -->
+          <div class="reports-section" id="reportsSection"></div>
+          <!-- /reports-section -->
+
+          <!-- === NETWORKING MODE ===
+           Everyone worth writing to, with where they stand. Live-only, like
+           Reports: a contact list is not part of the vacancy snapshot, so it
+           is fetched from /api/contacts. -->
+          <div class="contacts-section" id="contactsSection"></div>
+          <!-- /contacts-section -->
 
           <!-- === SETTINGS MODE ===
            Read-only display of the RESOLVED dials baked by the generator

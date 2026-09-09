@@ -14,11 +14,12 @@ import {
   isVacancyGone,
   triageColumnFor,
   dedupeTriageEntries,
-  computeTriageFunnel,
+  triageBuckets,
   screenScoreBadge,
   safeUrl,
   renderLocationChips,
   mdToHtml,
+  pluralForm,
   qualityBand,
   qualityClass,
   tierClass,
@@ -119,15 +120,15 @@ test("routing: fresh liked/to_apply stay in their own column", () => {
   );
 });
 
-test("routing: gone liked/to_apply/to_research/to_network collapse to 'expired'", () => {
+test("routing: gone liked/to_apply/to_research/to_network keep their current stage", () => {
   for (const s of ["liked", "to_apply", "to_research", "to_network"]) {
     assert.equal(
       triageColumnFor({ _status: s, deadline: dateOnly(-1) }, COLS),
-      "expired",
+      ["to_research", "to_network"].includes(s) ? "to_apply" : s,
     );
     assert.equal(
       triageColumnFor({ _status: s, last_seen: daysAgoISO(20) }, COLS),
-      "expired",
+      ["to_research", "to_network"].includes(s) ? "to_apply" : s,
     );
   }
 });
@@ -179,106 +180,18 @@ test("dedupe: a stale copy never routes a still-live role to 'expired'", () => {
   }
 });
 
-// --- computeTriageFunnel (DHA-396, U12) -------------------------------------
-// The board header's funnel strip must equal what the columns it summarizes
-// would show — it is built from the SAME dedupeTriageEntries/triageColumnFor
-// reduction, not a second parallel count (AE3).
-
-const FUNNEL_STATUS_PRI = {
-  to_apply: 0,
-  to_research: 1,
-  to_network: 2,
-  applied: 3,
-  skipped: 4,
-  liked: 5,
-  expiring: 6,
-  passed: 7,
-  unseen: 8,
-};
-const FUNNEL_STATUS_BASKET = {
-  liked: "liked",
-  to_apply: "liked",
-  to_research: "liked",
-  to_network: "liked",
-  applied: "liked",
-  expiring: "liked",
-  unseen: "unseen",
-  passed: "passed",
-  skipped: "passed",
-};
-const FUNNEL_OPTS = {
-  statusPri: FUNNEL_STATUS_PRI,
-  statusBasket: FUNNEL_STATUS_BASKET,
-  columnKeys: COLS,
-};
-
-test("computeTriageFunnel: counts match a hand-built fixture across bucket transitions (AE3)", () => {
+test("progress states partition decisions and preserve applications at untracked companies", () => {
+  const columnKeys = new Set(["liked", "applied", "declined"]);
   const entries = [
-    { _status: "liked", _approved: true, org: "A", title: "1" },
-    { _status: "liked", _approved: true, org: "B", title: "2" },
-    { _status: "liked", _approved: true, org: "C", title: "3" },
-    { _status: "applied", _approved: true, org: "D", title: "4" },
-    { _status: "to_apply", _approved: true, org: "E", title: "5" },
-    { _status: "passed", _approved: true, org: "F", title: "6" },
-    { _status: "skipped", _approved: true, org: "G", title: "7" },
-    // Not company-approved: counted in base_total only, never bucketed —
-    // mirrors visibleGroups' company-approval gate in pipeline.js.
-    { _status: "liked", _approved: false, org: "H", title: "8" },
+    {id: "keep", org: "A", title: "One", _status: "liked", _approved: false, deadline: dateOnly(-1)},
+    {id: "apply", org: "B", title: "Two", _status: "applied", _approved: false},
+    {id: "reject", org: "C", title: "Three", _status: "declined", _approved: true},
+    {id: "new", org: "D", title: "Four", _status: "unseen", _approved: true},
   ];
-  const { buckets, metrics } = computeTriageFunnel(entries, FUNNEL_OPTS);
-  assert.equal(metrics.base_total, 8);
-  assert.equal(metrics.liked_queue, 3);
-  assert.equal(metrics.applied_total, 1);
-  assert.equal(metrics.in_work, 1); // to_apply only
-  assert.equal(metrics.triaged_total, 3); // to_apply + skipped + applied
-  assert.equal(metrics.skipped_total, 1);
-  // 'passed' and 'skipped' both map to the "passed" basket (STATUS_BASKET),
-  // so both F and G count toward rejected_total.
-  assert.equal(metrics.rejected_total, 2);
-  assert.equal(buckets.liked.length, 3);
-  assert.equal(buckets.applied.length, 1);
-});
-
-// Regression per the dedupe lesson: without merging last_seen across
-// duplicates, a stale copy winning the tie would misroute the survivor to
-// "expired" in one insertion order but not the other, making the funnel
-// disagree with itself depending on fetch order alone.
-test("computeTriageFunnel: duplicate-order invariance", () => {
-  const stale = () => ({
-    org: "Acme",
-    title: "Engineer",
-    _status: "to_apply",
-    _approved: true,
-    last_seen: daysAgoISO(30),
-  });
-  const fresh = () => ({
-    org: "Acme",
-    title: "Engineer",
-    _status: "to_apply",
-    _approved: true,
-    last_seen: daysAgoISO(1),
-  });
-  const results = [
-    [stale(), fresh()],
-    [fresh(), stale()],
-  ].map((order) => computeTriageFunnel(order, FUNNEL_OPTS).metrics);
-  assert.deepEqual(results[0], results[1]);
-  assert.equal(results[0].base_total, 2);
-  assert.equal(results[0].in_work, 1); // deduped to one still-live to_apply card
-});
-
-test("computeTriageFunnel: empty payload -> zeros", () => {
-  const { buckets, metrics } = computeTriageFunnel([], FUNNEL_OPTS);
-  assert.deepEqual(metrics, {
-    base_total: 0,
-    liked_queue: 0,
-    triaged_total: 0,
-    in_work: 0,
-    applied_total: 0,
-    skipped_total: 0,
-    rejected_total: 0,
-  });
-  for (const k of COLS) assert.equal(buckets[k].length, 0);
+  const buckets = triageBuckets(entries, {columnKeys, statusPri: {liked: 0, applied: 1, declined: 2}});
+  assert.deepEqual(Object.values(buckets).map(rows => rows.map(r => r.id)), [["keep"], ["apply"], ["reject"]]);
+  assert.equal(new Set(Object.values(buckets).flat().map(r => r.id)).size, 3);
+  assert.deepEqual(triageBuckets([], {columnKeys, statusPri: {}}), {liked: [], applied: [], declined: []});
 });
 
 // --- screenScoreBadge -------------------------------------------------------
@@ -461,4 +374,41 @@ test("resolveVacancyCompany never matches on org/name text alone (the bug it rep
   const companies = [{ company_id: "1", name: "Acme", slug: "acme-old" }];
   const g = { org: "Acme", company_id: "2" };
   assert.equal(resolveVacancyCompany(g, companies), null);
+});
+
+
+// ---------------------------------------------------------------------------
+// pluralForm — the last digit decides, not the size of the number.
+// ---------------------------------------------------------------------------
+
+test("pluralForm picks the singular form for 1 and for anything ending in 1", () => {
+  for (const n of [1, 21, 31, 101, 1001]) {
+    assert.equal(pluralForm(n), "one", `${n} should take the "one" form`);
+  }
+});
+
+test("pluralForm picks the small-plural form for 2-4 and their echoes", () => {
+  for (const n of [2, 3, 4, 22, 33, 44, 104]) {
+    assert.equal(pluralForm(n), "few", `${n} should take the "few" form`);
+  }
+});
+
+test("pluralForm picks the big-plural form for 5-20 and for zero", () => {
+  for (const n of [0, 5, 9, 10, 20, 25, 100]) {
+    assert.equal(pluralForm(n), "many", `${n} should take the "many" form`);
+  }
+});
+
+test("pluralForm treats the 11-14 teens as the big plural, not as their last digit", () => {
+  // The exception that a naive last-digit rule gets wrong: 11 ends in 1 but is
+  // not singular, and 12-14 end in 2-4 but are not the small plural.
+  for (const n of [11, 12, 13, 14, 111, 112, 113, 114]) {
+    assert.equal(pluralForm(n), "many", `${n} should take the "many" form`);
+  }
+});
+
+test("pluralForm never throws on junk", () => {
+  for (const n of [null, undefined, NaN, "x", 1.5, -1]) {
+    assert.ok(["one", "few", "many"].includes(pluralForm(n)));
+  }
 });

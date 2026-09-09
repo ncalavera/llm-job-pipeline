@@ -82,7 +82,7 @@ export function pollOutcome(status) {
 export async function runPoll(fetchImpl, etag) {
   let res;
   try {
-    res = await fetchImpl("/api/vacancies", {
+    res = await fetchImpl("/api/vacancies?view=inbox", {
       headers: etag
         ? { Accept: "application/json", "If-None-Match": etag }
         : { Accept: "application/json" },
@@ -212,7 +212,7 @@ export async function boot() {
     let res = null;
     for (let attempt = 0; attempt < 2 && !res; attempt++) {
       try {
-        res = await fetch("/api/vacancies", {
+        res = await fetch("/api/vacancies?view=inbox", {
           headers: { Accept: "application/json" },
         });
       } catch {

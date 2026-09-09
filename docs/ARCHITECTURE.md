@@ -20,7 +20,7 @@ scheduler — one command a day.
 | `config/defaults.toml` | Machine mechanics — thresholds, geo tables, junk words, the `[boards.*]` catalogue, the `[volume]` window. Neutral; ships for any field. |
 | `config/user_profile.example.md` | The template for your candidate profile. Copy to `config/user_profile.md` (gitignored) — the single place personal taste lives. |
 | `sql/` | `schema.sql` (Postgres) + `schema.sqlite.sql` (SQLite) and `migrations/` (numbered, dual-dialect). |
-| `api/` | Vercel serverless routes (Node) the hosted dashboard calls for live status writes. |
+| `server.js` | The dashboard server — static `public/` plus every `/api/*` route against local Postgres. Contracts in [`DASHBOARD.md`](../DASHBOARD.md). |
 | `public/` | The static dashboard (vanilla JS/CSS) — six sections: Today, Vacancies, Companies, Applications, Boards, Settings. |
 | `docs/` | This file, the [board catalogue](job-boards-catalogue.md), the [fetch-engine reference](fetch-engines.md), and the onboarding questionnaire (`index.html`, served by GitHub Pages). |
 | `tests/` | Offline pytest suite — guards, characterizations, parity checks. |
@@ -106,10 +106,45 @@ report card instead of being withheld. Scoring `--save` commits each chunk
 without rebuilding the snapshot; `publish` refreshes it once after verdicts. In full mode
 publish refreshes the hosted dashboard snapshot (a browser refresh, no
 redeploy); in simple mode it rewrites the local `public/data.js`. Both go
-through the same driver — no mode branching. (`vercel --prod` is only ever for
-dashboard *code* changes.)
+through the same driver — no mode branching. Deploying dashboard **code** is a separate action: rsync the checkout to
+`forge2-root:/srv/http/dashboard`, `chown -R nikita:nikita`, then
+`systemctl restart dashboard`.
 
 ## Health & observability
+
+The four primary website sections are Inbox, Applications, Companies and Sources.
+The main Inbox uses the original scored catalogue table, with descending score
+sort and explanations on vacancy detail pages. Optional reason batches group low-scored
+undecided roles using current quoted requirements and possible profile conflicts.
+They reuse revision-checked screening decisions, durable retries and Undo; no
+new LLM calls or automatic decisions are involved. Legacy Screen links resolve to
+this table. Missing scores do not exclude collected roles. Materials are reached through Applications. Older
+routes remain accessible for history and diagnostics, not competing navigation.
+
+Algolia collection writes `source_observation` before applying parser flags,
+with stable external identifiers and original URLs. `source_fetch_run` records
+upstream pagination completeness and raw/unflagged/flagged counts; these are
+source listings, not counts of saved canonical vacancies. The Sources page reads
+recent runs from `stats.source_runs` and paginates their original listings through
+the authenticated `/api/source-observations` endpoint. Other collectors remain
+explicitly unverified at listing level. Archives and explicit company blocks
+are preserved; collection does not invent a human decision.
+
+
+### Private application materials
+
+`scripts/materials.py` imports original bytes into the existing private zone
+(`JOBSEARCH_PRIVATE_DIR/materials`). Content hashes preserve versions; the
+catalogue retains source, organisation, type, source date and submission evidence.
+Submission is `sent`, `draft`, or `unknown`; importing never infers that a file
+was submitted. Previous wording is not automatically verified career evidence.
+The private catalogue and originals are excluded from git and public snapshots.
+`/materials.html` reads `/api/materials` behind the dashboard's existing Caddy
+authentication. Downloads resolve catalogue IDs, never user-supplied file paths.
+The CLI's `search` command searches the same catalogue for application reuse.
+Back up this private directory together with the database. Imports are explicit;
+the daily pipeline neither collects personal correspondence nor spends tokens
+on the material library.
 
 The default daily path is fetch → enrich → dedup → filter → combined discovery
 → one Telegram summary → publish. Legacy company/vacancy scoring and terminal
@@ -122,8 +157,7 @@ The daily update contains one current Inbox count and link, plus actionable run
 failures. Preparation queues belong to Health. Readiness requires matching the
 stored screening fingerprint against the current posting and prompt/profile
 fingerprints. The snapshot ships these raw identities; Inbox, its sidebar badge,
-and functional review batches share `screenLists`. The digest validates the same
-identities. `send --details` remains the explicit legacy scoring view.
+and table rows share `catalogVisibility` with the basket derivations. Preparation does not filter Inbox. The digest counts all retained undecided vacancies. `send --details` remains the explicit legacy scoring view.
 Delivery advances last-success only after sending; a crash may repeat a message,
 but cannot mark an undelivered one successful.
 
@@ -144,8 +178,7 @@ reading logs:
   `run_state.json`. `PARTIAL` is a stage that advanced the run but left its own
   work undone — a scoring session that stopped early and carried the remainder
   over; its note says how many of how many. The `screening_prep` stage reports
-  preparation outcomes in Health. The daily update counts current preparations
-  for undecided vacancies; raw `ready` alone is not sufficient.
+  preparation outcomes in Health. The daily update counts all retained undecided vacancies, including those awaiting preparation.
 - **Health tab** (dashboard) — `public/modules/health.js` renders four blocks
   from the live `api/health-detail.js` endpoint (read-only, no LLM spend):
   - **Boards** — per enabled board: freshness, failure streak, vacancy count,
@@ -213,9 +246,8 @@ guardrail 2).
 
 | | Full mode (canonical) | Simple mode (honest demo) |
 | --- | --- | --- |
-| Backend | Postgres (Supabase), `SUPABASE_DB_URL` set | local SQLite file (`data/jobsearch.db`), auto-created |
-| Signups | Supabase + Vercel (free tiers) | none |
-| Dashboard | always-on Vercel URL, any device, Basic-Auth | `localhost` via `dashboard_local.py`, while your terminal is open |
+| Backend | Postgres on forge, `SUPABASE_DB_URL` set | local SQLite file (`data/jobsearch.db`), auto-created |
+| Dashboard | always-on `jobs.nikitasolovev.com`, any device, Basic-Auth | `localhost` via `dashboard_local.py`, while your terminal is open |
 | Telegram digest | yes | no (needs a server) |
 | Multi-device / sync | yes | no |
 | Runbook | [`INSTALL.md`](../INSTALL.md) | [`INSTALL-EASY.md`](../INSTALL-EASY.md) |
@@ -269,6 +301,32 @@ The core needs only `requests`, `beautifulsoup4` and `python-dateutil`
   path. The normal daily flow scores through your coding agent's subagents
   (`--local`), which needs no API key and no `anthropic` package.
 
+
+### Functional screening review and feedback
+
+The Screen view groups ready undecided roles by function from posting facts and titles,
+showing five at a time. Existing profile comparison evidence orders rows inside each
+function (explicit matches before unknowns, required possible conflicts last); it is
+not a new fit score. Unknown functions remain accessible. No score floor or automatic
+personal exclusion is introduced. Keep/Pass use POST `/api/screening-decision`. Each canonical role and its
+members are saved in one transaction, guarded by the current status and PostgreSQL
+row revision (`xmin`). A later edit on another device makes a stale decision or Undo
+fail safely, including changes away from and back to the same status.
+
+A UUID receipt (`screening_decision`, migration0029) commits with the status changes.
+Retries return the original previous statuses and revisions without writing again.
+The browser keeps pending receipts and Undo history in local storage; Retry recovers
+an interrupted save after reconnecting or refreshing. Failed Undo rows remain
+retryable. Browser storage being unavailable limits recovery to the open page.
+
+An optional reason is saved after successful status writes to `screening_feedback`
+(migration0028), with the exact successful member IDs and an idempotency key.
+Failed reasons remain retryable, including after refresh when browser storage works.
+GET/POST `/api/screening-feedback` share the dashboard authentication boundary.
+Agents read pending feedback and current statuses before proposing any preference
+change. Reviewed feedback records an outcome and session; no automatic consumer or
+preference mutation is enabled. See [review-feedback.md](review-feedback.md).
+
 ### Dashboard language
 
 `CONCEPTS.md` defines entities and independent state axes. Settings exposes a
@@ -285,3 +343,6 @@ Migration 0030 records every actual vacancy status change in `vacancy_status_eve
 ## Inbox and collection accounting (2026-09-08)
 
 The report includes every retained, non-archived vacancy at non-blocked companies. The Inbox uses the same catalogue row and decision baskets; preparation readiness does not hide rows. Sources exposes raw Algolia run observations before parser flags and transactionally records import outcomes. Source page completeness is distinct from successful import. Other collectors remain explicitly unverified listing by listing. Newsletter links are reconciled by stable 80,000 Hours job IDs against this ledger, with bounded Mailchimp redirect resolution. Materials is reached through Applications; company selection and collection controls remain independent.
+### Initial-load payload
+
+The self-hosted dashboard requests `/api/vacancies?view=inbox`: all retained IDs, statuses, summaries and filter facts remain, while long vacancy text, company profiles and archived descriptions load from the private `/api/snapshot-detail` endpoint when opened. The full snapshot and static-export contract stay intact. Brotli-capable browsers receive compressed Inbox JSON; other clients retain the existing JSON/gzip path. Company-list refreshes use the same compact projection.

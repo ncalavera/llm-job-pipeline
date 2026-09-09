@@ -33,7 +33,7 @@ import {
   isVacancyExpired,
 } from "./helpers.js";
 import { companyRollup } from "./derive.js";
-import { saveCompanyReview, showSyncStatus } from "./api.js";
+import { saveCompanyReview, showSyncStatus, hydrateDetail } from "./api.js";
 import { T } from "./i18n.js";
 // statusChipLabel is U6's vacancy-status pill vocabulary (Liked/Passed/To
 // apply/…) — reused here so an open role's status reads identically whether
@@ -162,6 +162,33 @@ function _getReviewStatus(c) {
   return c.review_status || "pending";
 }
 
+// Selection requires an explicit personal action, never an automatic score.
+export function companyListTab(c, reviewStatus = c.review_status) {
+  if (reviewStatus === "rejected") return "archived";
+  return c.status_reason === "approved via dashboard"
+    ? "approved" : "pending";
+}
+
+function _listTab(c) {
+  const reason = state.companyStatusReasons?.[c.company_id] ?? c.status_reason;
+  return companyListTab({ ...c, status_reason: reason }, _getReviewStatus(c));
+}
+
+export function companyHasRelevantRoles(roles, getStatus, isExpired) {
+  return roles.some((g) => {
+    const status = getStatus(g);
+    if (["archived", "passed", "skipped"].includes(status)) return false;
+    return status !== "unseen" || !isExpired(g);
+  });
+}
+
+function _catalogueVisible(c) {
+  return !!document.getElementById("companyIncludeEmpty")?.checked ||
+    !!document.getElementById("companySearch")?.value.trim() ||
+    !!(c.applications || []).length ||
+    companyHasRelevantRoles(_companyRoles(c), getGroupStatus, isVacancyExpired);
+}
+
 // Companies belonging to `subTab` before any search/tier/card/chip filter —
 // the basket size a sub-tab would show with every filter cleared. Shared by
 // the "N shown" label and the empty-state flavor check below (R11).
@@ -169,10 +196,10 @@ function _subTabTotal(subTab) {
   var all = getCompanies();
   var n = 0;
   for (var i = 0; i < all.length; i++) {
-    var rs = _getReviewStatus(all[i]);
+    var rs = _listTab(all[i]);
     if (subTab === "approved" && rs === "approved") n++;
-    else if (subTab === "pending" && rs === "pending") n++;
-    else if (subTab === "archived" && rs === "rejected") n++;
+    else if (subTab === "pending" && rs === "pending" && _catalogueVisible(all[i])) n++;
+    else if (subTab === "archived" && rs === "archived") n++;
   }
   return n;
 }
@@ -189,11 +216,12 @@ function getFilteredSortedCompanies() {
   var subTab = state.companySubTab;
 
   var filtered = getCompanies().filter(function (c) {
-    var reviewSt = _getReviewStatus(c);
+    var reviewSt = _listTab(c);
     // Sub-tab filter
     if (subTab === "approved" && reviewSt !== "approved") return false;
     if (subTab === "pending" && reviewSt !== "pending") return false;
-    if (subTab === "archived" && reviewSt !== "rejected") return false;
+    if (subTab === "archived" && reviewSt !== "archived") return false;
+    if (subTab === "pending" && !_catalogueVisible(c)) return false;
     // Tier filter
     if (tierFilter === "__unscored") {
       if (c.calculated_tier != null) return false;
@@ -435,7 +463,7 @@ function _getColumns() {
       },
       {
         key: "fit",
-        label: T("col_want", "WANT"),
+        label: T("col_want", "Company score"),
         sortable: true,
         cls: "ct-col-fit ct-col-fit--pending",
       },
@@ -454,7 +482,7 @@ function _getColumns() {
       },
       {
         key: "source",
-        label: T("col_source", "Source"),
+        label: T("col_source", "Connection"),
         sortable: false,
         cls: "ct-col-source",
       },
@@ -482,7 +510,7 @@ function _getColumns() {
       },
       {
         key: "fit",
-        label: T("col_want", "WANT"),
+        label: T("col_want", "Company score"),
         sortable: true,
         cls: "ct-col-fit ct-col-fit--archived",
       },
@@ -522,7 +550,7 @@ function _getColumns() {
     },
     {
       key: "fit",
-      label: T("col_want", "WANT"),
+      label: T("col_want", "Company score"),
       sortable: true,
       cls: "ct-col-fit",
     },
@@ -532,19 +560,19 @@ function _getColumns() {
     // approved tab's default sort with no visible header to click).
     {
       key: "applyable",
-      label: T("col_open", "Open"),
+      label: T("col_open", "Score \u226560, not applied"),
       sortable: true,
       cls: "ct-col-open",
     },
     {
       key: "liked",
-      label: T("col_liked", "Liked"),
+      label: T("col_liked", "Liked & applications"),
       sortable: true,
       cls: "ct-col-liked",
     },
     {
       key: "new",
-      label: T("col_new", "New"),
+      label: T("col_new", "Undecided"),
       sortable: true,
       cls: "ct-col-new",
     },
@@ -555,14 +583,20 @@ function _getColumns() {
       cls: "ct-col-loc",
     },
     {
+      key: "connection",
+      label: T("col_connection", "Connection"),
+      sortable: false,
+      cls: "ct-col-source",
+    },
+    {
       key: "freshness",
-      label: T("col_freshness", "Freshness"),
+      label: T("col_freshness", "Last check"),
       sortable: true,
       cls: "ct-col-freshness",
     },
     {
       key: "monitoring",
-      label: T("col_monitoring", "Monitoring"),
+      label: T("col_monitoring", "Collection check"),
       sortable: true,
       cls: "ct-col-monitoring",
     },
@@ -576,63 +610,11 @@ function _getColumns() {
 }
 
 // ---------------------------------------------------------------------------
-// Stats cards (context-aware per tab)
-// ---------------------------------------------------------------------------
-
-// Approved tab shows no stat cards (post-ship fast fix: the maintainer
-// dropped the Total/With new/Needs attention row — the counts it carried are
-// not relocated anywhere else). Pending/Archived keep theirs.
-function _renderStatsCards(filtered) {
-  var statsEl = document.getElementById("companyEnrichmentStats");
-  if (!statsEl) return;
-
-  var subTab = state.companySubTab;
-
-  if (subTab === "approved") {
-    statsEl.innerHTML = "";
-  } else if (subTab === "pending") {
-    var pendingCount = filtered.length;
-    var enrichedCount = 0;
-    for (var pi = 0; pi < filtered.length; pi++) {
-      if (filtered[pi].alignment_score != null) enrichedCount++;
-    }
-    statsEl.innerHTML =
-      '<div class="ces-card ces-card--pending">' +
-      '<span class="ces-number">' +
-      pendingCount +
-      "</span>" +
-      '<span class="ces-label">' +
-      escHtml(T("stat_pending", "Pending")) +
-      "</span>" +
-      "</div>" +
-      '<div class="ces-card ces-card--approved">' +
-      '<span class="ces-number">' +
-      enrichedCount +
-      "</span>" +
-      '<span class="ces-label">' +
-      escHtml(T("stat_enriched", "Enriched")) +
-      "</span>" +
-      "</div>";
-  } else {
-    // archived
-    statsEl.innerHTML =
-      '<div class="ces-card ces-card--total">' +
-      '<span class="ces-number">' +
-      filtered.length +
-      "</span>" +
-      '<span class="ces-label">' +
-      escHtml(T("stat_rejected", "Rejected")) +
-      "</span>" +
-      "</div>";
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Monitoring status logic
 // ---------------------------------------------------------------------------
 
 function _getMonitoringStatus(c) {
-  // Priority order: error → no_data → manual → nosource → never → stale → ok
+  // Latest result and freshness only; connection is a separate column.
   if (
     c.fetch_status &&
     c.fetch_status !== "ok" &&
@@ -640,39 +622,15 @@ function _getMonitoringStatus(c) {
   ) {
     return {
       level: "error",
-      label: T("mon_error", "Fetch error"),
+      label: T("mon_error", "Check failed"),
       dotCls: "mon-dot--error",
       tooltip: c.fetch_status,
-    };
-  }
-  if (c.fetch_status === "no_data") {
-    return {
-      level: "nodata",
-      label: T("mon_no_data", "No data"),
-      dotCls: "mon-dot--nodata",
-      tooltip: "Fetch succeeded, but no vacancies found",
-    };
-  }
-  if (c.is_manual_check) {
-    return {
-      level: "manual",
-      label: T("mon_manual", "Manual"),
-      dotCls: "mon-dot--manual",
-      tooltip: "Manual check",
-    };
-  }
-  if (c.needs_source || !c.strategy) {
-    return {
-      level: "nosource",
-      label: T("mon_no_source", "No source"),
-      dotCls: "mon-dot--nosource",
-      tooltip: "Source not configured",
     };
   }
   if (!c.last_fetched) {
     return {
       level: "never",
-      label: T("mon_never", "Never run"),
+      label: T("mon_never", "Never checked"),
       dotCls: "mon-dot--never",
       tooltip: "Fetch never run",
     };
@@ -682,14 +640,22 @@ function _getMonitoringStatus(c) {
   if (daysSince > 7) {
     return {
       level: "stale",
-      label: T("mon_days_ago", "{n}d ago").replace("{n}", daysSince),
+      label: T("mon_days_ago", "Check overdue \u00b7 {n}d").replace("{n}", daysSince),
       dotCls: "mon-dot--stale",
       tooltip: "Last fetch " + daysSince + " days ago",
     };
   }
+  if (c.fetch_status === "no_data") {
+    return {
+      level: "nodata",
+      label: T("mon_no_data", "Succeeded \u00b7 0 vacancies"),
+      dotCls: "mon-dot--nodata",
+      tooltip: "Fetch succeeded, but no vacancies found",
+    };
+  }
   return {
     level: "ok",
-    label: T("mon_working", "Working"),
+    label: T("mon_working", "Check succeeded"),
     dotCls: "mon-dot--ok",
     tooltip: "Last fetch " + _daysSince(c.last_fetched) + "d ago",
   };
@@ -721,6 +687,13 @@ function _freshnessHtml(c) {
   );
 }
 
+function _connectionHtml(c) {
+  const key = c.is_manual_check ? "connection_manual" :
+    c.needs_source || !c.strategy ? "connection_missing" : "connection_automatic";
+  const labels = {connection_manual: "Manual", connection_missing: "Not connected", connection_automatic: "Automatic"};
+  return escHtml(T(key, labels[key]));
+}
+
 function _monitoringHtml(c) {
   var ms = _getMonitoringStatus(c);
   return (
@@ -742,27 +715,21 @@ var MON_CHIP_ORDER = [
   "error",
   "stale",
   "never",
-  "nosource",
   "nodata",
-  "manual",
   "ok",
 ];
 function _monChipLabel(level) {
   switch (level) {
     case "error":
-      return T("monchip_error", "Errors");
+      return T("monchip_error", "Check failed");
     case "stale":
-      return T("monchip_stale", "Stale");
+      return T("monchip_stale", "Check overdue");
     case "never":
-      return T("monchip_never", "Never run");
-    case "nosource":
-      return T("monchip_nosource", "No source");
+      return T("monchip_never", "Never checked");
     case "nodata":
-      return T("monchip_nodata", "No data");
-    case "manual":
-      return T("monchip_manual", "Manual");
+      return T("monchip_nodata", "Succeeded \u00b7 0 vacancies");
     case "ok":
-      return T("monchip_ok", "OK");
+      return T("monchip_ok", "Check succeeded");
     default:
       return level;
   }
@@ -847,7 +814,7 @@ function _renderPendingDisclaimer(pendingCompanies) {
 
   var tpl = T(
     "companies_pending_hidden",
-    "ℹ️ {orgs} companies here have {vacs} vacancies hidden from your job list — approve a company to surface its roles.",
+    "{orgs} companies have {vacs} vacancies. Discovering a company does not select it or enable separate collection.",
   );
   var note = document.createElement("div");
   note.id = "companyPendingDisclaimer";
@@ -883,7 +850,8 @@ export function renderCompanies() {
   // Get final filtered list (with the chip filter applied)
   var filtered = getFilteredSortedCompanies();
 
-  _renderStatsCards(filtered);
+  var statsEl = document.getElementById("companyEnrichmentStats");
+  if (statsEl) statsEl.innerHTML = "";
   _renderPendingDisclaimer(unfiltered);
   _renderMonitoringChips(unfiltered);
 
@@ -923,9 +891,9 @@ export function renderCompanies() {
       // Basket-empty: this sub-tab (approved/pending/archived) has none,
       // regardless of filters — same "<tab> — no X" phrasing Browse uses.
       var subTabLabels = {
-        approved: T("subtab_approved", "Approved"),
-        pending: T("subtab_pending", "Pending Review"),
-        archived: T("subtab_archived", "Archived"),
+        approved: T("subtab_approved", "Selected"),
+        pending: T("subtab_pending", "Catalogue"),
+        archived: T("subtab_archived", "Excluded"),
       };
       emptyMsg =
         (subTabLabels[subTab] || "") +
@@ -1004,10 +972,10 @@ function _updateSubTabCounts() {
   var counts = { approved: 0, pending: 0, rejected: 0 };
   var allCompanies = getCompanies();
   for (var i = 0; i < allCompanies.length; i++) {
-    var rs = _getReviewStatus(allCompanies[i]);
+    var rs = _listTab(allCompanies[i]);
     if (rs === "approved") counts.approved++;
-    else if (rs === "pending") counts.pending++;
-    else if (rs === "rejected") counts.rejected++;
+    else if (rs === "pending" && _catalogueVisible(allCompanies[i])) counts.pending++;
+    else if (rs === "archived") counts.rejected++;
   }
   document.querySelectorAll(".company-sub-tab").forEach(function (btn) {
     var tab = btn.dataset.subtab;
@@ -1105,6 +1073,7 @@ function _buildApprovedRow(c) {
     '<td class="ct-td ct-col-loc"><span class="ct-location-text">' +
     locText +
     "</span></td>" +
+    '<td class="ct-td ct-col-source">' + _connectionHtml(c) + "</td>" +
     '<td class="ct-td ct-col-freshness">' +
     _freshnessHtml(c) +
     "</td>" +
@@ -1125,7 +1094,7 @@ function _buildPendingRow(c) {
     c.alignment_score != null ? llmScoreBadge(c.alignment_score) : "\u2014";
   var locText = c.offices ? escHtml(c.offices) : "\u2014";
   var catText = c.category ? escHtml(c.category) : "\u2014";
-  var sourceText = c.strategy ? escHtml(c.strategy) : "\u2014";
+  var sourceText = _connectionHtml(c);
 
   var cid = jsAttr(c.company_id || "");
   var reviewHtml =
@@ -1221,7 +1190,7 @@ function _buildArchivedRow(c) {
     '<td class="ct-td ct-col-review">' +
     '<button class="cr-btn cr-approve" onclick="event.stopPropagation();reviewCompany(\'' +
     jsAttr(c.company_id || "") +
-    "','approve')\" title=\"Restore to active\">✓</button>" +
+    "','approve')\" title=\"Unblock and select\">✓</button>" +
     "</td>" +
     "</tr>"
   );
@@ -1247,7 +1216,7 @@ export function sortCompanyTable(col) {
 
 export function reviewCompany(companyId, action) {
   if (!companyId) return;
-  var newStatus = action === "approve" ? "approved" : "rejected";
+  var newStatus = action === "approve" ? "pending" : "rejected";
 
   // Remember the status to restore if the server call fails. The company may
   // currently be pending, approved, or rejected (active/archived tabs now have
@@ -1256,6 +1225,10 @@ export function reviewCompany(companyId, action) {
     return c.company_id === companyId;
   });
   var prevStatus = prevCompany ? _getReviewStatus(prevCompany) : "pending";
+  if (action === "approve" && prevStatus === "approved") newStatus = "approved";
+  var prevReason = prevCompany && prevCompany.status_reason;
+  state.companyStatusReasons ||= {};
+  var prevLiveReason = state.companyStatusReasons[companyId];
 
   // Capture current position BEFORE optimistic update (for auto-nav in pending tab)
   var shouldAutoNav =
@@ -1283,6 +1256,10 @@ export function reviewCompany(companyId, action) {
   }
 
   // Optimistic update
+  state.companyStatusReasons[companyId] = action === "approve"
+    ? "approved via dashboard" : "rejected via dashboard";
+  if (prevCompany) prevCompany.status_reason = action === "approve"
+    ? "approved via dashboard" : "rejected via dashboard";
   state.companyStatuses[companyId] = newStatus;
   renderCompanies();
   scheduleRender();
@@ -1302,6 +1279,9 @@ export function reviewCompany(companyId, action) {
   // Persist to server
   saveCompanyReview(companyId, action).then(function (ok) {
     if (!ok) {
+      if (prevLiveReason === undefined) delete state.companyStatusReasons[companyId];
+      else state.companyStatusReasons[companyId] = prevLiveReason;
+      if (prevCompany) prevCompany.status_reason = prevReason;
       state.companyStatuses[companyId] = prevStatus;
       renderCompanies();
       scheduleRender();
@@ -1401,6 +1381,14 @@ export function renderProfileForSlug(slug) {
   var el = document.getElementById("companyProfile");
   el.innerHTML = buildCompanyProfilePage(c);
   el.classList.add("active");
+  if (c._detailKind) {
+    const notice = document.createElement('p');
+    notice.textContent = T('screen_loading', 'Loading full details…');
+    el.appendChild(notice);
+    hydrateDetail(c).then(() => {
+      if (state.currentProfileSlug === slug) renderProfileForSlug(slug);
+    }).catch(() => { notice.textContent = 'Could not load full details. Reopen to retry.'; });
+  }
 }
 
 export function hideProfile() {
@@ -1526,7 +1514,7 @@ function companyFitScoreHtml(c, t) {
   return (
     '<div class="cp-block">' +
     '<div class="vac-section-label">' +
-    escHtml(t("cp_fit_analysis", "Fit analysis")) +
+    escHtml(t("cp_fit_analysis", "Company score explanation")) +
     "</div>" +
     '<div class="cp-fit-row"><span class="cp-fit-score q-' +
     band +
@@ -1579,7 +1567,7 @@ function companyWantBarsHtml(c, t) {
   return (
     '<div class="cp-block">' +
     '<div class="vac-section-label">' +
-    escHtml(t("cp_want_breakdown", "Want breakdown")) +
+    escHtml(t("cp_want_breakdown", "Company score breakdown")) +
     "</div>" +
     rows +
     "</div>"
@@ -1742,11 +1730,6 @@ function companyApplicationsHtml(c, t) {
             : "";
           return (
             '<div class="cp-app-item">' +
-            '<span class="cp-app-status cp-app-status-' +
-            escHtml(a.status) +
-            '">' +
-            escHtml(t("app_status_" + a.status, a.status)) +
-            "</span>" +
             (meta.length
               ? '<span class="cp-app-meta">' + meta.join(" · ") + "</span>"
               : "") +
@@ -1920,7 +1903,7 @@ function companyRolesBlockHtml(c, roles, counts, t) {
       ? '<span class="cp-stat cp-stat-liked"><span class="cp-stat-icon">💚</span> ' +
         counts.liked +
         " " +
-        escHtml(t("cp_stat_liked_suffix", "liked")) +
+        escHtml(t("cp_stat_liked_suffix", "kept & applications")) +
         "</span>"
       : "") +
     (counts.passed > 0
@@ -2034,9 +2017,9 @@ function companyFactsHtml(c, t) {
 
 function companyStatusPillHtml(reviewStatus, t) {
   var STATUS_MAP = {
-    approved: ["q-good-bg", t("cp_review_approved", "Approved")],
-    pending: ["q-moderate-bg", t("cp_review_pending", "Pending review")],
-    rejected: ["q-weak-bg", t("cp_review_archived", "Archived")],
+    approved: ["q-good-bg", t("cp_review_approved", "Selected")],
+    pending: ["q-moderate-bg", t("cp_review_pending", "Not selected")],
+    rejected: ["q-weak-bg", t("cp_review_archived", "Excluded")],
   };
   var m = STATUS_MAP[reviewStatus] || STATUS_MAP.pending;
   return (
@@ -2080,7 +2063,7 @@ function companyMonitoringHtml(c, monStatus, t) {
   if (!rows && !statusRow) return "";
   return (
     '<div class="vac-rail-group"><div class="vac-section-label">' +
-    escHtml(t("col_monitoring", "Monitoring")) +
+    escHtml(t("col_monitoring", "Collection check")) +
     "</div>" +
     rows +
     statusRow +
@@ -2144,17 +2127,17 @@ export function companyProfileHtml(c, roles, opts) {
     banner =
       '<div class="cp-review-banner q-moderate-bg">' +
       '<span class="cp-review-label">' +
-      escHtml(t("cp_review_pending", "Pending review")) +
+      escHtml(t("cp_review_pending", "Not selected")) +
       "</span>" +
       '<button class="vac-btn vac-btn--like" onclick="reviewCompany(\'' +
       cid +
       "','approve')\">" +
-      escHtml(t("btn_approve", "Approve")) +
+      escHtml(t("btn_approve", "Select company")) +
       "</button>" +
       '<button class="vac-btn vac-btn--pass" onclick="reviewCompany(\'' +
       cid +
       "','reject')\">" +
-      escHtml(t("btn_reject", "Reject")) +
+      escHtml(t("btn_reject", "Block company")) +
       "</button></div>";
     // Approved is a settled state: its status shows once, in the rail pill
     // (companyStatusPillHtml) — no second full-width banner (DHA-412 #6, the
@@ -2167,12 +2150,12 @@ export function companyProfileHtml(c, roles, opts) {
     banner =
       '<div class="cp-review-banner q-weak-bg">' +
       '<span class="cp-review-label">' +
-      escHtml(t("cp_review_archived", "Archived")) +
+      escHtml(t("cp_review_archived", "Excluded")) +
       "</span>" +
       '<button class="vac-btn vac-btn--like" onclick="reviewCompany(\'' +
       cidR +
       "','approve')\">" +
-      escHtml(t("cp_restore", "Restore to active")) +
+      escHtml(t("cp_restore", "Unblock and select")) +
       "</button></div>";
   }
 
@@ -2250,15 +2233,29 @@ export function companyProfileHtml(c, roles, opts) {
 
 // Composite sort: status group first (liked/apply-track ahead of unseen ahead
 // of passed), then score DESC within group — unchanged from the pre-U7 list.
-var ROLE_STATUS_GROUP = {
+// Group 0 is the active basket: a role the user wants, at any stage from
+// `liked` through an application in flight (applied -> test_task ->
+// interview). `expiring` joins it — a protected role still awaiting a
+// decision is active work, not a dead end. Group 2 is closed: passed and
+// skipped are the user's no, `declined` is the employer's.
+export var _ROLE_STATUS_GROUP = {
   liked: 0,
   to_apply: 0,
   to_research: 0,
   to_network: 0,
   applied: 0,
+  test_task: 0,
+  interview: 0,
+  expiring: 0,
+  // The employer said yes. Group 0 with the rest of the active basket, so a
+  // won offer never sorts below an untouched role on its company's page.
+  accepted: 0,
   unseen: 1,
+  // A deferral is not a decision: it sorts with the untouched roles.
+  unsure: 1,
   passed: 2,
   skipped: 2,
+  declined: 2,
 };
 
 function getCompanyRoles(c) {
@@ -2267,8 +2264,8 @@ function getCompanyRoles(c) {
     var stA = (state.dbData[a] && state.dbData[a].status) || "unseen";
     var stB = (state.dbData[b] && state.dbData[b].status) || "unseen";
     var grpDiff =
-      (ROLE_STATUS_GROUP[stA] != null ? ROLE_STATUS_GROUP[stA] : 1) -
-      (ROLE_STATUS_GROUP[stB] != null ? ROLE_STATUS_GROUP[stB] : 1);
+      (_ROLE_STATUS_GROUP[stA] != null ? _ROLE_STATUS_GROUP[stA] : 1) -
+      (_ROLE_STATUS_GROUP[stB] != null ? _ROLE_STATUS_GROUP[stB] : 1);
     if (grpDiff !== 0) return grpDiff;
     var ga = groupsById.get(a);
     var gb = groupsById.get(b);
@@ -2303,7 +2300,7 @@ function buildCompanyProfilePage(c) {
   var counts = getCompanyStatusCounts(c.vacancy_ids);
   return companyProfileHtml(c, roles, {
     t: T,
-    reviewStatus: _getReviewStatus(c),
+    reviewStatus: _listTab(c) === "archived" ? "rejected" : _listTab(c),
     monStatus: _getMonitoringStatus(c),
     counts: counts,
   });
@@ -2344,7 +2341,7 @@ function companyProfileKeydown(e) {
   var c = getCompanyBySlug(state.currentProfileSlug);
   if (!c || !c.company_id) return;
 
-  var status = _getReviewStatus(c);
+  var status = _listTab(c) === "archived" ? "rejected" : _listTab(c);
   // approve is available while pending or rejected (restore); reject only while
   // pending — mirrors the banner button rendering in companyProfileHtml.
   if (key === "l" && (status === "pending" || status === "rejected")) {

@@ -9,16 +9,14 @@ import {
   triageReviews,
   TRIAGE_COLUMNS,
   STATUS_PRI,
-  STATUS_BASKET,
   getGroupStatus,
-  isGroupCompanyApproved,
   updateStatus,
   getCompanies,
 } from "./state.js";
 import {
   escHtml,
   normalizeDedupeText,
-  computeTriageFunnel,
+  triageBuckets,
   formatDeadlineHtml,
   isVacancyStale,
   sourceAgeDays,
@@ -53,117 +51,13 @@ function getReviewForGroup(g, reviewByVid) {
   return null;
 }
 
-function scrollToTriageColumn(colKey) {
-  const el = document.getElementById("triageCol-" + colKey);
-  if (!el) return;
-  el.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
-}
-
-// ---------------------------------------------------------------------------
-// Funnel visualization
-// ---------------------------------------------------------------------------
-
-// Header strip (design-protocol.md #6 "Board (Triage)"): the "Triage" title
-// plus an inline funnel track "in db \u2192 liked \u2192 triaged \u2192 in progress \u2192
-// applied \u2192 passed", each actionable stage jumping to its column. Sits on the
-// material \u2014 only .pipeline-board (the columns) is seated in the sheet.
-function renderTriageFunnel(funnelEl, metrics) {
+// Each column already counts its current vacancies. Cumulative funnel totals
+// overlap, so they are not another set of progress states.
+function renderTriageFunnel(funnelEl) {
   if (!funnelEl) return;
-
-  const stages = [
-    {
-      key: "base_total",
-      label: T("funnel_in_database", "In database"),
-      count: metrics.base_total,
-      scrollTo: "",
-    },
-    {
-      key: "liked_queue",
-      label: T("funnel_liked", "Liked"),
-      count: metrics.liked_queue,
-      scrollTo: "liked",
-    },
-    {
-      key: "triaged_total",
-      label: T("funnel_triaged", "Triaged"),
-      count: metrics.triaged_total,
-      scrollTo: "to_apply",
-    },
-    {
-      key: "in_work",
-      label: T("funnel_in_progress", "In progress"),
-      count: metrics.in_work,
-      scrollTo: "to_apply",
-    },
-    {
-      key: "applied_total",
-      label: T("funnel_applied", "Applied"),
-      count: metrics.applied_total,
-      scrollTo: "applied",
-    },
-    {
-      key: "rejected_total",
-      label: T("funnel_passed", "Passed"),
-      count: metrics.rejected_total,
-      scrollTo: "",
-    },
-  ];
-
-  const track = stages
-    .map(function (stage, idx) {
-      const isAction = !!stage.scrollTo;
-      const tag = isAction ? "button" : "span";
-      const cls =
-        "triage-stage" +
-        (isAction ? " triage-stage-btn" : "") +
-        " stage-" +
-        stage.key;
-      const attrs = isAction
-        ? ' type="button" data-scroll-col="' + stage.scrollTo + '"'
-        : "";
-      return (
-        "<" +
-        tag +
-        ' class="' +
-        cls +
-        '"' +
-        attrs +
-        ">" +
-        '<span class="triage-stage-count">' +
-        stage.count +
-        "</span> " +
-        stage.label +
-        "</" +
-        tag +
-        ">" +
-        (idx < stages.length - 1
-          ? '<span class="triage-stage-arrow">\u2192</span>'
-          : "")
-      );
-    })
-    .join("");
-
-  funnelEl.innerHTML =
-    '<span class="triage-title">' +
-    escHtml(T("tab_triage", "Triage")) +
-    "</span>" +
-    '<div class="triage-funnel-track">' +
-    track +
-    "</div>" +
-    '<span class="triage-hint">' +
-    escHtml(T("triage_drag_hint", "drag cards between columns")) +
-    "</span>";
-
-  funnelEl.querySelectorAll("[data-scroll-col]").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      scrollToTriageColumn(btn.getAttribute("data-scroll-col"));
-    });
-  });
-}
-
-function renderTriageControls(controlsEl, metrics) {
-  if (!controlsEl) return;
-  controlsEl.innerHTML = "";
+  funnelEl.innerHTML = '<span class="triage-title">' +
+    escHtml(T("nav_applications", "Applications")) + '</span><a class="scr-btn" href="/materials.html">' + escHtml(T("inbox_materials", "Materials")) + '</a>' +
+    '<span class="triage-hint">' + escHtml(T("triage_drag_hint", "drag cards between columns")) + '</span>';
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +68,28 @@ function renderTriageControls(controlsEl, metrics) {
 // title + org + score + note, and cards move between columns by drag alone
 // (SortableJS, see renderPipeline). This keeps the columns narrow enough that
 // ~6 fit at 1440px instead of ~4.
+
+// The score badge for one role, including the case the board never had: no
+// score at all. Applications added by hand (`vac add` — a course, a grant, a
+// programme) are never seen by the scorer, and the old `score != null ? … : ""`
+// rendered them as a card with a silent hole where every other card carries a
+// number. An em dash in the neutral colour every other surface already uses for
+// this (the Browse row, the vacancy page, the company page, the command
+// palette) says "never scored" instead of leaving the reader to guess whether
+// the number failed to load.
+//
+// A negative score is the pipeline's own "awaiting scoring" sentinel, so it
+// reads the same way — and never as a red zero, which is what qualityClass
+// would paint it.
+export function triageScoreHtml(score, cls) {
+  const scored = typeof score === "number" && !Number.isNaN(score) && score >= 0;
+  const klass = scored ? qualityClass(score) : cls + "--none";
+  const text = scored ? String(score) : "\u2014";
+  const title = scored ? "" : ' title="never scored"';
+  return (
+    '<span class="' + cls + " " + klass + '"' + title + ">" + text + "</span>"
+  );
+}
 
 // City (or Remote) + compensation, one line, expanded columns only. Reads the
 // first location entry's raw `city`/`work_mode` fields directly rather than
@@ -324,13 +240,7 @@ export function buildTriageCard(g, col, review, companies) {
     '<div class="pipe-card-title">' +
     titleHtml +
     "</div>" +
-    (g.llm_score != null
-      ? '<span class="pipe-card-score ' +
-        qualityClass(g.llm_score) +
-        '">' +
-        g.llm_score +
-        "</span>"
-      : "") +
+    triageScoreHtml(g.llm_score, "pipe-card-score") +
     (isCompact ? "" : buildTriageLocationLine(g)) +
     buildTriageMetaRow(g, !isCompact) +
     meta +
@@ -369,13 +279,7 @@ export function buildTriageGroupCard(entries, col, companies) {
         '<li class="pipe-grp-role">' +
         '<div class="pipe-grp-role-head">' +
         titleHtml +
-        (g.llm_score != null
-          ? '<span class="pipe-grp-role-score ' +
-            qualityClass(g.llm_score) +
-            '">' +
-            g.llm_score +
-            "</span>"
-          : "") +
+        triageScoreHtml(g.llm_score, "pipe-grp-role-score") +
         "</div>" +
         (isCompact ? "" : buildTriageLocationLine(g)) +
         buildTriageMetaRow(g, !isCompact) +
@@ -435,7 +339,6 @@ export function renderPipeline() {
   const funnelEl =
     document.getElementById("triageFunnel") ||
     document.getElementById("pipelineStats");
-  const controlsEl = document.getElementById("triageBoardControls");
   if (!board) return;
 
   const reviews = triageReviews || [];
@@ -447,28 +350,20 @@ export function renderPipeline() {
   // computed once per render, not per card.
   const companies = getCompanies();
 
-  // Tag every group with the two state.js-dependent facts the pure funnel
-  // helper needs (status, company approval) plus its private review, then
-  // hand the whole thing to computeTriageFunnel — the SAME dedupe/column
-  // reduction backs both the header strip and the board below, so they can
-  // never disagree (DHA-396, U12; pipeline.js can't be imported under
-  // `node --test`, so the derivation itself lives in helpers.js).
+  // Resolve live decisions once, then partition canonical vacancies by stage.
   const entries = groups.map(function (g) {
     var entry = Object.assign({}, g);
     entry._status = getGroupStatus(g);
-    entry._approved = isGroupCompanyApproved(g);
     entry._review = getReviewForGroup(g, reviewByVid);
     return entry;
   });
   const columnKeys = new Set(TRIAGE_COLUMNS.map((c) => c.key));
-  const { buckets, metrics } = computeTriageFunnel(entries, {
+  const buckets = triageBuckets(entries, {
     statusPri: STATUS_PRI,
-    statusBasket: STATUS_BASKET,
     columnKeys: columnKeys,
   });
 
-  renderTriageFunnel(funnelEl, metrics);
-  renderTriageControls(controlsEl, metrics);
+  renderTriageFunnel(funnelEl);
 
   var totalTracked = 0;
   TRIAGE_COLUMNS.forEach(function (col) {
@@ -479,7 +374,7 @@ export function renderPipeline() {
     board.innerHTML =
       '<div class="pipeline-empty">' +
       '<div class="pipeline-empty-icon">\uD83D\uDCCB</div>' +
-      "<p>Triage is empty. Like vacancies in the Catalog and run <code>/triage</code>.</p>" +
+      "<p>" + escHtml(T("progress_empty", "Like a vacancy in Inbox to choose your next step here.")) + "</p>" +
       "</div>";
     return;
   }
@@ -496,7 +391,7 @@ export function renderPipeline() {
       col.color +
       '"></span>' +
       '<span class="pipe-col-title">' +
-      col.label +
+      escHtml(T("vac_status_" + (col.key === "skipped" ? "passed" : col.key), col.label)) +
       "</span>" +
       '<span class="pipe-col-count">' +
       buckets[col.key].length +
@@ -550,24 +445,15 @@ export function renderPipeline() {
 
   // Drag-and-drop: each column's card list is a Sortable connected to the
   // shared "triage" group, so cards drag between columns. Dropping into a
-  // different column moves the role(s) to that column's status. Derived columns
-  // ('expired') accept no drops — cards drag OUT to a decision but never IN.
+  // different column moves the vacancy to that recorded stage.
   sortableInstances.forEach(function (s) {
     s.destroy();
   });
   sortableInstances = [];
-  const derivedKeys = new Set(
-    TRIAGE_COLUMNS.filter((c) => c.derived).map((c) => c.key),
-  );
   board.querySelectorAll(".pipe-col-cards").forEach(function (listEl) {
-    const colEl = listEl.closest(".pipe-col");
-    const colKey =
-      colEl && colEl.id.startsWith("triageCol-")
-        ? colEl.id.slice("triageCol-".length)
-        : "";
     sortableInstances.push(
       Sortable.create(listEl, {
-        group: { name: "triage", pull: true, put: !derivedKeys.has(colKey) },
+        group: "triage",
         animation: 150,
         draggable: ".pipe-card",
         ghostClass: "pipe-card-ghost",

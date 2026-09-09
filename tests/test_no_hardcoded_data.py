@@ -426,11 +426,20 @@ _GEO_PROPER_NOUNS = (
     "moscow",
 )
 
-# (a) def names containing a geo proper noun.
-_DEF_GEO = re.compile(
-    r"\bdef\s+\w*(?:" + "|".join(_GEO_PROPER_NOUNS) + r")\w*\s*\(",
-    re.IGNORECASE,
+# (a) def names containing a geo proper noun as a WHOLE underscore-delimited
+#     part of the name. A bare-substring match read "cis" out of the middle of
+#     "_api_screening_decision" and failed an unrelated endpoint; a place name
+#     welded into an identifier is always its own segment.
+_DEF_NAME = re.compile(r"\bdef\s+(\w+)\s*\(")
+_DEF_GEO_PARTS = tuple(
+    re.compile(r"(?:^|_)" + noun + r"(?:_|$)", re.IGNORECASE) for noun in _GEO_PROPER_NOUNS
 )
+
+
+def _def_name_is_geo(line):
+    m = _DEF_NAME.search(line)
+    return bool(m) and any(rx.search(m.group(1)) for rx in _DEF_GEO_PARTS)
+
 
 # (b) category-key string literals carrying a geo proper noun. Catches the
 #     historical delete_usa / delete_cis / delete_row family and any sibling.
@@ -465,7 +474,7 @@ def _scan_lines(files):
 def test_no_geo_proper_noun_in_def_names():
     hits = []
     for p, i, line in _scan_lines(_py_files(SCRIPTS)):
-        if _DEF_GEO.search(line):
+        if _def_name_is_geo(line):
             hits.append(f"{p.relative_to(REPO)}:{i}: {line.strip()[:120]}")
     assert not hits, (
         "A country/region proper noun is welded into a function name — geography "

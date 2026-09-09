@@ -25,8 +25,8 @@ export const {
 export const archivedGroups = window.VACANCY_DATA.archived_groups || [];
 
 // API base resolution:
-//  - Served over http(s) (Vercel OR the local dashboard server): use the page's
-//    own origin and POST to same-origin /api/* — both deployments answer there.
+//  - Served over http(s) (the dashboard server, hosted or local): use the page's
+//    own origin and POST to same-origin /api/* — both answer there.
 //  - Opened as a file:// (no server): fall back to the baked config.api_base,
 //    or "" which means truly offline (no save).
 export const API_BASE =
@@ -77,88 +77,30 @@ export const STATUS_PRI = {
   to_research: 1,
   to_network: 2,
   applied: 3,
-  interview: 4,
-  declined: 5,
-  skipped: 6,
-  liked: 7,
-  expiring: 8,
-  passed: 9,
-  unseen: 10,
+  test_task: 4,
+  interview: 5,
+  accepted: 6,
+  declined: 7,
+  skipped: 8,
+  liked: 9,
+  expiring: 10,
+  passed: 11,
+  // A deferral beats an untouched member, never a decision.
+  unsure: 12,
+  unseen: 13,
 };
 
-export const STATUS_BASKET = {
-  liked: "liked",
-  to_apply: "liked",
-  to_research: "liked",
-  to_network: "liked",
-  applied: "liked",
-  // An application still in flight is active work, so it stays in the Liked
-  // basket alongside 'applied'.
-  interview: "liked",
-  // A protected, about-to-disappear role with a decision still pending belongs
-  // in the active (Liked) basket, not Passed.
-  expiring: "liked",
-  unseen: "unseen",
-  passed: "passed",
-  skipped: "passed",
-  // The employer said no. A closed outcome, not a role still to consider — so
-  // it leaves the active basket. Unlike 'passed' it records THEIR decision,
-  // which is the strongest calibration signal scoring has.
-  declined: "passed",
-};
+export { VACANCY_BASKETS as STATUS_BASKET } from "./derive.js";
+import { VACANCY_BASKETS as STATUS_BASKET } from "./derive.js";
 
 export const TRIAGE_COLUMNS = [
-  {
-    key: "liked",
-    label: "Liked",
-    color: "var(--gold)",
-    compact: true,
-  },
-  {
-    key: "to_apply",
-    label: "To apply",
-    color: "var(--emerald)",
-  },
-  {
-    key: "to_research",
-    label: "Research",
-    color: "var(--amber)",
-  },
-  {
-    key: "to_network",
-    label: "Networking",
-    color: "var(--lavender)",
-  },
-  {
-    key: "applied",
-    label: "Applied",
-    color: "var(--coral)",
-  },
-  {
-    key: "interview",
-    label: "Interview",
-    color: "var(--orange)",
-  },
-  {
-    // The employer's own no. Kept on the board (not folded into Passed) so an
-    // application always has somewhere to end, and so the count of real
-    // rejections stays visible next to the count of applications.
-    key: "declined",
-    label: "Declined",
-    color: "var(--slate)",
-  },
-  {
-    // Roles that fell out of actuality (deadline lapsed or gone from source):
-    // surfaced together for an explicit decision instead of silently passing.
-    // Display-only — 'expired' is not a real DB status, so cards can be dragged
-    // OUT to a decision but never dropped IN (see `derived`). Sits next to the
-    // other dead-end column (Skipped) at the end of the board.
-    key: "expired",
-    label: "Expired",
-    color: "var(--terracotta)",
-    derived: true,
-  },
-  { key: "skipped", label: "Skipped", color: "var(--muted)" },
+  { key: "liked", label: "Backlog", color: "var(--gold)", compact: true },
+  { key: "to_apply", label: "In progress", color: "var(--emerald)" },
+  { key: "applied", label: "Applied", color: "var(--coral)" },
+  { key: "interview", label: "Interviewing", color: "var(--orange)" },
+  { key: "accepted", label: "Offer / invitation", color: "var(--pine)" },
+  { key: "declined", label: "Rejected", color: "var(--slate)" },
+  { key: "skipped", label: "Passed", color: "var(--muted)" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -170,7 +112,6 @@ export const state = {
   statusesLoaded: false,
   apiHealthy: true,
   currentBasket: "unseen",
-  activeCatalogLocs: new Set(),
   // Discovery score-floor toggle. When true the VISIBLE_MIN_SCORE floor is
   // lifted so sub-threshold roles show. Shared state (not a catalog-local flag)
   // so the Geo table honours the SAME show-all as the Catalog — the two browse
@@ -186,9 +127,9 @@ export const state = {
   companySortAsc: false,
   statsSortCol: "count",
   statsSortAsc: false,
-  // The active LEAF view (render dispatch keys on this). Today is the default
-  // entry (DHA-348). The six-section chrome derives from it via nav.js.
-  currentMode: "today",
+  // The scored catalogue is the main vacancy view.
+  // The six-section chrome derives the active section via nav.js.
+  currentMode: "catalog",
   // Remembered Vacancies sub-view (Browse/Geo/Archive) so re-opening the
   // Vacancies section returns to where the user was.
   vacancyView: "catalog",
@@ -235,6 +176,8 @@ export function recordSyncOutcome(outcome) {
 for (const g of groups) {
   g.member_ids = Array.isArray(g.member_ids) ? g.member_ids : [];
   state.dbData[g.id] = { status: g.status || "unseen" };
+  for (const id of g.member_ids)
+    state.dbData[id] ||= { status: g.status || "unseen" };
 }
 
 // ---------------------------------------------------------------------------
@@ -272,17 +215,36 @@ export function scheduleRender() {
 // State queries
 // ---------------------------------------------------------------------------
 
+// "Unsure" is a deferral, not a decision: the row leaves today's list and comes
+// back to the Inbox the next calendar day. Resolving that here — in the ONE
+// function every surface reads a status through — keeps the badge, the list,
+// the keyboard gating and the row buttons on the same answer. A row with no
+// recorded timestamp comes back, because losing a role is the worse failure.
+export function isUnsureToday(record) {
+  if (!record || record.status !== "unsure" || !record.status_changed_at)
+    return false;
+  const changed = new Date(record.status_changed_at);
+  return (
+    !Number.isNaN(changed.getTime()) &&
+    changed.toDateString() === new Date().toDateString()
+  );
+}
+
 export function getGroupStatus(g) {
   let best = "unseen";
   let bestP = 99;
   const allIds = new Set(g.member_ids);
   allIds.add(g.id);
   for (const mid of allIds) {
-    if (state.dbData[mid]) {
-      const p = STATUS_PRI[state.dbData[mid].status] ?? 1;
+    const record = state.dbData[mid];
+    if (record) {
+      const p = STATUS_PRI[record.status] ?? 1;
       if (p < bestP) {
         bestP = p;
-        best = state.dbData[mid].status;
+        best =
+          record.status === "unsure" && !isUnsureToday(record)
+            ? "unseen"
+            : record.status;
       }
     }
   }
@@ -387,6 +349,8 @@ export function applySnapshot(payload) {
     // live status already merged in — the snapshot never clobbers a decision.
     if (!state.dbData[g.id])
       state.dbData[g.id] = { status: g.status || "unseen" };
+    for (const id of g.member_ids || [])
+      state.dbData[id] ||= { status: g.status || "unseen" };
     groupsById.set(g.id, g);
   }
 
@@ -404,19 +368,8 @@ export function applySnapshot(payload) {
 
 export function getCompanyStatusCounts(ids) {
   const counts = { liked: 0, passed: 0, unseen: 0 };
-  const todayStr = new Date().toISOString().slice(0, 10);
   for (const id of ids || []) {
     let status = (state.dbData[id] && state.dbData[id].status) || "unseen";
-    // Expired liked vacancies count as passed
-    if (STATUS_BASKET[status] === "liked") {
-      const g = groupsById.get(id);
-      if (g && g.deadline) {
-        const dl = new Date(g.deadline);
-        if (!isNaN(dl.getTime()) && dl < new Date(todayStr)) {
-          status = "passed";
-        }
-      }
-    }
     counts[status] = (counts[status] || 0) + 1;
   }
   return counts;
@@ -449,11 +402,29 @@ export function updateStatus(canonId, memberIds, newStatus) {
 }
 
 /**
+ * Write a status into dbData for the given ids WITHOUT emitting
+ * 'statusChanged'. The Screen view's bulk actions use this: they await their
+ * own /api/save per row so a failed row can revert, and the fire-and-forget
+ * save the 'statusChanged' subscriber in api.js would add on top must not
+ * race that. Returns the previous status per id that existed in dbData.
+ */
+export function setStatusLocal(ids, status) {
+  const previous = {};
+  for (const mid of ids) {
+    if (!state.dbData[mid]) continue;
+    previous[mid] = state.dbData[mid].status;
+    state.dbData[mid].status = status;
+    state.dbData[mid]._optimistic = Date.now();
+  }
+  return previous;
+}
+
+/**
  * Merge remote statuses into dbData, respecting optimistic flag.
  * Entries with _optimistic < 5 seconds old are NOT overwritten.
  * Returns count of changed entries.
  */
-export function mergeRemoteStatuses(remote, timestamps) {
+export function mergeRemoteStatuses(remote, timestamps, revisions = {}) {
   let changed = 0;
   const now = Date.now();
   for (const [id, status] of Object.entries(remote)) {
@@ -466,6 +437,7 @@ export function mergeRemoteStatuses(remote, timestamps) {
         continue;
       }
       state.dbData[id].status = status;
+      state.dbData[id].revision = revisions[id];
       delete state.dbData[id]._optimistic;
       if (timestamps[id]) {
         state.dbData[id].status_changed_at = timestamps[id];

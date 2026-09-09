@@ -12,6 +12,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from statuses import ALL_STATUSES
+
 
 class CompanyStatus(str, Enum):
     candidate = "candidate"
@@ -26,17 +28,12 @@ class Tier(str, Enum):
     C = "C"
 
 
-class VacancyStatus(str, Enum):
-    unseen = "unseen"
-    liked = "liked"
-    passed = "passed"
-    to_apply = "to_apply"
-    to_research = "to_research"
-    to_network = "to_network"
-    skipped = "skipped"
-    applied = "applied"
-    expiring = "expiring"
-    archived = "archived"
+#: Generated from statuses.ALL_STATUSES — the one vocabulary shared with the
+#: DAL, the filter stage and the SQL CHECK. It was a hand-written list here and
+#: drifted: the funnel statuses ('test_task', 'interview', 'declined') shipped
+#: everywhere else and this enum still ended at 'applied', so validating a real
+#: row against the model rejected it.
+VacancyStatus = Enum("VacancyStatus", {s: s for s in ALL_STATUSES}, type=str)
 
 
 class Company(BaseModel):

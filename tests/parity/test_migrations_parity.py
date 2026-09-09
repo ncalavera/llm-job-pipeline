@@ -31,6 +31,10 @@ SHARED_TABLES = (
     "board",
     "company_evidence",
     "application",
+    # Stored research reports (migration 0023). Both dialects ship it, so both
+    # must agree on its columns — the Reports tab reads the same fields
+    # whichever backend is underneath.
+    "report",
 )
 
 
@@ -230,13 +234,40 @@ def test_parity_bootstrap_replays_every_sqlite_migration(tmp_path, monkeypatch):
     )
 
 
-def test_bootstrapped_sqlite_carries_the_late_migration_columns(tmp_path, monkeypatch):
-    """The two columns whose absence broke the cross-backend diff. Named
-    explicitly so the regression has a test that says what it was about."""
+def test_every_vacancy_column_a_reader_names_is_created_by_a_migration(tmp_path, monkeypatch):
+    """No reader may name a `vacancy` column no migration creates.
+
+    This is the shape of the bug a branch merge produces: the consumer arrives
+    with a query, the producer's migration stays on the other branch, and the
+    read fails only in production against a database nobody migrated. Scanning
+    the SQL *string literals* (not attribute access) keeps `v.get(...)` and
+    friends out of the result.
+    """
+    import ast
+
+    def _is_sql(value):
+        """A SQL statement, not prose that happens to spell `vacancy.region`."""
+        return isinstance(value, str) and re.search(
+            r"\b(SELECT|INSERT INTO|UPDATE|DELETE FROM)\b", value
+        )
+
+    named = set()
+    for path in sorted((REPO_ROOT / "scripts").rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Constant) and _is_sql(node.value):
+                named.update(
+                    m.group(1)
+                    for m in re.finditer(r"\b(?:v|vacancy)\.([a-z_][a-z0-9_]*)", node.value)
+                )
+
     dal = bootstrap_sqlite(monkeypatch, tmp_path)
     try:
-        cols = table_columns(dal, "vacancy")
+        existing = table_columns(dal, "vacancy")
     finally:
         dal.close_conn()
-    for column in ("scoring_excluded_reason", "digest_dropped_at"):
-        assert column in cols, f"vacancy.{column} missing from the bootstrapped SQLite DB"
+
+    missing = sorted(named - existing)
+    assert not missing, (
+        f"scripts/ read these vacancy columns, but no migration creates them: {missing}. "
+        "Either the migration was left behind on another branch, or the query is stale."
+    )

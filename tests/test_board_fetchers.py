@@ -924,51 +924,6 @@ def test_fetch_fastforward_board(monkeypatch):
     assert "GBP" in job["compensation"]
 
 
-LINKEDIN_CARD_HTML = """
-<ul>
-<li>
-  <div class="base-card job-search-card" data-entity-urn="urn:li:jobPosting:4403552549">
-    <a class="base-card__full-link" href="https://uk.linkedin.com/jobs/view/chief-of-staff-at-governr-4403552549?refId=x">x</a>
-    <div class="base-search-card__info">
-      <h3 class="base-search-card__title">Chief of Staff</h3>
-      <h4 class="base-search-card__subtitle"><a class="hidden-nested-link" href="https://uk.linkedin.com/company/governr?trk=y">governr</a></h4>
-      <span class="job-search-card__location">London, United Kingdom</span>
-    </div>
-  </div>
-</li>
-</ul>
-"""
-
-
-def test_fetch_linkedin_board(monkeypatch):
-    def router(verb, url, json=None, params=None):
-        assert verb == "GET"
-        if "seeMoreJobPostings" in url and (params or {}).get("start", 0) == 0:
-            return _Resp(text=LINKEDIN_CARD_HTML, status=200)
-        return _Resp(text="", status=200)
-
-    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
-    monkeypatch.setattr(fetchers.time, "sleep", lambda *a, **k: None)
-
-    out = fetchers.fetch_linkedin_board(
-        {
-            "name": "LinkedIn",
-            "url": "https://www.linkedin.com/jobs",
-            "queries": [{"keywords": "Chief of Staff", "location": "London"}],
-            "pages": 1,
-            "request_delay": 0,
-            "fetch_detail": False,
-        }
-    )
-    assert len(out) == 1
-    job = out[0]
-    assert job["title"] == "Chief of Staff"
-    assert job["org_override"] == "governr"
-    assert job["external_id"] == "4403552549"
-    assert job["url"] == "https://uk.linkedin.com/jobs/view/chief-of-staff-at-governr-4403552549"
-    assert job["location"] == "London, United Kingdom"
-
-
 CFI_BOARD_DATA = {
     "stats": {"total_fetched": 3, "total_scored": 3},
     "jobs": [

@@ -75,6 +75,13 @@ def build_parser() -> argparse.ArgumentParser:
         "run drains the backlog instead of forever chasing the newest fetch",
     )
     parser.add_argument(
+        "--dashboard",
+        action="store_true",
+        help="With --save: regenerate the dashboard after saving (default: off — "
+        "run_daily's publish stage rebuilds it once per run; per-chunk rebuilds "
+        "were redundant work)",
+    )
+    parser.add_argument(
         "--files",
         nargs="+",
         metavar="FILE",
@@ -507,7 +514,7 @@ def cmd_save(args):
     be split apart after the fact) — that failure is reported clearly instead
     of crashing with a raw traceback.
     """
-    from database_supabase import update_llm_score, get_conn
+    from database_supabase import update_llm_score_many, get_conn
     from llm_json import read_result_files
 
     bad_files: list[str] = []
@@ -638,9 +645,11 @@ def cmd_save(args):
             errors += 1
             continue
 
+        # One statement for every row of the role, not one per row: the ids in
+        # member_ids all receive the SAME score.
+        written = set(update_llm_score_many(member_ids, score_data))
         for member_id in member_ids:
-            rowcount = update_llm_score(member_id, score_data)
-            if rowcount == 0:
+            if str(member_id) not in written:
                 print(
                     f"WARNING: UUID {member_id} not found in DB — score not saved "
                     f"for {entry.get('org', '?')} — {entry.get('title', '?')}",
@@ -720,8 +729,16 @@ def cmd_save(args):
     else:
         archive_vacancies()  # prints the "paused" notice; no-op without --archive
 
-    # The driver publishes once after scoring and verdicts, not per chunk.
-    print("Scores saved. Refresh with --resume or scripts/fetch_vacancies.py --report-only.")
+    # Dashboard regeneration is opt-in (--dashboard): a scoring run saves in
+    # chunks, and rebuilding the multi-MB snapshot on every --save was
+    # redundant — run_daily's publish stage rebuilds it exactly once per run.
+    if getattr(args, "dashboard", False):
+        from report import generate_dashboard
+
+        generate_dashboard()
+        print("Dashboard regenerated.")
+    else:
+        print("Dashboard not regenerated (pass --dashboard, or let the publish stage build it).")
 
 
 # ---------------------------------------------------------------------------

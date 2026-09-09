@@ -39,6 +39,13 @@ Data safety — the whole point of this runner:
   accidental data-dropping migration can never run silently. A column backfill
   (``UPDATE ... SET``) is allowed — it is the normal additive pattern. The scan
   ignores keywords inside comments/strings and matches only at statement starts.
+* **One deliberate waiver, declared in the file.** A migration whose FIRST line
+  is ``-- migrate:allow-destructive <reason>`` runs unattended despite the scan,
+  and the reason is printed on every run that applies it. It exists for the one
+  pattern SQLite forces on us: widening a CHECK constraint means rebuilding the
+  table (create → copy → drop → rename), so the DROP is the migration, not an
+  accident. Write it only when the DROP provably removes nothing the copy above
+  it has not already carried over — the runner still takes its backup first.
 
 Applied versions are tracked in a ``schema_migrations`` ledger so each runs once.
 ``--baseline`` adopts an already-current database by recording every pending
@@ -98,6 +105,16 @@ _DESTRUCTIVE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A migration may waive the gate for itself by declaring, on its FIRST line:
+#   -- migrate:allow-destructive <reason>
+# The reason is required (and printed), so the waiver is never a silent flag —
+# it is a sentence the author had to write and a reviewer reads first. Only the
+# first line counts: a directive buried further down could be a leftover from a
+# statement that was edited away.
+_ALLOW_DESTRUCTIVE_RE = re.compile(
+    r"\A[ \t]*--[ \t]*migrate:allow-destructive[ \t]+(?P<reason>\S[^\n]*)", re.IGNORECASE
+)
+
 # Length-preserving-ish removal of SQL comments and string/identifier literals,
 # so keyword scans never match text inside them.
 _BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
@@ -153,19 +170,33 @@ def _discover():
     return out
 
 
-def _scan_destructive(loaded) -> list[str]:
-    """Return labels of pending migrations containing destructive statements.
+def _allow_destructive_reason(sql: str) -> str | None:
+    """The reason a migration declares for waiving the destructive gate, if any."""
+    m = _ALLOW_DESTRUCTIVE_RE.match(sql)
+    return m.group("reason") if m else None
 
-    ``loaded`` is ``[(version, label, path, sql_text_or_None)]`` — the SQL was
-    already read once by the caller, so this does no extra I/O.
+
+def _scan_destructive(loaded) -> tuple[list[str], list[str]]:
+    """Split pending migrations that contain destructive statements into
+    ``(blocked, waived)`` label lists.
+
+    ``waived`` are the ones declaring ``-- migrate:allow-destructive <reason>``
+    on their first line; their label carries the reason so the caller can print
+    it. ``loaded`` is ``[(version, label, path, sql_text_or_None)]`` — the SQL
+    was already read once by the caller, so this does no extra I/O.
     """
-    hits = []
+    blocked, waived = [], []
     for version, label, path, sql in loaded:
         if sql is None:
             continue
-        if _DESTRUCTIVE_RE.search(_strip_sql_noise(sql)):
-            hits.append(f"{version} {label} ({path.name})")
-    return hits
+        if not _DESTRUCTIVE_RE.search(_strip_sql_noise(sql)):
+            continue
+        reason = _allow_destructive_reason(sql)
+        if reason:
+            waived.append(f"{version} {label} ({path.name}): {reason}")
+        else:
+            blocked.append(f"{version} {label} ({path.name})")
+    return blocked, waived
 
 
 def _rotate_backups(prefix: str):
@@ -417,21 +448,102 @@ def cmd_status() -> int:
     return 0
 
 
+# What a migration CREATES, read out of its own SQL. Used to check that a
+# migration about to be marked "already applied" really was.
+_CREATE_TABLE_RE = re.compile(r"CREATE TABLE (?:IF NOT EXISTS )?(\w+)", re.IGNORECASE)
+_ADD_COLUMN_RE = re.compile(
+    r"ALTER TABLE (\w+)\s+ADD COLUMN (?:IF NOT EXISTS )?(\w+)", re.IGNORECASE
+)
+
+
+def _objects_a_migration_creates(path):
+    """``(tables, columns)`` the migration at ``path`` would add.
+
+    Deliberately shallow: tables it creates and columns it adds, nothing more.
+    A CHECK constraint widened or an index added is invisible here, so this
+    UNDER-reports rather than over-reports — it can miss a partially-applied
+    migration, but it never accuses a correctly-applied one.
+    """
+    if path is None:
+        return set(), set()
+    sql = path.read_text(encoding="utf-8")
+    # A rebuild migration creates a scratch table and renames it; the scratch
+    # name never survives, so checking for it would always fail.
+    renamed = set(re.findall(r"ALTER TABLE (\w+) RENAME TO", sql, re.IGNORECASE))
+    tables = {t for t in _CREATE_TABLE_RE.findall(sql) if t not in renamed}
+    columns = {(t, c) for (t, c) in _ADD_COLUMN_RE.findall(sql)}
+    return tables, columns
+
+
+def _existing_shape(db):
+    """``(tables, columns)`` the connected database actually has."""
+    if IS_SQLITE:
+        cur = db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = {r[0] for r in cur.fetchall()}
+        columns = set()
+        for t in tables:
+            for row in db.conn.execute(f"PRAGMA table_info({t})"):
+                columns.add((t, row[1]))
+        return tables, columns
+    with db.conn.cursor() as cur:
+        cur.execute(
+            "SELECT table_name, column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public'"
+        )
+        rows = cur.fetchall()
+    tables = {r[0] for r in rows}
+    return tables, {(r[0], r[1]) for r in rows}
+
+
 def cmd_baseline() -> int:
     """Record every not-yet-applied migration as applied WITHOUT running it.
 
     For adopting a database that is already at or beyond the current schema
     (e.g. one created before the migration system existed). After this, only
     genuinely new migrations will run.
+
+    Baselining is a CLAIM about the database — "it already has all of this".
+    Taken on trust, it is destructive in a quiet way: run against a database
+    built from the frozen baseline schema alone, it records every migration as
+    applied and then reports "0 pending" over a schema still missing whole
+    tables and columns, with each skipped migration now unreachable. So the
+    claim is verified before it is written, and a mismatch aborts the command
+    rather than being recorded.
     """
     db = _open()
     try:
         applied = db.applied()
-        to_mark = [(v, lbl) for (v, lbl, _p) in _discover() if v not in applied]
+        to_mark = [(v, lbl, p) for (v, lbl, p) in _discover() if v not in applied]
         if not to_mark:
             print("Already baselined — every migration is recorded.")
             return 0
-        for version, label in to_mark:
+
+        have_tables, have_columns = _existing_shape(db)
+        problems = []
+        for version, label, path in to_mark:
+            want_tables, want_columns = _objects_a_migration_creates(path)
+            missing_t = sorted(want_tables - have_tables)
+            missing_c = sorted(f"{t}.{c}" for (t, c) in want_columns if (t, c) not in have_columns)
+            if missing_t or missing_c:
+                problems.append((version, label, missing_t + missing_c))
+
+        if problems:
+            print(
+                "ABORTED — these migrations are NOT already applied, so recording\n"
+                "them as applied would skip them forever:\n",
+                file=sys.stderr,
+            )
+            for version, label, missing in problems:
+                print(f"    {version} {label}: missing {', '.join(missing)}", file=sys.stderr)
+            print(
+                "\nThis database is not up to date, so --baseline is the wrong command.\n"
+                "Run `python3 scripts/migrate.py` to APPLY them instead.\n"
+                "Nothing was recorded.",
+                file=sys.stderr,
+            )
+            return 1
+
+        for version, label, _p in to_mark:
             db.run(version, None)  # record only, run no SQL
             print(f"  = {version} {label}: marked applied (baseline, not run)")
         print(f"\nBaselined — {len(to_mark)} migration(s) recorded without running.")
@@ -471,7 +583,9 @@ def cmd_migrate(allow_destructive: bool, do_backup: bool) -> int:
         ]
 
         # Safety gate: refuse destructive migrations unless explicitly allowed.
-        destructive = _scan_destructive(loaded)
+        destructive, waived = _scan_destructive(loaded)
+        for w in waived:
+            print(f"  ! destructive by declaration — {w}", file=sys.stderr)
         if destructive and not allow_destructive:
             print(
                 "ABORTED — these pending migrations contain destructive statements:",

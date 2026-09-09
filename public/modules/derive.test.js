@@ -19,7 +19,7 @@ import {
   HOT_MIN_SCORE,
   isApplyable,
   companyRollup,
-  boardYield,
+  screenDateFacts,
 } from "./derive.js";
 
 // Mirror of STATUS_BASKET in state.js (kept inline so the test imports nothing
@@ -169,7 +169,7 @@ test("visibleGroups drops below-floor roles; a strong unapproved match still sho
 // Basket assignment + counts (DHA-374)
 // ---------------------------------------------------------------------------
 
-test("effectiveBasket re-buckets an expired liked role to passed", () => {
+test("effectiveBasket preserves Keep after the deadline", () => {
   const opts = visOpts({ g4: "liked" });
   const liveLiked = { id: "x" };
   const expiredLiked = { id: "g4", deadline: "2026-06-01" };
@@ -177,14 +177,14 @@ test("effectiveBasket re-buckets an expired liked role to passed", () => {
     effectiveBasket({ ...liveLiked }, visOpts({ x: "liked" })),
     "liked",
   );
-  assert.equal(effectiveBasket(expiredLiked, opts), "passed");
+  assert.equal(effectiveBasket(expiredLiked, opts), "liked");
 });
 
 test("basket counts over the visible set match the sample by hand", () => {
   const opts = visOpts({ g3: "liked", g4: "liked", g6: "passed" });
   const counts = basketCounts(sampleGroups(), opts);
   // liked: g3 | unseen: g1,g7,g5(unapproved 95, ORs past the gate) | passed: g4(expired-liked)+g6
-  assert.deepEqual(counts, { liked: 1, unseen: 3, passed: 2 });
+  assert.deepEqual(counts, { liked: 2, unseen: 3, passed: 1 });
 });
 
 // This is the DHA-374 invariant: a basket badge equals the number of rows its
@@ -295,13 +295,13 @@ test("Nit A: liking/passing a below-floor role puts it in that basket's count+li
   );
 });
 
-test("un-approved company: a strong match shows, a below-floor role stays hidden", () => {
+test("company tracking never hides an explicit decision", () => {
   // ≥ ANY_COMPANY_MIN_SCORE ORs past the approval gate (score_floor_any_company).
   const strong = { id: "np", approved: false, llm_score: 90, locations: [] };
   assert.equal(isVisible(strong, visOpts({ np: "liked" })), true);
-  // Below the floor, approval still gates it — a verdict cannot un-hide it.
+  // A human decision outranks company tracking and scores.
   const weak = { id: "nw", approved: false, llm_score: 20, locations: [] };
-  assert.equal(isVisible(weak, visOpts({ nw: "liked" })), false);
+  assert.equal(isVisible(weak, visOpts({ nw: "liked" })), true);
 });
 
 // ---------------------------------------------------------------------------
@@ -328,7 +328,7 @@ test("Geo buckets by city over the visible set, counting a role once per locatio
   assert.equal(rows["Germany::Berlin"].meanScore, 88.3);
   // Paris: g3 + g4 → count 2; g4 is expired-liked so NOT liked → liked 1.
   assert.equal(rows["France::Paris"].count, 2);
-  assert.equal(rows["France::Paris"].liked, 1);
+  assert.equal(rows["France::Paris"].liked, 2);
   assert.equal(rows["France::Paris"].meanScore, 80);
   // Spain: country-only (raw city ""), one role.
   assert.equal(rows["Spain::"].count, 1);
@@ -348,7 +348,7 @@ test("Geo 'liked' column reacts to a like with no reload", () => {
   assert.equal(after["Germany::Berlin"].liked, 1);
 });
 
-test("Geo drops a liked role from 'liked' once its deadline passes", () => {
+test("Geo preserves a kept vacancy after its deadline", () => {
   // g3 liked, deadline in the near future vs already past.
   const groups = sampleGroups();
   groups.find((g) => g.id === "g3").deadline = "2026-07-10";
@@ -356,7 +356,7 @@ test("Geo drops a liked role from 'liked' once its deadline passes", () => {
   const beforeExpiry = byKey(geoBuckets(groups, opts("2026-07-03")));
   const afterExpiry = byKey(geoBuckets(groups, opts("2026-07-11")));
   assert.equal(beforeExpiry["Germany::Berlin"].liked, 1);
-  assert.equal(afterExpiry["Germany::Berlin"].liked, 0); // expired → not liked
+  assert.equal(afterExpiry["Germany::Berlin"].liked, 1); // decision is unchanged
 });
 
 // ---------------------------------------------------------------------------
@@ -758,68 +758,371 @@ test("companyRollup: empty company → all-zero rollup, never a crash", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// boardYield — per-board funnel (scored → fit → liked) over the user's history.
-// ---------------------------------------------------------------------------
+import { screenLists, screenGroups, SCREEN_GROUP_KEYS } from "./derive.js";
 
-// boardYield needs getStatus + isExpired + basketMap (like the app wires it).
-function yieldOpts(statuses, { today = TODAY } = {}) {
-  return { ...rollupOpts(statuses, { today }), basketMap: STATUS_BASKET };
-}
+const ready = (id, extra) =>
+  Object.assign({ id, screening_state: "ready", screening: null }, extra);
 
-test("boardYield: buckets roles by source_board and counts scored/fit/liked", () => {
-  const groups = [
-    { id: "a1", source_board: "Alpha", llm_score: 80 }, // fit
-    { id: "a2", source_board: "Alpha", llm_score: 40 }, // scored, not fit
-    { id: "a3", source_board: "Alpha", llm_score: 62 }, // fit + liked
-    { id: "b1", source_board: "Beta", llm_score: 70 }, // fit
+test("screenLists: preparation never hides an undecided role", () => {
+  const roles = [
+    ready("a"),
+    ready("b"),
+    ready("c"),
+    { id: "d", screening_state: null },
   ];
-  const y = boardYield(groups, yieldOpts({ a3: "liked" }));
-  assert.deepEqual(y.Alpha, { scored: 3, fit: 2, liked: 1, hasData: true });
-  assert.deepEqual(y.Beta, { scored: 1, fit: 1, liked: 0, hasData: true });
+  const status = { a: "unseen", b: "liked", c: "passed", d: "unseen" };
+  const lists = screenLists(roles, (g) => status[g.id]);
+  assert.deepEqual([...lists.toScreen], ["a", "d"]);
+  assert.deepEqual([...lists.kept], ["b"]);
+  assert.deepEqual([...lists.putAside], ["c"]);
 });
 
-test("boardYield: fit uses the ≥60 apply bar (APPLYABLE_MIN_SCORE)", () => {
-  const groups = [
-    { id: "x1", source_board: "Board", llm_score: 59 }, // just under
-    { id: "x2", source_board: "Board", llm_score: 60 }, // exactly the bar
-  ];
-  const y = boardYield(groups, yieldOpts({}));
-  assert.equal(y.Board.scored, 2);
-  assert.equal(y.Board.fit, 1); // only the 60 clears the bar
-});
-
-test("boardYield: direct-ATS roles (no source_board) belong to no board", () => {
-  const groups = [
-    { id: "d1", source_board: "", llm_score: 90 },
-    { id: "d2", llm_score: 90 }, // field absent entirely
-    { id: "d3", source_board: "Board", llm_score: 90 },
-  ];
-  const y = boardYield(groups, yieldOpts({}));
-  assert.deepEqual(Object.keys(y), ["Board"]);
-  assert.equal(y.Board.scored, 1);
-});
-
-test("boardYield: an expired like has lapsed — it no longer counts as liked", () => {
-  const groups = [
-    { id: "e1", source_board: "Board", llm_score: 80, deadline: "2026-06-01" },
-  ];
-  // Status is liked, but the deadline is in the past (< TODAY) → effectiveBasket
-  // rebuckets it to passed, so liked must be 0 (mirrors the badge/list rule).
-  const y = boardYield(groups, yieldOpts({ e1: "liked" }));
-  assert.equal(y.Board.scored, 1);
-  assert.equal(y.Board.liked, 0);
-});
-
-test("boardYield: a board with no shipped roles is simply absent (renders no-data)", () => {
-  const y = boardYield(
-    [{ id: "z", source_board: "Other", llm_score: 70 }],
-    yieldOpts({}),
+test("screenLists: a failed role remains undecided", () => {
+  const lists = screenLists(
+    [{ id: "f", screening_state: "failed" }],
+    () => "unseen",
   );
-  assert.equal(y.Empty, undefined); // caller shows "no data yet" for absent boards
-  assert.equal(y.Other.hasData, true);
+  assert.equal(lists.toScreen.size + lists.kept.size + lists.putAside.size, 1);
 });
 
-test("boardYield: empty group set → empty map, never a crash", () => {
-  assert.deepEqual(boardYield([], yieldOpts({})), {});
+test("screenGroups: a role with a Spanish requirement and an onsite constraint is in both groups and once in All", () => {
+  const roles = [
+    ready("a", {
+      screening: {
+        posting_facts: {
+          work_mode: "onsite",
+          seniority: "unknown",
+          requirements: [
+            {
+              kind: "language",
+              value: "Spanish C1",
+              strength: "required",
+              quote: "Spanish C1 required.",
+            },
+          ],
+        },
+        profile_comparison: [],
+        unknowns: [],
+      },
+    }),
+    ready("b", {
+      screening: {
+        posting_facts: {
+          work_mode: "remote",
+          seniority: "senior",
+          requirements: [],
+        },
+        unknowns: ["eligible countries not stated"],
+      },
+    }),
+  ];
+  const g = screenGroups(roles);
+  assert.deepEqual(SCREEN_GROUP_KEYS, [
+    "language",
+    "onsite",
+    "seniority",
+    "unclear",
+    "all",
+  ]);
+  assert.deepEqual([...g.language], ["a"]);
+  assert.deepEqual([...g.onsite], ["a"]);
+  assert.deepEqual([...g.seniority], ["b"]);
+  assert.deepEqual([...g.unclear], ["b"]);
+  assert.deepEqual([...g.all], ["a", "b"]);
+});
+
+test("screenGroups: a location or authorisation requirement also counts as an onsite/location constraint", () => {
+  const roles = [
+    ready("a", {
+      screening: {
+        posting_facts: {
+          requirements: [
+            {
+              kind: "authorisation",
+              value: "UK right to work",
+              strength: "required",
+              quote: "",
+            },
+          ],
+        },
+      },
+    }),
+  ];
+  assert.deepEqual([...screenGroups(roles).onsite], ["a"]);
+});
+
+test("screenGroups: a ready role with no screening facts sits only in All", () => {
+  const g = screenGroups([ready("z")]);
+  assert.equal(
+    g.language.size + g.onsite.size + g.seniority.size + g.unclear.size,
+    0,
+  );
+  assert.deepEqual([...g.all], ["z"]);
+});
+
+import { screenMatches, screenMatchRequirements } from "./derive.js";
+
+test("screen filters bind kind, strength, text and profile finding to one requirement", () => {
+  const g = {
+    screening: {
+      posting_facts: {
+        requirements: [
+          {
+            kind: "language",
+            strength: "preferred",
+            value: "German",
+            quote: "German is preferred",
+          },
+          {
+            kind: "skill",
+            strength: "required",
+            value: "SQL",
+            quote: "SQL required",
+          },
+        ],
+      },
+      profile_comparison: [{ requirement: 1, finding: "possible_conflict" }],
+    },
+  };
+  assert.equal(
+    screenMatches(g, { kind: "language", strength: "required" }),
+    false,
+  );
+  assert.equal(
+    screenMatches(g, {
+      requirementText: "GERMAN",
+      finding: "possible_conflict",
+    }),
+    false,
+  );
+  assert.equal(
+    screenMatches(g, {
+      kind: "language",
+      strength: "preferred",
+      requirementText: "german",
+    }),
+    true,
+  );
+  assert.equal(
+    screenMatchRequirements(g, { kind: "skill", finding: "possible_conflict" })
+      .length,
+    1,
+  );
+});
+
+test("old screening remains unclassified, never inferred from job title or unrelated unknowns", () => {
+  const g = {
+    title: "Commercial engineering sales director",
+    screening: {
+      unknowns: ["Salary not stated"],
+      posting_facts: { requirements: [] },
+    },
+  };
+  assert.equal(screenMatches(g, { activity: "unclassified" }), true);
+  assert.equal(screenMatches(g, { activity: "selling" }), false);
+  assert.equal(
+    screenMatches(g, { technical: "unknown", purpose: "unknown" }),
+    true,
+  );
+  assert.equal(
+    screenMatches(g, { kind: "authorisation", finding: "unknown" }),
+    false,
+  );
+});
+
+test("work activities overlap and all question filters intersect", () => {
+  const g = {
+    title: "Programme lead",
+    company_name: "Org",
+    screening: {
+      posting_facts: {
+        work_mode: "remote",
+        seniority: "senior",
+        requirements: [],
+      },
+      work_profile: {
+        activities: [
+          { kind: "building", quote: "Launch" },
+          { kind: "selling", quote: "Raise funding" },
+        ],
+        technical_depth: { level: "coordination" },
+        purpose: { kind: "direct_impact" },
+      },
+    },
+  };
+  assert.equal(
+    screenMatches(g, {
+      activity: "building",
+      technical: "coordination",
+      purpose: "direct_impact",
+      workMode: "remote",
+      search: "org",
+    }),
+    true,
+  );
+  assert.equal(
+    screenMatches(g, { activity: "selling", workMode: "onsite" }),
+    false,
+  );
+  assert.equal(screenMatches(g, { activity: "unclassified" }), false);
+});
+
+test("prepared work with no stated activities is unknown, distinct from unprepared", () => {
+  const g = { screening: { work_profile: { activities: [] } } };
+  assert.equal(screenMatches(g, { activity: "unknown" }), true);
+  assert.equal(screenMatches(g, { activity: "unclassified" }), false);
+  assert.equal(
+    screenMatches({ screening: {} }, { activity: "unknown" }),
+    false,
+  );
+});
+
+test("first-seen age and deadline filters are independent and preserve unstated deadline uncertainty", () => {
+  const today = "2026-09-07";
+  const old = { first_seen: "2026-08-07T12:00:00Z", deadline: "2026-10-01" };
+  const recentExpired = { first_seen: "2026-09-06", deadline: "2026-09-06" };
+  assert.deepEqual(
+    screenDateFacts({ first_seen: old.first_seen, last_seen: "2026-09-06T08:00:00Z", deadline: old.deadline }, today),
+    { firstSeen: "2026-08-07", lastSeen: "2026-09-06", age: 31, deadline: "2026-10-01", expired: false },
+  );
+  assert.equal(
+    screenMatches(old, { age: "older30", deadline: "open" }, today),
+    true,
+  );
+  assert.equal(screenMatches(old, { age: "last30" }, today), false);
+  assert.equal(
+    screenMatches(recentExpired, { age: "last7", deadline: "expired" }, today),
+    true,
+  );
+  assert.equal(
+    screenMatches(recentExpired, { deadline: "open" }, today),
+    false,
+  );
+  assert.equal(
+    screenMatches({ first_seen: "2026-08-08" }, { age: "last30" }, today),
+    true,
+  );
+  assert.equal(
+    screenMatches({ first_seen: "2026-08-08" }, { age: "older30" }, today),
+    false,
+  );
+  assert.equal(
+    screenMatches({ deadline: today }, { deadline: "open" }, today),
+    true,
+  );
+  assert.equal(
+    screenMatches({ deadline: today }, { deadline: "expired" }, today),
+    false,
+  );
+  assert.equal(screenMatches({}, { deadline: "unknown" }, today), true);
+  assert.equal(screenMatches({}, { deadline: "open" }, today), true);
+  assert.equal(screenMatches({}, { age: "last30" }, today), false);
+  assert.equal(
+    screenMatches({ first_seen: "2026-09-08" }, { age: "last7" }, today),
+    false,
+  );
+  assert.equal(
+    screenMatches({ deadline: "2026-02-30" }, { deadline: "unknown" }, today),
+    true,
+  );
+});
+
+test("requirement search does not borrow another language from a shared quote", () => {
+  const g = {
+    screening: {
+      posting_facts: {
+        requirements: [
+          {
+            kind: "language",
+            strength: "required",
+            value: "English",
+            quote: "English is required; German is preferred.",
+          },
+          {
+            kind: "language",
+            strength: "preferred",
+            value: "German",
+            quote: "English is required; German is preferred.",
+          },
+        ],
+      },
+      profile_comparison: [],
+    },
+  };
+  assert.equal(
+    screenMatches(g, {
+      kind: "language",
+      strength: "required",
+      requirementText: "German",
+    }),
+    false,
+  );
+  assert.equal(
+    screenMatches(g, {
+      kind: "language",
+      strength: "preferred",
+      requirementText: "German",
+    }),
+    true,
+  );
+  assert.equal(screenMatchRequirements(g, { finding: "unknown" }).length, 2);
+  g.screening.profile_comparison = [{ requirement: 0, finding: "match" }];
+  assert.deepEqual(
+    screenMatchRequirements(g, { finding: "unknown" }).map((r) => r.value),
+    ["German"],
+  );
+  g.screening.profile_comparison.push({ requirement: 1, finding: "unknown" });
+  assert.equal(screenMatchRequirements(g, { finding: "unknown" }).length, 1);
+});
+
+
+test("inbox keeps older preparations and previous decisions", () => {
+  const roles = [
+    ready("current", { posting_fingerprint: "post", screening_fingerprint: "post:new" }),
+    ready("old-profile", { posting_fingerprint: "post", screening_fingerprint: "post:old" }),
+    ready("edited", { posting_fingerprint: "edited", screening_fingerprint: "post:new" }),
+    ready("kept", { posting_fingerprint: "post", screening_fingerprint: "post:old" }),
+    ready("passed", { posting_fingerprint: "post", screening_fingerprint: "post:old" }),
+  ];
+  const status = g => ({kept: "liked", passed: "passed"}[g.id] || "unseen");
+  const lists = screenLists(roles, status, "new");
+  assert.deepEqual([...lists.toScreen], ["current", "old-profile", "edited"]);
+  assert.deepEqual([...lists.kept], ["kept"]);
+  assert.deepEqual([...lists.putAside], ["passed"]);
+});
+
+
+test("prepared facts lift the company gate, not the user's score floor", () => {
+  // Recall-first: an unscored, unvetted role with extracted requirements is
+  // still reviewable. The review screen's default band sets no floor, so it
+  // shows. The prepared state used to override an explicit floor too, which
+  // made that band's 40 / 60 options do nothing to the list.
+  const role = { id: "ready", screening_state: "ready", llm_score: null };
+  const open = visOpts({}, { minScore: null });
+  open.isApproved = () => false;
+  assert.equal(isVisible(role, open), true);
+  assert.equal(basketCounts([role], open).unseen, 1);
+  assert.equal(groupsInBasket([role], "unseen", open).length, 1);
+
+  const floored = visOpts({}, { minScore: 60 });
+  floored.isApproved = () => false;
+  assert.equal(isVisible(role, floored), false);
+  assert.equal(isVisible({ ...role, llm_score: 70 }, floored), true);
+});
+
+
+test("application outcomes preserve interest and never become a user Pass", () => {
+ const statuses = ["liked", "applied", "accepted", "declined", "passed", "skipped", "unseen", "expiring", "archived"];
+ const lists = screenLists(statuses.map(status => ({id: status, status})), r => r.status);
+ assert.deepEqual([...lists.kept], ["liked", "applied", "accepted", "declined"]);
+ assert.deepEqual([...lists.putAside], ["passed", "skipped"]);
+ assert.deepEqual([...lists.toScreen], ["unseen", "expiring"]);
+});
+
+test("inbox filters combine source, added date, place and explicit requirement", () => {
+ const g = {title:'Analyst', source_board:'Board', first_seen:'2026-09-08', locations:[{location:'Berlin, Germany'}], screening:{posting_facts:{requirements:[{kind:'authorisation',strength:'required',value:'EU work permit'}]}}};
+ assert.equal(screenMatches(g, {source:'Board',added:'2026-09-08',place:'Germany',kind:'authorisation'}),true);
+ assert.equal(screenMatches(g, {source:'Other'}),false);
+ assert.equal(screenMatches(g, {place:'United States'}),false);
+ assert.equal(screenMatches(g, {added:'2026-09-07'}),false);
 });

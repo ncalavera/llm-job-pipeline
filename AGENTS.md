@@ -37,7 +37,7 @@ code 10 (a GATE), does the printed evidence-preparation task, then
 answers the gates. Exit codes: 0 done, 10 gate, 20 abort, 30 stage error.
 
 Install guides: `INSTALL-EASY.md` (simple mode, zero signups) and
-`INSTALL.md` (full mode, Supabase + Vercel).
+`INSTALL.md` (full mode, Postgres and the dashboard server on forge).
 
 `CONCEPTS.md` at the repo root defines the project's shared domain
 vocabulary (entities, named processes, status concepts) — relevant when
@@ -168,3 +168,11 @@ less. Warning about those two is correct.
 - `CONCEPTS.md` — shared domain vocabulary (entities, named processes,
   status concepts). Relevant when orienting to the codebase or
   discussing domain concepts.
+
+## Model choice for Codex screening and scoring
+
+For one-vacancy screening/scoring subagents, read `codex_model` from the private
+profile's `## VOLUME` section and use that model when the runtime exposes it.
+If unavailable, use the cheapest suitable model actually available and state the
+substitution. Do not silently escalate to a larger model. Claude model names in
+`screen_model` and `scoring_model` remain specific to the Claude runner.

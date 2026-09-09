@@ -8,9 +8,7 @@ import {
   config,
   companiesBySlug,
   groups,
-  STATUS_BASKET,
   getGroupStatus,
-  isGroupCompanyApproved,
   getCompanies,
   dashboardSource,
   on,
@@ -20,7 +18,6 @@ import {
 import {
   initUI,
   showToast,
-  isVacancyExpired,
   escHtml,
 } from "./modules/helpers.js";
 import {
@@ -36,15 +33,18 @@ import {
   loadCompanyStatuses,
   loadCompanies,
 } from "./modules/api.js";
-import { VISIBLE_MIN_SCORE, basketCounts } from "./modules/derive.js";
+import { basketCounts } from "./modules/derive.js";
 import {
   initCatalog,
+  catalogVisibility,
   updateBasketCounts,
   renderCatalog,
   switchBasket,
-  toggleCatalogLoc,
-  toggleCatalogSort,
-  toggleCatalogShowAll,
+  reviewSetBand,
+  reviewToggleDeadline,
+  reviewOpenFilters,
+  reviewToggleExpand,
+  reviewSearchInput,
   catalogThumbAction,
   openCatalogRow,
 } from "./modules/catalog.js";
@@ -61,10 +61,19 @@ import {
   renderProfileForSlug,
 } from "./modules/companies.js";
 import { renderPipeline } from "./modules/pipeline.js";
+import {
+  renderApplicationsTable,
+  buildTriageToggle,
+  readTriageView,
+  writeTriageView,
+} from "./modules/applications.js";
 import { renderToday, todayAction, openTodayRow } from "./modules/today.js";
 import { initStats, renderStats } from "./modules/stats.js";
 import { initArchive, renderArchive } from "./modules/archive.js";
-import { initBoards, renderBoards, toggleBoard } from "./modules/boards.js";
+import { renderScreen } from "./modules/screen.js";
+import { initReports, renderReports } from "./modules/reports.js";
+import { initContacts, renderContacts } from "./modules/contacts.js";
+import { initBoards, renderBoards, toggleBoard, showSourceRun } from "./modules/boards.js";
 import { initHealth, renderHealth } from "./modules/health.js";
 import { initSettings, renderSettings } from "./modules/settings.js";
 import {
@@ -79,8 +88,6 @@ import {
   renderVacancyDetail,
   vacancyLike,
   vacancyPass,
-  vacancyResearch,
-  vacancyNetwork,
   vacancyMoveToApply,
 } from "./modules/vacancy.js";
 import {
@@ -150,19 +157,9 @@ function renderLanguageSwitch() {
 // violate the same badge==list invariant this reuses.
 // ---------------------------------------------------------------------------
 
-function navVisOpts() {
-  return {
-    isApproved: isGroupCompanyApproved,
-    getStatus: getGroupStatus,
-    isExpired: isVacancyExpired,
-    basketMap: STATUS_BASKET,
-    minScore: state.catalogShowAll ? null : VISIBLE_MIN_SCORE,
-  };
-}
-
 function updateNavCounts() {
   var vacEl = document.getElementById("navCountVacancies");
-  if (vacEl) vacEl.textContent = basketCounts(groups, navVisOpts()).unseen;
+  if (vacEl) vacEl.textContent = basketCounts(groups, catalogVisibility()).unseen;
   var compEl = document.getElementById("navCountCompanies");
   if (compEl) compEl.textContent = getCompanies().length;
 }
@@ -290,6 +287,49 @@ on("statusChanged", ({ status }) => {
   scheduleRender();
 });
 
+// The Triage tab has two views of one dataset. This is the only place that
+// decides which one is on screen: the toggle writes the choice, this reads it,
+// and each view renders into its own container while the other stays empty.
+// Keeping the dispatch here (not inside either view) means neither module has
+// to know the other exists — pipeline.js cannot even be imported under the
+// test runner.
+function renderTriageSection() {
+  const store = typeof localStorage === "undefined" ? null : localStorage;
+  const view = readTriageView(store);
+
+  const toggleEl = document.getElementById("triageViewToggle");
+  if (toggleEl) {
+    toggleEl.innerHTML = buildTriageToggle(view, T);
+    toggleEl.querySelectorAll("[data-triage-view]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        writeTriageView(store, btn.getAttribute("data-triage-view"));
+        renderTriageSection();
+      });
+    });
+  }
+
+  const boardEl = document.getElementById("pipelineBoard");
+  const tableEl = document.getElementById("applicationsTable");
+  // The funnel strip belongs to the board — pipeline.js fills it. Left visible
+  // in the table view it paints as an empty sheet-coloured bar above the
+  // table's own count strip, which reads as a broken element.
+  const funnelEl = document.getElementById("triageFunnel");
+  if (funnelEl) funnelEl.hidden = view !== "board";
+  if (boardEl) boardEl.hidden = view !== "board";
+  if (tableEl) tableEl.hidden = view !== "table";
+
+  if (view === "table") {
+    // Blank the board's DOM as well as hiding it: its SortableJS instances hold
+    // listeners on those nodes, and leaving a hidden board mounted keeps them
+    // alive across every re-render of the table.
+    if (boardEl) boardEl.innerHTML = "";
+    renderApplicationsTable();
+  } else {
+    if (tableEl) tableEl.innerHTML = "";
+    renderPipeline();
+  }
+}
+
 on("render", () => {
   updateBasketCounts();
   updateNavCounts();
@@ -297,11 +337,14 @@ on("render", () => {
   renderCatalog();
   if (state.currentMode === "today") renderToday();
   if (state.currentMode === "companies") renderCompanies();
-  if (state.currentMode === "pipeline") renderPipeline();
+  if (state.currentMode === "pipeline") renderTriageSection();
   if (state.currentMode === "stats") renderStats();
   if (state.currentMode === "settings") renderSettings();
   if (state.currentMode === "boards") renderBoards();
   if (state.currentMode === "health") renderHealth();
+  if (state.currentMode === "reports") renderReports();
+  if (state.currentMode === "contacts") renderContacts();
+  if (state.currentMode === "screen") renderScreen();
   if (state.currentProfileSlug) renderProfileForSlug(state.currentProfileSlug);
   if (state.currentVacancyId) renderVacancyDetail(state.currentVacancyId);
 });
@@ -352,11 +395,14 @@ on("sync", () => {
 var LEAF_SECTION_ID = {
   today: "todaySection",
   catalog: "catalogSection",
+  screen: "screenSection",
   companies: "companiesSection",
   pipeline: "pipelineSection",
   stats: "statsSection",
   archive: "archiveSection",
   boards: "boardsSection",
+  reports: "reportsSection",
+  contacts: "contactsSection",
   health: "healthSection",
   settings: "settingsSection",
 };
@@ -369,6 +415,8 @@ var NAV_BTNS = {
   companies: "navCompanies",
   triage: "navTriage",
   boards: "navBoards",
+  reports: "navReports",
+  contacts: "navContacts",
   health: "navHealth",
   settings: "navSettings",
 };
@@ -557,6 +605,9 @@ function applyRouteFromUrl() {
       cp.classList.add("active");
     }
     setNavActiveSection(sectionForMode("company"));
+  } else if (route.mode && Object.prototype.hasOwnProperty.call(LEAF_SECTION_ID, route.mode)) {
+    // ?mode=<leaf> (the digest's "ready to screen" link) — open that leaf.
+    switchMode(route.mode);
   } else {
     // Bare URL — drop any overlay, reveal the current leaf list (no re-render).
     clearCompanyOverlay();
@@ -571,6 +622,7 @@ function applyRouteFromUrl() {
 // ---------------------------------------------------------------------------
 
 function switchMode(mode) {
+  if (mode === "screen" || mode === "today" || mode === "browse") mode = "catalog";
   // A section switch always drops any open detail overlay (company profile or
   // vacancy detail / not-found) and returns to a list.
   closeDetailOverlays();
@@ -579,6 +631,14 @@ function switchMode(mode) {
   // Remember the Vacancies sub-view so re-opening the section returns to it.
   if (isVacancyView(mode)) state.vacancyView = mode;
   var section = sectionForMode(mode);
+
+  // A ?mode= landing param (the digest's inbox link) names one leaf; once the
+  // user moves to another, drop it so back/forward and reload follow the user.
+  var url = new URL(window.location);
+  if (url.searchParams.get("mode") && url.searchParams.get("mode") !== mode) {
+    url.searchParams.delete("mode");
+    history.replaceState({}, "", url);
+  }
 
   // DOM section per leaf mode (each is a sibling under .container).
   Object.keys(LEAF_SECTION_ID).forEach(function (leaf) {
@@ -596,6 +656,7 @@ function switchMode(mode) {
   // leaf. Every other section (Triage included) is a single leaf with none.
   var subBtns = {
     catalog: "navSubBrowse",
+    screen: "navSubScreen",
     stats: "navSubGeo",
     archive: "navSubArchive",
   };
@@ -610,6 +671,7 @@ function switchMode(mode) {
   if (subNav) subNav.classList.toggle("active", section === "vacancies");
   var vsubBtns = {
     catalog: "vsubBrowse",
+    screen: "vsubScreen",
     stats: "vsubGeo",
     archive: "vsubArchive",
   };
@@ -636,15 +698,21 @@ function switchMode(mode) {
   } else if (mode === "companies") {
     initCompanies();
   } else if (mode === "pipeline") {
-    renderPipeline();
+    renderTriageSection();
   } else if (mode === "stats") {
     initStats();
   } else if (mode === "archive") {
     initArchive();
+  } else if (mode === "screen") {
+    renderScreen();
   } else if (mode === "boards") {
     initBoards();
   } else if (mode === "health") {
     initHealth();
+  } else if (mode === "reports") {
+    initReports();
+  } else if (mode === "contacts") {
+    initContacts();
   } else if (mode === "settings") {
     initSettings();
   }
@@ -668,9 +736,11 @@ window.addEventListener("popstate", applyRouteFromUrl);
 window.switchMode = switchMode;
 window.switchVacancies = switchVacancies;
 window.switchBasket = switchBasket;
-window.toggleCatalogLoc = toggleCatalogLoc;
-window.toggleCatalogSort = toggleCatalogSort;
-window.toggleCatalogShowAll = toggleCatalogShowAll;
+window.reviewSetBand = reviewSetBand;
+window.reviewToggleDeadline = reviewToggleDeadline;
+window.reviewOpenFilters = reviewOpenFilters;
+window.reviewToggleExpand = reviewToggleExpand;
+window.reviewSearchInput = reviewSearchInput;
 window.catalogThumbAction = catalogThumbAction;
 window.todayAction = todayAction;
 window.openTodayRow = openTodayRow;
@@ -692,14 +762,13 @@ window.closeDetail = closeDetail;
 // Vacancy detail page actions (U6) — inline onclick on the page's buttons.
 window.vacancyLike = vacancyLike;
 window.vacancyPass = vacancyPass;
-window.vacancyResearch = vacancyResearch;
-window.vacancyNetwork = vacancyNetwork;
 window.vacancyMoveToApply = vacancyMoveToApply;
 window.renderPipeline = renderPipeline;
 window.renderToday = renderToday;
 window.renderArchive = renderArchive;
 // Boards section (inline onclick on each board's enabled toggle).
 window.toggleBoard = toggleBoard;
+window.showSourceRun = showSourceRun;
 window.renderSettings = renderSettings;
 
 // ---------------------------------------------------------------------------
@@ -1054,6 +1123,8 @@ function initDefault() {
       cp.classList.add("active");
     }
     setNavActiveSection(sectionForMode("company"));
+  } else if (route.mode && Object.prototype.hasOwnProperty.call(LEAF_SECTION_ID, route.mode)) {
+    switchMode(route.mode);
   } else {
     switchMode(state.currentMode);
   }

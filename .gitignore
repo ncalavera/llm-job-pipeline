@@ -35,15 +35,13 @@ docs/*
 !docs/fetch-engines.md
 !docs/job-boards-catalogue.md
 !docs/manual-trial-protocol.md
+!docs/test-inventory-2026-08-26.md
 
 # Local illustration packs — personal art for a non-default DASHBOARD_PACK.
 # The committed "default" pack lives directly under public/images/. Any pack
 # subdirectory (public/images/<pack>/) is local-only and never committed.
 .local-illustrations/
 public/images/*/
-
-# Vercel CLI deploy denylist (local-only — controls uploads, not committed)
-.vercelignore
 
 # Local SQLite database (easy mode) — never commit personal data
 data/
@@ -67,7 +65,6 @@ venv/
 
 # Node
 node_modules/
-.vercel
 .next/
 
 # Local dashboards & reports
@@ -85,3 +82,6 @@ package-lock.json
 # runtime company filter archives
 companies/
 _archive/
+
+# local scratch — screenshots and throwaway files from a working session
+.scratch/

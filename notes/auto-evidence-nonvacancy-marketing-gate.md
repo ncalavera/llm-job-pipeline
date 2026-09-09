@@ -1,7 +1,7 @@
 # Evidence: non-vacancy junk gate + cleanup
 
 ## Reported example
-https://llm-job-pipeline-chi.vercel.app/?vacancy=b095704d-...
+Dashboard vacancy b095704d-…
 Co-Develop "Head of External Engagement" — full_description was a 5.3K-char
 scrape of codevelop.fund's homepage/news feed (Featured Insights, From the News
 Desk, "170 subscribers", "Tap to unmute"), scored 32 as if a real JD.
