@@ -243,6 +243,11 @@ export function initCatalog() {
     wireDrawer(body);
   }
   wireGrid();
+  syncStickyHeight();
+  if (typeof ResizeObserver === "function") {
+    const block = document.querySelector(".review-sticky");
+    if (block) new ResizeObserver(syncStickyHeight).observe(block);
+  }
   syncFilterCount();
   updateBasketCounts();
   renderCatalog();
@@ -441,6 +446,7 @@ export function reviewClearAll() {
   syncFilterCount();
   updateBasketCounts();
   renderCatalog();
+  syncDrawerCount();
 }
 
 // ---------------------------------------------------------------------------
@@ -959,10 +965,31 @@ function ensureCursorPainted() {
   while (_shown <= at && _shown < _items.length) growWindow();
 }
 
+/** Publish the pinned block's height, so a row scrolls clear of it. */
+function syncStickyHeight() {
+  const block = document.querySelector(".review-sticky");
+  if (!block) return;
+  const h = Math.round(block.getBoundingClientRect().height);
+  document.documentElement.style.setProperty("--review-sticky-h", h + "px");
+}
+
 function scrollCursorIntoView() {
+  syncStickyHeight();
   const row = cursorRowEl();
-  if (row && typeof row.scrollIntoView === "function")
-    row.scrollIntoView({ block: "nearest" });
+  if (!row || typeof row.getBoundingClientRect !== "function") return;
+  const box = row.getBoundingClientRect();
+  const top = document
+    .querySelector(".review-sticky")
+    ?.getBoundingClientRect().bottom;
+  const bottom = document
+    .querySelector(".review-keyhint")
+    ?.getBoundingClientRect().top;
+  const ceiling = (top > 0 ? top : 0) + 8;
+  const floor = (bottom > 0 ? bottom : window.innerHeight) - 8;
+  // "nearest" counts a row as visible while any of it is in the scrollport,
+  // even the part painted over by the pinned block. Move by the overlap.
+  if (box.top < ceiling) window.scrollBy(0, box.top - ceiling);
+  else if (box.bottom > floor) window.scrollBy(0, box.bottom - floor);
 }
 
 /** Which key means what. Exported so the binding is testable without a DOM. */

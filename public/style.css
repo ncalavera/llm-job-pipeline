@@ -7023,8 +7023,10 @@ body::after {
 
 .review-row {
   /* Clear of the pinned block above and the pinned key hints below, so
-     scrollIntoView never parks the cursor row under either. */
-  scroll-margin-top: 160px;
+     scrollIntoView never parks the cursor row under either. The top value is
+     the block's measured height (catalog.js syncStickyHeight); it wraps to two
+     rows at some widths, and a fixed number left rows behind it. */
+  scroll-margin-top: calc(var(--review-sticky-h, 200px) + 8px);
   scroll-margin-bottom: 56px;
   min-height: var(--review-row-h);
   background: var(--card);
@@ -7330,17 +7332,6 @@ body::after {
 
 .review-sentinel {
   height: 1px;
-}
-
-/* Clear of the pinned key hints and of the last row's decision buttons. */
-.catalog-section.active ~ .scroll-top-btn,
-.catalog-section.active .scroll-top-btn {
-  bottom: 60px;
-  right: 12px;
-}
-
-.review-spacer {
-  flex: none;
 }
 
 /* The floating scroll-to-top button used to sit over the last row's ✕. */
