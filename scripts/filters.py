@@ -12,6 +12,8 @@ db_conn / db_backend), so the DAL can import filters without a cycle.
 """
 
 import html
+from statuses import PROTECTED_STATUSES
+
 import re
 from difflib import SequenceMatcher
 from typing import NamedTuple
@@ -457,16 +459,7 @@ def is_recently_archived(archived_hashes: set[str], dedup_hash: str) -> bool:
 # ---------------------------------------------------------------------------
 
 _FUZZY_THRESHOLD: float = 0.85
-_PROTECTED_STATUSES: frozenset[str] = frozenset(
-    {
-        "liked",
-        "to_apply",
-        "to_research",
-        "to_network",
-        "applied",
-        "archived",
-    }
-)
+_PROTECTED_STATUSES: frozenset[str] = PROTECTED_STATUSES
 
 
 def _strip_punct(title: str) -> str:

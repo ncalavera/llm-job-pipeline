@@ -1559,8 +1559,7 @@ def test_unattended_verdicts_advance_and_record_the_count(rd, monkeypatch):
 
 @pytest.mark.parametrize("unattended", [False, True])
 def test_unattended_screening_prep_emits_the_prepare_gate(rd, monkeypatch, tmp_path, unattended):
-    """the night run hands the cohort to a prepare_screening gate
-    (one subagent per role, no score) and records the target ids."""
+    """The night run hands a combined discovery cohort to the existing gate."""
     import json
     import subprocess
 
@@ -1577,7 +1576,7 @@ def test_unattended_screening_prep_emits_the_prepare_gate(rd, monkeypatch, tmp_p
     ]
 
     def fake_capture(cmd, opts):
-        assert "prepare_screening.py" in cmd[1] and "--local" in cmd
+        assert "prepare_discovery.py" in cmd[1] and "--local" in cmd
         return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
 
     monkeypatch.setattr(rd, "_run_capture", fake_capture)
@@ -1589,6 +1588,96 @@ def test_unattended_screening_prep_emits_the_prepare_gate(rd, monkeypatch, tmp_p
     assert info["action"] == "prepare_screening" and info["phase"] == "prepare"
     assert info["count"] == 1 and entry["target_ids"] == ["a1"]
     assert json.loads((tmp_path / "prep.json").read_text()) == payload
+
+
+def test_combined_discovery_resume_counts_modes(rd, monkeypatch, tmp_path):
+    """Resume uses the discovery completion map and preserves facts-only scores."""
+    import sys
+    import types
+
+    monkeypatch.setattr(rd, "SCREEN_PREP_PAYLOAD_PATH", tmp_path / "prep.json")
+    rd._write_payload(
+        tmp_path / "prep.json",
+        [{"id": "a1", "mode": "score_and_facts"}, {"id": "b2", "mode": "facts_only"}],
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "prepare_discovery",
+        types.SimpleNamespace(completion=lambda payloads: {"a1": "ready", "b2": "skipped"}),
+    )
+    state = rd._new_state(rd.Opts())
+    entry = rd._stage(state, "screening_prep")
+    entry.update(
+        {
+            "emitted": True,
+            "discovery": True,
+            "target_ids": ["a1", "b2"],
+            "requested_modes": {
+                "a1": {"scoring": True, "screening": True},
+                "b2": {"scoring": False, "screening": True},
+            },
+        }
+    )
+    kind, note = rd._h_screening_prep(state, entry, rd.Opts())
+    assert kind == "advance" and "1 scored" in note and "1 skipped" in note
+    assert entry["scored"] == 1 and entry["prepared"] == 1
+
+
+def test_combined_discovery_partial_resumes_accumulate_counts(rd, monkeypatch, tmp_path):
+    """Three resume waves retain completed and skipped rows in the checkpoint."""
+    import sys
+    import types
+
+    monkeypatch.setattr(rd, "SCREEN_PREP_PAYLOAD_PATH", tmp_path / "prep.json")
+    payload = [
+        {"id": "a1", "mode": "score_and_facts"},
+        {"id": "b2", "mode": "score_and_facts"},
+        {"id": "c3", "mode": "facts_only"},
+    ]
+    rd._write_payload(tmp_path / "prep.json", payload)
+    waves = iter(
+        [
+            {"a1": "ready", "b2": "pending", "c3": "skipped"},
+            {"b2": "pending"},
+            {"b2": "ready"},
+        ]
+    )
+    monkeypatch.setitem(sys.modules, "prepare_discovery", types.SimpleNamespace(completion=lambda p: next(waves)))
+    state = rd._new_state(rd.Opts())
+    entry = rd._stage(state, "screening_prep")
+    entry.update(
+        {
+            "emitted": True,
+            "discovery": True,
+            "target_ids": ["a1", "b2", "c3"],
+            "requested_modes": {
+                "a1": {"scoring": True, "screening": True},
+                "b2": {"scoring": True, "screening": True},
+                "c3": {"scoring": False, "screening": True},
+            },
+        }
+    )
+    kind, _ = rd._h_screening_prep(state, entry, rd.Opts())
+    assert kind == "gate" and entry["scored"] == 1 and entry["skipped"] == 1
+    kind, _ = rd._h_screening_prep(state, entry, rd.Opts())
+    assert kind == "gate" and entry["scored"] == 1 and entry["skipped"] == 1
+    kind, note = rd._h_screening_prep(state, entry, rd.Opts())
+    assert kind == "advance" and entry["scored"] == 2 and entry["skipped"] == 1
+    assert "2 scored" in note
+
+
+def test_combined_discovery_missing_payload_does_not_advance(rd, monkeypatch, tmp_path):
+    import sys
+    import types
+
+    monkeypatch.setattr(rd, "SCREEN_PREP_PAYLOAD_PATH", tmp_path / "prep.json")
+    rd._write_payload(tmp_path / "prep.json", [])
+    monkeypatch.setitem(sys.modules, "prepare_discovery", types.SimpleNamespace(completion=lambda p: {}))
+    state = rd._new_state(rd.Opts())
+    entry = rd._stage(state, "screening_prep")
+    entry.update({"emitted": True, "discovery": True, "target_ids": ["a1"], "completed_ids": []})
+    kind, note = rd._h_screening_prep(state, entry, rd.Opts())
+    assert kind == "error" and "empty" in note
 
 
 def test_unattended_screening_prep_carries_over_when_nothing_progressed(rd, monkeypatch, tmp_path):

@@ -244,8 +244,11 @@ def generate_dashboard(db: dict = None) -> None:
     # --- Build VACANCY_DATA payload for JS ---
     from datetime import datetime, timezone
 
+    from prepare_screening import prompt_fingerprint
+
     vacancy_data = {
         "config": {
+            "screening_prompt_fingerprint": prompt_fingerprint(),
             # Timezone-aware UTC (ends in "+00:00"): browsers parse an
             # offset-less ISO string as browser-LOCAL time, which would skew
             # the fallback banner's 48h staleness check by up to

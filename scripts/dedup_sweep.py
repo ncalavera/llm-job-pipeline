@@ -76,6 +76,8 @@ from database_supabase import (  # noqa: E402
 # Higher = more worth keeping. A user decision (applied/passed/…) always beats
 # an undecided 'unseen', so the survivor inherits the decision (the point of the
 # whole exercise: a renamed copy must not resurface as unseen).
+from statuses import APPLICATION_STATUSES
+
 _STATUS_RANK = {
     "applied": 100,
     "to_apply": 90,
@@ -88,6 +90,7 @@ _STATUS_RANK = {
     "unseen": 20,
     "archived": 10,
 }
+_STATUS_RANK.update({status: 100 + i for i, status in enumerate(sorted(APPLICATION_STATUSES))})
 
 # A row in one of these states is no longer "live" in the source listing.
 _GONE_STATUSES = frozenset({"archived", "expiring"})

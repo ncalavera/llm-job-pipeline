@@ -1,5 +1,5 @@
 ---
-description: The one daily command. A Python driver runs the whole pipeline in a fixed order — validate → fetch → enrich → filter → prepare evidence → publish — with checkpoints, a live progress card, and a publish gate. You (the agent) only supply judgment at the gates it stops on: quoted evidence preparation and profile comparison. First run auto-onboards an empty database.
+description: The one daily command. A Python driver runs the whole pipeline in a fixed order — validate → fetch → enrich → filter → prepare discovery → publish — with checkpoints, a live progress card, and a publish gate. You (the agent) only supply judgment at the gates it stops on: per-vacancy scoring plus quoted evidence preparation. First run auto-onboards an empty database.
 ---
 
 # /jobs-new
@@ -118,24 +118,28 @@ backtests, rollover) live in `scripts/learning.py` — **no LLM calls**. Your jo
 
 Then `--resume`.
 
-### Screening preparation (default daily gate)
+### Combined discovery (default daily gate)
 
-`prepare_screening` points to `vacancies/prepare_screening_payload.json` (use the
-actual path printed by the gate). For each payload independently, run ONE
-subagent using its `system_prompt` and `user_msg`; return the requested facts,
-quotes, work profile and profile comparison. Do not produce a numerical score.
-Save each result with its original `id` to a private JSON file, then:
+`prepare_screening` keeps the gate name and points to
+`vacancies/prepare_screening_payload.json`. New discovery payloads contain
+separate `scoring` and `screening` sections. For each vacancy independently,
+run exactly ONE subagent request and return both sections when requested:
+unscored roles get a numeric score plus quoted facts/profile comparison; roles
+with an existing score below 40 get only missing or stale facts; roles at 40 or
+above are not sent. Copy ids and fingerprints verbatim, keep scoring and facts
+independent, and use exact posting quotes.
 
 ```bash
-python3 scripts/prepare_screening.py --save --files r1.json r2.json
+python3 scripts/prepare_discovery.py --save --payload vacancies/prepare_screening_payload.json --files r1.json r2.json
 python3 scripts/run_daily.py --resume
 ```
 
-The driver reuses successful results until the posting or profile changes.
-Failed preparations retry next run. Review and keep/put aside in the dashboard
-Screen view; the daily command never waits for human verdicts on vacancies.
-Company scoring and vacancy scoring remain available explicitly through
-`score_companies.py` and `score_vacancies.py`, outside the daily path.
+The saver validates each section and performs a conditional save without
+changing decisions. Successful results are reused until the posting or profile
+changes; failed or incomplete work retries next run. Review with Like / Pass
+in the Inbox table; the daily command never waits for human verdicts.
+Legacy `prepare_screening.py` and `score_vacancies.py` remain available for
+explicit old payloads.
 
 ---
 

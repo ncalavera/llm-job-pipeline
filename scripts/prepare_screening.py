@@ -167,17 +167,20 @@ def _description(row: dict) -> str:
     return (row.get("full_description") or "").strip()
 
 
+def is_current(row: dict) -> bool:
+    """Stored preparation belongs to the current posting, prompt and profile."""
+    return row.get("screening_state") == "ready" and row.get(
+        "screening_fingerprint"
+    ) == fingerprint(_description(row))
+
+
 def eligible(row: dict) -> bool:
     """A role the night may prepare: real description, not already prepared
     for this exact posting + prompt + profile."""
     desc = _description(row)
     if len(desc) < 200 or quality.is_boilerplate_junk(desc):
         return False
-    if row.get("screening_state") == "ready" and row.get("screening_fingerprint") == fingerprint(
-        desc
-    ):
-        return False
-    return True
+    return not is_current(row)
 
 
 def load_pool(window_days: int) -> list[dict]:

@@ -2,12 +2,15 @@
 
 import hashlib
 import json
+import os
 import re
+import uuid
 
 from config import GLOBAL_BLACKLIST, GLOBAL_BLACKLIST_SUBSTR
 from fetchers import http
 from fetchers.parsing import _blacklist_filter, _is_generic_pipeline_title
 from fetchers.registry import board_fetcher
+from source_observations import record_source_observations, record_source_run
 
 
 @board_fetcher("algolia_api")
@@ -19,6 +22,15 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
     api_key = board_cfg["algolia_api_key"]
     index = board_cfg["algolia_index"]
     board_name = board_cfg["name"]
+    run_id = os.environ.get("JOBS_RUN_ID") or str(uuid.uuid4())
+    source_key = board_cfg.get("source_key") or board_cfg.get("id") or re.sub(
+        r"[^a-z0-9]+", "_", board_name.lower()
+    ).strip("_")
+    source_url = board_cfg.get("url")
+    ledger_ok = record_source_run(run_id, source_key, source_url)
+    if run_id and not ledger_ok:
+        from fetchers.registry import record_fetch_error
+        record_fetch_error(board_name, "error: source ledger unavailable")
 
     url = f"https://{app_id}-dsn.algolia.net/1/indexes/{index}/query"
     headers = {
@@ -32,6 +44,7 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
     page = 0
     per_page = 200
     last_error = None
+    reported_total = None
 
     while True:
         payload = json.dumps(
@@ -50,6 +63,8 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
             break
 
         hits = data.get("hits", [])
+        if reported_total is None and data.get("nbHits") is not None:
+            reported_total = int(data["nbHits"])
         if not hits:
             break
         all_hits.extend(hits)
@@ -58,8 +73,26 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
             break
         page += 1
 
+    if last_error is None and reported_total is not None and len(all_hits) < reported_total:
+        last_error = RuntimeError(
+            f"incomplete pagination: observed {len(all_hits)} of advertised {reported_total} hits"
+        )
+
     if not all_hits and last_error is not None:
         raise last_error  # total failure — let the boundary record the reason
+
+    # Durable raw capture happens before parser filters run. A second upsert
+    # below annotates each row with the parser outcome.
+    raw_observations = [{
+        "external_id": hit.get("objectID") or hashlib.md5(
+            f"{hit.get('company_name', '')}:{hit.get('title', '')}".encode()
+        ).hexdigest()[:12],
+        "title": hit.get("title") or "",
+        "organization": (hit.get("company_name") or "").strip(),
+        "url": hit.get("url_external") or "",
+        "outcome": "observed",
+    } for hit in all_hits]
+    observations_ok = record_source_observations(run_id, source_key, source_url, raw_observations)
 
     # Apply GLOBAL_BLACKLIST + board-specific blacklist (NO caps, NO location filter, NO keyword filter)
     board_blacklist = board_cfg.get("board_blacklist", [])
@@ -71,14 +104,61 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
         substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
     )
 
+    # Keep the source's complete observed roster before any filtering. This is
+    # also the reconciliation key for newsletters, where the canonical vacancy
+    # row may have been filtered out before it reached the dashboard.
+    filtered_ids = {id(hit) for hit in filtered}
+    observations = []
+    for hit in all_hits:
+        title = hit.get("title") or ""
+        if id(hit) not in filtered_ids:
+            reason = "blacklist"
+            outcome = "excluded"
+        elif _is_generic_pipeline_title(title):
+            reason = "generic_pipeline_title"
+            outcome = "excluded"
+        else:
+            reason = None
+            outcome = "accepted"
+        observations.append({
+            "external_id": hit.get("objectID") or hashlib.md5(
+                f"{hit.get('company_name', '')}:{title}".encode()
+            ).hexdigest()[:12],
+            "title": title,
+            "organization": (hit.get("company_name") or "").strip(),
+            "url": hit.get("url_external") or "",
+            "outcome": outcome,
+            "reason": reason,
+        })
+    observations_ok = observations_ok and record_source_observations(
+        run_id, source_key, source_url,
+        observations,
+    )
+    final_ledger_ok = record_source_run(
+        run_id, source_key, source_url, raw_count=len(all_hits),
+        accepted_count=sum(o["outcome"] == "accepted" for o in observations),
+        excluded_count=sum(o["outcome"] == "excluded" for o in observations),
+        complete=last_error is None and ledger_ok and observations_ok,
+        error=str(last_error) if last_error else (None if ledger_ok and observations_ok else "source ledger write failed"),
+    )
+    if run_id and (not observations_ok or not final_ledger_ok):
+        from fetchers.registry import record_fetch_error
+        record_fetch_error(board_name, "error: source ledger write failed")
+
+    # A partial page walk is useful evidence, but it is not a complete source
+    # run. Keep the rows already collected while exposing the failure to the
+    # fetch boundary so gone detection/publish gates cannot treat it as healthy.
+    if last_error is not None:
+        from fetchers.registry import record_fetch_error
+        record_fetch_error(board_name, f"error: incomplete pagination: {last_error}")
+
     jobs = []
     generic_filtered_out = 0
-    for hit in filtered:  # NO cap — LLM scoring decides relevance
+    for hit in all_hits:  # raw intake; observations above retain filter reasons
         org = (hit.get("company_name") or "").strip() or f"[via {board_name}]"
         title = hit.get("title") or ""
         if _is_generic_pipeline_title(title):
             generic_filtered_out += 1
-            continue
         # Location: join city tags, fallback to country tags
         cities = hit.get("tags_city") or []
         location = ", ".join(cities) if cities else ", ".join(hit.get("tags_country") or [])
@@ -137,11 +217,14 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
                 "compensation": hit.get("salary") or "",
                 "org_override": org,
                 "org_url": board_cfg["url"],
+                "preserve_listing": True,
+                "_source_run": run_id,
+                "_source_key": source_key,
             }
         )
 
     print(
-        f"  [{board_name}] Algolia: {len(jobs)} relevant from {len(all_hits)} total"
-        f" (generic postings filtered: {generic_filtered_out})"
+        f"  [{board_name}] Algolia: {len(jobs)} retained from {len(all_hits)} total"
+        f" (generic postings flagged: {generic_filtered_out})"
     )
     return jobs

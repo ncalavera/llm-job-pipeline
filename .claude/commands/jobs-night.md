@@ -4,11 +4,10 @@ description: Headless nightly scoring session. Invoked by scripts/nightly_run.py
 
 # /jobs-night — one preparation gate, unattended
 
-The default daily run emits only `prepare_screening`: one call per vacancy for
-quoted facts and profile comparison, no numerical score. Unchanged ready results
-are reused; failed preparations retry next run. The other gate names below are
-retained for explicit legacy scoring. The morning digest is one compact summary
-and a dashboard link; human review happens in the Screen view.
+The default daily run emits `prepare_screening` with discovery payloads: one
+call per vacancy. Unscored roles request a numeric score and quoted facts/profile
+comparison; existing roles below 40 request only stale or missing facts; roles
+at or above 40 are untouched. The other gate names remain legacy paths.
 
 Arguments: `$ARGUMENTS` = `<gate> <night_dir> <phase>` where `<gate>` is one of
 `screen_companies | score_companies | score_vacancies | prepare_screening`,
@@ -90,18 +89,19 @@ filter stage. Python saves with `score_vacancies.py`; the
 
 ### prepare_screening
 
-Screening preparation: extraction with quotes plus a profile
-comparison — NO score. 1 vacancy = 1 subagent. The result is exactly the JSON
-object the payload's `system_prompt` defines (`id`, `posting_facts`,
-`work_profile`, `profile_comparison`, `unknowns`), with the payload's `id` copied verbatim:
+For a discovery payload, return one wrapper with the original identity and the
+requested sections. The scoring section is numeric; the screening section is
+evidence-only. 1 vacancy = 1 subagent:
 
 ```json
-{"id": "<from the payload>", "posting_facts": {...}, "work_profile": {...}, "profile_comparison": [...], "unknowns": [...]}
+{"id":"<from payload>","fingerprint":"<from payload>","scoring":{...}|null,"screening":{...}|null}
 ```
 
-Every quote must be a sentence copied character for character from the
-posting; Python rejects a result whose quote is not in the posting and stores
-it as failed with the reason. Python saves with `prepare_screening.py`.
+Every quote must be copied character for character from the posting. Python
+validates both sections, ids, fingerprints and score fields before the
+conditional save. Save discovery files with
+`prepare_discovery.py --save --payload vacancies/prepare_screening_payload.json
+--files ...`. Legacy screening payloads remain accepted by the old saver.
 
 ### score_companies
 

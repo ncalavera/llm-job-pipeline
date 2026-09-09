@@ -33,6 +33,7 @@ ReadWritePaths=/home/jobsearch/Projects/personal/llm-job-pipeline
 ReadWritePaths=/home/jobsearch/jobsearch
 ReadWritePaths=/home/jobsearch/.claude
 ReadWritePaths=/home/jobsearch/.claude.json
+ReadWritePaths=-/home/jobsearch/.codex
 NoNewPrivileges=yes
 PrivateTmp=yes
 # The wrapper logs one-line summaries only; transcripts stay in the private

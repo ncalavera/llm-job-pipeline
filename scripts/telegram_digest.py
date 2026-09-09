@@ -118,11 +118,10 @@ LIMIT %s
 # Ready to screen (KTD5): the one predicate the dashboard's To screen shares —
 # no score floor, no tier, no digest_sent_at stamp, so nothing above fits.
 SELECT_READY_TO_SCREEN_SQL = """
-SELECT v.id
+SELECT v.id, v.screening_state, v.screening_fingerprint, v.full_description
 FROM vacancy v
 JOIN company c ON v.company_id = c.id
-WHERE v.status = 'unseen'
-  AND v.screening_state = 'ready'
+WHERE v.status IN ('unseen', 'expiring')
   AND c.status != 'inactive'
 """
 
@@ -1080,20 +1079,8 @@ def cmd_send_details(args):
     )
 
 
-def fetch_screening_counts(conn):
-    """Same ready predicate and preparation cohort as the dashboard."""
-    from report.data_prep import _count_screening_processing
-
-    processing = _count_screening_processing()
-    return {
-        "ready": fetch_ready_to_screen(conn),
-        "failed": processing["failed"],
-        "waiting": processing["unprepared"],
-    }
-
-
-def build_screening_summary(counts, arrivals, run_state):
-    lines = [_t("digest_daily_screening", new=arrivals, **counts)]
+def build_screening_summary(ready, run_state):
+    lines = [_t("digest_daily_screening", ready=ready)]
     failed_stages = [
         s["name"] for s in (run_state or {}).get("stages", []) if s.get("status") == "error"
     ]
@@ -1119,9 +1106,7 @@ def cmd_send(args):
     state_path = os.environ.get("DIGEST_STATE_FILE", DEFAULT_STATE_FILE)
     last_digest = read_state_file(state_path).get("last_digest_at")
     run_state = load_run_state(last_digest)
-    since = _since_param(db_url, last_digest or (date.today() - timedelta(days=1)).isoformat())
-    arrivals = fetch_counts_since(conn, since).get("fetched") or 0
-    body = build_screening_summary(fetch_screening_counts(conn), arrivals, run_state)
+    body = build_screening_summary(fetch_ready_to_screen(conn), run_state)
     if args.dry_run:
         print(body)
         print("[dry-run] 1 message — nothing sent")

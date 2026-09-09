@@ -23,7 +23,7 @@ def _parse_hn_comment(comment: dict) -> dict | None:
 
     plain = _html_to_multiline(text)
     first_line = next((l.strip() for l in plain.splitlines() if l.strip()), "")
-    if not first_line:
+    if not first_line or re.match(r"(?i)^seeking\s+work\b", first_line):
         return None
 
     segments = [s.strip() for s in _HN_SEPARATOR_RE.split(first_line) if s.strip()]
