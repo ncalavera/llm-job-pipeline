@@ -1,4 +1,4 @@
--- Add the 'unsure' vacancy status to the CHECK constraint.
+-- 0032 — add the 'unsure' vacancy status to the CHECK constraint.
 --
 -- The daily review has three keys, not two: Like, Pass and Unsure. Unsure means
 -- "come back to me". The row leaves today's list and returns to the Inbox the
