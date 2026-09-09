@@ -6857,6 +6857,10 @@ body::after {
   overflow: auto;
 }
 
+.review-drawer-form > .review-group:last-of-type {
+  padding-bottom: 8px;
+}
+
 .review-drawer-head {
   display: flex;
   align-items: center;
@@ -6993,7 +6997,7 @@ body::after {
 .review-row {
   display: grid;
   grid-template-columns:
-    minmax(0, 2fr) 52px 104px minmax(190px, 2fr) 108px 56px 152px;
+    minmax(0, 3fr) 52px 104px minmax(180px, 2fr) 104px 56px 152px;
   gap: 14px;
   align-items: center;
   padding: 0 12px 0 10px;
@@ -7018,6 +7022,10 @@ body::after {
 }
 
 .review-row {
+  /* Clear of the pinned block above and the pinned key hints below, so
+     scrollIntoView never parks the cursor row under either. */
+  scroll-margin-top: 160px;
+  scroll-margin-bottom: 56px;
   min-height: var(--review-row-h);
   background: var(--card);
   border-radius: var(--radius-row);
@@ -7349,9 +7357,28 @@ body::after {
   }
 
   /* The command bar is four rows tall here; pinning it would cost a quarter
-     of the screen for controls the reader uses once per session. */
+     of the screen for controls the reader uses once per session. The recovery
+     strip does get pinned: it is empty until something needs saying, and a
+     phone has no U key to undo with. */
   .review-sticky {
     position: static;
+  }
+  /* Fixed, not sticky: sticky is trapped inside .review-sticky, which scrolls
+     away. A phone has no U key, so Undo has to be reachable from any scroll
+     position — and the bottom of the screen is where the thumb already is. */
+  .review-statusbar {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    z-index: 6;
+    padding: 10px 12px;
+    border-radius: var(--radius-tile);
+    background: var(--card);
+    box-shadow: var(--shadow-lg);
+  }
+  .review-rows {
+    padding-bottom: 96px;
   }
 
   /* The tab strip scrolls inside itself; the page never scrolls sideways. */
@@ -7361,8 +7388,7 @@ body::after {
   .review-bar .basket-tabs {
     order: -1;
     flex: 1 0 100%;
-    overflow-x: auto;
-    scrollbar-width: none;
+    flex-wrap: wrap;
   }
   .review-bar .basket-tab {
     flex: 0 0 auto;
@@ -7410,7 +7436,6 @@ body::after {
     text-overflow: ellipsis;
   }
   .review-meta {
-    flex-wrap: nowrap;
     line-height: 1.4;
   }
   .review-cell--conflict {
@@ -7463,7 +7488,7 @@ body::after {
   .review-meta {
     grid-area: meta;
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: baseline;
     gap: 4px 8px;
     font-size: var(--text-xs);

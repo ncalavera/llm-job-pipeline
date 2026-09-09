@@ -1428,7 +1428,12 @@ export function initUI() {
   window.addEventListener(
     "scroll",
     function () {
-      if (window.scrollY > 300) {
+      // Not on the review screen: its command bar is pinned, so the button
+      // buys nothing there and its 56px circle lands on a row's Pass button.
+      const review = document
+        .getElementById("catalogSection")
+        ?.classList.contains("active");
+      if (window.scrollY > 300 && !review) {
         scrollTopBtn.classList.add("visible");
       } else {
         scrollTopBtn.classList.remove("visible");

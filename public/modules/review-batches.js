@@ -100,9 +100,13 @@ export function reviewSections(rows, fingerprint) {
       defaultStatus: null,
       rows: rest,
     });
-  return sections.sort(
-    (a, b) => nearestDeadline(a.rows) - nearestDeadline(b.rows),
-  );
+  // Infinity - Infinity is NaN, which makes the order of two deadline-less
+  // sections arbitrary between renders.
+  return sections.sort((a, b) => {
+    const x = nearestDeadline(a.rows);
+    const y = nearestDeadline(b.rows);
+    return x === y ? 0 : x - y;
+  });
 }
 
 /**

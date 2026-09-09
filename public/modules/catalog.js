@@ -49,10 +49,6 @@ import { createCursor } from "./keys.js";
 // on both sides; add it if the deep-scroll case is ever measured as slow.
 export const REVIEW_WINDOW = 60;
 
-// Row height plus its gap — used only to size the spacer when the window jumps
-// to a row the reader reached with the keyboard rather than by scrolling.
-const APPROX_ITEM_HEIGHT = 64;
-
 // The three decisions this screen can take, and the status each writes.
 // The statuses server.js's SCREENING_STATUSES accepts as expected_status. A row
 // already in the application funnel is moved on its own detail page, not here.
@@ -111,7 +107,6 @@ let _queue = Promise.resolve();
 // painted. Rebuilt by renderCatalog, grown by the sentinel.
 let _items = [];
 let _shown = 0;
-let _dropped = 0;
 // The basket size behind the filters, or 0 when no filter is narrowing it.
 let _filteredTotal = 0;
 let _browseQueue = [];
@@ -185,11 +180,16 @@ export function reviewToggleDeadline() {
 let _searchTimer = null;
 export function reviewSearchInput() {
   clearTimeout(_searchTimer);
-  _searchTimer = setTimeout(renderCatalog, 160);
+  _searchTimer = setTimeout(() => {
+    renderCatalog();
+    syncDrawerCount();
+  }, 160);
 }
 
 export function reviewToggleExpand(id) {
+  const closing = expandedId;
   expandedId = expandedId === id ? null : id;
+  if (closing && closing !== id) refreshRow(closing);
   refreshRow(id);
 }
 
@@ -296,12 +296,19 @@ function visibleRows() {
   return { rows, total: inBasket.length };
 }
 
+const openDays = (g) => {
+  const days = daysToDeadline(g);
+  return days == null || days < 0 ? Infinity : days;
+};
+
 function sortRows(rows) {
   const by = {
     "score-desc": (a, b) => (b.llm_score ?? -1) - (a.llm_score ?? -1),
     "score-asc": (a, b) => (a.llm_score ?? 999) - (b.llm_score ?? 999),
-    deadline: (a, b) =>
-      (daysToDeadline(a) ?? Infinity) - (daysToDeadline(b) ?? Infinity),
+    // A lapsed deadline is not urgent. It sorts with "no deadline", matching
+    // review-batches.js nearestDeadline, so the row order and the section
+    // order never disagree about which role is closest.
+    deadline: (a, b) => openDays(a) - openDays(b),
   };
   return [...rows].sort(by[sortBy] || by["score-desc"]);
 }
@@ -334,7 +341,6 @@ export function renderCatalog() {
   if (!rows.length) {
     _items = [];
     _shown = 0;
-    _dropped = 0;
     _browseQueue = [];
     _browseCursor.reconcile(_browseQueue);
     grid.innerHTML = emptyStateHtml(total);
@@ -346,8 +352,7 @@ export function renderCatalog() {
   _browseQueue = _items.filter((i) => i.type === "row").map((i) => i.g.id);
   _browseCursor.reconcile(_browseQueue);
   _shown = 0;
-  _dropped = 0;
-  grid.innerHTML = '<div class="review-spacer" style="height:0"></div>';
+  grid.innerHTML = "";
   growWindow();
   ensureCursorPainted();
   renderStatusBar();
@@ -371,23 +376,6 @@ export function growWindow() {
   const next = _items.slice(_shown, _shown + REVIEW_WINDOW);
   _shown += next.length;
   grid.insertAdjacentHTML("beforeend", next.map(itemHtml).join(""));
-  applyCursorHighlight();
-}
-
-/**
- * Repaint the window from `from`, so a cursor move can reach an unpainted row.
- * A spacer stands in for the items above it, keeping the scrollbar honest.
- */
-function repaintFrom(from) {
-  const grid = document.getElementById("catalogGrid");
-  if (!grid) return;
-  _dropped = Math.max(0, Math.min(from, _items.length - REVIEW_WINDOW));
-  _shown = Math.min(_items.length, _dropped + REVIEW_WINDOW);
-  grid.innerHTML =
-    '<div class="review-spacer" style="height:' +
-    _dropped * APPROX_ITEM_HEIGHT +
-    'px"></div>' +
-    _items.slice(_dropped, _shown).map(itemHtml).join("");
   applyCursorHighlight();
 }
 
@@ -466,7 +454,7 @@ export function sectionHeadHtml(section, opts = {}) {
     : days === 0
       ? "nearest deadline today"
       : "nearest deadline in " + days + (days === 1 ? " day" : " days");
-  const defaultChip = section.defaultStatus
+  const defaultChip = section.defaultStatus && opts.canAccept !== false
     ? '<span class="review-head-default">Default: <span class="review-pill review-pill--' +
       section.defaultStatus +
       '">' +
@@ -808,21 +796,19 @@ export function refreshRow(id) {
   const el = Array.from(grid.querySelectorAll(".review-row")).find(
     (row) => row.dataset.id === id,
   );
-  if (!el) return;
   const g = groupsById.get(id);
   const status = g ? getGroupStatus(g) : null;
   const section = _items.find(
     (i) => i.type === "row" && i.g.id === id,
   )?.section;
   if (!g || STATUS_BASKET[status] !== state.currentBasket) {
-    el.remove();
+    el?.remove();
     const at = _items.findIndex((i) => i.type === "row" && i.g.id === id);
     if (at >= 0) {
       _items.splice(at, 1);
       // The painted count must shrink with the list, or growWindow's next
       // slice starts one item too far and an undecided role is never painted.
       if (at < _shown) _shown -= 1;
-      if (at < _dropped) _dropped -= 1;
     }
     if (section) {
       const left = section.rows.filter((r) => r.id !== id);
@@ -832,10 +818,15 @@ export function refreshRow(id) {
     }
     _browseQueue = _browseQueue.filter((qid) => qid !== id);
     _browseCursor.reconcile(_browseQueue);
+    if (!_browseQueue.length) {
+      renderCatalog();
+      return;
+    }
     applyCursorHighlight();
     refreshCount();
     return;
   }
+  if (!el) return;
   el.outerHTML = reviewRowHtml(g, status, {
     expanded: id === expandedId,
     fingerprint: config.screening_prompt_fingerprint,
@@ -859,7 +850,6 @@ function refreshSectionHead(section) {
     if (at >= 0) {
       _items.splice(at, 1);
       if (at < _shown) _shown -= 1;
-      if (at < _dropped) _dropped -= 1;
     }
     return;
   }
@@ -955,9 +945,10 @@ function applyCursorHighlight() {
 }
 
 /**
- * Repaint the window around the cursor when it has walked out of the painted
- * slice. Without this, j past the last painted row silently selects a role the
- * reader cannot see — and the next L/P/S decides it.
+ * Paint forward until the cursor's row exists. Without this, j past the last
+ * painted row silently selects a role the reader cannot see — and the next
+ * L/P/S decides it. It only ever grows: an earlier version recycled the top
+ * into a spacer, and scrolling back up then showed an empty list.
  */
 function ensureCursorPainted() {
   if (_browseCursor.id == null || cursorRowEl()) return;
@@ -965,7 +956,7 @@ function ensureCursorPainted() {
     (i) => i.type === "row" && i.g.id === _browseCursor.id,
   );
   if (at < 0) return;
-  repaintFrom(Math.max(0, at - 10));
+  while (_shown <= at && _shown < _items.length) growWindow();
 }
 
 function scrollCursorIntoView() {
@@ -1049,13 +1040,6 @@ function browseKeydown(e) {
   if (!cursorRowEl()) {
     ensureCursorPainted();
     scrollCursorIntoView();
-    return;
-  }
-  // An unsaved receipt blocks the write. Holding the cursor still keeps the
-  // refused decisions and the rows the reader believes they decided in step.
-  if (decisionState().pending) {
-    notice = "One decision is still unsaved. Retry it first.";
-    renderStatusBar();
     return;
   }
   applyDecision(g.id, action);
