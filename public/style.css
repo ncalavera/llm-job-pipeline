@@ -6728,10 +6728,55 @@ body::after {
   margin: 0;
 }
 
-/* Fitts's law: the tabs are a primary control and were 28px tall. */
-.review-bar .basket-tab {
-  min-height: var(--tap);
-  padding: 0 11px;
+.review-bar-spacer {
+  flex: 1;
+}
+
+/* Segmented, on a grey ground: the same shape as the filter pills would say
+   "another filter", which is what the old tab strip did (Gestalt similarity). */
+.basket-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--sky-shell);
+}
+
+.basket-switch .basket-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--sky-text-secondary);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.basket-switch .basket-tab.active {
+  background: var(--card);
+  color: var(--sky-text);
+  box-shadow: var(--shadow-sm);
+}
+
+.basket-switch .basket-tab:not(.active) .basket-count {
+  display: none;
+}
+
+.basket-switch .basket-count {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--sky-text-tertiary);
+}
+
+.basket-switch .basket-tab.active .basket-count {
+  color: var(--cobalt);
 }
 
 .review-search input {
@@ -6744,8 +6789,8 @@ body::after {
   gap: 8px;
   height: var(--tap);
   padding: 0 14px;
-  flex: 1 1 180px;
-  max-width: 230px;
+  flex: 1 1 160px;
+  max-width: 200px;
   background: var(--card);
   border: 1px solid var(--sky-line);
   border-radius: var(--radius-pill);
@@ -6983,28 +7028,25 @@ body::after {
   min-width: 0;
 }
 
-.review-head .browse-results-count {
-  grid-column: 4 / -1;
-  justify-self: end;
+.review-keyhint .browse-results-count {
   padding: 0;
-  font-size: var(--text-xs);
-  text-transform: none;
-  letter-spacing: 0;
+  font-size: var(--text-sm);
   color: var(--sky-text-secondary);
 }
 
 .review-head,
 .review-row {
   display: grid;
+  /* Both text columns flex, so neither starves the other: the title and the
+     conflict are the two fields a decision is made on. */
   grid-template-columns:
-    minmax(0, 3fr) 52px 104px minmax(180px, 2fr) 104px 56px 152px;
-  gap: 14px;
+    minmax(44px, auto) minmax(150px, 1.5fr) 52px 92px minmax(240px, 2fr) 84px 44px 148px;
+  gap: 12px;
   align-items: center;
   padding: 0 12px 0 10px;
 }
 
 .review-head {
-  grid-template-rows: auto auto;
   padding-top: 10px;
   padding-bottom: 8px;
   background: var(--sky-sheet);
@@ -7055,6 +7097,20 @@ body::after {
   display: contents;
 }
 
+.review-cell--default {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.review-cell--default .review-pill {
+  white-space: nowrap;
+}
+
+.review-default-none {
+  color: var(--sky-text-disabled);
+}
+
 .review-cell--role {
   display: flex;
   flex-direction: column;
@@ -7100,10 +7156,17 @@ body::after {
   color: var(--sky-text-secondary);
 }
 
-.review-deadline--soon,
-.review-deadline--past {
+.review-deadline--soon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--q-weak);
   font-weight: 600;
+}
+
+.review-deadline--soon > .review-clock {
+  font-size: 14px;
+  line-height: 1;
 }
 
 .review-conflict {
@@ -7314,8 +7377,8 @@ body::after {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
-  padding: 14px 4px 4px;
+  gap: 8px 12px;
+  padding: 14px 4px 6px;
 }
 
 .review-section-title {
@@ -7330,11 +7393,26 @@ body::after {
   color: var(--sky-text-secondary);
 }
 
+/* Its own line. Sharing the header row left the reason 146px and clamped it
+   to two of the three lines it needs. */
 .review-head-default {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1 1 260px;
+  flex: 1 1 100%;
+  order: 3;
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+
+.review-head-default-label,
+.review-head-default-note {
+  color: var(--sky-text-secondary);
+}
+
+.review-head-default-note {
+  min-width: 0;
+  line-height: 1.35;
 }
 
 .review-pill {
@@ -7355,12 +7433,34 @@ body::after {
   background: var(--q-good-bg);
   color: var(--q-good);
 }
+.review-pill--unsure {
+  background: var(--q-moderate-bg);
+  color: var(--q-moderate);
+}
 
 .review-section-spacer {
   flex: 1;
 }
 
+.review-key-cap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  margin-left: 8px;
+  padding: 0 6px;
+  border: 1px solid var(--sky-line);
+  border-radius: 6px;
+  background: var(--card);
+  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-size: var(--text-xs);
+  color: var(--sky-text);
+}
+
 .review-accept {
+  display: inline-flex;
+  align-items: center;
   height: var(--tap);
   padding: 0 14px;
   border: 1px solid var(--cobalt);
@@ -7375,49 +7475,75 @@ body::after {
 
 /* --- status bar and key hints -------------------------------------------- */
 
-.review-statusbar {
+/* The undo toast: transient, at the foot of the list, above the key hints.
+   It replaced a permanent outlined button wedged between the filters and the
+   column header, which read as part of the header and pushed the table down. */
+.review-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 56px;
+  z-index: 7;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 8px 4px 0;
+  gap: 14px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 12px 10px 16px;
+  transform: translateX(-50%);
+  border-radius: var(--radius-pill);
+  background: var(--sky-text);
+  color: #fff;
+  box-shadow: var(--shadow-lg);
+  font-size: var(--text-sm);
 }
 
-.review-statusbar:empty {
+.review-toast[hidden] {
   display: none;
 }
 
-.review-undo--alert {
-  border-color: var(--q-weak);
-  color: var(--q-weak);
+.review-toast--alert {
+  background: var(--q-weak);
 }
 
-.review-deferred,
-.review-notice:empty {
-  font-size: var(--text-sm);
-  color: var(--sky-text-secondary);
+.review-toast-what {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.review-undo {
-  height: var(--tap);
-  padding: 0 14px;
-  border: 1px solid var(--cobalt);
+.review-toast-undo {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
   border-radius: var(--radius-pill);
-  background: var(--card);
-  color: var(--cobalt);
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
   font: inherit;
   font-size: var(--text-sm);
   font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.review-notice {
-  font-size: var(--text-sm);
-  color: var(--sky-text-secondary);
+.review-toast-undo:hover {
+  background: rgba(255, 255, 255, 0.26);
 }
 
-/* Pinned, as on the canvas: the key map is only useful while the eye is on a
-   row, and at 1288 rows a footer at the end of the document is never seen. */
+.review-toast .review-key-cap {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: transparent;
+  color: #fff;
+}
+
+.review-keyhint-spacer {
+  flex: 1;
+}
+
 .review-keyhint {
   position: sticky;
   bottom: 0;
@@ -7436,14 +7562,14 @@ body::after {
   height: 1px;
 }
 
-/* The floating scroll-to-top button used to sit over the last row's ✕. */
+/* Clear of the pinned key hints and of the toast that rises above them. */
 .review-rows {
-  padding-bottom: 72px;
+  padding-bottom: 128px;
 }
 
 /* --- phone: two lines per row, no horizontal scroll ---------------------- */
 
-@media (max-width: 720px) {
+@media (max-width: 1100px) {
   .review-head,
   .review-keyhint {
     display: none;
@@ -7459,16 +7585,10 @@ body::after {
   /* Fixed, not sticky: sticky is trapped inside .review-sticky, which scrolls
      away. A phone has no U key, so Undo has to be reachable from any scroll
      position — and the bottom of the screen is where the thumb already is. */
-  .review-statusbar {
-    position: fixed;
-    left: 8px;
-    right: 8px;
-    bottom: 8px;
-    z-index: 6;
-    padding: 10px 12px;
-    border-radius: var(--radius-tile);
-    background: var(--card);
-    box-shadow: var(--shadow-lg);
+  /* No keyboard here, so the toast is the only way back: keep it in reach. */
+  .review-toast {
+    bottom: 12px;
+    max-width: calc(100vw - 24px);
   }
   .review-rows {
     padding-bottom: 96px;
@@ -7478,14 +7598,14 @@ body::after {
   .review-bar {
     gap: 8px;
   }
-  .review-bar .basket-tabs {
+  .basket-switch {
     order: -1;
     flex: 1 0 100%;
-    flex-wrap: wrap;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
-  .review-bar .basket-tab {
-    flex: 0 0 auto;
-    white-space: nowrap;
+  .review-bar-spacer {
+    display: none;
   }
   .review-search {
     flex: 1 0 100%;
@@ -7583,15 +7703,20 @@ body::after {
   }
 
   .review-row {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     grid-template-areas:
-      "role score"
-      "meta meta"
-      "acts acts";
+      "def role score"
+      "meta meta meta"
+      "acts acts acts";
     row-gap: 6px;
     padding: 10px 12px;
   }
 
+  .review-cell--default {
+    grid-area: def;
+    align-items: flex-start;
+    padding-top: 2px;
+  }
   .review-cell--role {
     grid-area: role;
   }
@@ -7616,13 +7741,27 @@ body::after {
     grid-area: acts;
     justify-content: flex-start;
   }
+  /* The word is the label here; the glyph beside it only stole the 15px the
+     longest translated word needs. */
   .review-btn {
+    flex: 1 1 0;
     width: auto;
-    min-width: var(--tap);
-    padding: 0 14px;
-    gap: 6px;
-    font-size: var(--text-sm);
+    min-width: 0;
+    padding: 0 6px;
+    font-size: 12px;
     font-weight: 600;
+  }
+  .review-btn-glyph {
+    display: none;
+  }
+  .review-cell--actions {
+    gap: 6px;
+  }
+  .review-btn-word {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .review-btn-word,
   .review-score-word {

@@ -489,45 +489,11 @@
                  sticky block, so there is a single offset to get right. -->
             <div class="review-sticky">
 
-            <!-- Daily review command bar (Direction B). One list, four
-                 controls: search, score band, the deadline chip, and the
-                 drawer that holds every remaining filter. -->
+            <!-- Command bar, one row, as the canvas: search, score band, the
+                 deadline chip, the drawer. The basket switch is a compact
+                 segmented control at the far end, so it reads as a view
+                 switch rather than a fifth filter. -->
             <div class="review-bar">
-              <div class="basket-tabs">
-                <button
-                  class="basket-tab"
-                  data-basket="liked"
-                  onclick="switchBasket(this)"
-                >
-                  <span>Liked</span>
-                  <span class="basket-count" id="countLiked">0</span>
-                </button>
-                <button
-                  class="basket-tab active"
-                  data-basket="unseen"
-                  onclick="switchBasket(this)"
-                >
-                  <span>Inbox</span>
-                  <span class="basket-count" id="countUnseen">0</span>
-                </button>
-                <button
-                  class="basket-tab"
-                  data-basket="passed"
-                  onclick="switchBasket(this)"
-                >
-                  <span>Passed</span>
-                  <span class="basket-count" id="countPassed">0</span>
-                </button>
-                <button
-                  class="basket-tab"
-                  data-basket="deferred"
-                  onclick="switchBasket(this)"
-                >
-                  <span>Set aside</span>
-                  <span class="basket-count" id="countDeferred">0</span>
-                </button>
-              </div>
-
               <label class="review-search">
                 <span class="review-search-icon" aria-hidden="true">&#128269;</span>
                 <input
@@ -542,9 +508,9 @@
               <label class="review-band">
                 <span class="visually-hidden">Score band</span>
                 <select id="reviewScoreBand" onchange="reviewSetBand(this.value)">
-                  <option value="">All scores</option>
-                  <option value="40">Score 40 and up</option>
+                  <option value="40" selected>Score 40 and up</option>
                   <option value="60">Score 60 and up</option>
+                  <option value="">All scores</option>
                 </select>
               </label>
 
@@ -566,6 +532,43 @@
               >
                 More filters<span class="review-more-count" id="reviewMoreCount" hidden></span>
               </button>
+
+              <span class="review-bar-spacer"></span>
+
+              <div class="basket-switch" role="group" aria-label="Which list">
+                <button
+                  class="basket-tab active"
+                  data-basket="unseen"
+                  onclick="switchBasket(this)"
+                >
+                  <span>Inbox</span>
+                  <span class="basket-count" id="countUnseen">0</span>
+                </button>
+                <button
+                  class="basket-tab"
+                  data-basket="liked"
+                  onclick="switchBasket(this)"
+                >
+                  <span>Liked</span>
+                  <span class="basket-count" id="countLiked">0</span>
+                </button>
+                <button
+                  class="basket-tab"
+                  data-basket="passed"
+                  onclick="switchBasket(this)"
+                >
+                  <span>Passed</span>
+                  <span class="basket-count" id="countPassed">0</span>
+                </button>
+                <button
+                  class="basket-tab"
+                  data-basket="deferred"
+                  onclick="switchBasket(this)"
+                >
+                  <span>Set aside</span>
+                  <span class="basket-count" id="countDeferred">0</span>
+                </button>
+              </div>
             </div>
 
             <!-- The drawer. Native <dialog>: focus trap, Esc and the backdrop
@@ -603,12 +606,8 @@
               </form>
             </dialog>
 
-            <!-- The recovery strip sits ABOVE the list, next to the command
-                 bar: Undo, Retry and the save notice are worthless at the
-                 bottom of 1288 rows. -->
-            <div class="review-statusbar" id="reviewStatusbar"></div>
-
               <div class="review-head">
+                <div>Default</div>
                 <div>Role &middot; employer</div>
                 <div>Score</div>
                 <div>Deadline</div>
@@ -616,7 +615,6 @@
                 <div>Source</div>
                 <div>Age</div>
                 <div>Decide</div>
-                <div class="browse-results-count" id="catalogResultsCount"></div>
               </div>
             </div>
             <!-- /review-sticky -->
@@ -628,6 +626,9 @@
               <div class="review-sentinel" id="reviewSentinel" aria-hidden="true"></div>
             </div>
 
+            <!-- The undo toast: transient, near the rows it undoes. -->
+            <div class="review-toast" id="reviewToast" role="status" aria-live="polite" hidden></div>
+
             <!-- Keyboard hints. Desktop only: the phone has no keyboard. -->
             <div class="review-keyhint">
               <span><span class="browse-key">j</span><span class="browse-key">k</span> move</span>
@@ -636,6 +637,9 @@
               <span><span class="browse-key">S</span> unsure, back tomorrow</span>
               <span><span class="browse-key">U</span> undo</span>
               <span><span class="browse-key">&#8629;</span> show the requirements</span>
+              <span><span class="browse-key">A</span> accept batch default</span>
+              <span class="review-keyhint-spacer"></span>
+              <span class="browse-results-count" id="catalogResultsCount"></span>
             </div>
           </div>
           <!-- /catalog-section -->

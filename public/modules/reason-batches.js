@@ -1,4 +1,4 @@
-import { VISIBLE_MIN_SCORE, screenRequirements } from './derive.js';
+import { screenRequirements } from './derive.js';
 
 export const REASON_GROUPS = [
   ['eligibility', 'Location or language'],
@@ -8,8 +8,11 @@ export const REASON_GROUPS = [
 // These are review prompts, not rejection verdicts. Unknown/preferred/stale
 // requirements never justify a batch. Eligibility takes precedence for one group per role.
 export function reasonBatch(g, fingerprint) {
-  if (typeof g.llm_score !== 'number' || g.llm_score >= VISIBLE_MIN_SCORE ||
-      g.screening_state !== 'ready' || !fingerprint ||
+  // No score gate: a quoted REQUIRED condition the profile may not meet is a
+  // reason to group a role whatever it scores. The old "< 40" rule came from
+  // the retired "review low scores by reason" strip, and under the review
+  // screen's default score band it left every batch empty.
+  if (g.screening_state !== 'ready' || !fingerprint ||
       g.screening_fingerprint !== `${g.posting_fingerprint}:${fingerprint}`) return null;
   const requirements = screenRequirements(g);
   const comparisons = g.screening?.profile_comparison;

@@ -97,10 +97,50 @@ test("an unscored role shows a dash, never a fabricated number", () => {
   assert.match(html, /review-score vac-score--none"[^>]*>.*?>score<\/span>—/s);
 });
 
-test("the top conflict shows the note and puts the quote in the title", () => {
+test("the top conflict is a short phrase built from the requirement itself", () => {
   const html = reviewRowHtml(conflicted, "unseen", { fingerprint: "f" });
-  assert.match(html, /title="Fluent Dutch at C1 level is required\."/);
-  assert.match(html, /Needs Dutch, C1/);
+  // The requirement's own value, not the model's free-text note. The kind and
+  // the note stay in the hover title and in the expanded panel.
+  assert.match(html, /review-conflict" title="Language — Dutch, C1 — Needs Dutch, C1"/);
+  assert.match(html, />Dutch, C1</);
+});
+
+test("a long requirement is cut at a word, never mid-word", () => {
+  const g = structuredClone(conflicted);
+  g.screening.posting_facts.requirements[0].value =
+    "eight or more years of experience running large international programmes";
+  const html = reviewRowHtml(g, "unseen", { fingerprint: "f" });
+  const value = g.screening.posting_facts.requirements[0].value;
+  const shown = /review-conflict"[^>]*>([^<]*)</.exec(html)[1];
+  assert.ok(shown.length <= 46, shown);
+  assert.match(shown, /…$/);
+  // What survives is a whole-word prefix of the requirement: the next
+  // character in the original is a space, so no word was cut in half.
+  const kept = shown.replace(/…$/, "");
+  assert.ok(value.startsWith(kept), kept);
+  assert.equal(value[kept.length], " ");
+});
+
+test("no conflict reads as a plain phrase, not an alarm", () => {
+  const html = reviewRowHtml(baseGroup, "unseen", {});
+  assert.match(html, /review-conflict--none">No conflict found</);
+});
+
+test("the row leads with the model's suggestion, as a pill", () => {
+  const html = reviewRowHtml(baseGroup, "unseen", { defaultStatus: "passed" });
+  assert.match(html, /review-cell--default"><span class="review-pill review-pill--passed">Pass</);
+  // With no suggestion the column is present and empty, ready for real values.
+  assert.match(
+    reviewRowHtml(baseGroup, "unseen", {}),
+    /review-cell--default"><span class="review-default-none">—</,
+  );
+});
+
+test("a per-role suggestion outranks the batch's, when one exists", () => {
+  const html = reviewRowHtml({ ...baseGroup, batch_default: "liked" }, "unseen", {
+    defaultStatus: "passed",
+  });
+  assert.match(html, /review-pill--liked/);
 });
 
 // --- decisions -------------------------------------------------------------
@@ -220,6 +260,9 @@ test("a batch keeps its proposed default and the unbatched rest comes last", () 
     ["eligibility", "unbatched"],
   );
   assert.equal(sections[0].defaultStatus, "passed");
+  // Batches are numbered in reading order; the unbatched rest is not a batch.
+  assert.equal(sections[0].number, 1);
+  assert.equal(sections[1].number, undefined);
 });
 
 test("every section, batched or not, is ordered by its nearest deadline", () => {
@@ -250,12 +293,9 @@ test("a section header names the count and the nearest deadline", () => {
   });
   assert.match(html, /Location or language/);
   assert.match(html, /1 role · nearest deadline in 2 days/);
-  assert.match(
-    html,
-    /Default: <span class="review-pill review-pill--passed">Pass/,
-  );
+  assert.match(html, /Model default:<\/span><span class="review-pill review-pill--passed">Pass/);
   assert.match(html, /data-accept="eligibility"/);
-  assert.match(html, /Pass all 1/);
+  assert.match(html, /Accept defaults for batch<span class="review-key-cap">A</);
 });
 
 test("a section with no proposed default offers no accept button", () => {
@@ -353,13 +393,20 @@ test("a conflict quote is escaped inside the title attribute", () => {
 
 // --- visibility ------------------------------------------------------------
 
-test("the default score band keeps unscored roles in the list", async () => {
+test("the screen opens on the canvas's score band, not on everything", async () => {
   const { groupsInBasket, basketCounts } = await import("./derive.js");
-  const rows = [{ ...baseGroup, id: "unscored", llm_score: null }];
   const visibility = catalogVisibility();
+  assert.equal(visibility.minScore, 40);
+  // A role under the band is out of the opening list, and out of its count, so
+  // the badge and the list still agree.
+  const rows = [
+    { ...baseGroup, id: "strong", llm_score: 70 },
+    { ...baseGroup, id: "weak", llm_score: 12 },
+    { ...baseGroup, id: "unscored", llm_score: null },
+  ];
   assert.deepEqual(
     groupsInBasket(rows, "unseen", visibility).map((g) => g.id),
-    ["unscored"],
+    ["strong"],
   );
   assert.equal(basketCounts(rows, visibility).unseen, 1);
 });

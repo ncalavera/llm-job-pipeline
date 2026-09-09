@@ -7,8 +7,11 @@ const role={llm_score:20,screening_state:'ready',posting_fingerprint:'p',screeni
 test('one reason group per role; only quoted required conflicts with current preparation qualify',()=>{
  assert.equal(reasonBatch(role,'f').key,'eligibility');
  assert.equal(reasonBatch(role,'stale'),null);
- assert.equal(reasonBatch({...role,llm_score:null},'f'),null);
- assert.equal(reasonBatch({...role,llm_score:80},'f'),null);
+ // A score no longer gates a batch: a quoted required condition the profile
+ // may not meet groups a role whatever it scores, and the review screen's
+ // default band starts at 40.
+ assert.equal(reasonBatch({...role,llm_score:null},'f').key,'eligibility');
+ assert.equal(reasonBatch({...role,llm_score:80},'f').key,'eligibility');
  const r=structuredClone(role);
  r.screening.profile_comparison[1].finding='unknown';
  assert.equal(reasonBatch(r,'f').key,'expertise');

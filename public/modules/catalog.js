@@ -27,6 +27,7 @@ import {
   qualityBand,
 } from "./helpers.js";
 import { basketCounts, screenMatches, groupsInBasket } from "./derive.js";
+import { T } from "./i18n.js";
 import { reviewDrawerHtml, DRAWER_KEYS } from "./review-filters.js";
 import {
   reviewSections,
@@ -64,26 +65,44 @@ export const DECIDABLE = new Set([
 const DECISIONS = {
   like: {
     status: "liked",
-    label: "Like",
+    key: "screen_keep",
     word: "Like",
     glyph: "✓",
     cls: "like",
   },
   unsure: {
     status: "unsure",
-    label: "Unsure, back tomorrow",
+    key: "review_unsure",
     word: "Unsure",
     glyph: "?",
     cls: "unsure",
   },
   pass: {
     status: "passed",
-    label: "Pass",
+    key: "screen_put_aside",
     word: "Pass",
     glyph: "✕",
     cls: "pass",
   },
 };
+
+/** The decision a status stands for, so a proposal can be shown as a pill. */
+const BY_STATUS = Object.fromEntries(
+  Object.entries(DECISIONS).map(([, d]) => [d.status, d]),
+);
+
+/** The model's suggestion for one role, as the canvas's tinted pill. */
+export function defaultPillHtml(status) {
+  const d = status && BY_STATUS[status];
+  if (!d) return '<span class="review-default-none">—</span>';
+  return (
+    '<span class="review-pill review-pill--' +
+    d.status +
+    '">' +
+    escHtml(T(d.key, d.word)) +
+    "</span>"
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Screen state
@@ -91,15 +110,15 @@ const DECISIONS = {
 
 // Drawer values, keyed exactly as derive.js's screenMatches reads them.
 const filters = {};
-// "" | "40" | "60" — the command bar's score band. "" lifts the floor.
-let scoreBand = "";
+// "" | "40" | "60" — the command bar's score band, preselected at 40 as the
+// canvas shows. "" lifts the floor.
+let scoreBand = "40";
 let deadlineSoon = false;
 let sortBy = "score-desc";
 let orgFilter = "";
 // The row whose requirement facts are open, or null. One at a time.
 let expandedId = null;
 let busy = false;
-let notice = "";
 // Decisions run one at a time, in the order they were made.
 let _queue = Promise.resolve();
 
@@ -349,7 +368,6 @@ export function renderCatalog() {
     _browseQueue = [];
     _browseCursor.reconcile(_browseQueue);
     grid.innerHTML = emptyStateHtml(total);
-    renderStatusBar();
     return;
   }
 
@@ -360,7 +378,6 @@ export function renderCatalog() {
   grid.innerHTML = "";
   growWindow();
   ensureCursorPainted();
-  renderStatusBar();
 }
 
 function itemHtml(item) {
@@ -371,6 +388,7 @@ function itemHtml(item) {
     : reviewRowHtml(item.g, getGroupStatus(item.g), {
         expanded: item.g.id === expandedId,
         fingerprint: config.screening_prompt_fingerprint,
+        defaultStatus: item.section?.defaultStatus,
       });
 }
 
@@ -456,41 +474,49 @@ export function reviewClearAll() {
 export function sectionHeadHtml(section, opts = {}) {
   const days = nearestDeadline(section.rows);
   const when = !Number.isFinite(days)
-    ? "no deadline ahead"
+    ? T("review_nearest_none", "no deadline ahead")
     : days === 0
-      ? "nearest deadline today"
-      : "nearest deadline in " + days + (days === 1 ? " day" : " days");
-  const defaultChip = section.defaultStatus && opts.canAccept !== false
-    ? '<span class="review-head-default">Default: <span class="review-pill review-pill--' +
-      section.defaultStatus +
-      '">' +
-      (section.defaultStatus === "passed" ? "Pass" : "Like") +
-      "</span>" +
-      (section.note ? " " + escHtml(section.note) : "") +
-      "</span>"
-    : "";
-  const accept =
-    section.defaultStatus && opts.canAccept !== false
-      ? '<button type="button" class="review-accept" data-accept="' +
-        escHtml(section.key) +
-        '">' +
-        (section.defaultStatus === "passed" ? "Pass all " : "Like all ") +
-        section.rows.length +
-        "</button>"
-      : "";
+      ? T("review_nearest_today", "nearest deadline today")
+      : T("review_nearest_in", "nearest deadline in {n}").replace(
+          "{n}",
+          dayCount(days),
+        );
+  const proposes = section.defaultStatus && opts.canAccept !== false;
+  const title =
+    (section.number ? T("review_batch", "Batch") + " " + section.number + " · " : "") +
+    section.title;
   return (
     '<div class="review-section" data-section="' +
     escHtml(section.key) +
     '"><span class="review-section-title">' +
-    escHtml(section.title) +
+    escHtml(title) +
     '</span><span class="review-section-meta">' +
     section.rows.length +
-    (section.rows.length === 1 ? " role · " : " roles · ") +
-    when +
+    " " +
+    escHtml(T("screen_roles", section.rows.length === 1 ? "role" : "roles")) +
+    " · " +
+    escHtml(when) +
     "</span>" +
-    defaultChip +
+    (proposes
+      ? '<span class="review-head-default"><span class="review-head-default-label">' +
+        escHtml(T("review_model_default", "Model default:")) +
+        "</span>" +
+        defaultPillHtml(section.defaultStatus) +
+        (section.note
+          ? '<span class="review-head-default-note">' +
+            escHtml(section.note) +
+            "</span>"
+          : "") +
+        "</span>"
+      : "") +
     '<span class="review-section-spacer"></span>' +
-    accept +
+    (proposes
+      ? '<button type="button" class="review-accept" data-accept="' +
+        escHtml(section.key) +
+        '">' +
+        escHtml(T("review_accept_batch", "Accept defaults for batch")) +
+        '<span class="review-key-cap">A</span></button>'
+      : "") +
     "</div>"
   );
 }
@@ -612,6 +638,13 @@ function expansionHtml(g, id) {
   );
 }
 
+/** "3 days" / "1 day", in the reader's language. */
+function dayCount(n) {
+  return n === 1
+    ? T("review_one_day", "1 day")
+    : T("review_days", "{n} days").replace("{n}", String(n));
+}
+
 /** How long the role has been in the inbox, in words. */
 export function ageText(firstSeen) {
   const day = String(firstSeen || "").slice(0, 10);
@@ -635,38 +668,44 @@ export function reviewRowHtml(g, basketStatus, opts = {}) {
     score == null ? "vac-score--none" : "q-" + qualityBand(score) + "-bg";
 
   const days = daysToDeadline(g);
+  // The canvas puts a clock beside a deadline that is close, and only then.
+  const urgent = days != null && days < 3;
   const deadlineHtml =
     days == null
-      ? '<span class="review-deadline review-deadline--none">no deadline</span>'
+      ? '<span class="review-deadline review-deadline--none">' +
+        escHtml(T("review_deadline_none", "no deadline")) +
+        "</span>"
       : '<span class="review-deadline' +
-        (days < 0
-          ? " review-deadline--past"
-          : days <= 7
-            ? " review-deadline--soon"
-            : "") +
+        (urgent ? " review-deadline--soon" : "") +
         '">' +
-        (days < 0
-          ? "passed"
-          : days === 0
-            ? "today"
-            : "in " + days + (days === 1 ? " day" : " days")) +
+        (urgent ? '<span class="review-clock" aria-hidden="true">◷</span>' : "") +
+        escHtml(
+          days < 0
+            ? T("review_deadline_passed", "passed")
+            : days === 0
+              ? T("review_deadline_today", "today")
+              : "in " + dayCount(days),
+        ) +
         "</span>";
 
-  const conflict = topConflict(g, opts.fingerprint);
+  const conflict = topConflict(g, opts.fingerprint, T);
   const conflictHtml = conflict
     ? '<span class="review-conflict" title="' +
-      escHtml(conflict.quote || conflict.text) +
+      escHtml(conflict.full || conflict.quote) +
       '">' +
       escHtml(conflict.text) +
       "</span>"
-    : '<span class="review-conflict review-conflict--none">No conflict found</span>';
+    : '<span class="review-conflict review-conflict--none">' +
+      escHtml(T("review_no_conflict", "No conflict found")) +
+      "</span>";
 
   // The durable write path only accepts these as a precondition, so offering a
   // button on any other status renders a control that can only fail.
   const actions = (DECIDABLE.has(basketStatus) ? Object.entries(DECISIONS) : [])
     .filter(([, d]) => d.status !== basketStatus)
-    .map(
-      ([key, d]) =>
+    .map(([key, d]) => {
+      const word = escHtml(T(d.key, d.word));
+      return (
         '<button type="button" class="review-btn review-btn--' +
         d.cls +
         '" data-decide="' +
@@ -674,18 +713,24 @@ export function reviewRowHtml(g, basketStatus, opts = {}) {
         '" data-id="' +
         id +
         '" title="' +
-        escHtml(d.label) +
+        word +
         '" aria-label="' +
-        escHtml(d.label) +
-        '"><span aria-hidden="true">' +
+        word +
+        '"><span class="review-btn-glyph" aria-hidden="true">' +
         d.glyph +
         '</span><span class="review-btn-word">' +
-        escHtml(d.word) +
-        "</span></button>",
-    )
+        word +
+        "</span></button>"
+      );
+    })
     .join("");
 
   const expansion = opts.expanded ? expansionHtml(g, id) : "";
+
+  // The model's suggestion. Today it comes from the role's batch; when the
+  // strong model emits one per role, review-batches.js attaches it to the row
+  // and this reads it without another change here.
+  const suggestion = g.batch_default || opts.defaultStatus || null;
 
   return (
     '<div class="review-row' +
@@ -701,7 +746,12 @@ export function reviewRowHtml(g, basketStatus, opts = {}) {
     "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();event.stopPropagation();reviewToggleExpand('" +
     idJs +
     "')}\">" +
-    '<div class="review-cell review-cell--role"><span class="review-title">' +
+    '<div class="review-cell review-cell--default">' +
+    defaultPillHtml(suggestion) +
+    "</div>" +
+    '<div class="review-cell review-cell--role"><span class="review-title" title="' +
+    escHtml(g.title) +
+    '">' +
     escHtml(g.title) +
     '</span><span class="review-org">' +
     escHtml(g.company_name || g.org || "—") +
@@ -799,23 +849,21 @@ async function writeDecision(id, decision) {
   // An unsaved receipt belongs to another row; sending a second decision would
   // replay that receipt against this one. Make the reader retry it first.
   if (decisionState().pending) {
-    notice = "One decision is still unsaved. Retry it first.";
-    renderStatusBar();
+    failureToast("One decision is still unsaved. Retry it first.");
     return;
   }
+  const title = groupsById.get(id)?.title || "";
   busy = true;
-  renderStatusBar();
   try {
     const result = await bulkSet([id], decision.status);
-    notice =
-      result && result.saved ? "" : "Could not save that decision. Retry.";
+    if (result && result.saved) decisionToast(decision, title);
+    else failureToast("Could not save that decision.");
   } catch {
-    notice = "Could not save that decision. Retry.";
+    failureToast("Could not save that decision.");
   }
   busy = false;
   refreshRow(id);
   updateBasketCounts();
-  renderStatusBar();
 }
 
 /** Apply a section's proposed default to every row still undecided in it. */
@@ -839,7 +887,6 @@ async function acceptSection(key) {
   )
     return;
   busy = true;
-  renderStatusBar();
   try {
     const result = await bulkSet(
       section.rows.map((g) => g.id),
@@ -847,11 +894,14 @@ async function acceptSection(key) {
       undefined,
       true,
     );
-    notice = result
-      ? result.saved + " of " + result.total + " saved"
-      : "Could not save. Retry.";
+    if (result)
+      decisionToast(
+        BY_STATUS[section.defaultStatus],
+        result.saved + " / " + result.total + " · " + section.title,
+      );
+    else failureToast("Could not save the batch.");
   } catch {
-    notice = "Could not save. Retry.";
+    failureToast("Could not save the batch.");
   }
   busy = false;
   updateBasketCounts();
@@ -861,12 +911,19 @@ async function acceptSection(key) {
 export async function undoDecision() {
   if (busy) return;
   busy = true;
-  renderStatusBar();
   try {
     const result = await undoLast();
-    notice = result ? result.restored + " restored" : "Nothing to undo.";
+    if (result)
+      showToast(
+        '<span class="review-toast-what">' +
+          escHtml(T("review_undone", "Undone")) +
+          " · " +
+          result.restored +
+          "</span>",
+      );
+    else hideToast();
   } catch {
-    notice = "Could not undo. Retry.";
+    failureToast("Could not undo.");
   }
   busy = false;
   updateBasketCounts();
@@ -876,12 +933,11 @@ export async function undoDecision() {
 async function retryPending() {
   if (busy) return;
   busy = true;
-  renderStatusBar();
   try {
     await retryDecision();
-    notice = "";
+    hideToast();
   } catch {
-    notice = "Still could not save. Retry.";
+    failureToast("Still could not save.");
   }
   busy = false;
   updateBasketCounts();
@@ -938,6 +994,7 @@ export function refreshRow(id) {
   el.outerHTML = reviewRowHtml(g, status, {
     expanded: id === expandedId,
     fingerprint: config.screening_prompt_fingerprint,
+    defaultStatus: section?.defaultStatus,
   });
   applyCursorHighlight();
   refreshCount();
@@ -979,49 +1036,66 @@ function refreshCount() {
     : shown + (shown === 1 ? " role" : " roles");
 }
 
-/** How many roles the reviewer set aside today — they sit in no basket. */
-function deferredToday() {
-  let n = 0;
-  for (const g of groups) if (getGroupStatus(g) === "unsure") n += 1;
-  return n;
-}
+// The toast clears itself. Undo keeps working after it goes: U undoes the last
+// decision of the session either way, and the key hint strip says so.
+const TOAST_MS = 8000;
+let _toastTimer = null;
 
 /**
- * The recovery strip, directly under the command bar. Undo, Retry, the save
- * notice and the count of roles deferred today. It used to render below the
- * whole list, where a lost decision reported itself 4,000px out of sight.
+ * Say what just happened, next to the rows it happened to, and offer the way
+ * back. This replaces a permanent outlined button that sat between the filters
+ * and the column header and read as part of the header.
  */
-function renderStatusBar() {
-  const bar = document.getElementById("reviewStatusbar");
-  if (!bar) return;
-  const pending = decisionState();
-  const deferred = deferredToday();
-  bar.innerHTML =
-    (pending.canUndo
-      ? '<button type="button" class="review-undo" id="reviewUndo"' +
-        (busy ? " disabled" : "") +
-        ">Undo last decision (U)</button>"
-      : "") +
-    (pending.pending
-      ? '<button type="button" class="review-undo review-undo--alert" id="reviewRetry"' +
-        (busy ? " disabled" : "") +
-        ">Retry the unsaved decision</button>"
-      : "") +
-    (busy || notice
-      ? '<span role="status" class="review-notice">' +
-        escHtml(busy ? "Saving…" : notice) +
-        "</span>"
-      : "") +
-    (deferred
-      ? '<span class="review-deferred">' +
-        deferred +
-        (deferred === 1 ? " role" : " roles") +
-        " set aside until tomorrow</span>"
-      : "");
-  const undo = document.getElementById("reviewUndo");
+function showToast(html, sticky) {
+  const el = document.getElementById("reviewToast");
+  if (!el) return;
+  clearTimeout(_toastTimer);
+  el.innerHTML = html;
+  el.hidden = false;
+  el.classList.toggle("review-toast--alert", !!sticky);
+  const undo = el.querySelector("[data-toast-undo]");
   if (undo) undo.onclick = undoDecision;
-  const retry = document.getElementById("reviewRetry");
+  const retry = el.querySelector("[data-toast-retry]");
   if (retry) retry.onclick = retryPending;
+  if (!sticky)
+    _toastTimer = setTimeout(() => {
+      el.hidden = true;
+    }, TOAST_MS);
+}
+
+function hideToast() {
+  clearTimeout(_toastTimer);
+  const el = document.getElementById("reviewToast");
+  if (el) el.hidden = true;
+}
+
+/** The toast for one saved decision: what happened, to which role, and Undo. */
+function decisionToast(decision, title) {
+  showToast(
+    '<span class="review-toast-what"><span class="review-pill review-pill--' +
+      decision.status +
+      '">' +
+      escHtml(T(decision.key, decision.word)) +
+      "</span>" +
+      escHtml(title) +
+      "</span>" +
+      '<button type="button" class="review-toast-undo" data-toast-undo>' +
+      escHtml(T("screen_undo", "Undo")) +
+      '<span class="review-key-cap">U</span></button>',
+  );
+}
+
+/** A save that did not land stays on screen until it is retried. */
+function failureToast(message) {
+  showToast(
+    '<span class="review-toast-what">' +
+      escHtml(message) +
+      "</span>" +
+      '<button type="button" class="review-toast-undo" data-toast-retry>' +
+      escHtml(T("screen_retry", "Retry")) +
+      "</button>",
+    true,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1132,6 +1206,17 @@ function browseKeydown(e) {
     ensureCursorPainted();
     applyCursorHighlight();
     scrollCursorIntoView();
+    return;
+  }
+
+  if (key === "a" || key === "A") {
+    const section = _items.find(
+      (i) => i.type === "row" && i.g.id === _browseCursor.id,
+    )?.section;
+    if (!section || !section.defaultStatus || state.currentBasket !== "unseen")
+      return;
+    e.preventDefault();
+    acceptSection(section.key);
     return;
   }
 

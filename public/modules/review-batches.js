@@ -24,23 +24,81 @@ const BATCH_NOTE = {
     "that may not match your profile",
 };
 
-/** The one requirement conflict worth putting in the row, or null. */
-export function topConflict(g, fingerprint) {
-  const batch = reasonBatch(g, fingerprint);
-  if (batch && batch.reasons.length) {
-    const r = batch.reasons[0];
-    return { text: r.note || r.kind, quote: r.quote };
-  }
-  // Outside a batch, still surface the first possible conflict the facts name.
+// Every requirement kind already has a "screen_<kind>" string in both
+// languages, so the key needs no table of its own.
+const kindWord = (kind, t) =>
+  t("screen_" + (kind || "other"), kind || "other");
+
+// What fits the column at 1280 without truncating. Past this the phrase gets
+// an ellipsis, which is what made the old column unreadable: every value ended
+// mid-word and the cell carried nothing at a glance.
+const CONFLICT_CHARS = 36;
+
+/**
+ * Shorten one requirement to a phrase that fits the row.
+ *
+ * The model writes `value` as a clause, sometimes several joined by commas or
+ * a pipe. The first clause is the requirement; the rest is elaboration that
+ * belongs in the expanded panel. Cutting there beats cutting mid-word.
+ */
+export function shortenRequirement(value, limit = CONFLICT_CHARS) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (text.length <= limit) return text;
+  const clause = text.split(/[;|(]|,\s/)[0].trim();
+  // A one-word first clause is short but says less than a trimmed sentence,
+  // so only a clause with real content wins over the word cut.
+  if (clause.length >= 18 && clause.length <= limit) return clause;
+  const cut = text.slice(0, limit);
+  const space = cut.lastIndexOf(" ");
+  return (space > 12 ? cut.slice(0, space) : cut).trim() + "…";
+}
+
+/**
+ * The one requirement conflict worth putting in the row, as a SHORT phrase.
+ *
+ * Built from the requirement's own kind and value, never from the model's
+ * free-text note: the note is a Russian sentence that truncated mid-word in a
+ * 260px column and carried nothing at a glance. `full` keeps the note and the
+ * profile factor for the hover title and the expanded panel.
+ */
+export function topConflict(g, fingerprint, t = (k, f) => f) {
   const requirements = screenRequirements(g);
-  const comparisons = g.screening?.profile_comparison;
-  for (const c of Array.isArray(comparisons) ? comparisons : []) {
-    if (!c || c.finding !== "possible_conflict") continue;
-    const r = Number.isInteger(c.requirement) && requirements[c.requirement];
-    if (!r) continue;
-    return { text: c.note || r.value || r.kind, quote: r.quote || "" };
-  }
-  return null;
+  const comparisons = Array.isArray(g.screening?.profile_comparison)
+    ? g.screening.profile_comparison
+    : [];
+  const batch = reasonBatch(g, fingerprint);
+  const wanted = batch && batch.reasons.length ? batch.reasons[0].quote : null;
+  const pick =
+    comparisons.find(
+      (c) =>
+        c &&
+        c.finding === "possible_conflict" &&
+        Number.isInteger(c.requirement) &&
+        requirements[c.requirement] &&
+        (!wanted || requirements[c.requirement].quote === wanted),
+    ) ||
+    comparisons.find(
+      (c) =>
+        c &&
+        c.finding === "possible_conflict" &&
+        Number.isInteger(c.requirement) &&
+        requirements[c.requirement],
+    );
+  if (!pick) return null;
+  const r = requirements[pick.requirement];
+  const kind = kindWord(r.kind, t);
+  const short = shortenRequirement(r.value);
+  return {
+    // No kind prefix: the column is headed "Top conflict with profile" and the
+    // amber says the rest. Prefixed, the kind alone ate a third of the cell in
+    // the longer language.
+    text: short || kind,
+    full: [kind, r.value, pick.note, pick.profile_factor]
+      .filter(Boolean)
+      .join(" — "),
+    quote: r.quote || "",
+  };
 }
 
 /** Every quoted requirement with its profile finding — the row's expansion. */
@@ -102,11 +160,17 @@ export function reviewSections(rows, fingerprint) {
     });
   // Infinity - Infinity is NaN, which makes the order of two deadline-less
   // sections arbitrary between renders.
-  return sections.sort((a, b) => {
+  sections.sort((a, b) => {
     const x = nearestDeadline(a.rows);
     const y = nearestDeadline(b.rows);
     return x === y ? 0 : x - y;
   });
+  // Numbered in the order they are read, so "Batch 2" means the same thing to
+  // the reader and to anyone he tells about it. The unbatched rest is not one.
+  let n = 0;
+  for (const section of sections)
+    if (section.defaultStatus) section.number = ++n;
+  return sections;
 }
 
 /**
