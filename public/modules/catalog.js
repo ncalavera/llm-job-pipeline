@@ -499,6 +499,119 @@ export function sectionHeadHtml(section, opts = {}) {
 // Row assembly — pure: no DOM or module-state reads beyond the arguments.
 // ---------------------------------------------------------------------------
 
+// The strength a posting attaches to a requirement, in words. "unknown" is the
+// least useful word on the screen, so it says what it means instead.
+const STRENGTH_WORD = {
+  required: "Must have",
+  preferred: "Preferred",
+  unknown: "Mentioned",
+};
+
+// What the comparison found, in words, with the colour that matches the row.
+const FINDING_WORD = {
+  possible_conflict: ["Possible conflict", "conflict"],
+  match: ["Evidence of a match", "match"],
+  unknown: ["Nothing recorded either way", "unknown"],
+};
+
+/** Required first: the conditions that can rule a role out are read first. */
+const STRENGTH_ORDER = { required: 0, preferred: 1, unknown: 2 };
+
+/** One quoted requirement, in three levels: label, finding, quote. */
+function factHtml(f, group) {
+  const [word, tone] = FINDING_WORD[f.finding] || FINDING_WORD.unknown;
+  const label = [STRENGTH_WORD[f.strength] || STRENGTH_WORD.unknown, f.kind]
+    .filter(Boolean)
+    .join(" · ");
+  const detail = f.note || f.value;
+  return (
+    '<div class="review-fact' +
+    (group ? " review-fact--group" : "") +
+    '"><span class="review-fact-label">' +
+    escHtml(label) +
+    '</span><p class="review-fact-note"><span class="review-finding review-finding--' +
+    tone +
+    '">' +
+    escHtml(word) +
+    "</span>" +
+    escHtml(detail ? " — " + detail : "") +
+    "</p><blockquote>" +
+    escHtml(f.quote) +
+    "</blockquote></div>"
+  );
+}
+
+/** The right rail: the posting's own facts, the ones the row has no room for. */
+function postingFactsHtml(g) {
+  const facts = g.screening?.posting_facts || {};
+  const days = daysToDeadline(g);
+  const rows = [
+    [
+      "Location",
+      facts.location ||
+        (g.locations || [])
+          .map((l) => l && l.location)
+          .filter(Boolean)
+          .join(", "),
+    ],
+    [
+      "Deadline",
+      days == null
+        ? "not stated"
+        : String(g.deadline).slice(0, 10) +
+          " (" +
+          (days < 0 ? "passed" : days === 0 ? "today" : "in " + days + " days") +
+          ")",
+    ],
+    ["Kind of contract", facts.employment_type],
+    ["Where the work happens", facts.work_mode],
+    ["Seniority", facts.seniority],
+    ["Source", g.source_board || "careers page"],
+    ["In the inbox", ageText(g.first_seen)],
+  ];
+  return (
+    '<aside class="review-expand-facts"><h4>Posting details</h4><dl>' +
+    rows
+      .map(
+        ([term, value]) =>
+          "<dt>" +
+          escHtml(term) +
+          "</dt><dd>" +
+          escHtml(value && value !== "unknown" ? String(value) : "not stated") +
+          "</dd>",
+      )
+      .join("") +
+    "</dl></aside>"
+  );
+}
+
+/** The panel under an expanded row: the evidence left, the facts right. */
+function expansionHtml(g, id) {
+  const facts = requirementFacts(g).sort(
+    (a, b) =>
+      (STRENGTH_ORDER[a.strength] ?? 2) - (STRENGTH_ORDER[b.strength] ?? 2),
+  );
+  return (
+    '<div class="review-expand" id="expand-' +
+    id +
+    '"><div class="review-expand-body">' +
+    "<h4>What the posting asks for</h4>" +
+    (facts.length
+      ? facts
+          .map((f, i) =>
+            factHtml(f, i > 0 && f.strength !== facts[i - 1].strength),
+          )
+          .join("")
+      : "<p class=\"review-fact-note\">No quoted requirements were prepared for this role.</p>") +
+    '<button type="button" class="review-expand-link" data-open="' +
+    id +
+    '">Open the full role page →</button>' +
+    "</div>" +
+    postingFactsHtml(g) +
+    "</div>"
+  );
+}
+
 /** How long the role has been in the inbox, in words. */
 export function ageText(firstSeen) {
   const day = String(firstSeen || "").slice(0, 10);
@@ -572,35 +685,18 @@ export function reviewRowHtml(g, basketStatus, opts = {}) {
     )
     .join("");
 
-  const facts = opts.expanded ? requirementFacts(g) : [];
-  const expansion = opts.expanded
-    ? '<div class="review-facts">' +
-      (facts.length
-        ? facts
-            .map(
-              (f) =>
-                '<p class="review-fact"><strong>' +
-                escHtml(f.strength) +
-                " · " +
-                escHtml(f.value || f.kind) +
-                "</strong>" +
-                (f.note ? " — " + escHtml(f.note) : "") +
-                "</p><blockquote>" +
-                escHtml(f.quote) +
-                "</blockquote>",
-            )
-            .join("")
-        : "<p>No quoted requirements were prepared for this role.</p>") +
-      '<button type="button" class="review-open" data-open="' +
-      id +
-      '">Open the full role page</button>' +
-      "</div>"
-    : "";
+  const expansion = opts.expanded ? expansionHtml(g, id) : "";
 
   return (
-    '<div class="review-row" data-id="' +
+    '<div class="review-row' +
+    (opts.expanded ? " review-row--expanded" : "") +
+    '" data-id="' +
     id +
-    '" role="button" tabindex="0" onclick="if(!event.target.closest(\'button,input,a,label,summary,details\'))openCatalogRow(\'' +
+    '" role="button" tabindex="0" aria-expanded="' +
+    (opts.expanded ? "true" : "false") +
+    '" aria-controls="expand-' +
+    id +
+    '" onclick="if(!event.target.closest(\'button,input,a,label,summary,details\'))openCatalogRow(\'' +
     idJs +
     "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();event.stopPropagation();reviewToggleExpand('" +
     idJs +
@@ -634,8 +730,8 @@ export function reviewRowHtml(g, basketStatus, opts = {}) {
     '<div class="review-cell review-cell--actions">' +
     actions +
     "</div>" +
-    expansion +
-    "</div>"
+    "</div>" +
+    expansion
   );
 }
 
@@ -807,7 +903,12 @@ export function refreshRow(id) {
   const section = _items.find(
     (i) => i.type === "row" && i.g.id === id,
   )?.section;
+  // The expansion is the row's next sibling, so it has to be dropped with it.
+  const panel =
+    el?.nextElementSibling?.classList.contains("review-expand") &&
+    el.nextElementSibling;
   if (!g || STATUS_BASKET[status] !== state.currentBasket) {
+    panel && panel.remove();
     el?.remove();
     const at = _items.findIndex((i) => i.type === "row" && i.g.id === id);
     if (at >= 0) {
@@ -833,6 +934,7 @@ export function refreshRow(id) {
     return;
   }
   if (!el) return;
+  panel && panel.remove();
   el.outerHTML = reviewRowHtml(g, status, {
     expanded: id === expandedId,
     fingerprint: config.screening_prompt_fingerprint,

@@ -138,17 +138,60 @@ test("every decision key maps to one of the three decisions", () => {
 
 // --- expansion -------------------------------------------------------------
 
-test("expanding a row shows every quoted requirement", () => {
+test("expanding a row shows every quoted requirement in three levels", () => {
   const html = reviewRowHtml(conflicted, "unseen", {
     expanded: true,
     fingerprint: "f",
   });
-  assert.match(html, /review-facts/);
-  assert.match(html, /Fluent Dutch at C1 level is required\./);
+  // The label says what the posting asks, not the raw enum value.
+  assert.match(html, /review-fact-label">Must have · language</);
+  assert.match(html, /review-finding--conflict">Possible conflict</);
+  assert.match(html, /<blockquote>Fluent Dutch at C1 level is required\./);
+  // The panel is a sibling of the row, so the row keeps its own height.
+  assert.match(html, /<\/div><div class="review-expand" id="expand-g2">/);
+  assert.match(html, /aria-expanded="true" aria-controls="expand-g2"/);
+  assert.match(html, /review-row--expanded/);
 });
 
-test("a collapsed row renders no facts block", () => {
-  assert.doesNotMatch(reviewRowHtml(conflicted, "unseen", {}), /review-facts/);
+test("the panel carries the posting facts the row has no room for", () => {
+  const html = reviewRowHtml(conflicted, "unseen", {
+    expanded: true,
+    fingerprint: "f",
+  });
+  assert.match(html, /Posting details/);
+  for (const term of ["Location", "Deadline", "Kind of contract", "Source"])
+    assert.match(html, new RegExp("<dt>" + term + "</dt>"));
+  // Nothing is left blank and nothing shows a raw "unknown".
+  assert.doesNotMatch(html, /<dd>unknown<\/dd>/);
+  assert.doesNotMatch(html, /<dd><\/dd>/);
+});
+
+test("the way out of the panel is a link, not a lone button row", () => {
+  const html = reviewRowHtml(conflicted, "unseen", {
+    expanded: true,
+    fingerprint: "f",
+  });
+  assert.match(html, /review-expand-link" data-open="g2">Open the full role page/);
+  assert.doesNotMatch(html, /class="review-open"/);
+});
+
+test("required conditions are read before preferred ones", () => {
+  const g = structuredClone(conflicted);
+  g.screening.posting_facts.requirements.unshift({
+    kind: "skill",
+    strength: "preferred",
+    value: "SQL",
+    quote: "SQL is a plus.",
+  });
+  g.screening.profile_comparison = [
+    { requirement: 1, finding: "possible_conflict", note: "Needs Dutch, C1" },
+  ];
+  const html = reviewRowHtml(g, "unseen", { expanded: true, fingerprint: "f" });
+  assert.ok(html.indexOf("Must have") < html.indexOf("Preferred"));
+});
+
+test("a collapsed row renders no panel", () => {
+  assert.doesNotMatch(reviewRowHtml(conflicted, "unseen", {}), /review-expand/);
 });
 
 test("requirementFacts drops a requirement with no quote", () => {

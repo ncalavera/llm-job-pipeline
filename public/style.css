@@ -7170,23 +7170,106 @@ body::after {
   border-color: currentColor;
 }
 
-.review-facts {
-  grid-column: 1 / -1;
-  margin: 4px 0 12px;
-  padding: 12px 14px;
-  border-radius: var(--radius-tile);
-  background: var(--sky-sheet);
-  font-size: var(--text-sm);
-  white-space: normal;
+/* --- the expanded row -----------------------------------------------------
+
+   The panel is a sibling of the row, not a cell inside it. The row keeps its
+   56px height and its cursor ring, and pins itself above the panel so the
+   reader can always see which role the evidence belongs to. The panel carries
+   a cobalt left rule instead of a frame around the whole card.
+   ------------------------------------------------------------------------ */
+
+.review-row--expanded {
+  position: sticky;
+  top: var(--review-sticky-h, 200px);
+  z-index: 1;
 }
 
-.review-open {
-  height: var(--tap);
-  margin-top: 4px;
-  padding: 0 14px;
-  border: 1px solid var(--sky-line);
-  border-radius: var(--radius-pill);
+.review-expand {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 28px;
+  margin: -2px 0 8px 10px;
+  padding: 16px 18px 18px;
+  border-left: 3px solid var(--cobalt);
+  border-radius: 0 var(--radius-row) var(--radius-row) 0;
   background: var(--card);
+  box-shadow: var(--shadow-sm);
+}
+
+.review-expand h4 {
+  margin: 0 0 12px;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--sky-text);
+}
+
+.review-fact {
+  margin-bottom: 16px;
+}
+
+/* A second group of requirements starts a new block, so six flat facts read as
+   "what rules this out" and "what is only mentioned". */
+.review-fact--group {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--sky-line);
+}
+
+/* Level 1: what the posting asks and how hard. Quiet, and the same shape for
+   every row, so the eye can skip it once it knows the pattern. */
+.review-fact-label {
+  display: block;
+  margin-bottom: 3px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sky-text-secondary);
+}
+
+/* Level 2: the finding, in ink. This is the line a decision is made on. */
+.review-fact-note {
+  max-width: 66ch;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--sky-text);
+}
+
+.review-finding {
+  font-weight: 600;
+}
+
+.review-finding--conflict {
+  color: var(--q-moderate);
+}
+.review-finding--match {
+  color: var(--q-good);
+}
+.review-finding--unknown {
+  color: var(--sky-text-secondary);
+}
+
+/* Level 3: the posting's own words, indented under the finding they support. */
+.review-expand blockquote {
+  max-width: 62ch;
+  margin: 8px 0 0 24px;
+  padding: 8px 14px;
+  border-left: 2px solid var(--cobalt-tint);
+  border-radius: 0 var(--radius-tile) var(--radius-tile) 0;
+  background: var(--sky-sheet);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--sky-text-secondary);
+}
+
+.review-expand-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap);
+  padding: 0;
+  border: 0;
+  background: none;
   color: var(--cobalt);
   font: inherit;
   font-size: var(--text-sm);
@@ -7194,16 +7277,35 @@ body::after {
   cursor: pointer;
 }
 
-.review-facts p,
-.review-facts blockquote {
-  max-width: 68ch;
+.review-expand-link:hover {
+  text-decoration: underline;
 }
 
-.review-facts blockquote {
-  margin: 6px 0 12px;
-  padding-left: 10px;
-  border-left: 2px solid var(--cobalt);
+/* The right rail: the facts the 56px row has no room for. */
+.review-expand-facts {
+  position: sticky;
+  top: calc(var(--review-sticky-h, 200px) + 74px);
+  align-self: start;
+}
+
+.review-expand-facts dl {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin: 0;
+}
+
+.review-expand-facts dt {
+  font-size: 12px;
+  font-weight: 500;
   color: var(--sky-text-secondary);
+}
+
+.review-expand-facts dd {
+  margin: 2px 0 0;
+  font-size: var(--text-sm);
+  color: var(--sky-text);
+  overflow-wrap: anywhere;
 }
 
 /* --- sections ------------------------------------------------------------ */
@@ -7457,6 +7559,27 @@ body::after {
   }
   .review-section-meta {
     flex: 1 1 100%;
+  }
+
+  .review-expand {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+    margin-left: 4px;
+    padding: 14px;
+  }
+  /* The facts the row truncated come first here; two screens of evidence must
+     not sit between the reader and the location or the contract kind. */
+  .review-expand-facts {
+    position: static;
+    order: -1;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--sky-line);
+  }
+  .review-expand-facts dl {
+    grid-template-columns: 1fr 1fr;
+  }
+  .review-row--expanded {
+    position: static;
   }
 
   .review-row {
