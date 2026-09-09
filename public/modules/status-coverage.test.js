@@ -134,6 +134,8 @@ test("R18: selectTodayRoles routes every status it should", () => {
   const notInToday = {
     passed: "decided against — nothing left to do",
     skipped: "deferred on purpose; Today is for what needs a decision now",
+    unsure:
+      "deliberately put off until tomorrow; Today is for what needs a decision now",
     declined: "the employer's no closed it; no action is owed",
     accepted:
       "the employer's yes closed it; the offer landed, so nothing is owed today",

@@ -1,54 +1,132 @@
 // =============================================================================
-// catalog.js — Browse: dense vacancy rows, search, filters, baskets (U5,
-// DHA-389). The accordion/expand card is retired — its content (full
-// description, model reasoning, hard requirements, US-eligibility warning)
-// now lives on the routed vacancy detail page (U6, vacancy.js); a row click
-// opens it.
+// catalog.js — the daily review screen (Direction B, docs/2026-09-09-ux-build-spec.md).
+//
+// One list. Four controls in the command bar (search, score band, the deadline
+// chip, the drawer), batch sections ordered by nearest deadline, and 56px rows
+// carrying seven fields plus three decisions.
+//
+// The one rule that matters: EVERY decision — button or key — goes through
+// screen.js's bulkSet, so it lands in the same undo history and gets the same
+// receipt, optimistic-concurrency check and retry the bulk path has. The old
+// fire-and-forget updateStatus path is gone from this surface.
 // =============================================================================
 
 import {
   state,
   config,
-  scheduleRender,
   groups,
   groupsById,
   stats,
   STATUS_BASKET,
   getGroupStatus,
-  updateStatus,
 } from "./state.js";
 import {
   escHtml,
-  safeUrl,
   jsAttr,
-  formatDeadlineHtml,
-  relativeTime,
   isVacancyExpired,
   qualityBand,
-  tierClass,
 } from "./helpers.js";
-import { T, dateLocale } from "./i18n.js";
+import { basketCounts, screenMatches, groupsInBasket } from "./derive.js";
+import { reviewDrawerHtml, DRAWER_KEYS } from "./review-filters.js";
 import {
-  VISIBLE_MIN_SCORE,
-  basketCounts,
-  screenDateFacts,
-  groupsInBasket,
-} from "./derive.js";
-import { REASON_GROUPS, reasonBatch } from "./reason-batches.js";
+  reviewSections,
+  topConflict,
+  requirementFacts,
+  nearestDeadline,
+  daysToDeadline,
+} from "./review-batches.js";
 import { bulkSet, undoLast, decisionState, retryDecision } from "./screen.js";
-import { createCursor, actionsFor } from "./keys.js";
+import { createCursor } from "./keys.js";
+
+// How many list items (section headers count as one) paint per pass. The rest
+// arrive as the sentinel scrolls into view, so an 866-row inbox never builds
+// 866 nodes at once.
+// ponytail: the window only grows — it paints REVIEW_WINDOW items at a time as
+// the sentinel scrolls in, and never discards what is behind the reader. That
+// keeps the FIRST paint bounded, which is the cost that hurt (866 rows and a
+// 53,000px page on load). A reader who scrolls the whole 1288 still ends with
+// them all in the DOM. Recycling the top needs a second sentinel and a spacer
+// on both sides; add it if the deep-scroll case is ever measured as slow.
+export const REVIEW_WINDOW = 60;
+
+// Row height plus its gap — used only to size the spacer when the window jumps
+// to a row the reader reached with the keyboard rather than by scrolling.
+const APPROX_ITEM_HEIGHT = 64;
+
+// The three decisions this screen can take, and the status each writes.
+// The statuses server.js's SCREENING_STATUSES accepts as expected_status. A row
+// already in the application funnel is moved on its own detail page, not here.
+export const DECIDABLE = new Set([
+  "unseen",
+  "liked",
+  "passed",
+  "skipped",
+  "unsure",
+  "expiring",
+]);
+
+const DECISIONS = {
+  like: {
+    status: "liked",
+    label: "Like",
+    word: "Like",
+    glyph: "✓",
+    cls: "like",
+  },
+  unsure: {
+    status: "unsure",
+    label: "Unsure, back tomorrow",
+    word: "Unsure",
+    glyph: "?",
+    cls: "unsure",
+  },
+  pass: {
+    status: "passed",
+    label: "Pass",
+    word: "Pass",
+    glyph: "✕",
+    cls: "pass",
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Screen state
+// ---------------------------------------------------------------------------
+
+// Drawer values, keyed exactly as derive.js's screenMatches reads them.
+const filters = {};
+// "" | "40" | "60" — the command bar's score band. "" lifts the floor.
+let scoreBand = "";
+let deadlineSoon = false;
+let sortBy = "score-desc";
+let orgFilter = "";
+// The row whose requirement facts are open, or null. One at a time.
+let expandedId = null;
+let busy = false;
+let notice = "";
+// Decisions run one at a time, in the order they were made.
+let _queue = Promise.resolve();
+
+// The flat render list (headers and rows in order) and how much of it is
+// painted. Rebuilt by renderCatalog, grown by the sentinel.
+let _items = [];
+let _shown = 0;
+let _dropped = 0;
+// The basket size behind the filters, or 0 when no filter is narrowing it.
+let _filteredTotal = 0;
+let _browseQueue = [];
+const _browseCursor = createCursor();
 
 // The shared visibility options the basket badge AND the basket list both read,
-// so a count can never disagree with its list (DHA-374). The score floor is
-// VISIBLE_MIN_SCORE unless "show all" (state.catalogShowAll, shared with Geo)
-// lifts it.
+// so a count can never disagree with its list (DHA-374). The score band is the
+// floor: "All scores" lifts it, 40 and 60 set it.
 export function catalogVisibility() {
   return {
     isApproved: () => true,
     getStatus: getGroupStatus,
     isExpired: isVacancyExpired,
     basketMap: STATUS_BASKET,
-    minScore: state.catalogShowAll ? null : VISIBLE_MIN_SCORE,
+    minScore: scoreBand ? Number(scoreBand) : null,
   };
 }
 
@@ -57,14 +135,16 @@ export function catalogVisibility() {
 // ---------------------------------------------------------------------------
 
 export function updateBasketCounts() {
-  // Same visibility filter + expiry re-bucketing the basket LIST uses, so the
-  // badge is always the count of the rows the list renders (DHA-374).
   const counts = basketCounts(groups, catalogVisibility());
-  document.getElementById("countLiked").textContent = counts.liked;
-  document.getElementById("countUnseen").textContent = counts.unseen;
-  document.getElementById("countPassed").textContent = counts.passed;
-  const navCount = document.getElementById("navCountVacancies");
-  if (navCount) navCount.textContent = counts.unseen;
+  const set = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  };
+  set("countLiked", counts.liked);
+  set("countUnseen", counts.unseen);
+  set("countPassed", counts.passed);
+  set("countDeferred", counts.deferred || 0);
+  set("navCountVacancies", counts.unseen);
 }
 
 export function switchBasket(btn) {
@@ -73,239 +153,841 @@ export function switchBasket(btn) {
     .forEach((b) => b.classList.remove("active"));
   btn.classList.add("active");
   state.currentBasket = btn.dataset.basket;
-  renderCatalog();
-}
-
-export function toggleCatalogLoc(btn) {
-  const loc = btn.dataset.cloc;
-  if (state.activeCatalogLocs.has(loc)) {
-    state.activeCatalogLocs.delete(loc);
-    btn.classList.remove("active");
-  } else {
-    state.activeCatalogLocs.add(loc);
-    btn.classList.add("active");
-  }
-  renderCatalog();
-}
-
-export function toggleCatalogSort(btn) {
-  state.catalogSortDesc = !state.catalogSortDesc;
-  btn.textContent = state.catalogSortDesc
-    ? T("sort_score", "Score") + " ↓"
-    : T("sort_score", "Score") + " ↑";
-  renderCatalog();
-}
-
-// Lift / restore the default score floor (VISIBLE_MIN_SCORE). UI state only.
-// Toggling the floor changes the visible set, so the badges refresh with it.
-export function toggleCatalogShowAll(btn) {
-  state.catalogShowAll = !state.catalogShowAll;
-  btn.classList.toggle("active", state.catalogShowAll);
-  btn.textContent = state.catalogShowAll
-    ? T("catalog_show_top", "Top only")
-    : T("catalog_show_all", "Show all");
-  updateBasketCounts();
+  expandedId = null;
   renderCatalog();
 }
 
 // ---------------------------------------------------------------------------
-// Catalog initialization
+// Command bar
+// ---------------------------------------------------------------------------
+
+export function reviewSetBand(value) {
+  scoreBand = value === "40" || value === "60" ? value : "";
+  // Geo reads the same floor through state.catalogShowAll; keep them in step so
+  // the two browse surfaces never disagree about what is visible.
+  state.catalogShowAll = !scoreBand;
+  updateBasketCounts();
+  renderCatalog();
+}
+
+export function reviewToggleDeadline() {
+  deadlineSoon = !deadlineSoon;
+  const btn = document.getElementById("reviewDeadlineChip");
+  if (btn) {
+    btn.classList.toggle("active", deadlineSoon);
+    btn.setAttribute("aria-pressed", String(deadlineSoon));
+  }
+  renderCatalog();
+}
+
+// A rebuild over 1288 rows costs more than a keystroke's worth of time, so the
+// search waits for a pause rather than repainting per character.
+let _searchTimer = null;
+export function reviewSearchInput() {
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(renderCatalog, 160);
+}
+
+export function reviewToggleExpand(id) {
+  expandedId = expandedId === id ? null : id;
+  refreshRow(id);
+}
+
+export function reviewOpenFilters() {
+  const drawer = document.getElementById("reviewDrawer");
+  if (drawer && typeof drawer.showModal === "function") {
+    syncDrawerCount();
+    drawer.showModal();
+  }
+}
+
+/** How many drawer filters are set — the number on the "More filters" button. */
+function activeFilterCount() {
+  return DRAWER_KEYS.filter((k) => filters[k]).length + (orgFilter ? 1 : 0);
+}
+
+/** The drawer's footer says how many roles its current settings would show. */
+function syncDrawerCount() {
+  const el = document.getElementById("reviewDrawerCount");
+  if (!el) return;
+  const { rows, total } = visibleRows();
+  el.textContent =
+    rows.length === total
+      ? total + (total === 1 ? " role" : " roles")
+      : rows.length + " of " + total + " roles match";
+}
+
+function syncFilterCount() {
+  const badge = document.getElementById("reviewMoreCount");
+  if (!badge) return;
+  const n = activeFilterCount();
+  badge.textContent = n ? String(n) : "";
+  badge.hidden = !n;
+}
+
+// ---------------------------------------------------------------------------
+// Init
 // ---------------------------------------------------------------------------
 
 export function initCatalog() {
-  const sel = document.getElementById("catalogOrgFilter");
-  const orgs = [
-    ...new Set(
-      groups.map((g) => g.org).filter(Boolean),
-    ),
-  ].sort();
-  sel.innerHTML = '<option value="">All companies</option>';
-  orgs.forEach((org) => {
-    const opt = document.createElement("option");
-    opt.value = org;
-    opt.textContent = org;
-    sel.appendChild(opt);
-  });
-  // Sync the show-all toggle button to the current state (it defaults ON), so
-  // its label + active class match before the user ever clicks it.
-  const showAllBtn = document.querySelector(".browse-showall-btn");
-  if (showAllBtn) {
-    showAllBtn.classList.toggle("active", state.catalogShowAll);
-    showAllBtn.textContent = state.catalogShowAll
-      ? T("catalog_show_top", "Top only")
-      : T("catalog_show_all", "Show all");
+  const body = document.getElementById("reviewDrawerBody");
+  if (body && !body.dataset.built) {
+    const distinct = (fn) =>
+      [...new Set(groups.map(fn).filter(Boolean))].sort();
+    body.innerHTML = reviewDrawerHtml({
+      orgs: distinct((g) => g.org),
+      sources: distinct((g) => g.source_board),
+      dates: distinct((g) => String(g.first_seen || "").slice(0, 10)).reverse(),
+    });
+    body.dataset.built = "1";
+    wireDrawer(body);
   }
+  wireGrid();
+  syncFilterCount();
+  updateBasketCounts();
+  renderCatalog();
+}
+
+function wireDrawer(body) {
+  body.addEventListener("change", (e) => {
+    const el = e.target;
+    if (el.id === "catalogOrgFilter") orgFilter = el.value;
+    else if (el.id === "reviewSort") sortBy = el.value;
+    else if (el.dataset.filter) filters[el.dataset.filter] = el.value;
+    else return;
+    syncFilterCount();
+    renderCatalog();
+    syncDrawerCount();
+  });
+  body.addEventListener("input", (e) => {
+    if (e.target.dataset.filter !== "requirementText") return;
+    filters.requirementText = e.target.value;
+    syncFilterCount();
+    reviewSearchInput();
+  });
+  const clear = document.getElementById("reviewFiltersClear");
+  if (clear) clear.addEventListener("click", reviewClearAll);
+}
+
+// ---------------------------------------------------------------------------
+// The visible set
+// ---------------------------------------------------------------------------
+
+function visibleRows() {
+  const search = (document.getElementById("catalogSearch")?.value || "").trim();
+  const fingerprint = config.screening_prompt_fingerprint;
+  const inBasket = groupsInBasket(
+    groups,
+    state.currentBasket,
+    catalogVisibility(),
+  );
+  const rows = inBasket.filter((g) => {
+    if (orgFilter && g.org !== orgFilter) return false;
+    if (deadlineSoon) {
+      const days = daysToDeadline(g);
+      if (days == null || days < 0 || days > 7) return false;
+    }
+    return screenMatches(g, {
+      ...filters,
+      search,
+      promptFingerprint: fingerprint,
+    });
+  });
+  return { rows, total: inBasket.length };
+}
+
+function sortRows(rows) {
+  const by = {
+    "score-desc": (a, b) => (b.llm_score ?? -1) - (a.llm_score ?? -1),
+    "score-asc": (a, b) => (a.llm_score ?? 999) - (b.llm_score ?? 999),
+    deadline: (a, b) =>
+      (daysToDeadline(a) ?? Infinity) - (daysToDeadline(b) ?? Infinity),
+  };
+  return [...rows].sort(by[sortBy] || by["score-desc"]);
+}
+
+/** Headers and rows in render order — the list the window paints from. */
+export function reviewItems(rows, fingerprint, sort = (r) => r) {
+  const items = [];
+  for (const section of reviewSections(rows, fingerprint)) {
+    items.push({ type: "head", section });
+    for (const g of sort(section.rows)) items.push({ type: "row", g, section });
+  }
+  return items;
+}
+
+// ---------------------------------------------------------------------------
+// Render
+// ---------------------------------------------------------------------------
+
+export function renderCatalog() {
+  const grid = document.getElementById("catalogGrid");
+  if (!grid) return;
+  const { rows, total } = visibleRows();
+  const count = document.getElementById("catalogResultsCount");
+  _filteredTotal = rows.length === total ? 0 : total;
+  if (count)
+    count.textContent = _filteredTotal
+      ? rows.length + " of " + total + " roles match the filters"
+      : total + (total === 1 ? " role" : " roles");
+
+  if (!rows.length) {
+    _items = [];
+    _shown = 0;
+    _dropped = 0;
+    _browseQueue = [];
+    _browseCursor.reconcile(_browseQueue);
+    grid.innerHTML = emptyStateHtml(total);
+    renderStatusBar();
+    return;
+  }
+
+  _items = reviewItems(rows, config.screening_prompt_fingerprint, sortRows);
+  _browseQueue = _items.filter((i) => i.type === "row").map((i) => i.g.id);
+  _browseCursor.reconcile(_browseQueue);
+  _shown = 0;
+  _dropped = 0;
+  grid.innerHTML = '<div class="review-spacer" style="height:0"></div>';
+  growWindow();
+  ensureCursorPainted();
+  renderStatusBar();
+}
+
+function itemHtml(item) {
+  return item.type === "head"
+    ? sectionHeadHtml(item.section, {
+        canAccept: state.currentBasket === "unseen",
+      })
+    : reviewRowHtml(item.g, getGroupStatus(item.g), {
+        expanded: item.g.id === expandedId,
+        fingerprint: config.screening_prompt_fingerprint,
+      });
+}
+
+/** Paint the next REVIEW_WINDOW items. The bottom sentinel calls this. */
+export function growWindow() {
+  const grid = document.getElementById("catalogGrid");
+  if (!grid || _shown >= _items.length) return;
+  const next = _items.slice(_shown, _shown + REVIEW_WINDOW);
+  _shown += next.length;
+  grid.insertAdjacentHTML("beforeend", next.map(itemHtml).join(""));
+  applyCursorHighlight();
+}
+
+/**
+ * Repaint the window from `from`, so a cursor move can reach an unpainted row.
+ * A spacer stands in for the items above it, keeping the scrollbar honest.
+ */
+function repaintFrom(from) {
+  const grid = document.getElementById("catalogGrid");
+  if (!grid) return;
+  _dropped = Math.max(0, Math.min(from, _items.length - REVIEW_WINDOW));
+  _shown = Math.min(_items.length, _dropped + REVIEW_WINDOW);
+  grid.innerHTML =
+    '<div class="review-spacer" style="height:' +
+    _dropped * APPROX_ITEM_HEIGHT +
+    'px"></div>' +
+    _items.slice(_dropped, _shown).map(itemHtml).join("");
+  applyCursorHighlight();
+}
+
+function emptyStateHtml(total) {
+  const filtered =
+    activeFilterCount() ||
+    deadlineSoon ||
+    scoreBand ||
+    (document.getElementById("catalogSearch")?.value || "").trim();
+  const unscored = (stats && stats.unscored_count) || 0;
+  if (!filtered && !groups.length && unscored > 0)
+    return (
+      '<div class="catalog-empty"><div class="catalog-empty-icon">⏳</div><strong>' +
+      unscored +
+      (unscored === 1 ? " vacancy" : " vacancies") +
+      " fetched, none scored yet.</strong>" +
+      '<div class="catalog-empty-hint">Run scoring next, then they appear here.</div></div>'
+    );
+  const basketEmpty = {
+    unseen: "Nothing left to review. Every role has a decision.",
+    liked: "No liked roles yet. Like one from the Inbox and it lands here.",
+    passed: "No passed roles yet.",
+    deferred: "Nothing set aside. Press S on a role you cannot judge yet.",
+  };
+  return (
+    '<div class="catalog-empty"><strong>' +
+    (filtered
+      ? "No role matches these filters."
+      : basketEmpty[state.currentBasket] || "Nothing in this list.") +
+    "</strong>" +
+    (filtered
+      ? '<div class="catalog-empty-hint">' +
+        total +
+        (total === 1 ? " role is" : " roles are") +
+        " in this list behind the filters.</div>" +
+        '<button type="button" class="review-undo" data-clear-all>Clear the search and every filter</button>'
+      : "") +
+    "</div>"
+  );
+}
+
+/** Reset every control in the command bar and the drawer to its default. */
+export function reviewClearAll() {
+  for (const key of DRAWER_KEYS) delete filters[key];
+  orgFilter = "";
+  deadlineSoon = false;
+  scoreBand = "";
+  state.catalogShowAll = true;
+  const search = document.getElementById("catalogSearch");
+  if (search) search.value = "";
+  const band = document.getElementById("reviewScoreBand");
+  if (band) band.value = "";
+  const chip = document.getElementById("reviewDeadlineChip");
+  if (chip) {
+    chip.classList.remove("active");
+    chip.setAttribute("aria-pressed", "false");
+  }
+  document
+    .querySelectorAll("#reviewDrawerBody select, #reviewDrawerBody input")
+    .forEach((el) => {
+      if (el.id !== "reviewSort") el.value = "";
+    });
+  syncFilterCount();
   updateBasketCounts();
   renderCatalog();
 }
 
 // ---------------------------------------------------------------------------
-// Render catalog table
+// Section header
 // ---------------------------------------------------------------------------
 
-// The ordered id queue for the currently rendered rows — what a row click
-// hands the U4 router as the "browse" context (F3's auto-advance walks this
-// same order). Read by openCatalogRow's thin DOM shell below, and the set the
-// keyboard cursor (U15) steps through.
-let _browseQueue = [];
-
-// The keyboard-triage cursor (U15, DHA-399) — a single id-keyed cursor over the
-// currently rendered rows. Pure logic in keys.js; this module is the thin DOM
-// shell (highlight + scroll + the keydown listener at the bottom of the file).
-const _browseCursor = createCursor();
-
-export function renderCatalog() {
-  const query = (
-    document.getElementById("catalogSearch").value || ""
-  ).toLowerCase();
-  const orgFilter = document.getElementById("catalogOrgFilter").value;
-  const grid = document.getElementById("catalogGrid");
-
-  // The visible rows in the current basket — the SAME set the badge counts, so
-  // the "N of M" denominator always matches the badge (DHA-374). The score
-  // floor + expiry re-bucketing live in the shared filter; only the org/
-  // location/search refinements below are catalog-specific.
-  const inBasket = groupsInBasket(groups, state.currentBasket, catalogVisibility());
-  let filtered = inBasket.filter((g) => {
-    if (orgFilter && g.org !== orgFilter) return false;
-    if (
-      state.activeCatalogLocs.size > 0 &&
-      !state.activeCatalogLocs.has(g.region)
-    )
-      return false;
-    if (query) {
-      const searchable = (
-        g.title +
-        " " +
-        g.org +
-        " " +
-        g.locations.map((l) => l.location).join(" ")
-      ).toLowerCase();
-      if (!searchable.includes(query)) return false;
-    }
-    return true;
-  });
-
-  filtered = renderReasonReview(filtered);
-
-  const countTpl = T("browse_results_count", "{shown} of {total} vacancies");
-  document.getElementById("catalogResultsCount").textContent = countTpl
-    .replace("{shown}", filtered.length)
-    .replace("{total}", inBasket.length);
-
-  if (filtered.length === 0) {
-    _browseQueue = [];
-    _browseCursor.reconcile(_browseQueue); // clears an active cursor; no rows to highlight
-    const hasFilters = query || orgFilter || state.activeCatalogLocs.size > 0;
-    // Fetched-but-unscored: the DB has vacancies, but none are scored yet, so the
-    // dashboard (which only shows scored roles) looks empty. Tell the user to run
-    // scoring next — distinct from the truly-empty "no vacancies at all" case.
-    const unscored = (stats && stats.unscored_count) || 0;
-    if (!hasFilters && groups.length === 0 && unscored > 0) {
-      grid.innerHTML =
-        '<div class="catalog-empty"><div class="catalog-empty-icon">⏳</div>' +
-        "<strong>" +
-        unscored +
-        (unscored === 1 ? " vacancy" : " vacancies") +
-        " fetched, none scored yet.</strong>" +
-        '<div class="catalog-empty-hint">Run scoring next ' +
-        "(<code>/jobs-score</code>) to rank them — scored roles appear here.</div>" +
-        "</div>";
-      return;
-    }
-    const basketLabels = {
-      liked: T("basket_liked", "Liked & applications"),
-      unseen: T("basket_unreviewed", "Undecided"),
-      passed: T("basket_passed", "Passed & rejected"),
-    };
-    var basketEmpty =
-      (basketLabels[state.currentBasket] || "") +
-      " — " +
-      T("catalog_basket_empty", "no vacancies");
-    grid.innerHTML =
-      '<div class="catalog-empty"><div class="catalog-empty-icon">🗂</div>' +
-      (hasFilters
-        ? T("catalog_no_match", "Nothing matches the filters")
-        : groups.length === 0
-          ? T("catalog_empty", "No vacancies yet. Fetch some first.")
-          : basketEmpty) +
-      "</div>";
-    return;
-  }
-
-  if (state.catalogSortDesc) {
-    filtered.sort((a, b) => (b.llm_score ?? -1) - (a.llm_score ?? -1));
-  } else {
-    filtered.sort((a, b) => (a.llm_score ?? 999) - (b.llm_score ?? 999));
-  }
-
-  _browseQueue = catalogQueueIds(filtered);
-  // Data may have hot-swapped since the last render (a 60s poll can insert a
-  // higher-scored row above the cursor, AE5); reconcile the id-keyed cursor to
-  // the freshly-computed visible set BEFORE the rows rebuild, then re-apply its
-  // highlight to the new DOM below.
-  _browseCursor.reconcile(_browseQueue);
-  const rowOpts = { t: T, locale: dateLocale() };
-  grid.innerHTML = filtered
-    .map((g) => catalogRowHtml(g, getGroupStatus(g), {...rowOpts, reason: state.currentBasket === "unseen" && reasonFilter ? reasonBatch(g, config.screening_prompt_fingerprint) : null}))
-    .join("");
-  applyCursorHighlight();
+export function sectionHeadHtml(section, opts = {}) {
+  const days = nearestDeadline(section.rows);
+  const when = !Number.isFinite(days)
+    ? "no deadline ahead"
+    : days === 0
+      ? "nearest deadline today"
+      : "nearest deadline in " + days + (days === 1 ? " day" : " days");
+  const defaultChip = section.defaultStatus
+    ? '<span class="review-head-default">Default: <span class="review-pill review-pill--' +
+      section.defaultStatus +
+      '">' +
+      (section.defaultStatus === "passed" ? "Pass" : "Like") +
+      "</span>" +
+      (section.note ? " " + escHtml(section.note) : "") +
+      "</span>"
+    : "";
+  const accept =
+    section.defaultStatus && opts.canAccept !== false
+      ? '<button type="button" class="review-accept" data-accept="' +
+        escHtml(section.key) +
+        '">' +
+        (section.defaultStatus === "passed" ? "Pass all " : "Like all ") +
+        section.rows.length +
+        "</button>"
+      : "";
+  return (
+    '<div class="review-section" data-section="' +
+    escHtml(section.key) +
+    '"><span class="review-section-title">' +
+    escHtml(section.title) +
+    '</span><span class="review-section-meta">' +
+    section.rows.length +
+    (section.rows.length === 1 ? " role · " : " roles · ") +
+    when +
+    "</span>" +
+    defaultChip +
+    '<span class="review-section-spacer"></span>' +
+    accept +
+    "</div>"
+  );
 }
 
 // ---------------------------------------------------------------------------
-// Keyboard triage (U15, DHA-399) — thin DOM shell over keys.js's pure cursor.
+// Row assembly — pure: no DOM or module-state reads beyond the arguments.
 // ---------------------------------------------------------------------------
 
-// The currently-highlighted row element, or null when the cursor is dormant.
+/** How long the role has been in the inbox, in words. */
+export function ageText(firstSeen) {
+  const day = String(firstSeen || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return "—";
+  const days = Math.round(
+    (Date.parse(new Date().toISOString().slice(0, 10)) - Date.parse(day)) /
+      86400000,
+  );
+  if (!Number.isFinite(days) || days < 0) return "—";
+  if (days === 0) return "today";
+  if (days === 1) return "1 day";
+  if (days < 60) return days + " days";
+  return Math.round(days / 30) + " months";
+}
+
+export function reviewRowHtml(g, basketStatus, opts = {}) {
+  const id = escHtml(g.id);
+  const idJs = jsAttr(g.id);
+  const score = g.llm_score;
+  const scoreCls =
+    score == null ? "vac-score--none" : "q-" + qualityBand(score) + "-bg";
+
+  const days = daysToDeadline(g);
+  const deadlineHtml =
+    days == null
+      ? '<span class="review-deadline review-deadline--none">no deadline</span>'
+      : '<span class="review-deadline' +
+        (days < 0
+          ? " review-deadline--past"
+          : days <= 7
+            ? " review-deadline--soon"
+            : "") +
+        '">' +
+        (days < 0
+          ? "passed"
+          : days === 0
+            ? "today"
+            : "in " + days + (days === 1 ? " day" : " days")) +
+        "</span>";
+
+  const conflict = topConflict(g, opts.fingerprint);
+  const conflictHtml = conflict
+    ? '<span class="review-conflict" title="' +
+      escHtml(conflict.quote || conflict.text) +
+      '">' +
+      escHtml(conflict.text) +
+      "</span>"
+    : '<span class="review-conflict review-conflict--none">No conflict found</span>';
+
+  // The durable write path only accepts these as a precondition, so offering a
+  // button on any other status renders a control that can only fail.
+  const actions = (DECIDABLE.has(basketStatus) ? Object.entries(DECISIONS) : [])
+    .filter(([, d]) => d.status !== basketStatus)
+    .map(
+      ([key, d]) =>
+        '<button type="button" class="review-btn review-btn--' +
+        d.cls +
+        '" data-decide="' +
+        key +
+        '" data-id="' +
+        id +
+        '" title="' +
+        escHtml(d.label) +
+        '" aria-label="' +
+        escHtml(d.label) +
+        '"><span aria-hidden="true">' +
+        d.glyph +
+        '</span><span class="review-btn-word">' +
+        escHtml(d.word) +
+        "</span></button>",
+    )
+    .join("");
+
+  const facts = opts.expanded ? requirementFacts(g) : [];
+  const expansion = opts.expanded
+    ? '<div class="review-facts">' +
+      (facts.length
+        ? facts
+            .map(
+              (f) =>
+                '<p class="review-fact"><strong>' +
+                escHtml(f.strength) +
+                " · " +
+                escHtml(f.value || f.kind) +
+                "</strong>" +
+                (f.note ? " — " + escHtml(f.note) : "") +
+                "</p><blockquote>" +
+                escHtml(f.quote) +
+                "</blockquote>",
+            )
+            .join("")
+        : "<p>No quoted requirements were prepared for this role.</p>") +
+      '<button type="button" class="review-open" data-open="' +
+      id +
+      '">Open the full role page</button>' +
+      "</div>"
+    : "";
+
+  return (
+    '<div class="review-row" data-id="' +
+    id +
+    '" role="button" tabindex="0" onclick="if(!event.target.closest(\'button,input,a,label,summary,details\'))openCatalogRow(\'' +
+    idJs +
+    "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();event.stopPropagation();reviewToggleExpand('" +
+    idJs +
+    "')}\">" +
+    '<div class="review-cell review-cell--role"><span class="review-title">' +
+    escHtml(g.title) +
+    '</span><span class="review-org">' +
+    escHtml(g.company_name || g.org || "—") +
+    "</span></div>" +
+    '<div class="review-cell review-cell--score"><span class="review-score ' +
+    scoreCls +
+    '" aria-label="Fit score ' +
+    (score == null ? "not scored" : String(score)) +
+    ' out of 100"><span class="review-score-word">score</span>' +
+    (score == null ? "—" : String(score)) +
+    "</span></div>" +
+    '<div class="review-meta">' +
+    '<div class="review-cell review-cell--deadline">' +
+    deadlineHtml +
+    "</div>" +
+    '<div class="review-cell review-cell--conflict">' +
+    conflictHtml +
+    "</div>" +
+    '<div class="review-cell review-cell--source">' +
+    escHtml(g.source_board || "careers page") +
+    "</div>" +
+    '<div class="review-cell review-cell--age">' +
+    escHtml(ageText(g.first_seen)) +
+    "</div>" +
+    "</div>" +
+    '<div class="review-cell review-cell--actions">' +
+    actions +
+    "</div>" +
+    expansion +
+    "</div>"
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Decisions — one path for the buttons AND the keys.
+// ---------------------------------------------------------------------------
+
+function wireGrid() {
+  const grid = document.getElementById("catalogGrid");
+  if (!grid || grid.dataset.wired) return;
+  grid.dataset.wired = "1";
+  grid.addEventListener("click", (e) => {
+    const decide = e.target.closest("[data-decide]");
+    if (decide) {
+      e.stopPropagation();
+      applyDecision(decide.dataset.id, decide.dataset.decide);
+      return;
+    }
+    if (e.target.closest("[data-clear-all]")) {
+      e.stopPropagation();
+      reviewClearAll();
+      return;
+    }
+    const open = e.target.closest("[data-open]");
+    if (open) {
+      e.stopPropagation();
+      openCatalogRow(open.dataset.open);
+      return;
+    }
+    const accept = e.target.closest("[data-accept]");
+    if (accept) {
+      e.stopPropagation();
+      acceptSection(accept.dataset.accept);
+    }
+  });
+  const sentinel = document.getElementById("reviewSentinel");
+  if (sentinel && typeof IntersectionObserver === "function")
+    new IntersectionObserver((entries) => {
+      if (entries.some((x) => x.isIntersecting)) growWindow();
+    }).observe(sentinel);
+  const drawer = document.getElementById("reviewDrawer");
+  if (drawer) {
+    drawer.addEventListener("close", renderCatalog);
+    // A click on the backdrop lands on the dialog itself, never on its form.
+    drawer.addEventListener("click", (e) => {
+      if (e.target === drawer) drawer.close();
+    });
+  }
+}
+
+/**
+ * One decision on one role. Goes through bulkSet, so it joins the same undo
+ * history, receipt and revision check the bulk path uses.
+ */
+export function applyDecision(id, action) {
+  const decision = DECISIONS[action];
+  if (!decision || !groupsById.has(id)) return Promise.resolve();
+  // Serialise instead of dropping. Typed faster than the network, ten decisions
+  // used to collapse into one save while the cursor walked past all ten rows.
+  _queue = _queue.then(() => writeDecision(id, decision));
+  return _queue;
+}
+
+async function writeDecision(id, decision) {
+  // An unsaved receipt belongs to another row; sending a second decision would
+  // replay that receipt against this one. Make the reader retry it first.
+  if (decisionState().pending) {
+    notice = "One decision is still unsaved. Retry it first.";
+    renderStatusBar();
+    return;
+  }
+  busy = true;
+  renderStatusBar();
+  try {
+    const result = await bulkSet([id], decision.status);
+    notice =
+      result && result.saved ? "" : "Could not save that decision. Retry.";
+  } catch {
+    notice = "Could not save that decision. Retry.";
+  }
+  busy = false;
+  refreshRow(id);
+  updateBasketCounts();
+  renderStatusBar();
+}
+
+/** Apply a section's proposed default to every row still undecided in it. */
+async function acceptSection(key) {
+  if (busy) return;
+  const section = _items.find(
+    (i) => i.type === "head" && i.section.key === key,
+  )?.section;
+  if (!section || !section.defaultStatus) return;
+  const verb = section.defaultStatus === "passed" ? "Pass" : "Like";
+  if (
+    typeof confirm === "function" &&
+    !confirm(
+      verb +
+        " all " +
+        section.rows.length +
+        " roles in “" +
+        section.title +
+        "”? Undo reverses the whole batch.",
+    )
+  )
+    return;
+  busy = true;
+  renderStatusBar();
+  try {
+    const result = await bulkSet(
+      section.rows.map((g) => g.id),
+      section.defaultStatus,
+      undefined,
+      true,
+    );
+    notice = result
+      ? result.saved + " of " + result.total + " saved"
+      : "Could not save. Retry.";
+  } catch {
+    notice = "Could not save. Retry.";
+  }
+  busy = false;
+  updateBasketCounts();
+  renderCatalog();
+}
+
+export async function undoDecision() {
+  if (busy) return;
+  busy = true;
+  renderStatusBar();
+  try {
+    const result = await undoLast();
+    notice = result ? result.restored + " restored" : "Nothing to undo.";
+  } catch {
+    notice = "Could not undo. Retry.";
+  }
+  busy = false;
+  updateBasketCounts();
+  renderCatalog();
+}
+
+async function retryPending() {
+  if (busy) return;
+  busy = true;
+  renderStatusBar();
+  try {
+    await retryDecision();
+    notice = "";
+  } catch {
+    notice = "Still could not save. Retry.";
+  }
+  busy = false;
+  updateBasketCounts();
+  renderCatalog();
+}
+
+/**
+ * Re-render exactly one row, or drop it when the decision moved it out of the
+ * current basket. Never rebuilds the list.
+ */
+export function refreshRow(id) {
+  const grid = document.getElementById("catalogGrid");
+  if (!grid) return;
+  const el = Array.from(grid.querySelectorAll(".review-row")).find(
+    (row) => row.dataset.id === id,
+  );
+  if (!el) return;
+  const g = groupsById.get(id);
+  const status = g ? getGroupStatus(g) : null;
+  const section = _items.find(
+    (i) => i.type === "row" && i.g.id === id,
+  )?.section;
+  if (!g || STATUS_BASKET[status] !== state.currentBasket) {
+    el.remove();
+    const at = _items.findIndex((i) => i.type === "row" && i.g.id === id);
+    if (at >= 0) {
+      _items.splice(at, 1);
+      // The painted count must shrink with the list, or growWindow's next
+      // slice starts one item too far and an undecided role is never painted.
+      if (at < _shown) _shown -= 1;
+      if (at < _dropped) _dropped -= 1;
+    }
+    if (section) {
+      const left = section.rows.filter((r) => r.id !== id);
+      section.rows.length = 0;
+      section.rows.push(...left);
+      refreshSectionHead(section);
+    }
+    _browseQueue = _browseQueue.filter((qid) => qid !== id);
+    _browseCursor.reconcile(_browseQueue);
+    applyCursorHighlight();
+    refreshCount();
+    return;
+  }
+  el.outerHTML = reviewRowHtml(g, status, {
+    expanded: id === expandedId,
+    fingerprint: config.screening_prompt_fingerprint,
+  });
+  applyCursorHighlight();
+  refreshCount();
+}
+
+/** Repaint one section header in place, so its count never goes stale. */
+function refreshSectionHead(section) {
+  const grid = document.getElementById("catalogGrid");
+  const el = grid?.querySelector(
+    '.review-section[data-section="' + CSS.escape(section.key) + '"]',
+  );
+  if (!el) return;
+  if (!section.rows.length) {
+    el.remove();
+    const at = _items.findIndex(
+      (i) => i.type === "head" && i.section.key === section.key,
+    );
+    if (at >= 0) {
+      _items.splice(at, 1);
+      if (at < _shown) _shown -= 1;
+      if (at < _dropped) _dropped -= 1;
+    }
+    return;
+  }
+  el.outerHTML = sectionHeadHtml(section, {
+    canAccept: state.currentBasket === "unseen",
+  });
+}
+
+/** Re-count without rebuilding the list — one decision changes one number. */
+function refreshCount() {
+  const count = document.getElementById("catalogResultsCount");
+  if (!count) return;
+  const shown = _items.filter((i) => i.type === "row").length;
+  // Keep the sentence the render wrote. A filtered "74 of 1288 roles match the
+  // filters" that silently becomes "73 roles" changes a number's meaning
+  // mid-session, which is the most expensive kind of number on a screen.
+  count.textContent = _filteredTotal
+    ? shown + " of " + _filteredTotal + " roles match the filters"
+    : shown + (shown === 1 ? " role" : " roles");
+}
+
+/** How many roles the reviewer set aside today — they sit in no basket. */
+function deferredToday() {
+  let n = 0;
+  for (const g of groups) if (getGroupStatus(g) === "unsure") n += 1;
+  return n;
+}
+
+/**
+ * The recovery strip, directly under the command bar. Undo, Retry, the save
+ * notice and the count of roles deferred today. It used to render below the
+ * whole list, where a lost decision reported itself 4,000px out of sight.
+ */
+function renderStatusBar() {
+  const bar = document.getElementById("reviewStatusbar");
+  if (!bar) return;
+  const pending = decisionState();
+  const deferred = deferredToday();
+  bar.innerHTML =
+    (pending.canUndo
+      ? '<button type="button" class="review-undo" id="reviewUndo"' +
+        (busy ? " disabled" : "") +
+        ">Undo last decision (U)</button>"
+      : "") +
+    (pending.pending
+      ? '<button type="button" class="review-undo review-undo--alert" id="reviewRetry"' +
+        (busy ? " disabled" : "") +
+        ">Retry the unsaved decision</button>"
+      : "") +
+    (busy || notice
+      ? '<span role="status" class="review-notice">' +
+        escHtml(busy ? "Saving…" : notice) +
+        "</span>"
+      : "") +
+    (deferred
+      ? '<span class="review-deferred">' +
+        deferred +
+        (deferred === 1 ? " role" : " roles") +
+        " set aside until tomorrow</span>"
+      : "");
+  const undo = document.getElementById("reviewUndo");
+  if (undo) undo.onclick = undoDecision;
+  const retry = document.getElementById("reviewRetry");
+  if (retry) retry.onclick = retryPending;
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard — j/k move, L like, P pass, S unsure, U undo, Enter expand.
+// ---------------------------------------------------------------------------
+
 function cursorRowEl() {
   const grid = document.getElementById("catalogGrid");
   if (!grid || _browseCursor.id == null) return null;
   return (
-    Array.from(grid.querySelectorAll(".catalog-row")).find(
+    Array.from(grid.querySelectorAll(".review-row")).find(
       (el) => el.dataset.id === _browseCursor.id,
     ) || null
   );
 }
 
-// Paint the persistent cobalt selection class onto the cursor row and strip it
-// from every other row. Compares dataset.id (not a CSS selector) so ids with
-// quotes/markup can't break the query. Called after every renderCatalog (rows
-// rebuild) and after each cursor move.
 function applyCursorHighlight() {
   const grid = document.getElementById("catalogGrid");
   if (!grid) return;
   const id = _browseCursor.id;
-  grid.querySelectorAll(".catalog-row").forEach((el) => {
-    el.classList.toggle(
-      "catalog-row--cursor",
-      id != null && el.dataset.id === id,
+  grid
+    .querySelectorAll(".review-row")
+    .forEach((el) =>
+      el.classList.toggle(
+        "review-row--cursor",
+        id != null && el.dataset.id === id,
+      ),
     );
-  });
 }
 
-// Instant (never smooth) so it honours prefers-reduced-motion by construction —
-// scrollIntoView's default behavior is not animated.
+/**
+ * Repaint the window around the cursor when it has walked out of the painted
+ * slice. Without this, j past the last painted row silently selects a role the
+ * reader cannot see — and the next L/P/S decides it.
+ */
+function ensureCursorPainted() {
+  if (_browseCursor.id == null || cursorRowEl()) return;
+  const at = _items.findIndex(
+    (i) => i.type === "row" && i.g.id === _browseCursor.id,
+  );
+  if (at < 0) return;
+  repaintFrom(Math.max(0, at - 10));
+}
+
 function scrollCursorIntoView() {
   const row = cursorRowEl();
-  if (row && typeof row.scrollIntoView === "function") {
+  if (row && typeof row.scrollIntoView === "function")
     row.scrollIntoView({ block: "nearest" });
-  }
 }
 
-// One document-level keydown listener (registered once at module load below).
-// Returns early unless Browse is the active, in-focus surface with no detail
-// overlay open — the catalogSection loses `.active` when a vacancy/company
-// overlay shows or another section is active, so that one check covers all
-// three. j/k move the cursor; l/x apply the SAME status path the row thumb
-// buttons use (badge==list holds); Enter opens via the SAME router entry a row
-// click uses; Escape clears the cursor.
-function browseKeydown(e) {
-  // Mid-IME-composition keystrokes belong to the composer, not triage.
-  if (e.isComposing) return;
-  // Never hijack browser/OS combos (⌘L address bar, ⌘K palette, etc.).
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
+/** Which key means what. Exported so the binding is testable without a DOM. */
+export const REVIEW_KEYS = {
+  l: "like",
+  L: "like",
+  p: "pass",
+  P: "pass",
+  x: "pass",
+  s: "unsure",
+  S: "unsure",
+};
 
-  // Ignore while typing in a field or focused on a form control.
+function browseKeydown(e) {
+  if (e.isComposing) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   const active = document.activeElement;
   if (active) {
     const tag = active.tagName;
@@ -317,18 +999,25 @@ function browseKeydown(e) {
     )
       return;
   }
-
-  // Only when Browse is the visible section (no overlay, not another mode).
   const cat = document.getElementById("catalogSection");
   if (!cat || !cat.classList.contains("active")) return;
+  const drawer = document.getElementById("reviewDrawer");
+  if (drawer && drawer.open) return;
 
   const key = e.key;
 
   if (key === "j" || key === "k") {
     e.preventDefault();
     _browseCursor.move(key === "j" ? 1 : -1, _browseQueue);
+    ensureCursorPainted();
     applyCursorHighlight();
     scrollCursorIntoView();
+    return;
+  }
+
+  if (key === "u" || key === "U") {
+    e.preventDefault();
+    undoDecision();
     return;
   }
 
@@ -339,209 +1028,50 @@ function browseKeydown(e) {
     return;
   }
 
-  // l / x / Enter act on the selection — a no-op until j/k picks a row.
   if (_browseCursor.id == null) return;
 
   if (key === "Enter") {
     e.preventDefault();
-    openCatalogRow(_browseCursor.id);
+    reviewToggleExpand(_browseCursor.id);
+    scrollCursorIntoView();
     return;
   }
 
-  if (key === "l" || key === "x") {
-    const g = groupsById.get(_browseCursor.id);
-    if (!g) return;
-    const action = key === "l" ? "like" : "pass";
-    // Gate on the cursor row's OWN status, mirroring catalogRowHtml's button
-    // rendering exactly (keys.js:actionsFor): a status that shows no thumb
-    // button (to_apply, applied, expiring, …) makes l/x a no-op here too — the
-    // 3-value basket tab this row sits in isn't a faithful proxy for that.
-    if (!actionsFor(getGroupStatus(g))[action]) return;
-    e.preventDefault();
-    catalogThumbAction(g.id, g.member_ids || [], action);
-    // Advance the cursor optimistically so a rapid second l/x lands on the NEXT
-    // row, not the one just actioned — catalogThumbAction defers the status
-    // write ~200ms, so without this both presses hit the same vacancy. A single
-    // press lands identically to the post-render reconcile, so this only
-    // changes fast repeats.
-    _browseCursor.move(1, _browseQueue);
-    applyCursorHighlight();
+  const action = REVIEW_KEYS[key];
+  if (!action) return;
+  const g = groupsById.get(_browseCursor.id);
+  if (!g) return;
+  if (DECISIONS[action].status === getGroupStatus(g)) return;
+  e.preventDefault();
+  // A cursor can sit on a row the window has not painted (a filter change
+  // reconciles it by remembered index). Show that row first; the next press
+  // decides a role the reader has actually seen.
+  if (!cursorRowEl()) {
+    ensureCursorPainted();
+    scrollCursorIntoView();
+    return;
   }
+  // An unsaved receipt blocks the write. Holding the cursor still keeps the
+  // refused decisions and the rows the reader believes they decided in step.
+  if (decisionState().pending) {
+    notice = "One decision is still unsaved. Retry it first.";
+    renderStatusBar();
+    return;
+  }
+  applyDecision(g.id, action);
+  _browseCursor.move(1, _browseQueue);
+  ensureCursorPainted();
+  applyCursorHighlight();
+  scrollCursorIntoView();
 }
 
-if (typeof document !== "undefined") {
+if (typeof document !== "undefined")
   document.addEventListener("keydown", browseKeydown);
-}
 
 // ---------------------------------------------------------------------------
-// Row assembly — pure (KTD2): no DOM/state reads beyond the arguments given,
-// so the click contract (row → vacancy id, action-button gating, escaping) is
-// directly unit-testable. `basket` is the group's RAW status (getGroupStatus(g),
-// 9 values) — only unseen/liked/passed render thumb buttons; every other status
-// shows none. keys.js:actionsFor mirrors this exact gating for the keyboard.
+// Row click → vacancy detail route
 // ---------------------------------------------------------------------------
 
-// First location's text plus a "+N" hint when there are more; the full list
-// is one click away on the vacancy detail page's facts rail.
-function primaryLocationInfo(g) {
-  const locs = (g.locations || []).filter((l) => l && l.location);
-  if (!locs.length) return null;
-  const extra = locs.length - 1;
-  return {
-    text: locs[0].location + (extra > 0 ? " +" + extra : ""),
-    title: locs.map((l) => l.location).join(", "),
-  };
-}
-
-export function catalogQueueIds(rows) {
-  return rows.map((g) => g.id);
-}
-
-export function catalogRowHtml(g, basket, opts) {
-  const o = opts || {};
-  const t = o.t || ((k, fb) => fb);
-  const locale = o.locale || "en-US";
-
-  const score = g.llm_score;
-  const scoreCls =
-    score == null ? "vac-score--none" : "q-" + qualityBand(score) + "-bg";
-  const scoreTxt = score == null ? "—" : String(score);
-
-  const idAttr = jsAttr(g.id);
-
-  const deadlineHtml = g.deadline
-    ? formatDeadlineHtml(g.deadline, "card-deadline", { t, locale })
-    : "";
-
-  const tierHtml = g.calculated_tier
-    ? '<span class="catalog-row-tier ' +
-      tierClass(g.calculated_tier) +
-      '">' +
-      escHtml(g.calculated_tier) +
-      "</span>"
-    : "";
-
-  const loc = primaryLocationInfo(g);
-  const locHtml = loc
-    ? '<span title="' +
-      escHtml(loc.title) +
-      '">' +
-      escHtml(loc.text) +
-      "</span>"
-    : "—";
-
-  const compText = g.compensation ? escHtml(g.compensation) : "—";
-  const seenText = g.first_seen ? escHtml(relativeTime(g.first_seen, t)) : "—";
-
-  const subText = g.llm_summary || g.screening?.posting_facts?.duties || g.snippet || "";
-  const subHtml = subText
-    ? '<div class="catalog-row-sub">' + escHtml(subText) + "</div>"
-    : "";
-
-  const mids = jsAttr(JSON.stringify(g.member_ids));
-  const likeLabel = escHtml(t("vac_like", "Keep"));
-  const passLabel = escHtml(t("vac_pass", "Pass"));
-  const likeBtn =
-    '<button class="catalog-row-btn like" onclick="event.stopPropagation();catalogThumbAction(\'' +
-    idAttr +
-    "'," +
-    mids +
-    ",'like')\" title=\"" +
-    likeLabel +
-    '" aria-label="' +
-    likeLabel +
-    '">✓</button>';
-  const passBtn =
-    '<button class="catalog-row-btn pass" onclick="event.stopPropagation();catalogThumbAction(\'' +
-    idAttr +
-    "'," +
-    mids +
-    ",'pass')\" title=\"" +
-    passLabel +
-    '" aria-label="' +
-    passLabel +
-    '">✕</button>';
-  let actionsHtml = "";
-  if (basket === "liked") actionsHtml = passBtn;
-  else if (basket === "unseen") actionsHtml = likeBtn + passBtn;
-  else if (basket === "passed") actionsHtml = likeBtn;
-
-  const dates = screenDateFacts(g);
-  const url = safeUrl((g.locations || []).find(l => l?.url)?.url || "");
-  const metadata = [
-    dates.firstSeen && `<span class="scr-meta scr-meta--date">${escHtml(t("vac_first_seen","First seen"))}: ${dates.firstSeen}</span>`,
-    dates.lastSeen && `<span class="scr-meta scr-meta--date">${escHtml(t("screen_last_seen","Last seen"))}: ${dates.lastSeen}</span>`,
-    g.source_board && `<span class="scr-meta">${escHtml(g.source_board)}</span>`,
-  ].filter(Boolean).join(" ");
-  const progress = !["unseen","liked","passed","skipped","expiring"].includes(basket);
-  const current = g.screening_state === "ready" && (!window.VACANCY_DATA.config.screening_prompt_fingerprint ||
-    g.screening_fingerprint === `${g.posting_fingerprint}:${window.VACANCY_DATA.config.screening_prompt_fingerprint}`);
-  const prepLabel = current ? "" : t(g.screening ? "inbox_older_facts" : "inbox_no_facts", g.screening ? "Facts need updating" : "Facts not prepared");
-  if (o.review) {
-    actionsHtml = progress ? '<span>' + escHtml(t("vac_status_" + basket,basket)) + '</span>' :
-      [["liked","screen_keep","Like"],["passed","screen_put_aside","Pass"]].map(([status,key,label]) =>
-        '<button class="catalog-row-btn" data-decision="' + status + '" data-vacancy="' + escHtml(g.id) + '"' +
-        (o.disabled ? ' disabled' : '') + '>' + escHtml(t(key,label)) + '</button>').join('');
-  }
-  const selectHtml = o.review ? '<input type="checkbox" data-toggle="' + escHtml(g.id) + '" aria-label="' + escHtml(g.title) + '"' +
-    (o.checked ? ' checked' : '') + (o.disabled || progress ? ' disabled' : '') + '>' : escHtml(scoreTxt);
-  return (
-    '<div class="catalog-row" data-id="' +
-    escHtml(g.id) +
-    '" role="button" tabindex="0" onclick="if(!event.target.closest(\'button,input,a,label,summary,details\'))openCatalogRow(\'' +
-    idAttr +
-    "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openCatalogRow('" +
-    idAttr +
-    "')}\">" +
-    '<div class="catalog-row-score ' +
-    scoreCls +
-    '">' +
-    selectHtml +
-    "</div>" +
-    '<div class="catalog-row-role">' +
-    '<div class="catalog-row-title-line">' +
-    '<span class="catalog-row-title">' +
-    escHtml(g.title) +
-    "</span>" +
-    deadlineHtml +
-    "</div>" +
-    subHtml +
-    (o.reason ? reasonDetails(g, o.reason) : "") +
-    (o.review ? '<div class="scr-row-meta">' + metadata + '</div>' : "") +
-    (o.review && prepLabel ? '<div class="scr-concern">' + escHtml(prepLabel) + '</div>' : '') +
-    (o.review && url ? '<a class="scr-posting" href="' + escHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escHtml(t("vac_open_posting","Open posting")) + ' ↗</a>' : '') +
-    "</div>" +
-    '<div class="catalog-row-company">' +
-    '<span class="catalog-row-org">' +
-    escHtml(g.company_name || g.org) +
-    "</span>" +
-    (o.review ? "" : tierHtml) +
-    "</div>" +
-    '<div class="catalog-row-loc">' +
-    '<span class="scr-meta scr-meta--location">' + locHtml + "</span>" +
-    "</div>" +
-    '<div class="catalog-row-comp">' +
-    compText +
-    "</div>" +
-    '<div class="catalog-row-seen">' +
-    seenText +
-    "</div>" +
-    '<div class="catalog-row-actions">' +
-    actionsHtml +
-    "</div>" +
-    "</div>"
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Row actions
-// ---------------------------------------------------------------------------
-
-// Thin DOM shell (KTD2): forwards a row click to the U4 router with the
-// "browse" context + the CURRENT sorted/filtered id queue, so U6's "Move to
-// apply" can auto-advance to the next unreviewed row (F3). `queue` is
-// overridable so the wiring itself is unit-testable without touching module
-// state.
 export function openCatalogRow(id, queue) {
   window.openVacancyRoute(id, {
     context: "browse",
@@ -549,82 +1079,8 @@ export function openCatalogRow(id, queue) {
   });
 }
 
-export function catalogThumbAction(canonId, memberIds, action) {
-  const targetStatus =
-    action === "like" ? "liked" : action === "pass" ? "passed" : "unseen";
-  const row = document.querySelector('.catalog-row[data-id="' + canonId + '"]');
-  if (row) {
-    row.classList.add("dismissing");
-    setTimeout(function () {
-      updateStatus(canonId, memberIds, targetStatus);
-    }, 200);
-  } else {
-    updateStatus(canonId, memberIds, targetStatus);
-  }
-}
-
-let reasonFilter = '';
-const reasonSelected = new Set();
-let reasonBusy = false;
-let reasonNotice = '';
-
-function reasonDetails(g, batch) {
-  return '<div class="reason-row"><label><input type="checkbox" data-reason-id="' + escHtml(g.id) + '"' +
-    (reasonSelected.has(g.id) ? ' checked' : '') + (reasonBusy ? ' disabled' : '') + '> ' +
-    escHtml(T('reason_select', 'Select for Pass')) + '</label><details><summary>' +
-    escHtml(batch.reasons[0].note) + '</summary>' + batch.reasons.map(r => '<p>' + escHtml(r.note) +
-    '</p><blockquote>' + escHtml(r.quote) + '</blockquote>').join('') + '</details></div>';
-}
-
-function renderReasonReview(rows) {
-  let host = document.getElementById('catalogReasonReview');
-  if (!host) {
-    host = document.createElement('div'); host.id = 'catalogReasonReview';
-    document.querySelector('.browse-header').after(host);
-    host.addEventListener('click', async e => {
-      const button = e.target.closest('button');
-      if (!button || reasonBusy) return;
-      if (button.dataset.reason !== undefined) {
-        reasonFilter = button.dataset.reason; reasonSelected.clear(); renderCatalog(); return;
-      }
-      if (button.dataset.reasonAction === 'select') {
-        document.querySelectorAll('[data-reason-id]').forEach(el => reasonSelected.add(el.dataset.reasonId));
-        renderCatalog(); return;
-      }
-      reasonBusy = true; renderCatalog();
-      try {
-        const result = button.dataset.reasonAction === 'undo' ? await undoLast() :
-          button.dataset.reasonAction === 'retry' ? await retryDecision() :
-          await bulkSet([...reasonSelected], 'passed', undefined, true);
-        reasonNotice = result ? `${result.saved ?? result.restored ?? 0} / ${result.total} ` + T('screen_saved','saved') : T('screen_notes_failed','Could not save. Retry.');
-        reasonSelected.clear();
-      } catch { reasonNotice = T('screen_notes_failed','Could not save. Retry.'); }
-      finally { reasonBusy = false; scheduleRender(); }
-    });
-    document.getElementById('catalogGrid').addEventListener('change', e => {
-      const id = e.target.dataset.reasonId;
-      if (!id || reasonBusy) return;
-      if (e.target.checked) reasonSelected.add(id); else reasonSelected.delete(id);
-      renderCatalog();
-    });
-  }
-  const pending = decisionState();
-  const candidates = state.currentBasket === 'unseen' ? rows : [];
-  const classified = new Map(candidates.map(g => [g.id, reasonBatch(g,config.screening_prompt_fingerprint)]));
-  const visible = reasonFilter && state.currentBasket === 'unseen' ? rows.filter(g => classified.get(g.id)?.key === reasonFilter) : rows;
-  for (const id of reasonSelected) if (!visible.some(g => g.id === id)) reasonSelected.delete(id);
-  const disabled = reasonBusy || !state.statusesLoaded || pending.pending;
-  const button = (action,label,off) => '<button class="browse-sort-btn" data-reason-action="' + action + '"' + (off ? ' disabled' : '') + '>' + escHtml(label) + '</button>';
-  host.innerHTML = (state.currentBasket === 'unseen' ? '<details' + (reasonFilter ? ' open' : '') + '><summary>' +
-    escHtml(T('reason_review','Review low scores by reason')) + ' · &lt;' + VISIBLE_MIN_SCORE + '</summary><div class="reason-toolbar">' +
-    [['',T('contacts_all_groups','All')],...REASON_GROUPS.map(([k,label])=>[k,T('reason_'+k,label)])].map(([key,label]) =>
-      '<button class="browse-sort-btn" data-reason="' + key + '" aria-pressed="' + (reasonFilter === key) + '"' +
-      (reasonBusy ? ' disabled' : '') + '>' + escHtml(label) + (key ? ' · ' + [...classified.values()].filter(b=>b?.key===key).length : '') + '</button>').join('') +
-    '</div><p>' + escHtml(T('reason_hint','Possible conflicts with required posting conditions. Review the explanation, select the roles you agree to pass, and leave exceptions unchecked. Other roles remain in All.')) + '</p></details>' : '') +
-    (reasonFilter && state.currentBasket === 'unseen' ? '<div class="reason-toolbar">' + button('select',T('screen_select_all','Select all'),disabled || !visible.length) +
-      button('pass',T('reason_pass','Pass selected') + ' · ' + reasonSelected.size,disabled || !reasonSelected.size) + '</div>' : '') +
-    (pending.pending ? button('retry',T('screen_retry','Retry'),reasonBusy) : '') +
-    (pending.canUndo ? button('undo',T('screen_undo','Undo'),disabled) : '') +
-    '<p role="status">' + escHtml(reasonNotice) + '</p>';
-  return visible;
+// The old fire-and-forget thumb path. Kept as a thin alias so the vacancy
+// detail page's existing calls still land on the durable write path.
+export function catalogThumbAction(canonId, _memberIds, action) {
+  return applyDecision(canonId, action === "like" ? "like" : "pass");
 }

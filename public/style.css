@@ -6671,3 +6671,837 @@ body::after {
 .reason-row input { accent-color: var(--cobalt); width: 18px; height: 18px; vertical-align: middle; }
 .reason-row summary { cursor: pointer; color: #8b4d12; white-space: normal; }
 .reason-row blockquote { white-space: normal; margin: 8px 0; padding-left: 10px; border-left: 3px solid var(--cobalt); }
+
+.scr-filter-evidence { margin: 10px 0; white-space: normal; overflow-wrap: anywhere; }
+.scr-filter-evidence summary { cursor: pointer; }
+.scr-filter-evidence p { margin: 8px 0 4px; }
+.scr-filter-evidence blockquote { margin: 0; padding-left: 10px; border-left: 2px solid #aaa; }
+.scr-filter-hint { font-size: var(--text-sm); }
+#inboxPreset { max-width: min(100%, 440px); }
+@media (max-width: 600px) {
+  #catalogReasonReview .inbox-filterbar label { width: 100%; min-width: 0; }
+  #catalogReasonReview .inbox-filterbar input,
+  #catalogReasonReview .inbox-filterbar select { width: 100%; max-width: 100%; box-sizing: border-box; }
+}
+
+/* ===========================================================================
+   Daily review screen (Direction B, docs/2026-09-09-ux-build-spec.md).
+   Tokens lifted from the design canvas onto the existing sky/quality/cobalt
+   system; --sky-line is the one value the canvas had and the tokens did not.
+   =========================================================================== */
+
+:root {
+  --sky-line: #d5d9e0;
+  --review-row-h: 56px;
+  --tap: 44px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* --- command bar --------------------------------------------------------- */
+
+.review-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--sky-sheet);
+}
+
+.review-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 0 14px;
+  background: var(--sky-sheet);
+  border-bottom: 1px solid var(--sky-line);
+}
+
+.review-bar .basket-tabs {
+  margin: 0;
+}
+
+/* Fitts's law: the tabs are a primary control and were 28px tall. */
+.review-bar .basket-tab {
+  min-height: var(--tap);
+  padding: 0 11px;
+}
+
+.review-search input {
+  height: 100%;
+}
+
+.review-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--tap);
+  padding: 0 14px;
+  flex: 1 1 180px;
+  max-width: 230px;
+  background: var(--card);
+  border: 1px solid var(--sky-line);
+  border-radius: var(--radius-pill);
+}
+
+.review-search-icon {
+  color: var(--sky-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.review-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--sky-text);
+}
+
+.review-band select,
+.review-chip,
+.review-more {
+  height: var(--tap);
+  padding: 0 14px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--sky-line);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  color: var(--sky-text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.review-band select {
+  padding-right: 34px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--sky-text) 50%),
+    linear-gradient(135deg, var(--sky-text) 50%, transparent 50%);
+  background-position:
+    right 18px center,
+    right 13px center;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.review-chip.active {
+  border-color: var(--cobalt);
+  background: var(--cobalt-tint);
+  color: var(--cobalt);
+}
+
+.review-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.review-more-count[hidden] {
+  display: none;
+}
+
+.review-more-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--cobalt);
+  color: #fff;
+  font-size: var(--text-xs);
+}
+
+.review-bar :focus-visible,
+.review-row:focus-visible,
+.review-btn:focus-visible {
+  outline: 2px solid var(--cobalt);
+  outline-offset: 2px;
+}
+
+/* --- drawer -------------------------------------------------------------- */
+
+.review-drawer {
+  width: min(720px, 94vw);
+  max-height: 88vh;
+  margin: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sheet);
+  background: var(--sky-sheet);
+  color: var(--sky-text);
+}
+
+.review-drawer::backdrop {
+  background: rgba(26, 22, 18, 0.4);
+}
+
+.review-drawer-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-height: 88vh;
+  padding: 22px 24px 0;
+  overflow: auto;
+}
+
+.review-drawer-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.review-drawer-head strong {
+  font-size: var(--text-lg);
+}
+
+.review-drawer-note {
+  flex: 1 1 240px;
+  font-size: var(--text-sm);
+  color: var(--sky-text-secondary);
+}
+
+.review-drawer-clear {
+  height: var(--tap);
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--cobalt);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.review-group + .review-group {
+  margin-top: 18px;
+}
+
+.review-group h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--sky-text);
+}
+
+.review-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.review-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--sky-text-secondary);
+}
+
+.review-field select,
+.review-field input {
+  height: var(--tap);
+  width: 100%;
+  padding: 0 12px;
+  border: 1px solid var(--sky-line);
+  border-radius: var(--radius-tile);
+  background: var(--card);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sky-text);
+}
+
+.review-drawer-foot {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: auto;
+  padding: 14px 0 18px;
+  background: var(--sky-sheet);
+  box-shadow: 0 -12px 12px -6px var(--sky-sheet);
+}
+
+.review-drawer-count {
+  font-size: var(--text-sm);
+  color: var(--sky-text-secondary);
+}
+
+.review-drawer-close {
+  width: var(--tap);
+  height: var(--tap);
+  border: 1px solid var(--sky-line);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  color: var(--sky-text);
+  font: inherit;
+  font-size: var(--text-base);
+  cursor: pointer;
+}
+
+.review-drawer-apply {
+  height: var(--tap);
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--cobalt);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* --- the list ------------------------------------------------------------ */
+
+.review-table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.review-head .browse-results-count {
+  grid-column: 4 / -1;
+  justify-self: end;
+  padding: 0;
+  font-size: var(--text-xs);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--sky-text-secondary);
+}
+
+.review-head,
+.review-row {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 2fr) 52px 104px minmax(190px, 2fr) 108px 56px 152px;
+  gap: 14px;
+  align-items: center;
+  padding: 0 12px 0 10px;
+}
+
+.review-head {
+  grid-template-rows: auto auto;
+  padding-top: 10px;
+  padding-bottom: 8px;
+  background: var(--sky-sheet);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--sky-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.review-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.review-row {
+  min-height: var(--review-row-h);
+  background: var(--card);
+  border-radius: var(--radius-row);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+}
+
+.review-row:hover {
+  background: var(--sky-row-hover);
+}
+
+.review-row--cursor {
+  box-shadow:
+    0 0 0 2px var(--cobalt),
+    var(--shadow-sm);
+}
+
+.review-cell {
+  min-width: 0;
+}
+
+/* On the desktop grid the wrapper disappears, so its four cells sit in the
+   row's own columns. On the phone it becomes the second line. */
+.review-meta {
+  display: contents;
+}
+
+.review-cell--role {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.review-title,
+.review-org,
+.review-conflict,
+.review-cell--source {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.review-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--sky-text);
+}
+
+.review-org,
+.review-cell--source {
+  font-size: var(--text-sm);
+  color: var(--sky-text-secondary);
+}
+
+.review-score {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-deadline {
+  font-size: var(--text-sm);
+  color: var(--sky-text-secondary);
+}
+
+.review-deadline--soon,
+.review-deadline--past {
+  color: var(--q-weak);
+  font-weight: 600;
+}
+
+.review-conflict {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--q-moderate);
+}
+
+.review-conflict--none {
+  font-weight: 400;
+  color: var(--sky-text-secondary);
+}
+
+.review-cell--age {
+  font-size: var(--text-xs);
+  color: var(--sky-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.review-cell--actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.review-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tap);
+  height: var(--tap);
+  border: 1px solid var(--sky-line);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  font-size: var(--text-base);
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* On the desktop grid the column header carries the word; on the phone the
+   header is gone, so the word rides on the control itself. */
+.review-btn-word,
+.review-score-word {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.review-btn--like {
+  color: var(--q-good);
+}
+.review-btn--unsure {
+  color: var(--q-moderate);
+}
+.review-btn--pass {
+  color: var(--q-weak);
+}
+
+.review-btn:hover {
+  border-color: currentColor;
+}
+
+.review-facts {
+  grid-column: 1 / -1;
+  margin: 4px 0 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-tile);
+  background: var(--sky-sheet);
+  font-size: var(--text-sm);
+  white-space: normal;
+}
+
+.review-open {
+  height: var(--tap);
+  margin-top: 4px;
+  padding: 0 14px;
+  border: 1px solid var(--sky-line);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  color: var(--cobalt);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.review-facts p,
+.review-facts blockquote {
+  max-width: 68ch;
+}
+
+.review-facts blockquote {
+  margin: 6px 0 12px;
+  padding-left: 10px;
+  border-left: 2px solid var(--cobalt);
+  color: var(--sky-text-secondary);
+}
+
+/* --- sections ------------------------------------------------------------ */
+
+.review-section {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 4px 4px;
+}
+
+.review-section-title {
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--sky-text);
+}
+
+.review-section-meta,
+.review-head-default {
+  font-size: var(--text-sm);
+  color: var(--sky-text-secondary);
+}
+
+.review-head-default {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 260px;
+}
+
+.review-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.review-pill--passed {
+  background: var(--q-weak-bg);
+  color: var(--q-weak);
+}
+.review-pill--liked {
+  background: var(--q-good-bg);
+  color: var(--q-good);
+}
+
+.review-section-spacer {
+  flex: 1;
+}
+
+.review-accept {
+  height: var(--tap);
+  padding: 0 14px;
+  border: 1px solid var(--cobalt);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  color: var(--cobalt);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* --- status bar and key hints -------------------------------------------- */
+
+.review-statusbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 4px 0;
+}
+
+.review-statusbar:empty {
+  display: none;
+}
+
+.review-undo--alert {
+  border-color: var(--q-weak);
+  color: var(--q-weak);
+}
+
+.review-deferred,
+.review-notice:empty {
+  font-size: var(--text-sm);
+  color: var(--sky-text-secondary);
+}
+
+.review-undo {
+  height: var(--tap);
+  padding: 0 14px;
+  border: 1px solid var(--cobalt);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  color: var(--cobalt);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.review-notice {
+  font-size: var(--text-sm);
+  color: var(--sky-text-secondary);
+}
+
+/* Pinned, as on the canvas: the key map is only useful while the eye is on a
+   row, and at 1288 rows a footer at the end of the document is never seen. */
+.review-keyhint {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 8px 4px;
+  background: var(--sky-sheet);
+  border-top: 1px solid var(--sky-line);
+  font-size: var(--text-sm);
+  color: var(--sky-text-secondary);
+}
+
+.review-sentinel {
+  height: 1px;
+}
+
+/* Clear of the pinned key hints and of the last row's decision buttons. */
+.catalog-section.active ~ .scroll-top-btn,
+.catalog-section.active .scroll-top-btn {
+  bottom: 60px;
+  right: 12px;
+}
+
+.review-spacer {
+  flex: none;
+}
+
+/* The floating scroll-to-top button used to sit over the last row's ✕. */
+.review-rows {
+  padding-bottom: 72px;
+}
+
+/* --- phone: two lines per row, no horizontal scroll ---------------------- */
+
+@media (max-width: 720px) {
+  .review-head,
+  .review-keyhint {
+    display: none;
+  }
+
+  /* The command bar is four rows tall here; pinning it would cost a quarter
+     of the screen for controls the reader uses once per session. */
+  .review-sticky {
+    position: static;
+  }
+
+  /* The tab strip scrolls inside itself; the page never scrolls sideways. */
+  .review-bar {
+    gap: 8px;
+  }
+  .review-bar .basket-tabs {
+    order: -1;
+    flex: 1 0 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .review-bar .basket-tab {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  .review-search {
+    flex: 1 0 100%;
+  }
+  .review-band,
+  .review-more {
+    flex: 1 1 40%;
+    min-width: 0;
+  }
+  .review-band select,
+  .review-more {
+    width: 100%;
+    padding: 0 12px;
+  }
+  /* Score band and the drawer share a line; the deadline chip takes the next
+     one whole, so its label never truncates. */
+  .review-more {
+    order: 2;
+  }
+  .review-chip {
+    order: 3;
+    flex: 1 0 100%;
+  }
+
+  /* The row folds to two lines plus the decisions: the title over the
+     company, then one line of meta. Both text fields clamp, so a long title or
+     a long quoted requirement cannot stretch one row past its neighbours. */
+  .review-title {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal;
+    overflow: hidden;
+    line-height: 1.3;
+  }
+  .review-conflict {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .review-meta {
+    flex-wrap: nowrap;
+    line-height: 1.4;
+  }
+  .review-cell--conflict {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .review-cell--deadline,
+  .review-cell--source,
+  .review-cell--age {
+    flex: 0 0 auto;
+  }
+  /* Source and age are one tap away on the detail page; on a 390px line the
+     deadline and the conflict are what a decision needs. */
+  .review-cell--source,
+  .review-cell--age {
+    display: none;
+  }
+  .review-cell--conflict::after {
+    content: none;
+  }
+  .review-section {
+    padding: 12px 4px 4px;
+  }
+  /* Stack the batch's proposal instead of squeezing it into a column. */
+  .review-head-default {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+  .review-section-meta {
+    flex: 1 1 100%;
+  }
+
+  .review-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "role score"
+      "meta meta"
+      "acts acts";
+    row-gap: 6px;
+    padding: 10px 12px;
+  }
+
+  .review-cell--role {
+    grid-area: role;
+  }
+  .review-cell--score {
+    grid-area: score;
+    justify-self: end;
+  }
+  .review-meta {
+    grid-area: meta;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+    font-size: var(--text-xs);
+  }
+  .review-cell--deadline {
+    padding-right: 10px;
+    border-right: 1px solid var(--sky-line);
+    margin-right: 10px;
+  }
+  .review-cell--actions {
+    grid-area: acts;
+    justify-content: flex-start;
+  }
+  .review-btn {
+    width: auto;
+    min-width: var(--tap);
+    padding: 0 14px;
+    gap: 6px;
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+  .review-btn-word,
+  .review-score-word {
+    position: static;
+    width: auto;
+    height: auto;
+    clip: auto;
+  }
+  .review-score-word {
+    margin-right: 5px;
+    font-size: var(--text-xs);
+    font-weight: 400;
+    opacity: 0.75;
+  }
+  .review-search {
+    max-width: none;
+  }
+  .review-drawer-form {
+    padding: 18px 16px;
+  }
+}

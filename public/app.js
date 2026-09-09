@@ -40,9 +40,11 @@ import {
   updateBasketCounts,
   renderCatalog,
   switchBasket,
-  toggleCatalogLoc,
-  toggleCatalogSort,
-  toggleCatalogShowAll,
+  reviewSetBand,
+  reviewToggleDeadline,
+  reviewOpenFilters,
+  reviewToggleExpand,
+  reviewSearchInput,
   catalogThumbAction,
   openCatalogRow,
 } from "./modules/catalog.js";
@@ -734,9 +736,11 @@ window.addEventListener("popstate", applyRouteFromUrl);
 window.switchMode = switchMode;
 window.switchVacancies = switchVacancies;
 window.switchBasket = switchBasket;
-window.toggleCatalogLoc = toggleCatalogLoc;
-window.toggleCatalogSort = toggleCatalogSort;
-window.toggleCatalogShowAll = toggleCatalogShowAll;
+window.reviewSetBand = reviewSetBand;
+window.reviewToggleDeadline = reviewToggleDeadline;
+window.reviewOpenFilters = reviewOpenFilters;
+window.reviewToggleExpand = reviewToggleExpand;
+window.reviewSearchInput = reviewSearchInput;
 window.catalogThumbAction = catalogThumbAction;
 window.todayAction = todayAction;
 window.openTodayRow = openTodayRow;

@@ -93,6 +93,8 @@ export const _STATUS_CHIP_KEYS = {
   liked: ["vac_status_liked", "Backlog"],
   passed: ["vac_status_passed", "Passed"],
   skipped: ["vac_status_passed", "Passed"],
+  // Deferred by the reviewer; the row returns to the Inbox the next day.
+  unsure: ["vac_status_unsure", "Back tomorrow"],
   to_apply: ["vac_status_to_apply", "In progress"],
   to_research: ["vac_status_to_research", "In progress"],
   to_network: ["vac_status_to_network", "In progress"],

@@ -26,8 +26,17 @@ import {
   scheduleRender,
 } from "./state.js";
 import { loadFromServer } from "./api.js";
-import { escHtml, safeUrl, showToastText, resolveVacancyCompany } from "./helpers.js";
-import { catalogRowHtml } from "./catalog.js";
+import {
+  escHtml,
+  safeUrl,
+  jsAttr,
+  formatDeadlineHtml,
+  relativeTime,
+  qualityBand,
+  tierClass,
+  showToastText,
+  resolveVacancyCompany,
+} from "./helpers.js";
 import { sourceLabel } from "./vacancy.js";
 import { T } from "./i18n.js";
 import { reviewBatches, batchConcern } from "./screen-batches.js";
@@ -309,6 +318,11 @@ export const liveIo = {
           previous[row.id] = row.previous;
           setStatusLocal([row.id], row.status);
           state.dbData[row.id].revision = row.revision;
+          // When the status changed, not when we learned it. getGroupStatus
+          // reads this to decide whether an "unsure" row is still deferred, so
+          // without it a just-deferred role reappears in the Inbox at once.
+          if (row.status_updated_at)
+            state.dbData[row.id].status_changed_at = row.status_updated_at;
         }
         return previous;
       } catch { /* Keep the receipt for an explicit retry after reconnecting. */ }
@@ -327,7 +341,10 @@ export async function bulkSet(ids, status, io, onlyUndecided = false) {
   const op = { status, rows };
   for (const id of ids) {
     const members = io.members(id);
-    if (!members.length || (onlyUndecided && members.some(mid => !["unseen", "expiring"].includes(io.current(mid))))) continue;
+    if (!members.length || (onlyUndecided &&
+        members.some(
+          (mid) => !["unseen", "expiring", "unsure"].includes(io.current(mid)),
+        ))) continue;
     const previous = await io.write(members, () => status, undefined, { id, status });
     if (previous) {
       const row = { id, member_ids: members, previous };
@@ -379,7 +396,158 @@ export async function undoLast(io) {
 
 // ---------------------------------------------------------------------------
 // Row assembly (pure)
+//
+// The dense row this view renders. It used to live in catalog.js; the review
+// screen there now has its own row, and this is the only remaining caller.
 // ---------------------------------------------------------------------------
+
+// First location's text plus a "+N" hint when there are more; the full list
+// is one click away on the vacancy detail page's facts rail.
+function primaryLocationInfo(g) {
+  const locs = (g.locations || []).filter((l) => l && l.location);
+  if (!locs.length) return null;
+  const extra = locs.length - 1;
+  return {
+    text: locs[0].location + (extra > 0 ? " +" + extra : ""),
+    title: locs.map((l) => l.location).join(", "),
+  };
+}
+
+function catalogRowHtml(g, basket, opts) {
+  const o = opts || {};
+  const t = o.t || ((k, fb) => fb);
+  const locale = o.locale || "en-US";
+
+  const score = g.llm_score;
+  const scoreCls =
+    score == null ? "vac-score--none" : "q-" + qualityBand(score) + "-bg";
+  const scoreTxt = score == null ? "—" : String(score);
+
+  const idAttr = jsAttr(g.id);
+
+  const deadlineHtml = g.deadline
+    ? formatDeadlineHtml(g.deadline, "card-deadline", { t, locale })
+    : "";
+
+  const tierHtml = g.calculated_tier
+    ? '<span class="catalog-row-tier ' +
+      tierClass(g.calculated_tier) +
+      '">' +
+      escHtml(g.calculated_tier) +
+      "</span>"
+    : "";
+
+  const loc = primaryLocationInfo(g);
+  const locHtml = loc
+    ? '<span title="' +
+      escHtml(loc.title) +
+      '">' +
+      escHtml(loc.text) +
+      "</span>"
+    : "—";
+
+  const compText = g.compensation ? escHtml(g.compensation) : "—";
+  const seenText = g.first_seen ? escHtml(relativeTime(g.first_seen, t)) : "—";
+
+  const subText = g.llm_summary || g.screening?.posting_facts?.duties || g.snippet || "";
+  const subHtml = subText
+    ? '<div class="catalog-row-sub">' + escHtml(subText) + "</div>"
+    : "";
+
+  const mids = jsAttr(JSON.stringify(g.member_ids));
+  const likeLabel = escHtml(t("vac_like", "Keep"));
+  const passLabel = escHtml(t("vac_pass", "Pass"));
+  const likeBtn =
+    '<button class="catalog-row-btn like" onclick="event.stopPropagation();catalogThumbAction(\'' +
+    idAttr +
+    "'," +
+    mids +
+    ",'like')\" title=\"" +
+    likeLabel +
+    '" aria-label="' +
+    likeLabel +
+    '">✓</button>';
+  const passBtn =
+    '<button class="catalog-row-btn pass" onclick="event.stopPropagation();catalogThumbAction(\'' +
+    idAttr +
+    "'," +
+    mids +
+    ",'pass')\" title=\"" +
+    passLabel +
+    '" aria-label="' +
+    passLabel +
+    '">✕</button>';
+  let actionsHtml = "";
+  if (basket === "liked") actionsHtml = passBtn;
+  else if (basket === "unseen") actionsHtml = likeBtn + passBtn;
+  else if (basket === "passed") actionsHtml = likeBtn;
+
+  const dates = screenDateFacts(g);
+  const url = safeUrl((g.locations || []).find(l => l?.url)?.url || "");
+  const metadata = [
+    dates.firstSeen && `<span class="scr-meta scr-meta--date">${escHtml(t("vac_first_seen","First seen"))}: ${dates.firstSeen}</span>`,
+    dates.lastSeen && `<span class="scr-meta scr-meta--date">${escHtml(t("screen_last_seen","Last seen"))}: ${dates.lastSeen}</span>`,
+    g.source_board && `<span class="scr-meta">${escHtml(g.source_board)}</span>`,
+  ].filter(Boolean).join(" ");
+  const progress = !["unseen","liked","passed","skipped","expiring"].includes(basket);
+  const current = g.screening_state === "ready" && (!window.VACANCY_DATA.config.screening_prompt_fingerprint ||
+    g.screening_fingerprint === `${g.posting_fingerprint}:${window.VACANCY_DATA.config.screening_prompt_fingerprint}`);
+  const prepLabel = current ? "" : t(g.screening ? "inbox_older_facts" : "inbox_no_facts", g.screening ? "Facts need updating" : "Facts not prepared");
+  if (o.review) {
+    actionsHtml = progress ? '<span>' + escHtml(t("vac_status_" + basket,basket)) + '</span>' :
+      [["liked","screen_keep","Like"],["passed","screen_put_aside","Pass"]].map(([status,key,label]) =>
+        '<button class="catalog-row-btn" data-decision="' + status + '" data-vacancy="' + escHtml(g.id) + '"' +
+        (o.disabled ? ' disabled' : '') + '>' + escHtml(t(key,label)) + '</button>').join('');
+  }
+  const selectHtml = o.review ? '<input type="checkbox" data-toggle="' + escHtml(g.id) + '" aria-label="' + escHtml(g.title) + '"' +
+    (o.checked ? ' checked' : '') + (o.disabled || progress ? ' disabled' : '') + '>' : escHtml(scoreTxt);
+  return (
+    '<div class="catalog-row" data-id="' +
+    escHtml(g.id) +
+    '" role="button" tabindex="0" onclick="if(!event.target.closest(\'button,input,a,label,summary,details\'))openCatalogRow(\'' +
+    idAttr +
+    "')\" onkeydown=\"if((event.key==='Enter'||event.key===' ')&&event.target===event.currentTarget){event.preventDefault();openCatalogRow('" +
+    idAttr +
+    "')}\">" +
+    '<div class="catalog-row-score ' +
+    scoreCls +
+    '">' +
+    selectHtml +
+    "</div>" +
+    '<div class="catalog-row-role">' +
+    '<div class="catalog-row-title-line">' +
+    '<span class="catalog-row-title">' +
+    escHtml(g.title) +
+    "</span>" +
+    deadlineHtml +
+    "</div>" +
+    subHtml +
+    (o.review ? '<div class="scr-row-meta">' + metadata + '</div>' : "") +
+    (o.review && prepLabel ? '<div class="scr-concern">' + escHtml(prepLabel) + '</div>' : '') +
+    (o.review && url ? '<a class="scr-posting" href="' + escHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escHtml(t("vac_open_posting","Open posting")) + ' ↗</a>' : '') +
+    "</div>" +
+    '<div class="catalog-row-company">' +
+    '<span class="catalog-row-org">' +
+    escHtml(g.company_name || g.org) +
+    "</span>" +
+    (o.review ? "" : tierHtml) +
+    "</div>" +
+    '<div class="catalog-row-loc">' +
+    '<span class="scr-meta scr-meta--location">' + locHtml + "</span>" +
+    "</div>" +
+    '<div class="catalog-row-comp">' +
+    compText +
+    "</div>" +
+    '<div class="catalog-row-seen">' +
+    seenText +
+    "</div>" +
+    '<div class="catalog-row-actions">' +
+    actionsHtml +
+    "</div>" +
+    "</div>"
+  );
+}
+
 
 const STRENGTH_LABEL = {
   required: ["screen_required", "Required"],

@@ -40,11 +40,24 @@ export function hasVerdict(g, opts) {
 export const ANY_COMPANY_MIN_SCORE = VISIBLE_MIN_SCORE;
 
 // Decisions and applications stay visible regardless of company tracking or
-// score. Prepared screening roles also bypass legacy discovery gates. Availability is
-// shown separately and never changes the decision basket.
+// score. Availability is shown separately and never changes the decision
+// basket.
+//
+// Prepared facts lift the COMPANY gate: an unscored role from a company the
+// user has not vetted is still worth reading once its requirements are
+// extracted. They do NOT lift the score floor. They used to, and that made the
+// review screen's score band inert — 868 of 1288 roles are prepared, so
+// "Score 60 and up" moved the tab count while the list stayed put. Recall-first
+// is preserved by the band's own default, "All scores", which sets no floor at
+// all; the floor now only exists when the user asked for one.
 export function isVisible(g, opts) {
-  if (hasVerdict(g, opts) || g.screening_state === "ready") return true;
-  if (!opts.isApproved(g) && !clearsScoreFloor(g, ANY_COMPANY_MIN_SCORE))
+  if (hasVerdict(g, opts)) return true;
+  const prepared = g.screening_state === "ready";
+  if (
+    !prepared &&
+    !opts.isApproved(g) &&
+    !clearsScoreFloor(g, ANY_COMPANY_MIN_SCORE)
+  )
     return false;
   return clearsScoreFloor(g, opts.minScore);
 }
@@ -175,6 +188,8 @@ export const NON_APPLYABLE_STATUSES = new Set([
   // An offer already accepted: the application ended, and it ended well.
   "accepted",
   "skipped",
+  // Deferred by the reviewer today; it returns to the Inbox tomorrow.
+  "unsure",
 ]);
 
 // A role is worth applying to right now when it clears APPLYABLE_MIN_SCORE, the
@@ -380,10 +395,22 @@ export function selectTodayRoles(groups, opts) {
 // Decision baskets are shared by every vacancy view. Progress is independent:
 // an employer rejection preserves the user's interest, not a manufactured Pass.
 export const VACANCY_BASKETS = {
-  unseen: "unseen", expiring: "unseen",
-  liked: "liked", to_apply: "liked", to_research: "liked", to_network: "liked",
-  applied: "liked", test_task: "liked", interview: "liked", accepted: "liked", declined: "liked",
-  passed: "passed", skipped: "passed",
+  unseen: "unseen",
+  expiring: "unseen",
+  liked: "liked",
+  to_apply: "liked",
+  to_research: "liked",
+  to_network: "liked",
+  applied: "liked",
+  test_task: "liked",
+  interview: "liked",
+  accepted: "liked",
+  declined: "liked",
+  passed: "passed",
+  skipped: "passed",
+  // Deferred for the rest of the day: in no basket. getGroupStatus turns a
+  // stale "unsure" back into "unseen", so only today's deferrals land here.
+  unsure: "deferred",
 };
 
 /** Same collected records, regardless of preparation readiness. */
@@ -453,6 +480,22 @@ export const SCREEN_ACTIVITIES = [
   "specialist",
 ];
 
+// Topic shortcuts search quoted requirements, not titles or company geography.
+// These are review aids, never automatic eligibility decisions.
+const REQUIREMENT_TOPICS = {
+  investment:
+    /\b(invest(?:ment|ing|or)|venture capital|private equity|portfolio|financial instruments)\b/i,
+  regional:
+    /\b(africa|african|asia|asian|pacific|sids|latin america|caribbean|middle east|europe|european|regional|country experience)\b/i,
+  management:
+    /\b(manag(?:e|ing|ement)|leadership|supervis|direct reports|team lead)/i,
+  fundraising: /\b(fundrais|donor|grant|philanthrop)/i,
+  technical:
+    /\b(programming|software|engineering|python|sql|machine learning|data science|technical)\b/i,
+  travel: /\b(travel|relocat|driving licen)/i,
+  certification: /\b(certif|licen[cs]|accredit|registration|chartered)/i,
+};
+
 /** Every requirement predicate binds to the same piece of posting evidence. */
 export function screenMatchRequirements(g, filters = {}) {
   const needle = String(filters.requirementText || "")
@@ -463,6 +506,12 @@ export function screenMatchRequirements(g, filters = {}) {
       r &&
       (!filters.kind || r.kind === filters.kind) &&
       (!filters.strength || (r.strength || "unknown") === filters.strength) &&
+      // Both searches read the requirement's OWN text. A quote is often one
+      // sentence covering several requirements ("English is required; German is
+      // preferred"), so searching it makes one requirement match on another
+      // one's words.
+      (!filters.topic ||
+        REQUIREMENT_TOPICS[filters.topic]?.test(String(r.value || ""))) &&
       (!needle ||
         String(r.value || "")
           .toLowerCase()
@@ -484,12 +533,55 @@ export function screenMatches(
   filters = {},
   today = new Date().toISOString().slice(0, 10),
 ) {
-  const dates = screenDateFacts(g, today);
+  const dates =
+    filters.added || filters.age || filters.deadline
+      ? screenDateFacts(g, today)
+      : null;
+  if (
+    filters.employment &&
+    (g.screening?.posting_facts?.employment_type || "unknown") !==
+      filters.employment
+  )
+    return false;
+  const current =
+    !!g.screening &&
+    g.screening_state === "ready" &&
+    (!filters.promptFingerprint ||
+      g.screening_fingerprint ===
+        `${g.posting_fingerprint}:${filters.promptFingerprint}`);
+  if (filters.preparation === "current" && !current) return false;
+  if (filters.preparation === "stale" && (!g.screening || current))
+    return false;
+  if (filters.preparation === "missing" && g.screening) return false;
+  if (filters.preparation === "failed" && g.screening_state !== "failed")
+    return false;
+  if (filters.unknowns === "yes" && !g.screening?.unknowns?.length)
+    return false;
+  if (
+    filters.unknowns === "no" &&
+    (!g.screening || g.screening.unknowns?.length)
+  )
+    return false;
+  const score = g.llm_score;
+  if (filters.score === "unscored" && score != null) return false;
+  if (
+    filters.score &&
+    filters.score !== "unscored" &&
+    (score == null ||
+      (filters.score === "below40" && score >= 40) ||
+      (filters.score === "40to69" && (score < 40 || score >= 70)) ||
+      (filters.score === "70plus" && score < 70))
+  )
+    return false;
   if (filters.source && g.source_board !== filters.source) return false;
   if (filters.added && dates.firstSeen !== filters.added) return false;
   if (filters.place) {
-    const locations = (g.locations || []).map(l => l.location || "").filter(l => !/^HQ:/i.test(l));
-    const place = [g.screening?.posting_facts?.location || "", ...locations].join(" ").toLowerCase();
+    const locations = (g.locations || [])
+      .map((l) => l.location || "")
+      .filter((l) => !/^HQ:/i.test(l));
+    const place = [g.screening?.posting_facts?.location || "", ...locations]
+      .join(" ")
+      .toLowerCase();
     if (!place.includes(filters.place.trim().toLowerCase())) return false;
   }
   if (filters.age) {
@@ -536,6 +628,7 @@ export function screenMatches(
     return false;
   if (
     (filters.kind ||
+      filters.topic ||
       filters.strength ||
       filters.requirementText?.trim() ||
       filters.finding) &&

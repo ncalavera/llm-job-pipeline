@@ -96,6 +96,9 @@ _STATUS_RANK = {
     "passed": 50,
     "skipped": 40,
     "expiring": 30,
+    # A deliberate "come back to me" beats an untouched row, but never the
+    # protection 'expiring' carries, and never a real decision above it.
+    "unsure": 25,
     "unseen": 20,
     "archived": 10,
 }

@@ -85,20 +85,22 @@ export const STATUS_PRI = {
   liked: 9,
   expiring: 10,
   passed: 11,
-  unseen: 12,
+  // A deferral beats an untouched member, never a decision.
+  unsure: 12,
+  unseen: 13,
 };
 
 export { VACANCY_BASKETS as STATUS_BASKET } from "./derive.js";
 import { VACANCY_BASKETS as STATUS_BASKET } from "./derive.js";
 
 export const TRIAGE_COLUMNS = [
-  {key: "liked", label: "Backlog", color: "var(--gold)", compact: true},
-  {key: "to_apply", label: "In progress", color: "var(--emerald)"},
-  {key: "applied", label: "Applied", color: "var(--coral)"},
-  {key: "interview", label: "Interviewing", color: "var(--orange)"},
-  {key: "accepted", label: "Offer / invitation", color: "var(--pine)"},
-  {key: "declined", label: "Rejected", color: "var(--slate)"},
-  {key: "skipped", label: "Passed", color: "var(--muted)"},
+  { key: "liked", label: "Backlog", color: "var(--gold)", compact: true },
+  { key: "to_apply", label: "In progress", color: "var(--emerald)" },
+  { key: "applied", label: "Applied", color: "var(--coral)" },
+  { key: "interview", label: "Interviewing", color: "var(--orange)" },
+  { key: "accepted", label: "Offer / invitation", color: "var(--pine)" },
+  { key: "declined", label: "Rejected", color: "var(--slate)" },
+  { key: "skipped", label: "Passed", color: "var(--muted)" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -110,7 +112,6 @@ export const state = {
   statusesLoaded: false,
   apiHealthy: true,
   currentBasket: "unseen",
-  activeCatalogLocs: new Set(),
   // Discovery score-floor toggle. When true the VISIBLE_MIN_SCORE floor is
   // lifted so sub-threshold roles show. Shared state (not a catalog-local flag)
   // so the Geo table honours the SAME show-all as the Catalog — the two browse
@@ -214,17 +215,36 @@ export function scheduleRender() {
 // State queries
 // ---------------------------------------------------------------------------
 
+// "Unsure" is a deferral, not a decision: the row leaves today's list and comes
+// back to the Inbox the next calendar day. Resolving that here — in the ONE
+// function every surface reads a status through — keeps the badge, the list,
+// the keyboard gating and the row buttons on the same answer. A row with no
+// recorded timestamp comes back, because losing a role is the worse failure.
+export function isUnsureToday(record) {
+  if (!record || record.status !== "unsure" || !record.status_changed_at)
+    return false;
+  const changed = new Date(record.status_changed_at);
+  return (
+    !Number.isNaN(changed.getTime()) &&
+    changed.toDateString() === new Date().toDateString()
+  );
+}
+
 export function getGroupStatus(g) {
   let best = "unseen";
   let bestP = 99;
   const allIds = new Set(g.member_ids);
   allIds.add(g.id);
   for (const mid of allIds) {
-    if (state.dbData[mid]) {
-      const p = STATUS_PRI[state.dbData[mid].status] ?? 1;
+    const record = state.dbData[mid];
+    if (record) {
+      const p = STATUS_PRI[record.status] ?? 1;
       if (p < bestP) {
         bestP = p;
-        best = state.dbData[mid].status;
+        best =
+          record.status === "unsure" && !isUnsureToday(record)
+            ? "unseen"
+            : record.status;
       }
     }
   }

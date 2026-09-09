@@ -485,18 +485,21 @@
               </p>
             </div>
 
-            <!-- Header on the material (design-protocol.md #6): title,
-                 basket tabs, location pills, search + sort + show-all. -->
-            <div class="browse-header">
-              <span class="browse-title" data-i18n="vsub_browse">Browse</span>
+            <!-- Everything that must stay visible while deciding rides in ONE
+                 sticky block, so there is a single offset to get right. -->
+            <div class="review-sticky">
 
+            <!-- Daily review command bar (Direction B). One list, four
+                 controls: search, score band, the deadline chip, and the
+                 drawer that holds every remaining filter. -->
+            <div class="review-bar">
               <div class="basket-tabs">
                 <button
                   class="basket-tab"
                   data-basket="liked"
                   onclick="switchBasket(this)"
                 >
-                  <span data-i18n="basket_liked">Liked & applications</span>
+                  <span>Liked</span>
                   <span class="basket-count" id="countLiked">0</span>
                 </button>
                 <button
@@ -504,7 +507,7 @@
                   data-basket="unseen"
                   onclick="switchBasket(this)"
                 >
-                  <span data-i18n="basket_unreviewed">Undecided</span>
+                  <span>Inbox</span>
                   <span class="basket-count" id="countUnseen">0</span>
                 </button>
                 <button
@@ -512,114 +515,127 @@
                   data-basket="passed"
                   onclick="switchBasket(this)"
                 >
-                  <span data-i18n="basket_passed">Passed & rejected</span>
+                  <span>Passed</span>
                   <span class="basket-count" id="countPassed">0</span>
                 </button>
-              </div>
-
-              <div class="browse-loc-chips">
                 <button
-                  class="browse-loc-chip"
-                  data-cloc="europe"
-                  onclick="toggleCatalogLoc(this)"
-                  data-i18n="loc_europe"
+                  class="basket-tab"
+                  data-basket="deferred"
+                  onclick="switchBasket(this)"
                 >
-                  Europe
-                </button>
-                <button
-                  class="browse-loc-chip"
-                  data-cloc="remote"
-                  onclick="toggleCatalogLoc(this)"
-                  data-i18n="loc_remote"
-                >
-                  Remote
-                </button>
-                <button
-                  class="browse-loc-chip"
-                  data-cloc="other"
-                  onclick="toggleCatalogLoc(this)"
-                  data-i18n="loc_other"
-                >
-                  Other
+                  <span>Set aside</span>
+                  <span class="basket-count" id="countDeferred">0</span>
                 </button>
               </div>
 
-              <div class="browse-header-right">
+              <label class="review-search">
+                <span class="review-search-icon" aria-hidden="true">&#128269;</span>
                 <input
-                  type="text"
-                  class="browse-search"
+                  type="search"
                   id="catalogSearch"
-                  placeholder="Search by title, organization, location..."
-                  data-i18n-ph="search_vacancies_ph"
-                  oninput="renderCatalog()"
+                  placeholder="Search title or employer"
+                  aria-label="Search title or employer"
+                  oninput="reviewSearchInput()"
                 />
-                <select
-                  class="browse-org-filter"
-                  id="catalogOrgFilter"
-                  onchange="renderCatalog()"
-                >
-                  <option value="" data-i18n="all_companies">
-                    All companies
-                  </option>
+              </label>
+
+              <label class="review-band">
+                <span class="visually-hidden">Score band</span>
+                <select id="reviewScoreBand" onchange="reviewSetBand(this.value)">
+                  <option value="">All scores</option>
+                  <option value="40">Score 40 and up</option>
+                  <option value="60">Score 60 and up</option>
                 </select>
-                <button
-                  class="browse-sort-btn active"
-                  onclick="toggleCatalogSort(this)"
-                >
-                  <span data-i18n="sort_score">Score</span>&#160;&#8595;
-                </button>
-                <button
-                  class="browse-showall-btn"
-                  onclick="toggleCatalogShowAll(this)"
-                  data-i18n="catalog_show_all"
-                >
-                  Show all
-                </button>
-              </div>
+              </label>
+
+              <button
+                type="button"
+                class="review-chip"
+                id="reviewDeadlineChip"
+                aria-pressed="false"
+                onclick="reviewToggleDeadline()"
+              >
+                Deadline within 7 days
+              </button>
+
+              <button
+                type="button"
+                class="review-more"
+                id="reviewMoreFilters"
+                onclick="reviewOpenFilters()"
+              >
+                More filters<span class="review-more-count" id="reviewMoreCount" hidden></span>
+              </button>
             </div>
 
-            <!-- Keyboard-triage affordance (U15, DHA-399; design-protocol #4 —
-                 keep j/k/l/x/Enter visible). Keys are literal mono; the action
-                 words go through i18n (EN in markup, RU baked). -->
-            <div class="browse-keyhint">
-              <span class="browse-key">j</span><span class="browse-key">k</span>
-              <span class="browse-keyhint-label" data-i18n="keys_move"
-                >move</span
-              >
-              <span class="browse-key">l</span>
-              <span class="browse-keyhint-label" data-i18n="keys_like"
-                >like</span
-              >
-              <span class="browse-key">x</span>
-              <span class="browse-keyhint-label" data-i18n="keys_pass"
-                >pass</span
-              >
-              <span class="browse-key">&#8629;</span>
-              <span class="browse-keyhint-label" data-i18n="keys_open"
-                >open</span
-              >
-            </div>
-
-            <!-- Data as a sheet (design-protocol.md #2, #6). min-width guards
-                 the scroll (AE4): below 920px the table scrolls inside the
-                 sheet, never the page body. -->
-            <div class="catalog-sheet">
-              <div class="catalog-table">
-                <div class="catalog-row-head">
-                  <div data-i18n="browse_col_fit">Score</div>
-                  <div data-i18n="browse_col_role">Role</div>
-                  <div data-i18n="browse_col_company">Company</div>
-                  <div data-i18n="browse_col_location">Location</div>
-                  <div data-i18n="browse_col_comp">Comp</div>
-                  <div data-i18n="browse_col_seen">Seen</div>
-                  <div></div>
+            <!-- The drawer. Native <dialog>: focus trap, Esc and the backdrop
+                 come from the platform, not from us. -->
+            <dialog class="review-drawer" id="reviewDrawer" aria-label="More filters">
+              <form method="dialog" class="review-drawer-form">
+                <div class="review-drawer-head">
+                  <strong>More filters</strong>
+                  <span class="review-drawer-note"
+                    >Filters add up. A filter never rejects a role for you;
+                    &ldquo;unknown&rdquo; stays in the list.</span
+                  >
+                  <button
+                    type="button"
+                    class="review-drawer-clear"
+                    id="reviewFiltersClear"
+                  >
+                    Clear all
+                  </button>
+                  <button
+                    class="review-drawer-close"
+                    value="close"
+                    aria-label="Close the filters"
+                  >
+                    &#10005;
+                  </button>
                 </div>
-                <div class="browse-rows" id="catalogGrid"></div>
-                <div
-                  class="browse-results-count"
-                  id="catalogResultsCount"
-                ></div>
+                <div id="reviewDrawerBody"></div>
+                <div class="review-drawer-foot">
+                  <button class="review-drawer-apply" value="close" id="reviewDrawerApply">
+                    Show the roles
+                  </button>
+                  <span class="review-drawer-count" id="reviewDrawerCount"></span>
+                </div>
+              </form>
+            </dialog>
+
+            <!-- The recovery strip sits ABOVE the list, next to the command
+                 bar: Undo, Retry and the save notice are worthless at the
+                 bottom of 1288 rows. -->
+            <div class="review-statusbar" id="reviewStatusbar"></div>
+
+              <div class="review-head">
+                <div>Role &middot; employer</div>
+                <div>Score</div>
+                <div>Deadline</div>
+                <div>Top conflict with profile</div>
+                <div>Source</div>
+                <div>Age</div>
+                <div>Decide</div>
+                <div class="browse-results-count" id="catalogResultsCount"></div>
               </div>
+            </div>
+            <!-- /review-sticky -->
+
+            <!-- One list. Sections are batch headers; rows paint in windows of
+                 REVIEW_WINDOW as the sentinel scrolls into view. -->
+            <div class="review-table">
+              <div class="review-rows" id="catalogGrid"></div>
+              <div class="review-sentinel" id="reviewSentinel" aria-hidden="true"></div>
+            </div>
+
+            <!-- Keyboard hints. Desktop only: the phone has no keyboard. -->
+            <div class="review-keyhint">
+              <span><span class="browse-key">j</span><span class="browse-key">k</span> move</span>
+              <span><span class="browse-key">L</span> like</span>
+              <span><span class="browse-key">P</span> pass</span>
+              <span><span class="browse-key">S</span> unsure, back tomorrow</span>
+              <span><span class="browse-key">U</span> undo</span>
+              <span><span class="browse-key">&#8629;</span> show the requirements</span>
             </div>
           </div>
           <!-- /catalog-section -->

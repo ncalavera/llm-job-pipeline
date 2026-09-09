@@ -1448,6 +1448,10 @@ export const TOAST_MESSAGES = {
   liked: { key: "toast_liked", fallback: "\u2705 Added to favorites" },
   passed: { key: "toast_passed", fallback: "\uD83D\uDC4E Skipped" },
   skipped: { key: "toast_skipped", fallback: "\uD83D\uDC4E Skipped" },
+  unsure: {
+    key: "toast_unsure",
+    fallback: "\uD83D\uDD52 Back in the inbox tomorrow",
+  },
   to_apply: { key: "toast_to_apply", fallback: "\uD83D\uDCE5 Moved to apply" },
   to_research: {
     key: "toast_to_research",

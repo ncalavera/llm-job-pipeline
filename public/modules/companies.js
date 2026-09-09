@@ -2251,6 +2251,8 @@ export var _ROLE_STATUS_GROUP = {
   // won offer never sorts below an untouched role on its company's page.
   accepted: 0,
   unseen: 1,
+  // A deferral is not a decision: it sorts with the untouched roles.
+  unsure: 1,
   passed: 2,
   skipped: 2,
   declined: 2,

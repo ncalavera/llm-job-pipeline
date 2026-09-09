@@ -463,6 +463,7 @@ export const VALID_STATUSES = [
   "to_research",
   "to_network",
   "skipped",
+  "unsure",
   "applied",
   "test_task",
   "interview",
@@ -527,7 +528,7 @@ const FEEDBACK_UUID =
 
 // PostgreSQL's row version changes for every writer, including agent/CLI writes.
 // Compare opaque tokens, never timestamps rounded by JavaScript.
-const SCREENING_STATUSES = ["unseen", "liked", "passed", "skipped", "expiring"];
+const SCREENING_STATUSES = ["unseen", "liked", "passed", "skipped", "unsure", "expiring"];
 async function handleScreeningDecision(req, res) {
   if (piiPreamble(req, res, "screening-decision", "POST")) return;
   if (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] || ""))

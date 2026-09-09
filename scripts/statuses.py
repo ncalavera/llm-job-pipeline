@@ -25,6 +25,9 @@ ALL_STATUSES: tuple[str, ...] = (
     "to_research",
     "to_network",
     "skipped",
+    # Set from the daily review: "come back to me". Not a decision — the row
+    # leaves today's list and returns to the Inbox the next day.
+    "unsure",
     "applied",
     "test_task",
     "interview",
@@ -102,7 +105,9 @@ VALID_REPORT_KINDS: frozenset[str] = frozenset(REPORT_KINDS)
 #: What the filter/dedup stages must never delete: every user decision, plus
 #: 'archived' (already out of view — deleting it would drop the tombstone that
 #: keeps it from being re-fetched).
-PROTECTED_STATUSES: frozenset[str] = DECIDED_STATUSES | frozenset({"archived"})
+PROTECTED_STATUSES: frozenset[str] = DECIDED_STATUSES | frozenset(
+    {"archived", "unsure"}
+)
 
 #: Where a networking contact stands. Ordered as the funnel runs, so the UI can
 #: lay the counts out in this order without a second list to keep in step.

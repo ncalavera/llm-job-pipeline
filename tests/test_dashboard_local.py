@@ -158,11 +158,16 @@ def test_statuses_empty_db(server):
     base, _ = server
     status, body = _get(base, "/api/statuses")
     assert status == 200
-    assert body == {"statuses": {}, "timestamps": {}}
+    assert body == {"statuses": {}, "timestamps": {}, "revisions": {}}
 
 
-def test_statuses_returns_decided_only(server):
-    """/api/statuses returns non-unseen, non-archived statuses keyed by vid."""
+def test_statuses_returns_every_live_row_with_a_revision(server):
+    """/api/statuses ships every non-archived row, each with a revision.
+
+    The durable write path refuses to send a change without a revision, and
+    every row the review screen decides is unseen. Omitting unseen rows from
+    this map therefore makes every decision in easy mode fail silently.
+    """
     base, dal = server
     liked = _seed_vacancy(dal, title="Liked Role")
     unseen = _seed_vacancy(dal, title="Unseen Role")
@@ -172,8 +177,9 @@ def test_statuses_returns_decided_only(server):
     status, body = _get(base, "/api/statuses")
     assert status == 200
     assert body["statuses"].get(liked) == "liked"
-    # Unseen rows are omitted from the map.
-    assert unseen not in body["statuses"]
+    assert body["statuses"].get(unseen) == "unseen"
+    assert body["revisions"].get(unseen)
+    assert body["revisions"].get(liked)
 
 
 # ---------------------------------------------------------------------------

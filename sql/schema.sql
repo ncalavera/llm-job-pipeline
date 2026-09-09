@@ -98,7 +98,8 @@ CREATE TABLE IF NOT EXISTS vacancy (
     status                TEXT NOT NULL DEFAULT 'unseen'
                           CHECK (status IN ('unseen', 'liked', 'passed',
                                             'to_apply', 'to_research',
-                                            'to_network', 'skipped', 'applied',
+                                            'to_network', 'skipped', 'unsure',
+                                            'applied',
                                             'test_task', 'interview',
                                             'declined', 'accepted',
                                             'expiring', 'archived')),

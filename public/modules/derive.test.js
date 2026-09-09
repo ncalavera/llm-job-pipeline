@@ -1092,13 +1092,22 @@ test("inbox keeps older preparations and previous decisions", () => {
 });
 
 
-test("ready screening vacancies remain in Browse without a legacy score or approved company", () => {
-  const opts = visOpts({});
-  opts.isApproved = () => false;
+test("prepared facts lift the company gate, not the user's score floor", () => {
+  // Recall-first: an unscored, unvetted role with extracted requirements is
+  // still reviewable. The review screen's default band sets no floor, so it
+  // shows. The prepared state used to override an explicit floor too, which
+  // made that band's 40 / 60 options do nothing to the list.
   const role = { id: "ready", screening_state: "ready", llm_score: null };
-  assert.equal(isVisible(role, opts), true);
-  assert.equal(basketCounts([role], opts).unseen, 1);
-  assert.equal(groupsInBasket([role], "unseen", opts).length, 1);
+  const open = visOpts({}, { minScore: null });
+  open.isApproved = () => false;
+  assert.equal(isVisible(role, open), true);
+  assert.equal(basketCounts([role], open).unseen, 1);
+  assert.equal(groupsInBasket([role], "unseen", open).length, 1);
+
+  const floored = visOpts({}, { minScore: 60 });
+  floored.isApproved = () => false;
+  assert.equal(isVisible(role, floored), false);
+  assert.equal(isVisible({ ...role, llm_score: 70 }, floored), true);
 });
 
 
