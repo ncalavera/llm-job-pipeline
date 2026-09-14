@@ -683,6 +683,10 @@ message_max_chars = 4000
 # trailing slash (forge: "https://jobs.nikitasolovev.com"). Empty = no link.
 # Env DASHBOARD_BASE_URL overrides this.
 dashboard_base_url = ""
+# Base URL of the screener app, without a trailing slash. The morning message
+# counts and links its /today page — the same rows that page shows. Empty = the
+# count still goes out, without a link. Env SCREENER_URL overrides this.
+screener_base_url = ""
 
 # ===========================================================================
 # Job board aggregators — OPT-IN via the JOB_BOARDS env var (default: none).

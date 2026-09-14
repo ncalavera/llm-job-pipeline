@@ -654,8 +654,11 @@ def _sweep_save(ctx: _Ctx, action: str, out_files: list[Path], timeout: float = 
         res = subprocess.run(
             cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=max(0.1, timeout)
         )
-        tail = (res.stdout or res.stderr or "").strip()[-300:]
-        ctx.log(f"save sweep exited {res.returncode}: {tail}")
+        # On failure prefer stderr: stdout carries the harmless "Postgres:
+        # connected" banner, and preferring it hid a ProdWriteBlocked traceback
+        # for every night between 2026-09-06 and 2026-09-14.
+        stream = res.stderr if res.returncode else res.stdout
+        ctx.log(f"save sweep exited {res.returncode}: {(stream or '').strip()[-300:]}")
         return res.returncode == 0
     except Exception as exc:
         ctx.log(f"save sweep failed: {type(exc).__name__}: {exc}")

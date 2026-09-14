@@ -363,6 +363,7 @@ def digest() -> dict:
         "summary_max_chars": int(_num(sec, "summary_max_chars", 1500)),
         "message_max_chars": int(_num(sec, "message_max_chars", 4000)),
         "dashboard_base_url": str(sec.get("dashboard_base_url", "")).rstrip("/"),
+        "screener_base_url": str(sec.get("screener_base_url", "")).rstrip("/"),
     }
 
 

@@ -56,12 +56,17 @@ except Exception:
         "summary_max_chars": 1500,
         "message_max_chars": 4000,
         "dashboard_base_url": "",
+        "screener_base_url": "",
     }
 
 SUMMARY_FALLBACK_CHARS = _DIGEST["summary_fallback_chars"]
 SUMMARY_MAX_CHARS = _DIGEST["summary_max_chars"]  # guard the Telegram message limit
 MESSAGE_MAX_CHARS = _DIGEST["message_max_chars"]
 DASHBOARD_BASE_URL = os.environ.get("DASHBOARD_BASE_URL", _DIGEST["dashboard_base_url"]).rstrip("/")
+# The morning screen lives in the screener app, not the old dashboard. Empty =
+# the count still goes out, without a link.
+_SCREENER_BASE = os.environ.get("SCREENER_URL", _DIGEST["screener_base_url"]).rstrip("/")
+SCREENER_TODAY_URL = _SCREENER_BASE + "/today" if _SCREENER_BASE else ""
 
 # Product language: the digest speaks the ONE language chosen in the
 # profile's ## OUTPUT_LANGUAGE. Every user-facing string routes through _t(),
@@ -115,14 +120,14 @@ ORDER BY v.llm_score DESC, v.created_at DESC
 LIMIT %s
 """
 
-# Ready to screen (KTD5): the one predicate the dashboard's To screen shares —
-# no score floor, no tier, no digest_sent_at stamp, so nothing above fits.
+# Ready to screen: character for character the screener's /today predicate
+# (screener.py today_page), so the headline number is the number of cards
+# Nikita will actually see. No score floor, no company-status gate.
 SELECT_READY_TO_SCREEN_SQL = """
-SELECT v.id, v.screening_state, v.screening_fingerprint, v.full_description
+SELECT v.id
 FROM vacancy v
 JOIN company c ON v.company_id = c.id
-WHERE v.status IN ('unseen', 'expiring')
-  AND c.status != 'inactive'
+WHERE v.source_board IS NOT NULL AND v.status = 'unseen'
 """
 
 # Tier 2: mid scores — one line each (title, company, score, link), stamped
@@ -619,10 +624,9 @@ def build_tail_lines(run_state, ready_to_screen=0):
     carried-over / rolled-over / pending-verdict one-liners."""
     lines = []
     if ready_to_screen:
+        # Same count, same destination as the summary headline.
         text = _t("digest_ready_to_screen", n=ready_to_screen)
-        if DASHBOARD_BASE_URL:
-            text = f'<a href="{DASHBOARD_BASE_URL}/?mode=screen">{text}</a>'
-        lines.append(text)
+        lines.append(f'<a href="{SCREENER_TODAY_URL}">{text}</a>' if SCREENER_TODAY_URL else text)
     if not run_state:
         return lines
     what = []
@@ -1092,8 +1096,8 @@ def build_screening_summary(ready, run_state):
         text = _t(f"digest_degraded_{cap}")
         if text != f"digest_degraded_{cap}":
             lines.append(html.escape(text))
-    if DASHBOARD_BASE_URL:
-        url = html.escape(DASHBOARD_BASE_URL + "/?mode=screen", quote=True)
+    if SCREENER_TODAY_URL:
+        url = html.escape(SCREENER_TODAY_URL, quote=True)
         lines.append(f'<a href="{url}">{_t("digest_open_screening")}</a>')
     return "\n".join(lines)
 

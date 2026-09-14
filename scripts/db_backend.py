@@ -640,6 +640,10 @@ _PIPELINE_ENTRYPOINTS = frozenset(
         "find_company_urls.py",
         "learning.py",
         "migrate.py",
+        # Writes the combined nightly discovery result (score + facts). Missing
+        # here until 2026-09-14: every night's save sweep died on ProdWriteBlocked,
+        # so the night scored 193 roles and saved none of them.
+        "prepare_discovery.py",
         # Writes since migration 0027: the nightly screening preparation result.
         "prepare_screening.py",
         "run_daily.py",
