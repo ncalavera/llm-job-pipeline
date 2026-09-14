@@ -25,8 +25,10 @@ Module structure (for parallel-safe development):
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+import uuid
 from datetime import datetime
 
 import run_status  # lightweight progress heartbeat (vacancies/run_status.json)
@@ -146,6 +148,7 @@ from fetchers import (
     get_firecrawl_change_statuses,
     get_scrape_statuses,
     get_fetch_errors,
+    record_fetch_error,
     COMPANY_FETCHERS,
     BOARD_FETCHERS,
 )
@@ -165,6 +168,7 @@ from database_supabase import (
     archive_stale_board_vacancies,
     is_fetch_error,
 )
+from source_observations import record_source_observations, record_source_run
 
 # Strategies whose fetch returns the company's COMPLETE current listing —
 # safe to treat "absent from fetch" as "closed at source". Excluded:
@@ -738,6 +742,51 @@ def _fetch_one_company(org_name, config, tier, strategy, fetch_stats, archived_h
     return new_count
 
 
+def _record_board_observations(board_id: str, board_cfg: dict, jobs: list) -> None:
+    """Write this board's run + listing rows to the observation ledger, in place.
+
+    One call for EVERY board (it used to live inside algolia.py, so three of the
+    four live boards left no trace at all — 2026-09-14 audit). The key is the
+    board id, which is stable; the old per-fetcher key was a slug of the display
+    name and split one board's history across "80k_hours" and "80_000_hours".
+
+    Stamping ``_source_run`` / ``_source_key`` on each job is what makes
+    ``record_import_outcome`` in the save layer record why a listing did or did
+    not land.
+    """
+    run_id = os.environ.get("JOBS_RUN_ID") or str(uuid.uuid4())
+    source_url = board_cfg.get("url")
+    ok = record_source_run(run_id, board_id, source_url)
+    observations = []
+    for job in jobs:
+        job["_source_run"] = run_id
+        job["_source_key"] = board_id
+        observations.append(
+            {
+                "external_id": str(job.get("external_id", "")),
+                "title": job.get("title") or "",
+                "organization": (job.get("org_override") or "").strip(),
+                "url": job.get("url") or "",
+                "outcome": "accepted",
+            }
+        )
+    ok = record_source_observations(run_id, board_id, source_url, observations) and ok
+    ok = (
+        record_source_run(
+            run_id,
+            board_id,
+            source_url,
+            raw_count=len(jobs),
+            accepted_count=len(jobs),
+            complete=ok,
+            error=None if ok else "source ledger write failed",
+        )
+        and ok
+    )
+    if not ok:
+        record_fetch_error(board_cfg.get("name", board_id), "error: source ledger write failed")
+
+
 def _fetch_one_board(
     board_id, board_cfg, strategy, fetch_stats, archived_hashes=None
 ) -> tuple[int, str]:
@@ -786,6 +835,8 @@ def _fetch_one_board(
     except Exception as exc:
         print(f"  [{board_name}] Fetch error: {exc}")
         board_fetch_status = f"error: {exc}"
+
+    _record_board_observations(board_id, board_cfg, jobs)
 
     # Honest marking: an empty board that actually FAILED keeps its
     # recorded reason (error: timeout / http_500 / …), it does not

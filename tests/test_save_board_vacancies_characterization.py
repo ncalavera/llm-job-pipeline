@@ -12,7 +12,7 @@ backend/registry/DAL chain so it runs entirely on local SQLite (never Postgres).
 Order of gates inside save_board_vacancies (load-bearing for these tests):
     _gate_description → filters.title_words_blacklisted(title)
     → filters.has_enough_content → filters.is_content_junk
-    → external_id batch-dedup → resolve/ensure company → inactive-company skip
+    → external_id batch-dedup → resolve/ensure company
     → filters.is_recently_archived (vs get_archived_hashes(include_gone=True))
     → locations merge / insert
 """
@@ -165,13 +165,17 @@ def test_normalize_title_for_dedup_keeps_non_geo_parens():
 
 
 # ===========================================================================
-# 2. Inactive company → skipped, never inserted
+# 2. Inactive company → still saved on the board path
 # ===========================================================================
 
 
-def test_inactive_company_skipped(dal):
-    """A job whose resolved company has status='inactive' is counted in
-    skipped_inactive and never inserted; new_count stays 0.
+def test_inactive_company_board_row_is_saved(dal):
+    """A board row lands whatever its employer's status.
+
+    The old gate dropped 355 of 954 listings in one 80,000 Hours run
+    (2026-09-14 audit) because the employer had been rejected once on its
+    alignment score. The company gate is off for boards; the title blacklist
+    and the geo/profile filter still apply.
     """
     dal.ensure_company("InactiveCo", status="active")
     cur = dal.get_conn().cursor()
@@ -182,8 +186,8 @@ def test_inactive_company_skipped(dal):
     new = dal.save_board_vacancies(_board("InactiveCo"), [_job("Inactive Role", org="InactiveCo")])
     dal.get_conn().commit()
 
-    assert new == 0
-    assert _row_count(dal, dal.make_vacancy_id("InactiveCo", "Inactive Role")) == 0
+    assert new == 1
+    assert _row_count(dal, dal.make_vacancy_id("InactiveCo", "Inactive Role")) == 1
 
 
 # ===========================================================================
@@ -440,3 +444,77 @@ def test_blacklisted_title_skipped(dal):
 
     assert new == 0
     assert _row_count(dal, dal.make_vacancy_id("BlackCo", title)) == 0
+
+
+# ===========================================================================
+# 10. department (cause-area tags) is persisted, not dropped
+# ===========================================================================
+
+
+def test_department_is_saved_and_backfilled(dal):
+    """Every board fetcher sets `department`; the board save path used to omit
+    it from both the INSERT column list and the UPDATE set, so 20 of 936
+    Probably Good rows carried it (2026-09-14 audit).
+    """
+    _seed_company(dal, "TagCo")
+    board = _board("TagCo")
+
+    dal.save_board_vacancies(board, [_job("Tagged Role", org="TagCo", department="Biosecurity")])
+    dal.get_conn().commit()
+    row = _vacancy_row(dal, dal.make_vacancy_id("TagCo", "Tagged Role"))
+    assert row["department"] == "Biosecurity"
+
+    # A row stored before the fix (empty department) is backfilled on re-listing.
+    cur = dal.get_conn().cursor()
+    cur.execute("UPDATE vacancy SET department = '' WHERE dedup_hash = %s", (row["dedup_hash"],))
+    dal.get_conn().commit()
+    cur.close()
+
+    dal.save_board_vacancies(board, [_job("Tagged Role", org="TagCo", department="AI safety")])
+    dal.get_conn().commit()
+    assert _vacancy_row(dal, row["dedup_hash"])["department"] == "AI safety"
+
+
+# ===========================================================================
+# 11. Two boards, two employer spellings, one apply URL → one row
+# ===========================================================================
+
+
+def test_same_apply_url_across_boards_folds_to_one_row(dal):
+    """Consultants for Impact re-lists 145 of its 150 roles from 80,000 Hours
+    and Probably Good, often under an employer name that does not fold onto the
+    first board's spelling ("Model Evaluation and Threat Research" / "METR").
+    That opens a second company row, so the per-company dedup index never sees
+    the first row. The apply URL is the same posting once the utm decoration and
+    the trailing slash are stripped (2026-09-14 audit).
+    """
+    _seed_company(dal, "Model Evaluation and Threat Research")
+    dal.save_board_vacancies(
+        {"name": "80,000 Hours", "url": "https://jobs.80000hours.org", "tier": "B"},
+        [
+            _job(
+                "System Administrator",
+                org="Model Evaluation and Threat Research",
+                url="https://metr.org/careers/system-administrator/?utm_source=80000hours",
+            )
+        ],
+    )
+    dal.get_conn().commit()
+
+    new = dal.save_board_vacancies(
+        {"name": "Consultants for Impact", "url": "https://cfi.test/board", "tier": "B"},
+        [
+            _job(
+                "System Administrator",
+                org="METR",
+                url="https://metr.org/careers/system-administrator",
+            )
+        ],
+    )
+    dal.get_conn().commit()
+
+    assert new == 0
+    cur = dal.get_conn().cursor()
+    cur.execute("SELECT COUNT(*) FROM vacancy")
+    assert cur.fetchone()[0] == 1
+    cur.close()

@@ -690,6 +690,9 @@ dashboard_base_url = ""
 # user's choice via user_profile.md's exclude_title_keywords, not baked here.
 # Public board credentials (e.g. 80k Hours' Algolia keys) are embedded from the
 # board's own public site search.
+# ttl_days = 1 on the six boards that are actually enabled: each costs one
+# HTTP request and the pipeline only runs on weeknights, so anything larger
+# means a board misses most nights (2026-09-14 board audit).
 # ===========================================================================
 [boards.80k_hours]
 strategy = "algolia_api"
@@ -702,7 +705,7 @@ algolia_app_id = "W6KM1UDIB3"
 algolia_api_key = "d1d7f2c8696e7b36837d5ed337c4a319"
 algolia_index = "jobs_prod_super_ranked"
 board_blacklist = []
-ttl_days = 3
+ttl_days = 1
 tier = "B"
 free = true
 
@@ -821,7 +824,7 @@ url = "https://www.idealist.org/en/jobs"
 remote_zone = "WORLD"
 max_pages = 20
 board_blacklist = []
-ttl_days = 2
+ttl_days = 1
 tier = "B"
 free = true
 
@@ -855,7 +858,7 @@ strategy = "linkedin_guest"
 name = "LinkedIn"
 url = "https://www.linkedin.com/jobs"
 board_blacklist = []
-ttl_days = 3
+ttl_days = 1
 tier = "B"
 free = true
 pages = 2
@@ -910,7 +913,7 @@ url = "https://www.consultantsforimpact.org/job-board"
 data_url = "https://cfi-job-board.netlify.app/board-data.json"
 max_jobs = 150
 board_blacklist = []
-ttl_days = 3
+ttl_days = 1
 tier = "B"
 free = true
 
@@ -922,7 +925,7 @@ audience_ru = "Высокоэффективные вакансии: глобал
 audience_tags = ["effective altruism", "global health", "biosecurity", "ai safety", "policy", "nonprofit", "operations"]
 url = "https://jobs.probablygood.org"
 board_blacklist = []
-ttl_days = 3
+ttl_days = 1
 tier = "B"
 free = true
 
@@ -934,6 +937,6 @@ audience_ru = "Вакансии, стипендии и стажировки в �
 audience_tags = ["effective altruism", "global health", "animal welfare", "ai safety", "policy", "research", "operations"]
 url = "https://www.effectivealtruism.org/opportunities"
 board_blacklist = []
-ttl_days = 3
+ttl_days = 1
 tier = "B"
 free = true

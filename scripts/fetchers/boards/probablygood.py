@@ -28,8 +28,11 @@ _SITE = "https://jobs.probablygood.org"
 def fetch_probablygood_board(board_cfg: dict) -> list[dict]:
     """Fetch jobs from Probably Good's job board via its embedded Algolia key.
 
-    Algolia's index caps pagination at 1000 reachable hits (paginationLimitedTo)
-    even when nbHits is larger — logged explicitly rather than silently dropped.
+    Algolia caps this index at 1000 reachable hits per QUERY, and the index holds
+    more than that (1671 on 2026-09-14), so an unfiltered walk lost 40% of the
+    board. `has_salary` partitions it exactly — true 756 + false 915 = 1671 — so
+    two filtered walks reach every listing under the same cap and the same key.
+    Hits are merged by objectID.
     """
     board_name = board_cfg["name"]
     board_blacklist = board_cfg.get("board_blacklist", [])
@@ -41,28 +44,39 @@ def fetch_probablygood_board(board_cfg: dict) -> list[dict]:
         "Content-Type": "application/json",
     }
 
+    seen_ids: set[str] = set()
     all_hits: list[dict] = []
-    page = 0
-    per_page = 200
     last_error = None
-    nb_hits = None
-    while True:
-        payload = json.dumps({"query": "", "hitsPerPage": per_page, "page": page})
-        try:
-            resp = http.post(url, data=payload, headers=headers, timeout=15)
-            data = resp.json()
-        except Exception as exc:
-            print(f"  [{board_name}] Algolia ERROR page {page}: {exc}")
-            last_error = exc
-            break
-        nb_hits = data.get("nbHits", nb_hits)
-        hits = data.get("hits", [])
-        if not hits:
-            break
-        all_hits.extend(hits)
-        if page >= data.get("nbPages", 1) - 1:
-            break
-        page += 1
+    nb_hits = 0
+    per_page = 200
+    for facet in ("has_salary:true", "has_salary:false"):
+        page = 0
+        while True:
+            payload = json.dumps(
+                {"query": "", "hitsPerPage": per_page, "page": page, "filters": facet}
+            )
+            try:
+                resp = http.post(url, data=payload, headers=headers, timeout=15)
+                data = resp.json()
+            except Exception as exc:
+                print(f"  [{board_name}] Algolia ERROR {facet} page {page}: {exc}")
+                last_error = exc
+                break
+            if page == 0:
+                nb_hits += data.get("nbHits") or 0
+            hits = data.get("hits", [])
+            if not hits:
+                break
+            for hit in hits:
+                key = hit.get("objectID") or ""
+                if key in seen_ids:
+                    continue
+                if key:
+                    seen_ids.add(key)
+                all_hits.append(hit)
+            if page >= data.get("nbPages", 1) - 1:
+                break
+            page += 1
 
     if not all_hits and last_error is not None:
         raise last_error  # total failure — let the boundary record the reason
