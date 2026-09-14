@@ -162,3 +162,56 @@ def test_import_outcome_commits_with_the_vacancy(monkeypatch, tmp_path):
     cur.execute("SELECT outcome, canonical_id FROM source_observation WHERE external_id = 'job1'")
     assert tuple(cur.fetchone()) == ("observed", None)
     close_conn()
+
+
+def test_every_board_records_its_ledger_through_the_shared_loop(monkeypatch, tmp_path):
+    """The ledger used to live inside algolia.py, so three of the four live
+    boards left no row in source_fetch_run / source_observation at all, and the
+    one that did keyed itself off a slug of its display name — the same board
+    recorded "80k_hours" one night and "80_000_hours" the next (2026-09-14
+    audit). It is now one call in the shared board loop, keyed by board id.
+    """
+    monkeypatch.setenv("JOBSEARCH_DB_PATH", str(tmp_path / "ledger.sqlite"))
+    monkeypatch.setenv("JOBS_RUN_ID", "run-shared")
+    from db_conn import close_conn, get_conn
+
+    close_conn()
+    import fetch_vacancies
+    import database_supabase as db
+
+    # A board with NO ledger code of its own (Probably Good's shape).
+    job = {
+        "title": "Programme Coordinator",
+        "org_override": "Some Org",
+        "external_id": "pg-1",
+        "url": "https://org.test/pg-1",
+        "location": "Geneva, Switzerland",
+        "snippet": "Coordinate the programme and manage the donor reporting cycle.",
+        "full_description": "Coordinate the programme and manage donor reporting. " * 5,
+    }
+    board_cfg = {"name": "Probably Good", "url": "https://jobs.probablygood.org", "tier": "B"}
+    fetch_vacancies._record_board_observations("probablygood", board_cfg, [job])
+
+    cur = get_conn().cursor()
+    cur.execute("SELECT source_key, raw_count, complete FROM source_fetch_run")
+    assert tuple(cur.fetchone())[:2] == ("probablygood", 1)
+    cur.execute("SELECT source_key, outcome FROM source_observation WHERE external_id = 'pg-1'")
+    assert tuple(cur.fetchone()) == ("probablygood", "accepted")
+
+    # The stamp is what makes the save layer record where a listing ended up.
+    assert job["_source_run"] == "run-shared" and job["_source_key"] == "probablygood"
+    db.save_board_vacancies(board_cfg, [job])
+    get_conn().commit()
+    cur.execute("SELECT outcome FROM source_observation WHERE external_id = 'pg-1'")
+    assert cur.fetchone()[0] == "new"
+    close_conn()
+
+
+def test_no_board_fetcher_writes_the_ledger_itself():
+    """One writer, one key. A fetcher that opens its own ledger connection is
+    how the 80k history split across two source keys."""
+    import pathlib
+
+    boards = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "fetchers" / "boards"
+    offenders = [p.name for p in boards.glob("*.py") if "source_observations" in p.read_text()]
+    assert offenders == []

@@ -597,6 +597,40 @@ def _build_dedup_index(cur, org: str, company_id) -> dict:
     return index
 
 
+def _build_cross_company_url_index(cur) -> dict:
+    """Index EVERY stored row by its normalized apply URL, across companies.
+
+    _build_dedup_index only sees ONE company's rows, so the same posting listed
+    by two boards under employer names that do not fold together ("Model
+    Evaluation and Threat Research" / "METR") opens two company rows and two
+    vacancy rows — Consultants for Impact re-lists 145 of its 150 roles from
+    80,000 Hours and Probably Good that way (2026-09-14 audit). An apply URL
+    identifies one requisition whoever the employer string says it is, once
+    normalize_apply_url has stripped the utm decoration and the trailing slash.
+
+    Merged UNDER each company's own index, so a same-company match always wins,
+    and the same title guard applies, so two roles sharing a generic careers URL
+    still stay two rows.
+    """
+    cur.execute("SELECT id, dedup_hash, title, status, locations FROM vacancy")
+    index: dict = {}
+    rows = cur.fetchall()
+    rows.sort(key=lambda r: (0 if r.get("status") in _DECIDED_STATUSES else 1, str(r.get("id"))))
+    for r in rows:
+        entry = {
+            "id": r["id"],
+            "status": r.get("status"),
+            "dedup_hash": r.get("dedup_hash") or "",
+            "title": r.get("title") or "",
+            "cross_board": True,
+        }
+        for loc in r.get("locations") or []:
+            u = normalize_apply_url(loc.get("url"))
+            if u:
+                index.setdefault(u, entry)
+    return index
+
+
 def _consume_index_entry(index: dict, row_id) -> None:
     """Drop every key pointing at row_id after it is claimed by a rename match.
 
@@ -949,7 +983,10 @@ def _find_existing_vacancy(
                 cand = cur.fetchone()
                 if cand is not None:
                     _consume_index_entry(index, hit["id"])
-                    return cand, "norm", dedup_hash
+                    # A cross-board copy is one posting under two employer
+                    # spellings, not a rename: never repoint the surviving row's
+                    # title/dedup_hash, which belong to the other company row.
+                    return cand, "exact" if hit.get("cross_board") else "norm", dedup_hash
 
     # Board-prefix retitles ("seg"): the same req listed bare on one board and
     # under a "<generic label> — <title>" decoration on another. Match the
@@ -2055,7 +2092,13 @@ def save_board_vacancies(
     """Save job board results into the DB. Returns count of new vacancies.
 
     Unknown orgs → ensure_company(status=_auto_discovery_status()), "candidate"
-    by default (see that function). Skips inactive companies.
+    by default (see that function).
+
+    A board row is saved whatever its employer's status. The old
+    inactive-company gate dropped 37% of one board's roster in a single run
+    (2026-09-14 audit) — a company rejected once on its alignment score still
+    posts roles worth seeing, and the drop was silent. The title blacklist and
+    the geography/profile filter still apply.
 
     ``archived_hashes`` — the ``get_archived_hashes(include_gone=True)`` set.
     A multi-board run (fetch_vacancies.main) loads it ONCE and passes it in;
@@ -2086,6 +2129,8 @@ def save_board_vacancies(
     # Per-company dedup index, built lazily (a board batch spans many orgs) so a
     # renamed / re-punctuated / language variant merges onto the live row.
     dedup_index_cache: dict = {}
+    # Cross-board apply-URL index, built once per board save (see the helper).
+    cross_board_urls: dict | None = None
     # Exact hashes present in THIS fetch, per canonical org — the batch-alive
     # guard: a variant of a title that is itself live in the fetch is a
     # same-time pair (keep both), not a rename.
@@ -2107,7 +2152,6 @@ def save_board_vacancies(
     skipped_boilerplate = 0
     resurrected = 0
     refreshed_gated = 0
-    skipped_inactive: dict[str, int] = {}
 
     for job in jobs:
         title, skip_reason, boilerplate_gated = _gate_job(job)
@@ -2151,14 +2195,6 @@ def save_board_vacancies(
         if company_id is None:
             company_id = ensure_company(org, status=_auto_discovery_status())
 
-        # Skip inactive companies (log the loss for visibility)
-        cur.execute("SELECT status FROM company WHERE id = %s", (company_id,))
-        comp_row = cur.fetchone()
-        if comp_row and comp_row["status"] == "inactive":
-            record_import_outcome(cur, job, "blocked", "company_inactive")
-            skipped_inactive[org] = skipped_inactive.get(org, 0) + 1
-            continue
-
         dedup_hash = make_vacancy_id(org, title)
         norm_hash = make_normalized_id(org, title)
         desc_fp = description_fingerprint(job.get("full_description"))
@@ -2172,7 +2208,10 @@ def save_board_vacancies(
 
         dedup_index = dedup_index_cache.get(company_id)
         if dedup_index is None:
+            if cross_board_urls is None:
+                cross_board_urls = _build_cross_company_url_index(cur)
             dedup_index = _build_dedup_index(cur, org, company_id)
+            dedup_index["url"] = {**cross_board_urls, **dedup_index["url"]}
             dedup_index_cache[company_id] = dedup_index
 
         loc_entry = _make_location_entry(job)
@@ -2210,7 +2249,7 @@ def save_board_vacancies(
             if is_rename:
                 updates["title"] = title
                 updates["dedup_hash"] = dedup_hash
-            for field in ("snippet", "full_description"):
+            for field in ("snippet", "full_description", "department"):
                 if job.get(field) and not existing.get(field):
                     # Don't fill a decided row's description from an inexact match.
                     if field == "full_description" and is_rename and decided:
@@ -2262,6 +2301,7 @@ def save_board_vacancies(
                 "snippet",
                 "full_description",
                 "compensation",
+                "department",
                 "deadline",
                 "first_seen",
                 "last_seen",
@@ -2274,6 +2314,7 @@ def save_board_vacancies(
                 job.get("snippet", ""),
                 job.get("full_description", ""),
                 job.get("compensation", ""),
+                job.get("department", ""),
                 parsed_deadline,
                 today,
                 today,
@@ -2301,15 +2342,6 @@ def save_board_vacancies(
         resurrected=resurrected,
         refreshed_gated=refreshed_gated,
     )
-    if skipped_inactive:
-        total_skipped = sum(skipped_inactive.values())
-        top3 = sorted(skipped_inactive.items(), key=lambda x: -x[1])[:3]
-        top3_str = ", ".join(f"{name} ({n})" for name, n in top3)
-        print(
-            f"  [{board_name}] ⚠ {total_skipped} vacancies from {len(skipped_inactive)}"
-            f" inactive companies skipped: {top3_str}",
-            flush=True,
-        )
     return new_count
 
 
@@ -2893,7 +2925,15 @@ def sync_boards(boards: dict) -> None:
 
 
 def should_fetch_board(board_id: str, ttl_days: int) -> bool:
-    """Return True if board has not been scraped within ttl_days."""
+    """Return True if board has not been scraped within ttl_days.
+
+    Compares CALENDAR dates, not elapsed seconds. Elapsed `.days` truncates, so
+    a board fetched at 22:00 Monday with ttl_days=3 showed 2 days 23h at 22:00
+    Thursday and was skipped for a fourth night; with weeknight-only runs each
+    board fetched about twice a week (2026-09-14 board audit). By date, a
+    ttl_days=3 board fetched Monday is due Thursday and a ttl_days=1 board is
+    due every night.
+    """
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
@@ -2906,7 +2946,7 @@ def should_fetch_board(board_id: str, ttl_days: int) -> bool:
         return True
     last_dt = row[0]
     if isinstance(last_dt, datetime):
-        return (datetime.now(last_dt.tzinfo) - last_dt).days >= ttl_days
+        return last_dt.date() <= datetime.now(last_dt.tzinfo).date() - timedelta(days=ttl_days)
     return True
 
 

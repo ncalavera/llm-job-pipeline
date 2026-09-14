@@ -701,6 +701,84 @@ def test_fetch_probablygood_board(monkeypatch):
     assert job["compensation"] == ""
 
 
+def test_fetch_probablygood_splits_on_has_salary_to_beat_the_1000_cap(monkeypatch):
+    """Algolia caps this index at 1000 reachable hits per QUERY, and the index
+    holds more (1671 on 2026-09-14), so an unfiltered walk lost 671 listings —
+    40% of the most independent board. `has_salary` partitions it exactly, so
+    two filtered walks reach everything under the same cap and the same key.
+    """
+
+    def _hits(prefix, n):
+        return [
+            {
+                "objectID": f"{prefix}{i}",
+                "slug": f"{prefix}{i}",
+                "title": f"Programme Officer {prefix}{i}",
+                "description": "A real description of the role, long enough to keep.",
+                "org": {"name": "Some Org", "website": "https://org.test"},
+                "url_external": f"https://org.test/{prefix}{i}",
+                "locations": [],
+                "tags_area": [],
+            }
+            for i in range(n)
+        ]
+
+    # Per facet: 3 hits over 2 pages. Unfiltered (no `filters`) would cap at 1.
+    pages = {
+        ("has_salary:true", 0): {"hits": _hits("paid", 2), "nbHits": 3, "nbPages": 2},
+        ("has_salary:true", 1): {"hits": _hits("paid", 3)[2:], "nbHits": 3, "nbPages": 2},
+        ("has_salary:false", 0): {"hits": _hits("unpaid", 2), "nbHits": 3, "nbPages": 2},
+        ("has_salary:false", 1): {"hits": _hits("unpaid", 3)[2:], "nbHits": 3, "nbPages": 2},
+    }
+    seen = []
+
+    def router(verb, url, json=None, params=None):
+        return _Resp(json_data={"hits": [], "nbHits": 0, "nbPages": 1})
+
+    fake = _FakeHTTP(router)
+
+    def post(url, data=None, json=None, headers=None, timeout=None):
+        import json as _json
+
+        body = _json.loads(data)
+        seen.append(body["filters"])
+        return _Resp(json_data=pages[(body["filters"], body["page"])])
+
+    fake.post = post
+    monkeypatch.setattr(fetchers, "requests", fake)
+    out = fetchers.fetch_probablygood_board(
+        {"name": "Probably Good", "url": "https://jobs.probablygood.org", "board_blacklist": []}
+    )
+
+    assert set(seen) == {"has_salary:true", "has_salary:false"}
+    assert len(out) == 6
+    ids = [j["external_id"] for j in out]
+    assert len(set(ids)) == 6  # merged by objectID, no facet returns a duplicate
+
+
+def test_fetch_probablygood_merges_a_hit_seen_in_both_facets(monkeypatch):
+    """An objectID returned by both facets lands once."""
+    hit = {
+        "objectID": "dup",
+        "slug": "dup",
+        "title": "Programme Officer",
+        "description": "A real description of the role, long enough to keep.",
+        "org": {"name": "Some Org", "website": "https://org.test"},
+        "url_external": "https://org.test/dup",
+        "locations": [],
+        "tags_area": [],
+    }
+
+    def router(verb, url, json=None, params=None):
+        return _Resp(json_data={"hits": [hit], "nbHits": 1, "nbPages": 1})
+
+    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
+    out = fetchers.fetch_probablygood_board(
+        {"name": "Probably Good", "url": "https://jobs.probablygood.org", "board_blacklist": []}
+    )
+    assert len(out) == 1
+
+
 def test_fetch_probablygood_board_no_external_url_falls_back_to_site(monkeypatch):
     hit = {
         "objectID": "abc",
@@ -1178,3 +1256,46 @@ def test_hn_skips_job_seeker_advertisements():
         _parse_hn_comment({"id": 1, "text": "SEEKING WORK | Poland / EU | Senior Developer"})
         is None
     )
+
+
+def test_fetch_algolia_board_maps_closes_at_to_a_deadline(monkeypatch):
+    """80,000 Hours' index stores closes_at as UNIX seconds and the fetcher used
+    to build no deadline key at all, so only 64 of 790 rows had one, from the
+    description scraper (2026-09-14 audit). An int must never reach the save
+    layer's date parser.
+    """
+    hits = [
+        {
+            "objectID": "closing",
+            "title": "Programme Officer",
+            "company_name": "Some Org",
+            "url_external": "https://org.test/closing",
+            "description_short": "A real description of the role.",
+            "closes_at": 1791158400,  # 2026-10-05 UTC
+        },
+        {
+            "objectID": "open",
+            "title": "Research Analyst",
+            "company_name": "Some Org",
+            "url_external": "https://org.test/open",
+            "description_short": "A real description of the role.",
+            "closes_at": None,
+        },
+    ]
+
+    def router(verb, url, json=None, params=None):
+        return _Resp(json_data={"hits": hits, "nbHits": 2, "nbPages": 1})
+
+    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
+    out = fetchers.fetch_algolia_board(
+        {
+            "name": "80,000 Hours",
+            "url": "https://jobs.80000hours.org",
+            "algolia_app_id": "a",
+            "algolia_api_key": "k",
+            "algolia_index": "i",
+        }
+    )
+    by_id = {j["external_id"]: j for j in out}
+    assert by_id["closing"]["deadline"] == "2026-10-05"
+    assert by_id["open"]["deadline"] == ""

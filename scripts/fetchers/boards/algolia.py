@@ -2,38 +2,27 @@
 
 import hashlib
 import json
-import os
 import re
-import uuid
+from datetime import datetime, timezone
 
-from config import GLOBAL_BLACKLIST, GLOBAL_BLACKLIST_SUBSTR
 from fetchers import http
-from fetchers.parsing import _blacklist_filter, _is_generic_pipeline_title
+from fetchers.parsing import _is_generic_pipeline_title
 from fetchers.registry import board_fetcher
-from source_observations import record_source_observations, record_source_run
 
 
 @board_fetcher("algolia_api")
 def fetch_algolia_board(board_cfg: dict) -> list[dict]:
     """Query an Algolia search index directly via REST API (free, no Firecrawl).
-    Applies GLOBAL_BLACKLIST + board-specific blacklist. NO caps, NO keyword/location filters.
+
+    NO caps, NO keyword/location filters: every listing is offered to the save
+    layer, which runs the shared title/quality gate (each job carries
+    ``preserve_listing``). The observation ledger is written by the shared board
+    loop in fetch_vacancies, keyed by board id.
     """
     app_id = board_cfg["algolia_app_id"]
     api_key = board_cfg["algolia_api_key"]
     index = board_cfg["algolia_index"]
     board_name = board_cfg["name"]
-    run_id = os.environ.get("JOBS_RUN_ID") or str(uuid.uuid4())
-    source_key = (
-        board_cfg.get("source_key")
-        or board_cfg.get("id")
-        or re.sub(r"[^a-z0-9]+", "_", board_name.lower()).strip("_")
-    )
-    source_url = board_cfg.get("url")
-    ledger_ok = record_source_run(run_id, source_key, source_url)
-    if run_id and not ledger_ok:
-        from fetchers.registry import record_fetch_error
-
-        record_fetch_error(board_name, "error: source ledger unavailable")
 
     url = f"https://{app_id}-dsn.algolia.net/1/indexes/{index}/query"
     headers = {
@@ -84,83 +73,6 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
     if not all_hits and last_error is not None:
         raise last_error  # total failure — let the boundary record the reason
 
-    # Durable raw capture happens before parser filters run. A second upsert
-    # below annotates each row with the parser outcome.
-    raw_observations = [
-        {
-            "external_id": hit.get("objectID")
-            or hashlib.md5(
-                f"{hit.get('company_name', '')}:{hit.get('title', '')}".encode()
-            ).hexdigest()[:12],
-            "title": hit.get("title") or "",
-            "organization": (hit.get("company_name") or "").strip(),
-            "url": hit.get("url_external") or "",
-            "outcome": "observed",
-        }
-        for hit in all_hits
-    ]
-    observations_ok = record_source_observations(run_id, source_key, source_url, raw_observations)
-
-    # Apply GLOBAL_BLACKLIST + board-specific blacklist (NO caps, NO location filter, NO keyword filter)
-    board_blacklist = board_cfg.get("board_blacklist", [])
-    combined_blacklist = GLOBAL_BLACKLIST + board_blacklist
-    filtered = _blacklist_filter(
-        all_hits,
-        combined_blacklist,
-        title_fields=["title"],
-        substr_blacklist=GLOBAL_BLACKLIST_SUBSTR,
-    )
-
-    # Keep the source's complete observed roster before any filtering. This is
-    # also the reconciliation key for newsletters, where the canonical vacancy
-    # row may have been filtered out before it reached the dashboard.
-    filtered_ids = {id(hit) for hit in filtered}
-    observations = []
-    for hit in all_hits:
-        title = hit.get("title") or ""
-        if id(hit) not in filtered_ids:
-            reason = "blacklist"
-            outcome = "excluded"
-        elif _is_generic_pipeline_title(title):
-            reason = "generic_pipeline_title"
-            outcome = "excluded"
-        else:
-            reason = None
-            outcome = "accepted"
-        observations.append(
-            {
-                "external_id": hit.get("objectID")
-                or hashlib.md5(f"{hit.get('company_name', '')}:{title}".encode()).hexdigest()[:12],
-                "title": title,
-                "organization": (hit.get("company_name") or "").strip(),
-                "url": hit.get("url_external") or "",
-                "outcome": outcome,
-                "reason": reason,
-            }
-        )
-    observations_ok = observations_ok and record_source_observations(
-        run_id,
-        source_key,
-        source_url,
-        observations,
-    )
-    final_ledger_ok = record_source_run(
-        run_id,
-        source_key,
-        source_url,
-        raw_count=len(all_hits),
-        accepted_count=sum(o["outcome"] == "accepted" for o in observations),
-        excluded_count=sum(o["outcome"] == "excluded" for o in observations),
-        complete=last_error is None and ledger_ok and observations_ok,
-        error=str(last_error)
-        if last_error
-        else (None if ledger_ok and observations_ok else "source ledger write failed"),
-    )
-    if run_id and (not observations_ok or not final_ledger_ok):
-        from fetchers.registry import record_fetch_error
-
-        record_fetch_error(board_name, "error: source ledger write failed")
-
     # A partial page walk is useful evidence, but it is not a complete source
     # run. Keep the rows already collected while exposing the failure to the
     # fetch boundary so gone detection/publish gates cannot treat it as healthy.
@@ -171,7 +83,7 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
 
     jobs = []
     generic_filtered_out = 0
-    for hit in all_hits:  # raw intake; observations above retain filter reasons
+    for hit in all_hits:  # raw intake; the save layer runs the quality gate
         org = (hit.get("company_name") or "").strip() or f"[via {board_name}]"
         title = hit.get("title") or ""
         if _is_generic_pipeline_title(title):
@@ -201,6 +113,14 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
         exp_req = ", ".join(hit.get("tags_exp_required") or [])
         areas = ", ".join(hit.get("tags_area") or [])
         salary = hit.get("salary") or ""
+        # This index stores closes_at as UNIX seconds; the save layer parses a
+        # date string, so convert here rather than hand it an int.
+        closes_at = hit.get("closes_at")
+        deadline = (
+            datetime.fromtimestamp(closes_at, tz=timezone.utc).date().isoformat()
+            if isinstance(closes_at, (int, float)) and not isinstance(closes_at, bool)
+            else ""
+        )
 
         desc_parts = [desc_text]
         if comp_desc:
@@ -232,11 +152,10 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
                 "snippet": snippet,
                 "full_description": full_description,
                 "compensation": hit.get("salary") or "",
+                "deadline": deadline,
                 "org_override": org,
                 "org_url": board_cfg["url"],
                 "preserve_listing": True,
-                "_source_run": run_id,
-                "_source_key": source_key,
             }
         )
 

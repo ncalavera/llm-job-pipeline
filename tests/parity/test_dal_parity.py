@@ -336,6 +336,48 @@ def _backdate_board(dal, board_id, days):
     conn.commit()
 
 
+def _backdate_board_hours(dal, board_id, hours):
+    """Set last_fetched to an exact UTC instant `hours` ago.
+
+    The now()-interval idiom only translates whole DAYS to SQLite, and the TTL
+    cooldown is precisely about the sub-day remainder, so this writes an ISO
+    timestamp both backends store and read back as a datetime.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    stamp = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(sep=" ")
+    conn = dal.get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE board SET last_fetched = %s WHERE id = %s", (stamp, board_id))
+    cur.close()
+    conn.commit()
+
+
+def test_board_ttl_counts_calendar_nights_not_whole_elapsed_days(backend):
+    """A board fetched at 22:00 must be due again at 22:00 ttl_days later.
+
+    Elapsed `.days` truncated (2 days 23h read as 2), so a ttl_days=3 board
+    fetched Monday night was skipped on Thursday night and a ttl_days=1 board
+    was skipped every other night — on two of five weeknights the pipeline
+    fetched no board at all (2026-09-14 board audit).
+    """
+    dal = backend
+    dal.sync_boards({"fictive_board": _BOARD_CFG})
+    _commit(dal)
+    dal.mark_board_fetched("fictive_board")
+    _commit(dal)
+
+    # 71h55m ago = three calendar nights back, one truncated `.days` short of 3.
+    _backdate_board_hours(dal, "fictive_board", 71)
+    assert dal.should_fetch_board("fictive_board", ttl_days=3) is True
+
+    # A nightly board is due every night, never twice in one night.
+    _backdate_board_hours(dal, "fictive_board", 23)
+    assert dal.should_fetch_board("fictive_board", ttl_days=1) is True
+    _backdate_board_hours(dal, "fictive_board", 1)
+    assert dal.should_fetch_board("fictive_board", ttl_days=1) is False
+
+
 def test_board_ttl_never_fetched_is_always_due(backend):
     dal = backend
     dal.sync_boards({"fictive_board": _BOARD_CFG})
