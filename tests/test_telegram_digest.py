@@ -19,10 +19,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 import telegram_digest as td
 
 _MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "sql" / "migrations"
+MIGRATION_0013 = _MIGRATIONS_DIR / "0013_add_source_board.sqlite.sql"
 MIGRATION_0020 = _MIGRATIONS_DIR / "0025_add_vacancy_scoring_excluded_reason.sqlite.sql"
 MIGRATION_0021 = _MIGRATIONS_DIR / "0026_add_vacancy_digest_dropped_at.sqlite.sql"
 MIGRATION_0027 = _MIGRATIONS_DIR / "0027_add_vacancy_screening.sqlite.sql"
-SCREENING_READY_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "screening-ready.json"
 
 
 ROW = {
@@ -241,6 +241,7 @@ def denv(tmp_path, monkeypatch):
 
     conn = db.get_conn()
     cur = conn.cursor()
+    cur.execute(MIGRATION_0013.read_text(encoding="utf-8"))
     cur.execute(MIGRATION_0020.read_text(encoding="utf-8"))
     cur.execute(MIGRATION_0021.read_text(encoding="utf-8"))
     conn.commit()
@@ -283,6 +284,7 @@ def _seed(
     deadline=None,
     digest_sent_at=None,
     url="https://example.test/job",
+    source_board=None,
 ):
     """Insert one vacancy row directly and return its id."""
     db.ensure_company(org, status=company_status)
@@ -293,7 +295,7 @@ def _seed(
     cur.execute(
         "INSERT INTO vacancy (dedup_hash, company_id, title, full_description, llm_summary, "
         "first_seen, last_seen, locations, status, llm_score, scoring_excluded_reason, "
-        "deadline, digest_sent_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "deadline, digest_sent_at, source_board) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             dedup,
             company_id,
@@ -308,6 +310,7 @@ def _seed(
             reason,
             deadline.isoformat() if deadline else None,
             digest_sent_at,
+            source_board,
         ),
     )
     cur.execute("SELECT id FROM vacancy WHERE dedup_hash = ?", (dedup,))
@@ -1027,66 +1030,81 @@ def test_skip_reasons_are_russian_in_russian(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _seed_screening_fixture(db):
-    """Load tests/fixtures/screening-ready.json; return its expected ready ids."""
-    from prepare_screening import fingerprint
-
-    description = "A posting with current facts."
-    fx = json.loads(SCREENING_READY_FIXTURE.read_text(encoding="utf-8"))
-    conn = db.get_conn()
-    cur = conn.cursor()
-    for role in fx["roles"]:
-        vac_id = _seed(
+def _seed_board_roles(db):
+    """Three unseen board roles across every company status, plus three rows
+    the screener's /today does not show: a company-site role, a liked board
+    role, and a board role already passed."""
+    ids = {
+        "board-active": _seed(db, "Org A", "Policy Analyst", source_board="80,000 Hours"),
+        "board-candidate": _seed(
             db,
-            role["org"],
-            role["title"],
-            company_status=role["company_status"],
-            status=role["status"],
-        )
-        cur.execute(
-            "UPDATE vacancy SET id = ?, screening_state = ?, full_description = ?, screening_fingerprint = ? WHERE id = ?",
-            (role["id"], role["screening_state"], description, fingerprint(description), vac_id),
-        )
-    cur.close()
-    conn.commit()
-    return set(fx["expected_ready_ids"])
+            "Org B",
+            "Research Manager",
+            company_status="candidate",
+            source_board="Probably Good",
+        ),
+        "board-inactive": _seed(
+            db,
+            "Org C",
+            "Programme Lead",
+            company_status="inactive",
+            source_board="Idealist",
+        ),
+    }
+    _seed(db, "Org D", "Site Role")  # no source_board
+    _seed(db, "Org E", "Liked Role", status="liked", source_board="Idealist")
+    _seed(db, "Org F", "Passed Role", status="passed", source_board="Idealist")
+    return set(ids.values())
 
 
-def test_ready_to_screen_sql_selects_exactly_the_fixture_ready_set(denv):
-    expected = _seed_screening_fixture(denv.db)
+def test_ready_to_screen_sql_is_the_screeners_today_predicate(denv):
+    """Board role + unseen, whatever the company status — the same rows
+    screener.py today_page renders, so the headline number is the card count."""
+    expected = _seed_board_roles(denv.db)
     cur = denv.db.get_conn().cursor()
     cur.execute(td.SELECT_READY_TO_SCREEN_SQL)
-    assert {r[0] for r in cur.fetchall()} == expected | {"failed-1"}
+    assert {str(r[0]) for r in cur.fetchall()} == {str(v) for v in expected}
     cur.close()
 
 
-def test_digest_says_how_many_roles_are_ready_to_screen(denv, monkeypatch):
+def test_digest_headline_counts_board_roles_and_links_to_the_screener(denv, monkeypatch):
     monkeypatch.setattr(td, "DASHBOARD_BASE_URL", "https://jobs.example.test")
-    _seed_screening_fixture(denv.db)
+    monkeypatch.setattr(td, "SCREENER_TODAY_URL", "https://screener.example.test/today")
+    _seed_board_roles(denv.db)
     td.cmd_send(_args())
     body = "\n".join(_sent_texts(denv.calls))
-    assert "4 roles ready to screen" in body
-    assert 'href="https://jobs.example.test/?mode=screen"' in body
+    assert "3 roles ready to screen" in body
+    assert 'href="https://screener.example.test/today"' in body
 
 
-def test_no_ready_line_when_nothing_is_ready(denv):
-    _seed(denv.db, "Org A", "Top Role", score=80)
+def test_no_ready_line_when_no_board_role_is_unseen(denv):
+    _seed(denv.db, "Org A", "Top Role", score=80)  # company site, not a board
     td.cmd_send(_args())
-    assert "1 roles ready to screen" in "\n".join(_sent_texts(denv.calls))
+    assert "ready to screen" not in "\n".join(_sent_texts(denv.calls))
 
 
-def test_ready_line_carries_no_link_without_a_dashboard_base_url(denv, monkeypatch):
+def test_the_screener_link_does_not_depend_on_the_dashboard_url(denv, monkeypatch):
     monkeypatch.setattr(td, "DASHBOARD_BASE_URL", "")
-    _seed_screening_fixture(denv.db)
+    monkeypatch.setattr(td, "SCREENER_TODAY_URL", "https://screener.example.test/today")
+    _seed_board_roles(denv.db)
     td.cmd_send(_args())
     body = "\n".join(_sent_texts(denv.calls))
-    assert "4 roles ready to screen" in body
-    assert "mode=screen" not in body
+    assert "3 roles ready to screen" in body
+    assert "https://screener.example.test/today" in body
+
+
+def test_the_count_still_goes_out_without_a_screener_url(denv, monkeypatch):
+    monkeypatch.setattr(td, "SCREENER_TODAY_URL", "")
+    _seed_board_roles(denv.db)
+    td.cmd_send(_args(details=False))
+    body = "\n".join(_sent_texts(denv.calls))
+    assert "Vacancies to review: 3." in body
+    assert "<a href" not in body
 
 
 def test_default_summary_is_one_score_free_message(denv, monkeypatch):
-    _seed(denv.db, "Org A", "Secret numeric card", score=80)
-    monkeypatch.setattr(td, "DASHBOARD_BASE_URL", 'https://example.com/a?x=1&y="2"')
+    _seed(denv.db, "Org A", "Secret numeric card", score=80, source_board="Idealist")
+    monkeypatch.setattr(td, "SCREENER_TODAY_URL", 'https://example.com/a?x=1&y="2"')
     td.cmd_send(_args(details=False))
     texts = _sent_texts(denv.calls)
     assert len(texts) == 1
@@ -1094,7 +1112,7 @@ def test_default_summary_is_one_score_free_message(denv, monkeypatch):
     assert "Awaiting preparation:" not in texts[0]
     assert "Secret numeric card" not in texts[0]
     assert "score" not in texts[0].lower()
-    assert "&amp;" in texts[0] and "&quot;" in texts[0]
+    assert "&amp;" in texts[0] and "&quot;" in texts[0]  # the link is escaped
 
 
 def test_summary_dry_run_and_failed_send_do_not_advance(denv, monkeypatch, capsys):
@@ -1112,16 +1130,18 @@ def test_summary_dry_run_and_failed_send_do_not_advance(denv, monkeypatch, capsy
     ) == before
 
 
-def test_summary_counts_only_current_preparations_and_surfaces_failure(denv):
-    expected = _seed_screening_fixture(denv.db)
-    assert td.fetch_ready_to_screen(denv.db.get_conn()) == len(expected) + 1
+def test_summary_counts_board_roles_and_surfaces_failure(denv):
+    expected = _seed_board_roles(denv.db)
+    assert td.fetch_ready_to_screen(denv.db.get_conn()) == len(expected)
+    # Preparation state does not change the headline: an unscreened board role
+    # is still a card on /today.
     cur = denv.db.get_conn().cursor()
     cur.execute(
         "UPDATE vacancy SET screening_fingerprint = 'old-profile' WHERE id = %s",
         (next(iter(expected)),),
     )
     denv.db.get_conn().commit()
-    assert td.fetch_ready_to_screen(denv.db.get_conn()) == len(expected) + 1
+    assert td.fetch_ready_to_screen(denv.db.get_conn()) == len(expected)
     body = td.build_screening_summary(2, {"stages": [{"name": "fetch", "status": "error"}]})
     assert "Vacancies to review: 2." in body
     assert "fetch failed" in body

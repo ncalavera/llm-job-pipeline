@@ -38,7 +38,11 @@ def env(tmp_path, monkeypatch):
     db = _force_sqlite(monkeypatch, tmp_path / "discovery.db")
     db.get_conn().commit()
     raw = sqlite3.connect(tmp_path / "discovery.db")
-    for name in ("0025_add_vacancy_scoring_excluded_reason", "0027_add_vacancy_screening"):
+    for name in (
+        "0013_add_source_board",
+        "0025_add_vacancy_scoring_excluded_reason",
+        "0027_add_vacancy_screening",
+    ):
         raw.executescript((MIGRATIONS / f"{name}.sqlite.sql").read_text())
     raw.commit()
     raw.close()
@@ -328,8 +332,8 @@ def test_discovery_rejects_duplicate_unknown_and_stale_without_writes(env):
     assert d.save_results([{"id": str(uuid.uuid4())}], [payload])["errors"]
 
 
-@pytest.mark.parametrize("mutation", ["decision", "inactive_company", "excluded"])
-def test_completion_skips_changed_decision_company_or_exclusion(env, mutation):
+@pytest.mark.parametrize("mutation", ["decision", "excluded"])
+def test_completion_skips_changed_decision_or_exclusion(env, mutation):
     db, ps = env
     import prepare_discovery as d
 
@@ -341,18 +345,82 @@ def test_completion_skips_changed_decision_company_or_exclusion(env, mutation):
     cur = db.get_conn().cursor()
     if mutation == "decision":
         cur.execute("UPDATE vacancy SET status='passed' WHERE id=%s", (vid,))
-    elif mutation == "excluded":
-        cur.execute(
-            "UPDATE vacancy SET scoring_excluded_reason=%s WHERE id=%s", ("manual exclusion", vid)
-        )
     else:
         cur.execute(
-            "UPDATE company SET status='inactive' WHERE id=(SELECT company_id FROM vacancy WHERE id=%s)",
-            (vid,),
+            "UPDATE vacancy SET scoring_excluded_reason=%s WHERE id=%s", ("manual exclusion", vid)
         )
     db.get_conn().commit()
     cur.close()
     assert d.completion([p])[vid] == "skipped"
+
+
+def test_a_rejected_employers_role_is_still_selected_and_scored(env):
+    """The inverse of the old rule: an inactive (rejected) company's role is
+    scored like any other. A board posts roles from employers nobody approved;
+    leaving them unscored puts a blank card on /today forever."""
+    db, ps = env
+    import prepare_discovery as d
+
+    d = importlib.reload(d)
+    vid = str(uuid.uuid4())
+    _seed(db, vid, company_status="inactive", score=None)
+    p = next(p for p in d.select_payloads(limit=20) if p["id"] == vid)
+    assert d.completion([p])[vid] == "pending"
+    result = {
+        "id": vid,
+        "fingerprint": p["fingerprint"],
+        "scoring": {
+            "score": 61,
+            "reasoning": "A specific scoring rationale for this vacancy.",
+            "short_summary": " ".join(["Фактическое резюме роли и её обязанностей."] * 35),
+            "hard_requirements": [],
+            "country": "Spain",
+            "work_mode": "remote",
+            "us_eligibility": "outside_us_ok",
+            "deadline": None,
+        },
+        "screening": _good_result(vid) if p["screening"] is not None else None,
+    }
+    counts = d.save_results([result], [p], model="haiku")
+    assert counts["scored"] == 1, counts
+    cur = db.get_conn().cursor()
+    cur.execute("SELECT llm_score, status FROM vacancy WHERE id=%s", (vid,))
+    assert tuple(cur.fetchone()) == (61, "unseen")
+    cur.close()
+
+
+def test_board_roles_take_the_night_cap_before_company_site_rows(env, monkeypatch):
+    """The cap is small; a board role is what /today shows, so it goes first."""
+    db, ps = env
+    import prepare_discovery as d
+
+    d = importlib.reload(d)
+    old_site, new_board = str(uuid.uuid4()), str(uuid.uuid4())
+    _seed(db, old_site, score=None)
+    _seed(db, new_board, score=None)
+    cur = db.get_conn().cursor()
+    cur.execute("UPDATE vacancy SET first_seen='2020-01-01' WHERE id=%s", (old_site,))
+    cur.execute("UPDATE vacancy SET source_board='Probably Good' WHERE id=%s", (new_board,))
+    db.get_conn().commit()
+    cur.close()
+    monkeypatch.setattr(d, "_cap", lambda limit: 1)
+    assert [p["id"] for p in d.select_payloads()] == [new_board]
+
+
+def test_a_filtered_out_role_is_never_offered_to_the_scorer(env):
+    """The geography / profile filter still decides: a row the filter pass
+    excluded costs no model call."""
+    db, ps = env
+    import prepare_discovery as d
+
+    d = importlib.reload(d)
+    vid = str(uuid.uuid4())
+    _seed(db, vid, score=None)
+    cur = db.get_conn().cursor()
+    cur.execute("UPDATE vacancy SET scoring_excluded_reason='US-only' WHERE id=%s", (vid,))
+    db.get_conn().commit()
+    cur.close()
+    assert not [p for p in d.select_payloads(limit=20) if p["id"] == vid]
 
 
 def test_save_accepts_whitespace_but_rejects_changed_body(env):

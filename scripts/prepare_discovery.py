@@ -70,12 +70,19 @@ def select_payloads(limit=None):
     from database_supabase import load_vacancies
     import quality
 
-    rows = load_vacancies(
-        status="unseen", include_candidate_companies=True, include_scoring_excluded=False
-    )
+    # Every company status. A board posts roles from employers nobody approved,
+    # and one rejected on its own alignment score still posts roles worth
+    # seeing — the save layer keeps them (save_board_vacancies), so the scorer
+    # must too, or they sit on /today forever with no number. The geography /
+    # profile filter (scoring_excluded_reason) and the title blacklist (applied
+    # at fetch time) still decide what gets here at all.
+    rows = load_vacancies(status="unseen", include_inactive_companies=True)
     eligible = []
     for row in rows.values():
         row = dict(row)
+        # load_vacancies only applies this with unscored_only; we ask by status.
+        if row.get("scoring_excluded_reason"):
+            continue
         text = _text(row)
         if not text or quality.is_boilerplate_junk(text):
             continue
@@ -85,25 +92,31 @@ def select_payloads(limit=None):
         if prep.is_current(row) and score is not None and score >= 0:
             continue
         eligible.append(row)
-    eligible.sort(key=lambda r: (str(r.get("first_seen") or ""), str(r.get("id"))))
+    # Board roles first, then oldest first inside each group. The night cap is
+    # small (200) and the waiting pool is mostly company-site rows, which the
+    # screener's /today never shows: pure oldest-first spent the whole cap on
+    # roles Nikita cannot see and left last night's board roles blank.
+    eligible.sort(
+        key=lambda r: (
+            r.get("source_board") is None,
+            str(r.get("first_seen") or ""),
+            str(r.get("id")),
+        )
+    )
     cap = _cap(limit)
     return [build_payload(r) for r in eligible[:cap]]
 
 
 def _load_row(cur, vid):
-    cur.execute(
-        "SELECT v.*, c.status AS company_status FROM vacancy v "
-        "JOIN company c ON c.id=v.company_id WHERE v.id=%s",
-        (vid,),
-    )
+    cur.execute("SELECT * FROM vacancy WHERE id=%s", (vid,))
     return cur.fetchone()
 
 
 def _allowed(row, payload):
+    # No company-status gate: see select_payloads.
     return (
         row
         and row.get("status") == "unseen"
-        and row.get("company_status") in {"active", "candidate"}
         and row.get("scoring_excluded_reason") is None
         and _fp(_text(row)) == payload.get("fingerprint")
     )
@@ -278,8 +291,7 @@ def save_results(results, payloads, model=None):
             values += [vid, row["full_description"]]
             where = (
                 " WHERE id=%s AND status='unseen' AND scoring_excluded_reason IS NULL "
-                "AND full_description=%s AND EXISTS (SELECT 1 FROM company c "
-                "WHERE c.id=vacancy.company_id AND c.status IN ('active','candidate'))"
+                "AND full_description=%s"
             )
             if existing is None:
                 where += " AND llm_score IS NULL"
