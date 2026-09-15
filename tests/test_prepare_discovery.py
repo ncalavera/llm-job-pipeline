@@ -465,3 +465,62 @@ def test_save_accepts_whitespace_but_rejects_changed_body(env):
     cur.close()
     stale = d.save_results([result], [p], model="haiku")
     assert stale["skipped"] >= 1
+
+
+def test_organization_summary_roundtrip_preserves_existing_description(env):
+    db, ps = env
+    vid = str(uuid.uuid4())
+    _seed(db, vid)
+    p = next(p for p in d.select_payloads(limit=20) if p["id"] == vid)
+    summary = "Builds software that helps charities coordinate volunteers."
+    result = {
+        "id": vid,
+        "fingerprint": p["fingerprint"],
+        "scoring": {
+            "score": 60,
+            "reasoning": "Relevant programme experience.",
+            "short_summary": "A detailed account of the role's responsibilities. " * 6,
+            "organization_summary": summary,
+        },
+        "screening": _good_result(vid),
+    }
+    assert "organization_summary" in p["scoring"]["system_prompt"]
+    invalid = {**result, "scoring": {**result["scoring"], "organization_summary": ["invalid"]}}
+    assert d.save_results([invalid], [p])["errors"]
+    assert d.save_results([result], [p])["scored"] == 1
+    cur = db.get_conn().cursor()
+    cur.execute(
+        "SELECT description FROM company WHERE id=(SELECT company_id FROM vacancy WHERE id=%s)",
+        (vid,),
+    )
+    assert cur.fetchone()[0] == summary
+    # The legacy score saver shares the same company-fill rule and transaction.
+    db.update_llm_score(
+        vid,
+        {
+            "llm_score": 60,
+            "llm_summary": "Role summary",
+            "organization_summary": "Must not overwrite existing research.",
+        },
+    )
+    cur.execute(
+        "SELECT description FROM company WHERE id=(SELECT company_id FROM vacancy WHERE id=%s)",
+        (vid,),
+    )
+    assert cur.fetchone()[0] == summary
+    cur.execute("UPDATE company SET description=NULL")
+    db.update_llm_score(
+        vid,
+        {
+            "llm_score": 60,
+            "llm_summary": "Role summary",
+            "organization_summary": summary,
+        },
+    )
+    cur.execute(
+        "SELECT description FROM company WHERE id=(SELECT company_id FROM vacancy WHERE id=%s)",
+        (vid,),
+    )
+    assert cur.fetchone()[0] == summary
+    db.get_conn().rollback()
+    cur.close()

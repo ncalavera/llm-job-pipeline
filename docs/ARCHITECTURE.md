@@ -151,6 +151,11 @@ The default daily path is fetch → enrich → dedup → filter → combined dis
 verdict checkpoints remain readable, preserving resumability of old checkpoints.
 Preparation records the requested fingerprint and sections. Resume checks the
 database for those results and counts state changes separately from completed work.
+Scoring returns separate role (`short_summary`) and employer (`organization_summary`)
+text in the profile's output language. The employer summary uses only posting facts;
+unknown employers return null. Both nightly discovery and manual vacancy scoring
+fill a blank `company.description` through the shared DAL helper in the score's
+transaction, without overwriting existing descriptions. No extra model call is added.
 Current results are reused; rejected or unfinished results remain pending for the
 next run.
 The daily update contains one current Inbox count and link, plus actionable run

@@ -412,6 +412,7 @@ def _make_score_data(result: dict, rep: dict) -> dict:
         "llm_score": adjusted,
         "llm_reasoning": reasoning,
         "llm_summary": result["short_summary"],
+        "organization_summary": result.get("organization_summary"),
         "llm_hard_requirements": result.get("hard_requirements", []),
         # Carried for the save-time geo ban net (not DB columns themselves).
         "country": country,
@@ -602,6 +603,7 @@ def cmd_save(args):
                     "score": score,
                     "reasoning": entry.get("reasoning", ""),
                     "short_summary": entry.get("short_summary", ""),
+                    "organization_summary": entry.get("organization_summary"),
                     "hard_requirements": entry.get("hard_requirements", []),
                     "country": entry.get("country"),
                     "work_mode": entry.get("work_mode"),

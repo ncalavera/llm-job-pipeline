@@ -16,7 +16,7 @@ export const ARCHITECTURE_OVERVIEW = `flowchart LR
     SRC[Job boards +<br/>company career sites] -->|fetch daily| DB[(Database)]
     DB --> SCORE[Approved filters +<br/>score and facts]
     SCORE --> N[Cheap file-only agents<br/>one vacancy per request]
-    N -->|score + quoted facts + comparison<br/>validated and saved by Python| DB
+    N -->|score + role and organization summaries<br/>quoted facts + comparison<br/>validated and saved by Python| DB
     DB -->|compact rows + filter facts| SCR[Scored Inbox table<br/>Score sort + reason batches<br/>Like / Pass + Undo]
     SCR -->|open one record| DETAIL[Full vacancy or company text]
     DB -->|private detail endpoint| DETAIL

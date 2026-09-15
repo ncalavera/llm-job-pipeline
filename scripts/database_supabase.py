@@ -2660,6 +2660,22 @@ def _geo_hard_banned(country: str, work_mode: str) -> bool:
     )
 
 
+def fill_company_description(vacancy_uuids, summary):
+    """Fill missing employer context from scored postings; caller owns commit."""
+    if not isinstance(summary, str) or not summary.strip() or not vacancy_uuids:
+        return
+    cur = get_conn().cursor()
+    try:
+        cur.execute(
+            """UPDATE company SET description=%s
+               WHERE NULLIF(TRIM(description), '') IS NULL
+                 AND id IN (SELECT company_id FROM vacancy WHERE id = ANY(%s::uuid[]))""",
+            (summary.strip(), [str(vid) for vid in vacancy_uuids]),
+        )
+    finally:
+        cur.close()
+
+
 def update_llm_score(vacancy_uuid: str, score_data: dict):
     """Update LLM score fields for ONE vacancy. Returns the row count (0/1).
 
@@ -2746,6 +2762,7 @@ def update_llm_score_many(vacancy_uuids, score_data: dict) -> list[str]:
         ),
     )
     written = [str(r[0]) for r in cur.fetchall()]
+    fill_company_description(written, score_data.get("organization_summary"))
 
     # Drop roles that geography makes unreachable: US/Canada-bound (us_only, only
     # when the profile opts in via ban_us_only) or a banned-region country the

@@ -692,6 +692,7 @@ def test_save_persists_score_and_full_summary(sqlite_dal, monkeypatch):
                 "score": 73,
                 "reasoning": "Strong ops fit.",
                 "short_summary": _LONG,
+                "organization_summary": "Builds scheduling software for clinics.",
                 "hard_requirements": ["5y ops"],
                 "tags": ["ops"],
             }
@@ -702,6 +703,11 @@ def test_save_persists_score_and_full_summary(sqlite_dal, monkeypatch):
     assert v["llm_summary"] == _LONG  # FULL summary persisted, not truncated
     assert v["llm_scored_at"]
     assert v["llm_hard_requirements"] == ["5y ops"]
+
+    cur = sqlite_dal.get_conn().cursor()
+    cur.execute("SELECT description FROM company WHERE canonical_name='Globex'")
+    assert cur.fetchone()[0] == "Builds scheduling software for clinics."
+    cur.close()
 
 
 def test_save_maps_each_member_id(sqlite_dal, monkeypatch):
