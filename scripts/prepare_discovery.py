@@ -156,6 +156,8 @@ def _validate_score(s, p):
         return None, "reasoning missing"
     if not isinstance(s.get("short_summary"), str) or len(s["short_summary"]) < 200:
         return None, "summary too short"
+    if s.get("organization_summary") is not None and not isinstance(s["organization_summary"], str):
+        return None, "invalid organization summary"
     if any(not isinstance(s.get(k, ""), str) for k in ("country", "work_mode")):
         return None, "invalid geography type"
     if not isinstance(s.get("hard_requirements", []), list) or any(
@@ -217,7 +219,7 @@ def validate_result(payload, result):
 
 def save_results(results, payloads, model=None):
     """Commit validated per-record CAS updates; never change a decision or an old score."""
-    from database_supabase import get_conn, _scored_by_supported
+    from database_supabase import get_conn, _scored_by_supported, fill_company_description
     from db_backend import Json, RealDictCursor
 
     byid = {str(p["id"]): p for p in payloads}
@@ -300,6 +302,8 @@ def save_results(results, payloads, model=None):
                 values.append(existing)
             cur.execute("UPDATE vacancy SET " + ", ".join(assignments) + where, values)
             if cur.rowcount:
+                if score_data is not None:
+                    fill_company_description([vid], score_data.get("organization_summary"))
                 counts["scored"] += int(score_data is not None)
                 counts["prepared"] += int(facts is not None)
             else:
