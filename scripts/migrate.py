@@ -73,6 +73,13 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# A non-superuser migrator role (forge) wins over SUPABASE_*, so a box that
+# also has a stray SUPABASE_DB_URL set still migrates as the least-privilege
+# account. Must happen before importing db_backend: its backend selection
+# (IS_SQLITE) and its connector both read SUPABASE_DB_URL at that point.
+if os.environ.get("JOBSEARCH_MIGRATOR_DB_URL"):
+    os.environ["SUPABASE_DB_URL"] = os.environ["JOBSEARCH_MIGRATOR_DB_URL"]
+
 # scripts/ is on sys.path[0] when run as ``python3 scripts/migrate.py``.
 from db_backend import IS_SQLITE, sqlite_db_path  # noqa: E402
 
@@ -369,7 +376,9 @@ class _Postgres:
         try:
             with open(dest, "w", encoding="utf-8") as fh:
                 subprocess.run(
-                    ["pg_dump", "--no-owner", "--no-privileges", self.url],
+                    # The forge migrator may read only schema public; a whole-database dump is refused.
+                    ["pg_dump", "--no-owner", "--no-privileges",
+                     *(["--schema=public"] if os.environ.get("JOBSEARCH_MIGRATOR_DB_URL") else []), self.url],
                     stdout=fh,
                     check=True,
                     timeout=300,
