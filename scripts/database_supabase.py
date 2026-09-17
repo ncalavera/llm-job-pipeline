@@ -1780,7 +1780,7 @@ def backfill_deadline_from_text(cur, vacancy_id: str, text: str) -> bool:
     source-page fetch) used to write full_description alone, so a role whose
     board summary never mentioned a date stayed deadline=NULL even after its
     full posting text — which usually does — was fetched (found live via
-    DHA-711: "Project Officer (Humanitarian Hub)" had an extractable deadline
+    found live: "Project Officer (Humanitarian Hub)" had an extractable deadline
     in full_description but it was never applied). One helper, called from
     every such write site, so the fix does not have to be repeated per caller.
 
@@ -2185,6 +2185,13 @@ def save_board_vacancies(
     # Resurrects must clear a machine-archival reason (board_stale /
     # board_disabled) so it never sits on a live row. Guarded once (0014).
     has_status_reason = _vacancy_has_column("status_reason")
+    # Provenance of full_description (migration 0033): a fetcher can override
+    # via job["description_source"] (ReliefWeb's RSS feed carries the full
+    # posting body -> "feed"); every other board path defaults to
+    # "board_summary" — the board's own text, not judgeable/scorable as a
+    # posting until the enrich stage fetches the real page. Guarded so a
+    # pre-migration install still saves, unstamped.
+    write_description_source = _vacancy_has_column("description_source")
 
     # Board path: full archived set (include_gone=True) so a lagging feed cannot
     # resurrect a posting the source already closed. Loaded once per RUN by the
@@ -2353,6 +2360,12 @@ def save_board_vacancies(
             if write_source_board and not (existing.get("source_board") or ""):
                 updates["source_board"] = board_name
 
+            # Never overwrite a 'source_page' value — that means the enrich
+            # stage already fetched the real posting, which outranks whatever
+            # the board feed/summary says.
+            if write_description_source and existing.get("description_source") != "source_page":
+                updates["description_source"] = job.get("description_source") or "board_summary"
+
             set_parts = [f"{k} = %s" for k in updates]
             vals = list(updates.values()) + [existing["id"]]
             cur.execute(f"UPDATE vacancy SET {', '.join(set_parts)} WHERE id = %s", vals)
@@ -2388,6 +2401,9 @@ def save_board_vacancies(
             if write_source_board:
                 cols.append("source_board")
                 vals.append(board_name)
+            if write_description_source:
+                cols.append("description_source")
+                vals.append(job.get("description_source") or "board_summary")
             placeholders = ", ".join(["%s"] * len(cols))
             cur.execute(
                 f"INSERT INTO vacancy ({', '.join(cols)}) VALUES ({placeholders})",

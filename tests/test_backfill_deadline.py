@@ -1,4 +1,4 @@
-"""backfill_deadline_from_text (DHA-711 piece 5) — one small check.
+"""backfill_deadline_from_text — one small check.
 
 Real bug it fixes: enrich_blind_vacancies.py used to write full_description
 alone, so a role whose short board summary had no date stayed deadline=NULL

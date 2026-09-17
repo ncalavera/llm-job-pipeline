@@ -5,7 +5,7 @@ import re
 
 from config import GLOBAL_BLACKLIST, GLOBAL_BLACKLIST_SUBSTR
 from fetchers import http
-from fetchers.html_utils import _html_to_snippet
+from fetchers.html_utils import _html_to_snippet, _html_to_text
 from fetchers.registry import board_fetcher
 
 
@@ -15,11 +15,24 @@ def _extract_rss_field(html: str, pattern: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+#: The three leading metadata tags ReliefWeb prepends to every item's
+#: <description> (country/organization/closing date, each its own <div>).
+#: The real posting body that follows uses <p>/<h2>/<ul>, never <div>, so
+#: stripping every <div> block cleanly separates metadata from body.
+_METADATA_DIV_RE = re.compile(r"<div[^>]*>.*?</div>", re.S)
+
+
 @board_fetcher("reliefweb_api")
 def fetch_reliefweb_board(board_cfg: dict) -> list[dict]:
     """Fetch jobs from ReliefWeb RSS feed (free, no registration).
-    The JSON API requires pre-approved appname since Nov 2025,
-    so we use the public RSS feed instead.
+    The JSON API requires pre-approved appname since Nov 2025 (v1 returns 410,
+    v2 returns 403 for an unregistered appname), so we use the public RSS feed
+    instead. The RSS <description> is not a teaser: it carries the FULL
+    posting body (verified live, 7000+ chars on a real item) behind three
+    leading metadata <div>s (country/source/closing date), which are stripped
+    before it is stored as full_description with description_source='feed' —
+    this is a real posting, not a board summary, and is judgeable/scorable
+    as-is.
     """
     import xml.etree.ElementTree as ET
 
@@ -78,8 +91,12 @@ def fetch_reliefweb_board(board_cfg: dict) -> list[dict]:
         if not org:
             org = f"[via {board_name}]"
 
-        # Extract snippet (the actual description text after metadata divs)
-        snippet = _html_to_snippet(desc_html)
+        # Strip the leading metadata divs so full_description/snippet hold the
+        # actual posting body, not "Country: X Organization: Y Closing date:
+        # Z" — those three are already extracted as their own fields above.
+        body_html = _METADATA_DIV_RE.sub("", desc_html)
+        full_description = _html_to_text(body_html)
+        snippet = _html_to_snippet(body_html)
 
         # External ID from URL (e.g. /job/4199305/...)
         ext_id_match = re.search(r"/job/(\d+)/", job_url)
@@ -97,6 +114,8 @@ def fetch_reliefweb_board(board_cfg: dict) -> list[dict]:
                 "url": job_url,
                 "external_id": ext_id,
                 "snippet": snippet,
+                "full_description": full_description,
+                "description_source": "feed",
                 "deadline": deadline,
                 "org_override": org,
                 "org_url": board_cfg["url"],
