@@ -1773,6 +1773,33 @@ def _extract_deadline_from_description(html: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+def backfill_deadline_from_text(cur, vacancy_id: str, text: str) -> bool:
+    """After (re)writing ``full_description``, try to fill ``deadline`` from it.
+
+    Every path that writes a fuller description (enrichment scrape, the
+    source-page fetch) used to write full_description alone, so a role whose
+    board summary never mentioned a date stayed deadline=NULL even after its
+    full posting text — which usually does — was fetched (found live via
+    DHA-711: "Project Officer (Humanitarian Hub)" had an extractable deadline
+    in full_description but it was never applied). One helper, called from
+    every such write site, so the fix does not have to be repeated per caller.
+
+    COALESCE-only: never overwrites a deadline that is already set. Returns
+    whether a value was written, purely for caller-side reporting.
+    """
+    raw = _extract_deadline_from_description(text or "")
+    if not raw:
+        return False
+    parsed = _safe_deadline(raw)
+    if not parsed:
+        return False
+    cur.execute(
+        "UPDATE vacancy SET deadline = COALESCE(deadline, %s) WHERE id = %s::uuid",
+        (parsed, vacancy_id),
+    )
+    return True
+
+
 def _strip_nul_bytes(job: dict) -> None:
     """Postgres TEXT can't contain 0x00. Strip from all string values in place."""
     for k, v in list(job.items()):

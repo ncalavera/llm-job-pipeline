@@ -174,7 +174,7 @@ def main():
         if arg == "--limit" and i + 1 < len(sys.argv):
             limit = int(sys.argv[i + 1])
 
-    from database_supabase import load_vacancies, get_conn
+    from database_supabase import load_vacancies, get_conn, backfill_deadline_from_text
 
     # Scope to active-company, unscored vacancies only: enriching inactive or
     # already-scored rows wastes Firecrawl credits and re-parses vacancies the
@@ -257,8 +257,9 @@ def main():
                 "UPDATE vacancy SET full_description = %s WHERE id = %s::uuid",
                 (cleaned[:30000], vid),  # cap at 30K chars
             )
+            filled_deadline = backfill_deadline_from_text(cur, vid, cleaned)
             enriched += 1
-            print(f"  -> {len(cleaned)} chars")
+            print(f"  -> {len(cleaned)} chars" + (" [+deadline]" if filled_deadline else ""))
         elif verdict == "cookie_wall":
             # Cookie wall with no real content behind it — page needs JS, or
             # the banner (leading or trailing) ate almost everything. Saving
