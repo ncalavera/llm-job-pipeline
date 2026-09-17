@@ -34,6 +34,7 @@ from bs4 import BeautifulSoup
 
 from config import get_firecrawl_client
 from fetchers import _fetch_unops_job_detail, _LOCAL_UA
+from fetchers.html_utils import _html_to_text
 from quality import (
     _COOKIE_BANNER_RE,
     COOKIE_MIN_REMAINDER,
@@ -153,13 +154,25 @@ def _get_vacancy_url(vac: dict) -> str:
     return ""
 
 
-#: docs.google.com/forms.gle/... are shared collaborative documents, not a
-#: single role's page: found live (the source-text pass) fetching one
-#: returned "Chargé de mission - Opérations" at "GPAI Policy Lab" for a
-#: vacancy titled "Operations Manager" — Firecrawl's markdown scrape of a
-#: Google Doc is not reliably THIS role's text, so it must never be trusted
-#: as a posting body, whatever it returns.
-_SHARED_DOC_HOSTS = {"docs.google.com", "drive.google.com", "forms.gle", "sheets.google.com"}
+#: drive.google.com/forms.gle/sheets.google.com are shared or multi-role
+#: pages (a form, a spreadsheet, a shared drive folder) — never one role's
+#: own posting, so they are never fetched at all. docs.google.com is handled
+#: separately below: a single /document/d/<id> doc CAN be exported as plain
+#: text (see _google_doc_id/_fetch_google_doc_text), but a bug once stored a
+#: DIFFERENT org's doc as the posting ("Chargé de mission - Opérations" for a
+#: vacancy titled "Operations Manager") — looks_like_this_role() guards every
+#: fetch against exactly that, so a doc export is safe to try.
+_SHARED_DOC_HOSTS = {"drive.google.com", "forms.gle", "sheets.google.com"}
+
+_GOOGLE_DOC_ID_RE = re.compile(r"^https://docs\.google\.com/document/d/([\w-]+)", re.IGNORECASE)
+
+
+def _google_doc_id(url: str) -> str | None:
+    """The doc id of a docs.google.com/document/d/<id>/... URL, else None.
+    A docs.google.com FORM or other non-/document/ path returns None, so it
+    stays blocked by _is_unscrapable_host — only a single doc is fetchable."""
+    m = _GOOGLE_DOC_ID_RE.match(url)
+    return m.group(1) if m else None
 
 
 def _is_unscrapable_host(url: str) -> bool:
@@ -168,11 +181,14 @@ def _is_unscrapable_host(url: str) -> bool:
     wrong. LinkedIn blocks scrapers outright (verified live 2026-07-03: a
     guest job page returns 0 chars); such rows heal on the next fetch when
     the detail pages aren't throttled, or age out via the stale-blind sweep.
-    A Google Doc/Form is a shared, often multi-role document — never a single
-    posting — so it is never fetched at all, whatever it would return."""
+    A shared drive/form/spreadsheet is never a single posting, so it is never
+    fetched. docs.google.com is fetchable only for a single /document/d/<id>
+    doc — a form under the same host stays blocked."""
     host = urlparse(url).netloc.lower()
     if host == "linkedin.com" or host.endswith(".linkedin.com"):
         return True
+    if host == "docs.google.com":
+        return _google_doc_id(url) is None
     return host in _SHARED_DOC_HOSTS
 
 
@@ -286,11 +302,97 @@ def _find_main_container(soup):
     return None
 
 
+#: Workday hosts a public (undocumented but keyless) JSON API for a job's own
+#: posting: https://{tenant}.{wdN}.myworkdayjobs.com/wday/cxs/{tenant}/{site}
+#: /job/{rest}, mirroring the job page's own
+#: https://{tenant}.{wdN}.myworkdayjobs.com/{site}/job/{rest}.
+_WORKDAY_HOST_RE = re.compile(r"^([a-z0-9-]+)\.wd\d+\.myworkdayjobs\.com$", re.IGNORECASE)
+
+
+def _workday_cxs_url(url: str) -> str | None:
+    """The job's cxs JSON detail URL, or None when url isn't a Workday job page."""
+    parsed = urlparse(url)
+    if not _WORKDAY_HOST_RE.match(parsed.netloc.lower()):
+        return None
+    tenant = parsed.netloc.split(".", 1)[0].lower()
+    parts = parsed.path.strip("/").split("/", 1)
+    if len(parts) < 2 or not parts[1]:
+        return None
+    site, rest = parts
+    return f"{parsed.scheme}://{parsed.netloc}/wday/cxs/{tenant}/{site}/{rest}"
+
+
+def _fetch_workday_detail_text(cxs_url: str, diag: dict) -> tuple[str, dict]:
+    diag["cxs_url"] = cxs_url
+    try:
+        resp = requests.get(
+            cxs_url, headers={"User-Agent": _LOCAL_UA, "Accept": "application/json"}, timeout=20
+        )
+    except Exception as e:
+        diag["error"] = str(e)
+        return "", diag
+    diag["status"] = resp.status_code
+    if resp.status_code != 200:
+        diag["body_head"] = resp.text[:300]
+        return "", diag
+    try:
+        data = resp.json()
+    except Exception as e:
+        diag["error"] = f"bad json: {e}"
+        diag["body_head"] = resp.text[:300]
+        return "", diag
+    html_desc = (data.get("jobPostingInfo") or {}).get("jobDescription", "") or ""
+    return _html_to_text(html_desc), diag
+
+
+def _fetch_google_doc_text(doc_id: str, diag: dict) -> tuple[str, dict]:
+    """A public Google Doc exports as plain text at this URL — no HTML parsing,
+    no auth. looks_like_this_role() still gates it before it's ever saved."""
+    export_url = f"https://docs.google.com/document/d/{doc_id}/export?format=txt"
+    diag["export_url"] = export_url
+    try:
+        resp = requests.get(export_url, headers={"User-Agent": _LOCAL_UA}, timeout=20)
+    except Exception as e:
+        diag["error"] = str(e)
+        return "", diag
+    diag["status"] = resp.status_code
+    diag["body_head"] = resp.text[:300]
+    if resp.status_code != 200:
+        return "", diag
+    return resp.text.strip(), diag
+
+
+def _looks_like_pdf(resp) -> bool:
+    ctype = resp.headers.get("Content-Type", "")
+    if "application/pdf" in ctype.lower():
+        return True
+    return getattr(resp, "content", b"")[:5] == b"%PDF-"
+
+
+def _extract_pdf_text(content: bytes) -> str:
+    """Local PDF text extraction (pypdf). Returns "" on any failure — the
+    caller's Firecrawl fallback (which also parses PDFs) picks it up from
+    there, so a missing/broken extractor never crashes the run."""
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return ""
+    from io import BytesIO
+
+    try:
+        reader = PdfReader(BytesIO(content))
+        return "\n\n".join((page.extract_text() or "") for page in reader.pages).strip()
+    except Exception:
+        return ""
+
+
 def _fetch_plain_page_text(url: str) -> tuple[str, dict]:
     """Zero-cost requests+bs4 fetch of an arbitrary job page.
 
-    Extracts the posting body, not the whole page: JSON-LD JobPosting
-    description first, else the best-guess main container (see
+    Host/type dispatch before the generic HTML fetch: a Workday job page's
+    own JSON API, a Google Doc's text export, a PDF posting's extracted text.
+    Otherwise, extracts the posting body, not the whole page: JSON-LD
+    JobPosting description first, else the best-guess main container (see
     _find_main_container), falling back to the full body when the container
     doesn't hold enough of the page's text to trust.
 
@@ -300,6 +402,15 @@ def _fetch_plain_page_text(url: str) -> tuple[str, dict]:
     context from day one, not just "it failed").
     """
     diag: dict = {"url": url}
+
+    doc_id = _google_doc_id(url)
+    if doc_id:
+        return _fetch_google_doc_text(doc_id, diag)
+
+    cxs_url = _workday_cxs_url(url)
+    if cxs_url:
+        return _fetch_workday_detail_text(cxs_url, diag)
+
     try:
         resp = requests.get(url, headers={"User-Agent": _LOCAL_UA}, timeout=20)
     except Exception as e:
@@ -307,10 +418,15 @@ def _fetch_plain_page_text(url: str) -> tuple[str, dict]:
         return "", diag
     diag["status"] = resp.status_code
     diag["headers"] = dict(resp.headers)
-    diag["body_head"] = resp.text[:300]
     if resp.status_code != 200:
+        diag["body_head"] = resp.text[:300]
         return "", diag
 
+    if _looks_like_pdf(resp):
+        diag["content_type"] = "pdf"
+        return _extract_pdf_text(resp.content), diag
+
+    diag["body_head"] = resp.text[:300]
     soup = BeautifulSoup(resp.text, "html.parser")
 
     jsonld_text = _extract_jsonld_job_description(soup)

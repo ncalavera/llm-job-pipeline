@@ -728,14 +728,17 @@ class TestEnrichBlindVacancies:
         assert not ebv._is_unscrapable_host("https://notlinkedin.com/jobs/1")
 
     def test_EBV08_shared_doc_hosts_never_scraped(self):
-        """A Google Doc/Form is a shared, often multi-role document — found
-        live: fetching one for an "Operations Manager" vacancy returned an
-        unrelated "Chargé de mission - Opérations" posting at a different
-        org. Never trusted as a single role's posting text."""
+        """A form or shared drive/spreadsheet is a multi-role page, never a
+        single posting — never fetched. A single Google Doc IS fetchable
+        (its own text export), guarded downstream by looks_like_this_role()
+        against exactly the "Chargé de mission - Opérations" mismatch this
+        rule used to prevent by blocking docs.google.com outright."""
         import enrich_blind_vacancies as ebv
 
-        assert ebv._is_unscrapable_host("https://docs.google.com/document/d/abc/edit")
+        assert not ebv._is_unscrapable_host("https://docs.google.com/document/d/abc/edit")
+        assert ebv._is_unscrapable_host("https://docs.google.com/forms/d/abc/viewform")
         assert ebv._is_unscrapable_host("https://forms.gle/xyz")
+        assert ebv._is_unscrapable_host("https://drive.google.com/file/d/abc/view")
         assert not ebv._is_unscrapable_host("https://jobs.ashbyhq.com/PRISM/abc")
 
     def test_EBV09_plain_fetch_diagnostics_on_failure(self, monkeypatch):
@@ -768,6 +771,103 @@ class TestEnrichBlindVacancies:
         text, diag = ebv._fetch_plain_page_text("https://example.org/job/1")
         assert text == "Real job text."
         assert "evil" not in text
+
+    def test_EBV12_workday_url_maps_to_cxs_endpoint(self):
+        import enrich_blind_vacancies as ebv
+
+        url = (
+            "https://path.wd1.myworkdayjobs.com/External/job/"
+            "United-States-Washington-DC-Headquarters-Office/"
+            "Senior-HR-Business-Partner_JR2708"
+        )
+        assert ebv._workday_cxs_url(url) == (
+            "https://path.wd1.myworkdayjobs.com/wday/cxs/path/External/job/"
+            "United-States-Washington-DC-Headquarters-Office/"
+            "Senior-HR-Business-Partner_JR2708"
+        )
+        # A non-Workday host never maps.
+        assert ebv._workday_cxs_url("https://jobs.ashbyhq.com/PRISM/abc") is None
+
+    def test_EBV13_workday_detail_extracts_description(self, monkeypatch):
+        import enrich_blind_vacancies as ebv
+
+        class _Resp:
+            status_code = 200
+            text = '{"jobPostingInfo": {"jobDescription": "<p>Real HR role.</p>"}}'
+
+            def json(self):
+                return {"jobPostingInfo": {"jobDescription": "<p>Real HR role.</p>"}}
+
+        monkeypatch.setattr(ebv.requests, "get", lambda *a, **k: _Resp())
+        url = "https://path.wd1.myworkdayjobs.com/External/job/x/Senior-HR-Business-Partner_JR2708"
+        text, diag = ebv._fetch_plain_page_text(url)
+        assert text == "Real HR role."
+        assert diag["cxs_url"].endswith("/wday/cxs/path/External/job/x/Senior-HR-Business-Partner_JR2708")
+
+    def test_EBV14_pdf_detection_by_content_type_and_magic_bytes(self):
+        import enrich_blind_vacancies as ebv
+
+        class _CTResp:
+            headers = {"Content-Type": "application/pdf"}
+            content = b"whatever"
+
+        class _MagicResp:
+            headers = {}
+            content = b"%PDF-1.4 ..."
+
+        class _HtmlResp:
+            headers = {"Content-Type": "text/html"}
+            content = b"<html></html>"
+
+        assert ebv._looks_like_pdf(_CTResp())
+        assert ebv._looks_like_pdf(_MagicResp())
+        assert not ebv._looks_like_pdf(_HtmlResp())
+
+    def test_EBV15_pdf_response_routes_to_pdf_extraction(self, monkeypatch):
+        """A PDF posting must never be parsed as HTML — that produces
+        garbage that then fails looks_like_this_role as a CONTENT MISMATCH."""
+        import enrich_blind_vacancies as ebv
+
+        class _Resp:
+            status_code = 200
+            headers = {"Content-Type": "application/pdf"}
+            content = b"%PDF-1.4 fake pdf bytes"
+            text = "garbage-if-decoded-as-html"
+
+        monkeypatch.setattr(ebv.requests, "get", lambda *a, **k: _Resp())
+        monkeypatch.setattr(ebv, "_extract_pdf_text", lambda content: "Consultant, Academics and Skills.")
+        text, diag = ebv._fetch_plain_page_text("https://example.org/JD.pdf")
+        assert text == "Consultant, Academics and Skills."
+        assert diag["content_type"] == "pdf"
+
+    def test_EBV16_google_doc_id_extraction(self):
+        import enrich_blind_vacancies as ebv
+
+        assert ebv._google_doc_id(
+            "https://docs.google.com/document/d/1wsJEXC-XFAJAvrZHgOCK/edit"
+        ) == "1wsJEXC-XFAJAvrZHgOCK"
+        assert ebv._google_doc_id("https://docs.google.com/forms/d/abc/viewform") is None
+        assert ebv._google_doc_id("https://forms.gle/xyz") is None
+
+    def test_EBV17_google_doc_fetch_uses_export_url(self, monkeypatch):
+        import enrich_blind_vacancies as ebv
+
+        class _Resp:
+            status_code = 200
+            text = "Operations Manager job description text."
+
+        captured = {}
+
+        def fake_get(url, **kwargs):
+            captured["url"] = url
+            return _Resp()
+
+        monkeypatch.setattr(ebv.requests, "get", fake_get)
+        text, diag = ebv._fetch_plain_page_text(
+            "https://docs.google.com/document/d/DOC123/edit"
+        )
+        assert text == "Operations Manager job description text."
+        assert captured["url"] == "https://docs.google.com/document/d/DOC123/export?format=txt"
 
     def test_EBV11_looks_like_this_role_table(self):
         """The general content guard behind the Google-Doc bug: whatever a
