@@ -678,3 +678,69 @@ def test_non_summary_board_never_flagged():
     # check, however short (the existing blind/boilerplate gates decide those).
     row = {"source_board": "ReliefWeb", "description_source": "feed", "full_description": "x"}
     assert filters.is_unjudgeable_board_text(row) is False
+
+
+# ---------------------------------------------------------------------------
+# Career-stage / eligibility junk words — NOT added to config/defaults.toml
+# [junk] (that list is universal-only; these are personal taste, per the
+# file's own docstring and Nikita's decision). This proves the matching is
+# boundary-safe against a temp word list, so the exact same words are safe to
+# paste into config/user_profile.md's exclude_title_keywords (see the report
+# for the word list + diff).
+# ---------------------------------------------------------------------------
+
+_CAREER_STAGE_CANDIDATE_WORDS = [
+    "phd",
+    "postdoc",
+    "postdoctoral",
+    "intern",
+    "internship",
+    "student",
+    "trainee",
+    "volunteer",
+    "national officer",
+    "no-a",
+    "no-b",
+    "no-c",
+    "no-d",
+    "noa",
+    "nob",
+    "noc",
+    "nod",
+    "g-1",
+    "g-2",
+    "g-3",
+    "g-4",
+    "g-5",
+    "g-6",
+    "g-7",
+    "gs-1",
+    "gs-2",
+    "gs-3",
+    "gs-4",
+    "gs-5",
+    "gs-6",
+    "gs-7",
+]
+
+_CAREER_STAGE_TITLE_TABLE = [
+    ("PhD Candidate, Immunology", True),
+    ("Postdoctoral Research Fellow", True),
+    ("Intern, Security Engineering", True),
+    ("Digital, AI and Innovation Internship: Global Call for 2026", True),
+    ("Trainee Solicitor", True),
+    ("Volunteer Coordinator", True),
+    ("National Officer (Cash Programming)", True),
+    ("National Professional Officer, NOB", True),
+    ("Adjoint(e) à la logistique (Roster) FT G-6, RD Congo", True),
+    ("International Communications Manager", False),
+    ("Internal Communications Manager", False),
+    ("Mid-Career Fellowship", False),
+    ("Programme Officer", False),
+]
+
+
+@pytest.mark.parametrize("title,expect_junk", _CAREER_STAGE_TITLE_TABLE)
+def test_career_stage_words_boundary_safe_against_temp_wordlist(title, expect_junk):
+    pattern = filters.build_title_blacklist_pattern(_CAREER_STAGE_CANDIDATE_WORDS)
+    assert bool(pattern.search(title.lower())) is expect_junk
