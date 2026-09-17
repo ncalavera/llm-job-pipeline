@@ -533,7 +533,9 @@ def _strip_chrome_lines(text: str) -> str:
         stripped = line.strip()
         low = _MD_BULLET_RE.sub("", stripped).lower()
         if stripped and (
-            _EMPTY_MD_LINK_RE.match(stripped) or low in _CHROME_LINE_TOKENS or _BACK_TO_RE.match(low)
+            _EMPTY_MD_LINK_RE.match(stripped)
+            or low in _CHROME_LINE_TOKENS
+            or _BACK_TO_RE.match(low)
         ):
             continue
         kept.append(line)

@@ -802,7 +802,9 @@ class TestEnrichBlindVacancies:
         url = "https://path.wd1.myworkdayjobs.com/External/job/x/Senior-HR-Business-Partner_JR2708"
         text, diag = ebv._fetch_plain_page_text(url)
         assert text == "Real HR role."
-        assert diag["cxs_url"].endswith("/wday/cxs/path/External/job/x/Senior-HR-Business-Partner_JR2708")
+        assert diag["cxs_url"].endswith(
+            "/wday/cxs/path/External/job/x/Senior-HR-Business-Partner_JR2708"
+        )
 
     def test_EBV14_pdf_detection_by_content_type_and_magic_bytes(self):
         import enrich_blind_vacancies as ebv
@@ -835,7 +837,9 @@ class TestEnrichBlindVacancies:
             text = "garbage-if-decoded-as-html"
 
         monkeypatch.setattr(ebv.requests, "get", lambda *a, **k: _Resp())
-        monkeypatch.setattr(ebv, "_extract_pdf_text", lambda content: "Consultant, Academics and Skills.")
+        monkeypatch.setattr(
+            ebv, "_extract_pdf_text", lambda content: "Consultant, Academics and Skills."
+        )
         text, diag = ebv._fetch_plain_page_text("https://example.org/JD.pdf")
         assert text == "Consultant, Academics and Skills."
         assert diag["content_type"] == "pdf"
@@ -843,9 +847,10 @@ class TestEnrichBlindVacancies:
     def test_EBV16_google_doc_id_extraction(self):
         import enrich_blind_vacancies as ebv
 
-        assert ebv._google_doc_id(
-            "https://docs.google.com/document/d/1wsJEXC-XFAJAvrZHgOCK/edit"
-        ) == "1wsJEXC-XFAJAvrZHgOCK"
+        assert (
+            ebv._google_doc_id("https://docs.google.com/document/d/1wsJEXC-XFAJAvrZHgOCK/edit")
+            == "1wsJEXC-XFAJAvrZHgOCK"
+        )
         assert ebv._google_doc_id("https://docs.google.com/forms/d/abc/viewform") is None
         assert ebv._google_doc_id("https://forms.gle/xyz") is None
 
@@ -863,9 +868,7 @@ class TestEnrichBlindVacancies:
             return _Resp()
 
         monkeypatch.setattr(ebv.requests, "get", fake_get)
-        text, diag = ebv._fetch_plain_page_text(
-            "https://docs.google.com/document/d/DOC123/edit"
-        )
+        text, diag = ebv._fetch_plain_page_text("https://docs.google.com/document/d/DOC123/edit")
         assert text == "Operations Manager job description text."
         assert captured["url"] == "https://docs.google.com/document/d/DOC123/export?format=txt"
 
@@ -1109,7 +1112,7 @@ def test_plain_fetch_extracts_main_and_drops_surrounding_chrome(monkeypatch):
         "portfolio and manage grants across three continents.\n\n"
         "Requirements: five years of relevant experience and a graduate degree."
     )
-    html = f"""
+    html = """
     <html><body>
       <header><a href="/">Skip to content</a><div class="cookie-banner">
         We use cookies to enhance your browsing experience.</div></header>

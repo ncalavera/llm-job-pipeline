@@ -307,7 +307,6 @@ def test_run_audit_stage_skips_when_review_brief_path_empty():
     assert "skipped" in result
 
 
-
 def test_audit_due_only_for_fresh_unaudited_kills():
     cutoff = "2026-01-02T00:00:00+00:00"
     fresh = {"judge": {"judged_at": "2026-01-02T22:00:00+00:00"}}
@@ -346,6 +345,7 @@ def test_save_judge_marks_too_senior_level_kill_as_north_star():
     assert saved("Too senior: C-level post, 15+ years")["north_star"] is True
     assert "north_star" not in saved("Entry-level internship")
     assert "north_star" not in saved("Too senior: x", kind="experience")
+
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
