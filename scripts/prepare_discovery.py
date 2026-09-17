@@ -86,6 +86,8 @@ def select_payloads(limit=None):
         text = _text(row)
         if not text or quality.is_boilerplate_junk(text):
             continue
+        if scoremod.filters.is_unjudgeable_board_text(row):
+            continue
         score = row.get("llm_score")
         if score is not None and score >= 40:
             continue

@@ -305,11 +305,19 @@ def _load_and_dedup(
                 loc.get("url") for member in members for loc in (member.get("locations") or [])
             )
         )
-        if not desc.strip() or quality.is_boilerplate_junk(desc) or snippet_only:
+        unjudgeable_board_text = filters.is_unjudgeable_board_text(rep)
+        if (
+            not desc.strip()
+            or quality.is_boilerplate_junk(desc)
+            or snippet_only
+            or unjudgeable_board_text
+        ):
             stats["blind"] += 1
             reason = (
                 "no description"
                 if not desc.strip()
+                else "board summary, not the real posting"
+                if unjudgeable_board_text
                 else "snippet_only"
                 if snippet_only
                 else "boilerplate/no real content"

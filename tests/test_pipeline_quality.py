@@ -727,6 +727,210 @@ class TestEnrichBlindVacancies:
         assert not ebv._is_unscrapable_host("https://careers.example.org/jobs/1")
         assert not ebv._is_unscrapable_host("https://notlinkedin.com/jobs/1")
 
+    def test_EBV08_shared_doc_hosts_never_scraped(self):
+        """A form or shared drive/spreadsheet is a multi-role page, never a
+        single posting — never fetched. A single Google Doc IS fetchable
+        (its own text export), guarded downstream by looks_like_this_role()
+        against exactly the "Chargé de mission - Opérations" mismatch this
+        rule used to prevent by blocking docs.google.com outright."""
+        import enrich_blind_vacancies as ebv
+
+        assert not ebv._is_unscrapable_host("https://docs.google.com/document/d/abc/edit")
+        assert ebv._is_unscrapable_host("https://docs.google.com/forms/d/abc/viewform")
+        assert ebv._is_unscrapable_host("https://forms.gle/xyz")
+        assert ebv._is_unscrapable_host("https://drive.google.com/file/d/abc/view")
+        assert not ebv._is_unscrapable_host("https://jobs.ashbyhq.com/PRISM/abc")
+
+    def test_EBV09_plain_fetch_diagnostics_on_failure(self, monkeypatch):
+        """A failed fetch must carry full diagnostics (url, status, headers,
+        body head) per the 'no lazy design' rule — never just 'it failed'."""
+        import enrich_blind_vacancies as ebv
+
+        class _Resp:
+            status_code = 404
+            headers = {"Content-Type": "text/html"}
+            text = "<html>not found, sorry</html>"
+
+        monkeypatch.setattr(ebv.requests, "get", lambda *a, **k: _Resp())
+        text, diag = ebv._fetch_plain_page_text("https://example.org/gone")
+        assert text == ""
+        assert diag["url"] == "https://example.org/gone"
+        assert diag["status"] == 404
+        assert diag["headers"] == {"Content-Type": "text/html"}
+        assert "not found" in diag["body_head"]
+
+    def test_EBV10_plain_fetch_extracts_text_and_drops_scripts(self, monkeypatch):
+        import enrich_blind_vacancies as ebv
+
+        class _Resp:
+            status_code = 200
+            headers = {}
+            text = "<html><script>evil()</script><body><p>Real job text.</p></body></html>"
+
+        monkeypatch.setattr(ebv.requests, "get", lambda *a, **k: _Resp())
+        text, diag = ebv._fetch_plain_page_text("https://example.org/job/1")
+        assert text == "Real job text."
+        assert "evil" not in text
+
+    def test_EBV12_workday_url_maps_to_cxs_endpoint(self):
+        import enrich_blind_vacancies as ebv
+
+        url = (
+            "https://path.wd1.myworkdayjobs.com/External/job/"
+            "United-States-Washington-DC-Headquarters-Office/"
+            "Senior-HR-Business-Partner_JR2708"
+        )
+        assert ebv._workday_cxs_url(url) == (
+            "https://path.wd1.myworkdayjobs.com/wday/cxs/path/External/job/"
+            "United-States-Washington-DC-Headquarters-Office/"
+            "Senior-HR-Business-Partner_JR2708"
+        )
+        # A non-Workday host never maps.
+        assert ebv._workday_cxs_url("https://jobs.ashbyhq.com/PRISM/abc") is None
+
+    def test_EBV13_workday_detail_extracts_description(self, monkeypatch):
+        import enrich_blind_vacancies as ebv
+
+        class _Resp:
+            status_code = 200
+            text = '{"jobPostingInfo": {"jobDescription": "<p>Real HR role.</p>"}}'
+
+            def json(self):
+                return {"jobPostingInfo": {"jobDescription": "<p>Real HR role.</p>"}}
+
+        monkeypatch.setattr(ebv.requests, "get", lambda *a, **k: _Resp())
+        url = "https://path.wd1.myworkdayjobs.com/External/job/x/Senior-HR-Business-Partner_JR2708"
+        text, diag = ebv._fetch_plain_page_text(url)
+        assert text == "Real HR role."
+        assert diag["cxs_url"].endswith(
+            "/wday/cxs/path/External/job/x/Senior-HR-Business-Partner_JR2708"
+        )
+
+    def test_EBV14_pdf_detection_by_content_type_and_magic_bytes(self):
+        import enrich_blind_vacancies as ebv
+
+        class _CTResp:
+            headers = {"Content-Type": "application/pdf"}
+            content = b"whatever"
+
+        class _MagicResp:
+            headers = {}
+            content = b"%PDF-1.4 ..."
+
+        class _HtmlResp:
+            headers = {"Content-Type": "text/html"}
+            content = b"<html></html>"
+
+        assert ebv._looks_like_pdf(_CTResp())
+        assert ebv._looks_like_pdf(_MagicResp())
+        assert not ebv._looks_like_pdf(_HtmlResp())
+
+    def test_EBV15_pdf_response_routes_to_pdf_extraction(self, monkeypatch):
+        """A PDF posting must never be parsed as HTML — that produces
+        garbage that then fails looks_like_this_role as a CONTENT MISMATCH."""
+        import enrich_blind_vacancies as ebv
+
+        class _Resp:
+            status_code = 200
+            headers = {"Content-Type": "application/pdf"}
+            content = b"%PDF-1.4 fake pdf bytes"
+            text = "garbage-if-decoded-as-html"
+
+        monkeypatch.setattr(ebv.requests, "get", lambda *a, **k: _Resp())
+        monkeypatch.setattr(
+            ebv, "_extract_pdf_text", lambda content: "Consultant, Academics and Skills."
+        )
+        text, diag = ebv._fetch_plain_page_text("https://example.org/JD.pdf")
+        assert text == "Consultant, Academics and Skills."
+        assert diag["content_type"] == "pdf"
+
+    def test_EBV16_google_doc_id_extraction(self):
+        import enrich_blind_vacancies as ebv
+
+        assert (
+            ebv._google_doc_id("https://docs.google.com/document/d/1wsJEXC-XFAJAvrZHgOCK/edit")
+            == "1wsJEXC-XFAJAvrZHgOCK"
+        )
+        assert ebv._google_doc_id("https://docs.google.com/forms/d/abc/viewform") is None
+        assert ebv._google_doc_id("https://forms.gle/xyz") is None
+
+    def test_EBV17_google_doc_fetch_uses_export_url(self, monkeypatch):
+        import enrich_blind_vacancies as ebv
+
+        class _Resp:
+            status_code = 200
+            text = "Operations Manager job description text."
+
+        captured = {}
+
+        def fake_get(url, **kwargs):
+            captured["url"] = url
+            return _Resp()
+
+        monkeypatch.setattr(ebv.requests, "get", fake_get)
+        text, diag = ebv._fetch_plain_page_text("https://docs.google.com/document/d/DOC123/edit")
+        assert text == "Operations Manager job description text."
+        assert captured["url"] == "https://docs.google.com/document/d/DOC123/export?format=txt"
+
+    def test_EBV11_looks_like_this_role_table(self):
+        """The general content guard behind the Google-Doc bug: whatever a
+        fetch returns, it must actually mention the role before it is
+        trusted as that role's posting."""
+        import enrich_blind_vacancies as ebv
+
+        # (text, org, title, expect_ok) — one case per requested scenario.
+        cases = [
+            (
+                "right page",
+                "PRISM Cambridge is hiring a Head of Operations to manage "
+                "HR, finance and compliance for the whole organisation.",
+                "PRISM",
+                "Head of Operations",
+                True,
+            ),
+            (
+                "other-job page (the live Google-Doc bug)",
+                "Chargé de mission - Opérations. Organisation : GPAI Policy "
+                "Lab. Vous travaillerez aux côtés de la direction.",
+                "80,000 Hours",  # the BOARD's own name, never the real employer
+                "Operations Manager",
+                False,
+            ),
+            (
+                "short title, org name present",
+                "Acme Robotics is looking for a new CEO to lead the company.",
+                "Acme Robotics",
+                "CEO",
+                True,
+            ),
+            (
+                "short title, org name absent",
+                "A completely unrelated announcement about quarterly results.",
+                "Acme Robotics",
+                "CEO",
+                False,
+            ),
+            (
+                "org-name-only match (title words absent from the text)",
+                "Doctors Without Borders is recruiting across every "
+                "department this quarter, apply on our careers page.",
+                "Doctors Without Borders",
+                "Logistics Coordinator",
+                True,
+            ),
+            (
+                "non-ASCII org name",
+                "Médecins Sans Frontières recherche un coordinateur logistique "
+                "pour sa mission au Tchad.",
+                "Médecins Sans Frontières",
+                "Coordinateur Logistique",
+                True,
+            ),
+        ]
+        for label, text, org, title, expect_ok in cases:
+            ok, reason = ebv.looks_like_this_role(text, org, title)
+            assert ok is expect_ok, f"{label}: got {ok} ({reason!r}), expected {expect_ok}"
+
     def test_EBV06_quality_functions_accessible(self):
         # enrich_blind_vacancies must use clean_description from quality
         from quality import clean_description
@@ -888,3 +1092,119 @@ def test_pageup_extracts_only_real_job_container(monkeypatch, quote):
         ),
     )
     assert ebv._fetch_description(None, "https://jobs.unicef.org/en-us/job/123") == body.strip()
+
+
+# ===========================================================================
+# 8. main-content extraction (chrome around a <main>, no-main fallback,
+#    shared post-clean of chrome lines)
+# ===========================================================================
+
+
+def test_plain_fetch_extracts_main_and_drops_surrounding_chrome(monkeypatch):
+    """A page with nav/cookie/share chrome around <main> must yield just the
+    posting body, paragraphs intact — not the chrome, not one flat line."""
+    from types import SimpleNamespace
+    import enrich_blind_vacancies as ebv
+
+    posting = (
+        "Program Officer, Global Health\n\n"
+        "We are looking for a Program Officer to lead our global health "
+        "portfolio and manage grants across three continents.\n\n"
+        "Requirements: five years of relevant experience and a graduate degree."
+    )
+    html = """
+    <html><body>
+      <header><a href="/">Skip to content</a><div class="cookie-banner">
+        We use cookies to enhance your browsing experience.</div></header>
+      <nav>Home About Careers Contact</nav>
+      <main>
+        <h1>Program Officer, Global Health</h1>
+        <p>We are looking for a Program Officer to lead our global health
+        portfolio and manage grants across three continents.</p>
+        <p>Requirements: five years of relevant experience and a graduate
+        degree.</p>
+      </main>
+      <div class="share-bar">Share Facebook Twitter LinkedIn Copy URL</div>
+      <footer>Back to opportunities</footer>
+    </body></html>
+    """
+    monkeypatch.setattr(
+        ebv.requests,
+        "get",
+        lambda *a, **kw: SimpleNamespace(status_code=200, headers={}, text=html),
+    )
+    text, diag = ebv._fetch_plain_page_text("https://example.org/jobs/1")
+    assert "Skip to content" not in text
+    assert "We use cookies" not in text
+    assert "Share" not in text
+    assert "Home About Careers" not in text
+    assert "Program Officer" in text
+    assert "Requirements" in text
+    assert "\n\n" in text  # paragraph break kept, not collapsed to one line
+
+
+def test_plain_fetch_falls_back_to_body_when_no_main_or_article(monkeypatch):
+    """No <main>/<article>/[role=main] and no dominant single block — the
+    posting text (spread across plain <div>s) must still come back, not an
+    empty string."""
+    from types import SimpleNamespace
+    import enrich_blind_vacancies as ebv
+
+    html = """
+    <html><body>
+      <nav>Home Careers</nav>
+      <div class="content-a">Regional Coordinator, East Africa.</div>
+      <div class="content-b">We seek a Regional Coordinator to run field
+      operations across six country offices and report to the regional
+      director on programme delivery and budget.</div>
+    </body></html>
+    """
+    monkeypatch.setattr(
+        ebv.requests,
+        "get",
+        lambda *a, **kw: SimpleNamespace(status_code=200, headers={}, text=html),
+    )
+    text, diag = ebv._fetch_plain_page_text("https://example.org/jobs/2")
+    assert "Regional Coordinator" in text
+    assert "Home Careers" not in text
+
+
+class TestStripChromeLines:
+    """_strip_chrome_lines is the shared post-clean applied to BOTH the
+    plain-fetch and Firecrawl-markdown text before clean_description() and
+    looks_like_this_role() ever see it."""
+
+    def test_empty_markdown_links_and_chrome_lines_removed(self):
+        import enrich_blind_vacancies as ebv
+
+        text = (
+            "- [](https://facebook.com/share)\n"
+            "Share\n"
+            "Copy URL\n"
+            "Program Manager role at Acme.\n"
+            "We are looking to share our impact with the world through this "
+            "hire.\n"
+            "Apply now"
+        )
+        cleaned = ebv._strip_chrome_lines(text)
+        assert "- [](" not in cleaned
+        assert "Program Manager role at Acme." in cleaned
+        # a prose line that merely contains the word "share" survives —
+        # only a line that IS exactly "Share" is dropped
+        assert "We are looking to share our impact" in cleaned
+        for chrome_line in ("Share", "Copy URL", "Apply now"):
+            assert chrome_line not in cleaned.split("\n")
+
+
+def test_chrome_strip_keeps_big_block_and_survives_nested_removal():
+    from bs4 import BeautifulSoup
+    import enrich_blind_vacancies as ebv
+
+    html = (
+        '<body><div class="share-bar"><span class="social-icon">Facebook</span></div>'
+        '<div class="social-impact-role"><p>' + "Real posting text. " * 80 + "</p></div></body>"
+    )
+    soup = BeautifulSoup(html, "html.parser")
+    ebv._strip_chrome_elements(soup)
+    text = soup.get_text()
+    assert "Facebook" not in text and "Real posting text." in text

@@ -663,6 +663,37 @@ nightly_limit = 400
 pilot_limit = 50
 
 # ===========================================================================
+# Enrich — the source-page fetch pass for summary-only boards (see
+# SUMMARY_ONLY_BOARDS in config.py). source_fetch_max_age_days is the retry
+# bound: a row older than this keeps its board summary rather than being
+# refetched forever against a likely-dead apply URL.
+# ===========================================================================
+[enrich]
+source_fetch_max_age_days = 21
+
+# ===========================================================================
+# Judge — the nightly KEEP/UNSURE/KILL pass over board roles
+# and its second-reviewer audit. brief_path / review_brief_path ship
+# empty: the brief is personal taste (visa status, targets, pay), never
+# tracked here, so a public checkout's judge and audit stages both skip with
+# a plain note. A private deployment sets both paths and provider/model.
+# ===========================================================================
+[judge]
+provider = "codex"
+model = ""
+effort = "medium"
+batch_size = 15
+kill_confidence = 5
+max_per_run = 200
+brief_path = ""
+audit_provider = "claude"
+audit_model = ""
+review_brief_path = ""
+audit_min_score = 20
+audit_sample_pct = 10
+timeout = 180
+
+# ===========================================================================
 # Telegram digest — defaults for the optional daily digest. Env vars still win
 # (DIGEST_HOT_SCORE, DIGEST_DEADLINE_SOON_DAYS, DIGEST_LIMIT, DIGEST_MIN_SCORE).
 # ===========================================================================
@@ -701,6 +732,8 @@ screener_base_url = ""
 [boards.80k_hours]
 strategy = "algolia_api"
 name = "80,000 Hours"
+# The board's own summary text, not the real posting — see config.SUMMARY_ONLY_BOARDS.
+summary_only = true
 audience = "Effective altruism, AI safety, global-priorities policy and research."
 audience_ru = "Эффективный альтруизм, безопасность ИИ, политика и исследования глобальных приоритетов."
 audience_tags = ["effective altruism", "ai safety", "policy", "research", "global health", "biosecurity", "nonprofit"]
@@ -788,6 +821,8 @@ free = true
 [boards.impactpool]
 strategy = "impactpool_html"
 name = "Impactpool"
+# Listing-only: no posting text at fetch time — see config.SUMMARY_ONLY_BOARDS.
+summary_only = true
 audience = "Nonprofit, UN and multilateral / international-organisation roles."
 audience_ru = "НКО, ООН и роли в международных организациях."
 audience_tags = ["nonprofit", "development", "humanitarian", "multilateral", "un", "policy", "global health"]
@@ -924,6 +959,8 @@ free = true
 [boards.probablygood]
 strategy = "probablygood_algolia"
 name = "Probably Good"
+# The board's own summary text, not the real posting — see config.SUMMARY_ONLY_BOARDS.
+summary_only = true
 audience = "High-impact roles across global health, biosecurity, AI safety, and nonprofit operations."
 audience_ru = "Высокоэффективные вакансии: глобальное здравоохранение, биобезопасность, безопасность ИИ, операции в НКО."
 audience_tags = ["effective altruism", "global health", "biosecurity", "ai safety", "policy", "nonprofit", "operations"]
@@ -936,6 +973,8 @@ free = true
 [boards.ea_opportunities]
 strategy = "ea_opportunities_next_data"
 name = "EA Opportunities Board"
+# The board's own summary text, not the real posting — see config.SUMMARY_ONLY_BOARDS.
+summary_only = true
 audience = "Roles, fellowships and internships at effective altruism organisations."
 audience_ru = "Вакансии, стипендии и стажировки в организациях эффективного альтруизма."
 audience_tags = ["effective altruism", "global health", "animal welfare", "ai safety", "policy", "research", "operations"]
