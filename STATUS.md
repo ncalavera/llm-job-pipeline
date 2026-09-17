@@ -165,37 +165,30 @@ Per `~/.claude/skills/levelsio/SKILL.md`: the repo lives on the server, there
 is no CI, and the dashboard is `dashboard.service` on 127.0.0.1:3001 with its
 code at `/srv/http/dashboard`.
 
-**`scripts/migrate.py` does NOT run on forge.** The box has no psycopg2, and
-`jobsearch_app` does not own the tables, so the runner cannot connect and could
-not ALTER them if it did. Migrations go in by hand as the `postgres` superuser,
-and the three steps below are one unit — a migration applied without its ledger
-row will be offered again on the next run, and a table created by `postgres`
-without the ownership hand-off is unwritable by the app.
+**`scripts/migrate.py` runs on forge as `jobsearch_migrator`**, a
+non-superuser role that may ALTER/CREATE in `jobsearch` and insert into
+`schema_migrations`; default privileges grant the app user DML on anything it
+creates, so no manual ownership hand-off is needed. Set
+`JOBSEARCH_MIGRATOR_DB_URL` (in `~/.config/op/secrets.cache` on forge) and the
+runner picks it up ahead of `SUPABASE_*`.
 
 ```bash
 # 1. code
 rsync -a --delete <local>/ root@forge:/srv/http/dashboard/     # as root
 ssh forge 'chown -R dashboard:dashboard /srv/http/dashboard'   # hand it back
 
-# 2. schema, as the superuser
-ssh forge
-sudo -u postgres psql -d jobsearch -v ON_ERROR_STOP=1 \
-  -f /srv/http/dashboard/sql/migrations/0024_contact_table.postgres.sql
+# 2. schema, one command, as jobsearch_migrator
+ssh forge 'source ~/.config/op/secrets.cache && cd ~/Projects/personal/llm-job-pipeline && \
+  JOBSEARCH_MIGRATOR_DB_URL="$JOBSEARCH_MIGRATOR_DB_URL" .venv/bin/python scripts/migrate.py'
 
-# 3. record it, and hand any NEW table to the app user
-sudo -u postgres psql -d jobsearch -c "INSERT INTO schema_migrations (version) VALUES ('0024');"
-sudo -u postgres psql -d jobsearch -c "ALTER TABLE contact OWNER TO jobsearch_app;"
-
-# 4. restart (only for server.js / scripts; public/ needs none)
+# 3. restart (only for server.js / scripts; public/ needs none)
 sudo systemctl restart dashboard
 ```
 
-Check the result with `python3 scripts/migrate.py --status` FROM THE LAPTOP
-over the tunnel — that is the one place the runner can reach the database. It
-should report `0 pending`. If it reports the migration as pending, step 3 was
-missed; if `--baseline` looks like the fix, it is not — it now refuses a
-database that is not actually current, and the right move is to apply what is
-missing.
+Check the result with `ssh forge '... scripts/migrate.py --status'`. It
+should report `0 pending`. If `--baseline` looks like the fix, it is not — it
+now refuses a database that is not actually current, and the right move is to
+apply what is missing.
 
 Loading reports and applications afterwards, from the laptop over the tunnel:
 
