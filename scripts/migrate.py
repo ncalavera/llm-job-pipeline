@@ -377,8 +377,17 @@ class _Postgres:
             with open(dest, "w", encoding="utf-8") as fh:
                 subprocess.run(
                     # The forge migrator may read only schema public; a whole-database dump is refused.
-                    ["pg_dump", "--no-owner", "--no-privileges",
-                     *(["--schema=public"] if os.environ.get("JOBSEARCH_MIGRATOR_DB_URL") else []), self.url],
+                    [
+                        "pg_dump",
+                        "--no-owner",
+                        "--no-privileges",
+                        *(
+                            ["--schema=public"]
+                            if os.environ.get("JOBSEARCH_MIGRATOR_DB_URL")
+                            else []
+                        ),
+                        self.url,
+                    ],
                     stdout=fh,
                     check=True,
                     timeout=300,
