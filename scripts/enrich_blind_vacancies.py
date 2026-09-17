@@ -218,6 +218,84 @@ def _fetch_plain_page_text(url: str) -> tuple[str, dict]:
     return text, diag
 
 
+#: Below this share of the title's content words found in the fetched text,
+#: the org name alone must carry the match (see looks_like_this_role).
+TITLE_WORD_MATCH_THRESHOLD = 0.6
+
+_STOPWORDS = {
+    "the",
+    "a",
+    "an",
+    "of",
+    "and",
+    "or",
+    "for",
+    "to",
+    "in",
+    "on",
+    "at",
+    "by",
+    "with",
+    "is",
+    "are",
+}
+
+#: Legal-entity suffixes stripped before matching an org name — "Acme NGO"
+#: must still match "Acme" in running prose that never spells out "NGO".
+_LEGAL_SUFFIX_RE = re.compile(
+    r"\b(ltd|inc|llc|gmbh|foundation|corp|corporation|plc|ngo|nonprofit|co)\.?\b",
+    re.IGNORECASE,
+)
+
+
+def _content_words(text: str) -> set[str]:
+    """Lowercased words of 3+ chars, stopwords dropped — the title's meaning,
+    not its grammar."""
+    words = re.findall(r"[\w'-]+", (text or "").lower())
+    return {w for w in words if w not in _STOPWORDS and len(w) >= 3}
+
+
+def _has_whole_word_phrase(text_lower: str, phrase_lower: str) -> bool:
+    if not phrase_lower:
+        return False
+    return re.search(r"(?<!\w)" + re.escape(phrase_lower) + r"(?!\w)", text_lower) is not None
+
+
+def looks_like_this_role(text: str, org: str, title: str) -> tuple[bool, str]:
+    """True when ``text`` plausibly IS the posting for (org, title) — the
+    general guard behind the Google-Doc bug: whatever a fetch returns, before
+    it is trusted as THIS role's posting, it must actually mention this role.
+
+    Passes on either signal: the org's own name appears (legal suffix
+    stripped, whole word, case-insensitive) OR at least
+    TITLE_WORD_MATCH_THRESHOLD of the title's content words do. A title with
+    no usable content words (all stopwords / short words) falls back to
+    requiring the org match alone. Returns (ok, reason) — the reason is
+    printed on refusal so a wrong-page fetch is diagnosable, not silent.
+    """
+    text_lower = (text or "").lower()
+    if not text_lower:
+        return False, "empty text"
+
+    org_norm = re.sub(r"\s+", " ", _LEGAL_SUFFIX_RE.sub("", org or "")).strip().lower()
+    if org_norm and _has_whole_word_phrase(text_lower, org_norm):
+        return True, "org name matched"
+
+    title_words = _content_words(title)
+    if not title_words:
+        return False, "no usable title words and org name not found"
+
+    hits = sum(1 for w in title_words if _has_whole_word_phrase(text_lower, w))
+    ratio = hits / len(title_words)
+    if ratio >= TITLE_WORD_MATCH_THRESHOLD:
+        return True, f"title words matched {hits}/{len(title_words)} ({ratio:.0%})"
+    return (
+        False,
+        f"org name not found, title words {hits}/{len(title_words)} ({ratio:.0%}) "
+        f"below {TITLE_WORD_MATCH_THRESHOLD:.0%}",
+    )
+
+
 def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
     """The source-text pass: upgrade a summary-only board's row from the
     board's own text to the real posting.
@@ -230,11 +308,15 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
 
     Plain requests+bs4 first (free); Firecrawl fallback only when a key is
     configured AND the plain text looks like a JS shell (< _JS_SHELL_MAX_CHARS).
-    Success: full_description + description_source='source_page' (column
-    permitting), the old board summary preserved into snippet if that was
-    empty, deadline backfilled from the new text. Failure: description_source
-    reset to 'board_summary' (column permitting) and the full fetch
-    diagnostics are printed — never silently dropped.
+    Every fetch, however long or clean, is content-checked before it is
+    trusted (looks_like_this_role) — a shared/misdirected page can return
+    something else's posting entirely (found live: a Google Doc URL returned
+    a different org's role). Success: full_description +
+    description_source='source_page' (column permitting), the old board
+    summary preserved into snippet if that was empty, deadline backfilled
+    from the new text. Failure — fetch failure OR a content mismatch —
+    description_source resets to 'board_summary' (column permitting) and full
+    diagnostics are printed; never silently dropped.
     """
     from database_supabase import get_conn, _vacancy_has_column, backfill_deadline_from_text
     from psycopg2.extras import RealDictCursor
@@ -248,24 +330,27 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
 
     if ids:
         cur.execute(
-            "SELECT id, title, source_board, full_description, snippet, locations, first_seen "
-            "FROM vacancy WHERE id = ANY(%s::uuid[])",
+            "SELECT v.id, v.title, v.source_board, v.full_description, v.snippet, "
+            "v.locations, v.first_seen, c.canonical_name AS org "
+            "FROM vacancy v JOIN company c ON v.company_id = c.id "
+            "WHERE v.id = ANY(%s::uuid[])",
             (list(ids),),
         )
     else:
         source_cond = (
-            "(description_source IS NULL OR description_source = 'board_summary')"
+            "(v.description_source IS NULL OR v.description_source = 'board_summary')"
             if has_desc_source
-            else "(full_description IS NULL OR length(full_description) < 400)"
+            else "(v.full_description IS NULL OR length(v.full_description) < 400)"
         )
         query = f"""
-            SELECT id, title, source_board, full_description, snippet, locations, first_seen
-            FROM vacancy
-            WHERE status = 'unseen'
-              AND source_board = ANY(%s)
+            SELECT v.id, v.title, v.source_board, v.full_description, v.snippet,
+                   v.locations, v.first_seen, c.canonical_name AS org
+            FROM vacancy v JOIN company c ON v.company_id = c.id
+            WHERE v.status = 'unseen'
+              AND v.source_board = ANY(%s)
               AND {source_cond}
-              AND first_seen >= (CURRENT_DATE - %s * INTERVAL '1 day')
-            ORDER BY first_seen DESC
+              AND v.first_seen >= (CURRENT_DATE - %s * INTERVAL '1 day')
+            ORDER BY v.first_seen DESC
         """
         params = [list(config.SUMMARY_ONLY_BOARDS), max_age_days]
         if limit:
@@ -301,7 +386,14 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
                     {**diag, "firecrawl_fallback": True},
                 )
 
-        success = verdict == "ok" and len(cleaned or "") >= filters.MIN_JUDGEABLE_DESC_CHARS
+        method = "firecrawl" if diag.get("firecrawl_fallback") else "plain"
+        length_ok = verdict == "ok" and len(cleaned or "") >= filters.MIN_JUDGEABLE_DESC_CHARS
+        content_ok, content_reason = (
+            looks_like_this_role(cleaned, row.get("org", ""), row["title"])
+            if length_ok
+            else (False, "n/a (verdict/length gate failed)")
+        )
+        success = length_ok and content_ok
         updates: dict = {}
         if success:
             updates["full_description"] = cleaned[:30000]
@@ -313,8 +405,18 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
             upgraded += 1
             print(
                 f"  [{row['source_board']}] {row['title'][:45]:45s} -> "
-                f"{before_len} -> {len(cleaned)} chars"
-                + (" [firecrawl]" if diag.get("firecrawl_fallback") else " [plain]")
+                f"{before_len} -> {len(cleaned)} chars [{method}] ({content_reason})"
+            )
+        elif length_ok and not content_ok:
+            # Fetched something long and clean-looking, but it does not
+            # mention this role at all — a shared/misdirected page (the
+            # Google Doc bug), not a real posting. Never save it.
+            if has_desc_source:
+                updates["description_source"] = "board_summary"
+            print(
+                f"  [{row['source_board']}] {row['title'][:45]:45s} -> CONTENT MISMATCH "
+                f"org={row.get('org', '')!r} url={url} method={method} reason={content_reason!r} "
+                f"first_200={cleaned[:200]!r}"
             )
         else:
             if has_desc_source:

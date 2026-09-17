@@ -769,6 +769,65 @@ class TestEnrichBlindVacancies:
         assert text == "Real job text."
         assert "evil" not in text
 
+    def test_EBV11_looks_like_this_role_table(self):
+        """The general content guard behind the Google-Doc bug: whatever a
+        fetch returns, it must actually mention the role before it is
+        trusted as that role's posting."""
+        import enrich_blind_vacancies as ebv
+
+        # (text, org, title, expect_ok) — one case per requested scenario.
+        cases = [
+            (
+                "right page",
+                "PRISM Cambridge is hiring a Head of Operations to manage "
+                "HR, finance and compliance for the whole organisation.",
+                "PRISM",
+                "Head of Operations",
+                True,
+            ),
+            (
+                "other-job page (the live Google-Doc bug)",
+                "Chargé de mission - Opérations. Organisation : GPAI Policy "
+                "Lab. Vous travaillerez aux côtés de la direction.",
+                "80,000 Hours",  # the BOARD's own name, never the real employer
+                "Operations Manager",
+                False,
+            ),
+            (
+                "short title, org name present",
+                "Acme Robotics is looking for a new CEO to lead the company.",
+                "Acme Robotics",
+                "CEO",
+                True,
+            ),
+            (
+                "short title, org name absent",
+                "A completely unrelated announcement about quarterly results.",
+                "Acme Robotics",
+                "CEO",
+                False,
+            ),
+            (
+                "org-name-only match (title words absent from the text)",
+                "Doctors Without Borders is recruiting across every "
+                "department this quarter, apply on our careers page.",
+                "Doctors Without Borders",
+                "Logistics Coordinator",
+                True,
+            ),
+            (
+                "non-ASCII org name",
+                "Médecins Sans Frontières recherche un coordinateur logistique "
+                "pour sa mission au Tchad.",
+                "Médecins Sans Frontières",
+                "Coordinateur Logistique",
+                True,
+            ),
+        ]
+        for label, text, org, title, expect_ok in cases:
+            ok, reason = ebv.looks_like_this_role(text, org, title)
+            assert ok is expect_ok, f"{label}: got {ok} ({reason!r}), expected {expect_ok}"
+
     def test_EBV06_quality_functions_accessible(self):
         # enrich_blind_vacancies must use clean_description from quality
         from quality import clean_description
