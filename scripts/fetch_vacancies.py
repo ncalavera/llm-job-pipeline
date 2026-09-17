@@ -155,6 +155,7 @@ from fetchers import (
 from database_supabase import (
     get_conn,
     get_archived_hashes,
+    get_cross_company_url_index,
     save_vacancies,
     refresh_unchanged_company_last_seen,
     archive_gone_vacancies,
@@ -593,13 +594,19 @@ def _drop_by_profile(default_org, jobs, fetch_stats):
     return kept
 
 
-def _fetch_one_company(org_name, config, tier, strategy, fetch_stats, archived_hashes=None) -> int:
+def _fetch_one_company(
+    org_name, config, tier, strategy, fetch_stats, archived_hashes=None, cross_company_urls=None
+) -> int:
     """Fetch one tracked company, save its vacancies, and record source tracking
     + gone-detection telemetry. Returns the count of new vacancies added.
 
     ``archived_hashes`` — the run-wide ``get_archived_hashes(include_gone=False)``
     set, loaded once in main() and threaded through to save_vacancies (which
-    loads it itself when None — single-company callers and tests)."""
+    loads it itself when None — single-company callers and tests).
+
+    ``cross_company_urls`` — the run-wide ``get_cross_company_url_index()``,
+    same hoist, threaded through so the same posting under a board-created
+    company row and a tracked company row folds into one vacancy."""
     print(f"\n--- {org_name} (Tier {tier}) ---")
 
     jobs = []
@@ -697,7 +704,7 @@ def _fetch_one_company(org_name, config, tier, strategy, fetch_stats, archived_h
     # against the source's full listing.
     jobs = _drop_by_profile(org_name, jobs, fetch_stats)
 
-    new_count = save_vacancies(org_name, tier, jobs, archived_hashes)
+    new_count = save_vacancies(org_name, tier, jobs, archived_hashes, cross_company_urls)
 
     # Firecrawl reported the careers page byte-identical to the last scrape
     # (changeStatus == "same"): it returns an empty UnchangedListing sentinel, so
@@ -951,6 +958,10 @@ def main():
         # written DURING the run are 'gone_from_source' (gone-detection), which
         # this set excludes by definition, so the hoist loses nothing.
         direct_archived_hashes = get_archived_hashes(include_gone=False)
+        # Cross-company posting-URL index, same hoist: built once here instead
+        # of once per company (was ~25s/run rebuilt ~150x — see
+        # get_cross_company_url_index).
+        direct_cross_company_urls = get_cross_company_url_index()
 
         for org_idx, (org_name, config) in enumerate(filtered.items()):
             run_status.step(org_name, org_idx, new=total_new)
@@ -990,7 +1001,13 @@ def main():
                 continue
 
             company_new = _fetch_one_company(
-                org_name, config, tier, strategy, fetch_stats, direct_archived_hashes
+                org_name,
+                config,
+                tier,
+                strategy,
+                fetch_stats,
+                direct_archived_hashes,
+                direct_cross_company_urls,
             )
             total_new += company_new
             fetch_stats["career_sites"]["total"] += 1

@@ -1,0 +1,136 @@
+"""Cross-company clustering in dedup_sweep.py (report-only, never auto-merged).
+
+``_cluster`` only groups rows within one company_id (the SASH / SASH Foundation
+split never surfaces there). ``_cluster_cross_company`` adds a second pass over
+EVERY row, grouping on a shared normalized apply URL + a matching title across
+DIFFERENT companies. These clusters are printed every run — dry-run or
+--apply — and never enter ``merges``: a split company row is a company-registry
+decision, not something this sweep resolves on its own.
+
+Same SQLite harness as tests/test_dedup_sweep_applications.py.
+"""
+
+import importlib
+import sys
+
+import pytest
+
+
+@pytest.fixture()
+def dal(tmp_path, monkeypatch):
+    db_file = tmp_path / "jobsearch.db"
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_DIRECT_URL", raising=False)
+    monkeypatch.setenv("JOBSEARCH_DB_PATH", str(db_file))
+    for mod in (
+        "dedup_sweep",
+        "database_supabase",
+        "config",
+        "company_registry",
+        "db_conn",
+        "db_backend",
+    ):
+        sys.modules.pop(mod, None)
+    import db_backend
+
+    importlib.reload(db_backend)
+    assert db_backend.IS_SQLITE, "test must run on the SQLite backend"
+    import database_supabase as db
+
+    yield db
+    db.close_conn()
+
+
+def _commit(db):
+    db.get_conn().commit()
+
+
+def _job(title, *, url):
+    return {
+        "title": title,
+        "snippet": f"{title} -- a genuine open role, long enough to clear the content gate.",
+        "full_description": f"We are hiring a {title}. " * 12 + "Own the work end to end.",
+        "location": "Remote",
+        "url": url,
+    }
+
+
+_URL = "https://sash.org/careers/program-officer"
+# Two spellings that do NOT fuzzy-fold in ensure_company/_find_mergeable_company
+# (mirrors the real "Model Evaluation and Threat Research" / "METR" case in
+# test_save_board_vacancies_characterization.py) — a genuine split company pair.
+_ORG_A = "Model Evaluation and Threat Research"
+_ORG_B = "METR"
+
+
+def test_same_url_two_companies_flagged_cross_company(dal):
+    """Two company rows sharing a posting URL are flagged, not silently
+    ignored by the within-company-only clusterer.
+    """
+    import dedup_sweep
+
+    dal.ensure_company(_ORG_A, status="active")
+    _commit(dal)
+    dal.save_vacancies(_ORG_A, "B", [_job("Program Officer", url=_URL)])
+    _commit(dal)
+
+    dal.ensure_company(_ORG_B, status="active")
+    _commit(dal)
+    # Bypass save_vacancies' own cross-company fold (the (b) fix) to reproduce
+    # a company row already split BEFORE that fix existed.
+    dal.save_vacancies(_ORG_B, "B", [_job("Program Officer", url=_URL)], None, {})
+    _commit(dal)
+
+    rows = dedup_sweep._load_rows()
+    same_company_clusters = dedup_sweep._cluster(rows)
+    assert same_company_clusters == []  # different company_id, invisible to _cluster
+
+    cross = dedup_sweep._cluster_cross_company(rows)
+    assert len(cross) == 1
+    assert {r["org"] for r in cross[0]} == {_ORG_A, _ORG_B}
+
+
+def test_different_title_same_company_url_not_flagged(dal):
+    """A shared generic careers URL across two companies with UNRELATED titles
+    must not be flagged — same title guard as the within-company merge."""
+    import dedup_sweep
+
+    dal.ensure_company("Company A", status="active")
+    _commit(dal)
+    dal.save_vacancies("Company A", "B", [_job("Finance Manager", url=_URL)])
+    _commit(dal)
+
+    dal.ensure_company("Company B", status="active")
+    _commit(dal)
+    dal.save_vacancies("Company B", "B", [_job("Software Engineer", url=_URL)], None, {})
+    _commit(dal)
+
+    rows = dedup_sweep._load_rows()
+    cross = dedup_sweep._cluster_cross_company(rows)
+    assert cross == []
+
+
+def test_main_never_merges_cross_company_cluster(monkeypatch, dal, capsys):
+    """main() --apply must still leave a cross-company duplicate as two rows —
+    only same-company merges are ever written."""
+    import dedup_sweep
+
+    dal.ensure_company(_ORG_A, status="active")
+    _commit(dal)
+    dal.save_vacancies(_ORG_A, "B", [_job("Program Officer", url=_URL)])
+    _commit(dal)
+    dal.ensure_company(_ORG_B, status="active")
+    _commit(dal)
+    dal.save_vacancies(_ORG_B, "B", [_job("Program Officer", url=_URL)], None, {})
+    _commit(dal)
+
+    monkeypatch.setattr(sys, "argv", ["dedup_sweep.py", "--apply"])
+    dedup_sweep.main()
+
+    out = capsys.readouterr().out
+    assert "CROSS-COMPANY" in out
+
+    cur = dal.get_conn().cursor()
+    cur.execute("SELECT COUNT(*) FROM vacancy")
+    assert cur.fetchone()[0] == 2
+    cur.close()
