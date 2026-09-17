@@ -989,3 +989,105 @@ def test_pageup_extracts_only_real_job_container(monkeypatch, quote):
         ),
     )
     assert ebv._fetch_description(None, "https://jobs.unicef.org/en-us/job/123") == body.strip()
+
+
+# ===========================================================================
+# 8. main-content extraction (chrome around a <main>, no-main fallback,
+#    shared post-clean of chrome lines)
+# ===========================================================================
+
+
+def test_plain_fetch_extracts_main_and_drops_surrounding_chrome(monkeypatch):
+    """A page with nav/cookie/share chrome around <main> must yield just the
+    posting body, paragraphs intact — not the chrome, not one flat line."""
+    from types import SimpleNamespace
+    import enrich_blind_vacancies as ebv
+
+    posting = (
+        "Program Officer, Global Health\n\n"
+        "We are looking for a Program Officer to lead our global health "
+        "portfolio and manage grants across three continents.\n\n"
+        "Requirements: five years of relevant experience and a graduate degree."
+    )
+    html = f"""
+    <html><body>
+      <header><a href="/">Skip to content</a><div class="cookie-banner">
+        We use cookies to enhance your browsing experience.</div></header>
+      <nav>Home About Careers Contact</nav>
+      <main>
+        <h1>Program Officer, Global Health</h1>
+        <p>We are looking for a Program Officer to lead our global health
+        portfolio and manage grants across three continents.</p>
+        <p>Requirements: five years of relevant experience and a graduate
+        degree.</p>
+      </main>
+      <div class="share-bar">Share Facebook Twitter LinkedIn Copy URL</div>
+      <footer>Back to opportunities</footer>
+    </body></html>
+    """
+    monkeypatch.setattr(
+        ebv.requests,
+        "get",
+        lambda *a, **kw: SimpleNamespace(status_code=200, headers={}, text=html),
+    )
+    text, diag = ebv._fetch_plain_page_text("https://example.org/jobs/1")
+    assert "Skip to content" not in text
+    assert "We use cookies" not in text
+    assert "Share" not in text
+    assert "Home About Careers" not in text
+    assert "Program Officer" in text
+    assert "Requirements" in text
+    assert "\n\n" in text  # paragraph break kept, not collapsed to one line
+
+
+def test_plain_fetch_falls_back_to_body_when_no_main_or_article(monkeypatch):
+    """No <main>/<article>/[role=main] and no dominant single block — the
+    posting text (spread across plain <div>s) must still come back, not an
+    empty string."""
+    from types import SimpleNamespace
+    import enrich_blind_vacancies as ebv
+
+    html = """
+    <html><body>
+      <nav>Home Careers</nav>
+      <div class="content-a">Regional Coordinator, East Africa.</div>
+      <div class="content-b">We seek a Regional Coordinator to run field
+      operations across six country offices and report to the regional
+      director on programme delivery and budget.</div>
+    </body></html>
+    """
+    monkeypatch.setattr(
+        ebv.requests,
+        "get",
+        lambda *a, **kw: SimpleNamespace(status_code=200, headers={}, text=html),
+    )
+    text, diag = ebv._fetch_plain_page_text("https://example.org/jobs/2")
+    assert "Regional Coordinator" in text
+    assert "Home Careers" not in text
+
+
+class TestStripChromeLines:
+    """_strip_chrome_lines is the shared post-clean applied to BOTH the
+    plain-fetch and Firecrawl-markdown text before clean_description() and
+    looks_like_this_role() ever see it."""
+
+    def test_empty_markdown_links_and_chrome_lines_removed(self):
+        import enrich_blind_vacancies as ebv
+
+        text = (
+            "- [](https://facebook.com/share)\n"
+            "Share\n"
+            "Copy URL\n"
+            "Program Manager role at Acme.\n"
+            "We are looking to share our impact with the world through this "
+            "hire.\n"
+            "Apply now"
+        )
+        cleaned = ebv._strip_chrome_lines(text)
+        assert "- [](" not in cleaned
+        assert "Program Manager role at Acme." in cleaned
+        # a prose line that merely contains the word "share" survives —
+        # only a line that IS exactly "Share" is dropped
+        assert "We are looking to share our impact" in cleaned
+        for chrome_line in ("Share", "Copy URL", "Apply now"):
+            assert chrome_line not in cleaned.split("\n")

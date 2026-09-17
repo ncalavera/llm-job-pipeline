@@ -20,6 +20,7 @@ Usage:
         a fallback for a JS-shell page). See fetch_source_text_for_summary_boards.
 """
 
+import json
 import re
 import sys
 import time
@@ -192,8 +193,100 @@ def _gate_scraped_description(text: str) -> tuple[str | None, str]:
 _JS_SHELL_MAX_CHARS = 1200
 
 
+#: id/class tokens that mark chrome the blacklist tags don't catch (a
+#: cookie widget or share bar is usually a <div>, not one of the tags above).
+_CHROME_ATTR_RE = re.compile(r"cookie|consent|share|social|breadcrumb", re.IGNORECASE)
+
+#: Narrowed container must keep at least this many chars, and this share of
+#: the body's own text, or it's discarded as a mis-detection (e.g. a page
+#: where <main> wraps only a sidebar widget) in favour of the full body.
+_CONTAINER_MIN_CHARS = 400
+_CONTAINER_MIN_BODY_SHARE = 0.2
+#: ponytail: the "largest block" fallback only fires above this share of the
+#: body's text, so it never grabs a random big <div> that isn't the content.
+_LARGEST_BLOCK_MIN_BODY_SHARE = 0.6
+
+
+def _get_text_block(el) -> str:
+    """Element text with paragraph breaks kept: one line per text node,
+    internal whitespace collapsed, runs of blank lines capped at one."""
+    raw = el.get_text("\n")
+    lines = [re.sub(r"[ \t]+", " ", ln).strip() for ln in raw.split("\n")]
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines))
+    return text.strip()
+
+
+def _extract_jsonld_job_description(soup) -> str | None:
+    """A `JobPosting.description` in a JSON-LD block is a legit, pre-cleaned
+    source many ATS pages embed for search engines — top priority when
+    present and substantial, ahead of guessing at the right HTML container."""
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or "")
+        except Exception:
+            continue
+        for item in data if isinstance(data, list) else [data]:
+            if isinstance(item, dict) and item.get("@type") == "JobPosting":
+                desc = item.get("description")
+                if desc:
+                    return _get_text_block(BeautifulSoup(desc, "html.parser"))
+    return None
+
+
+def _strip_chrome_elements(soup) -> None:
+    """Drop tags and id/class-flagged elements that are never posting body:
+    scripts/nav/chrome tags outright, plus ARIA-marked nav/dialog regions and
+    anything whose id/class says cookie/consent/share/social/breadcrumb."""
+    for tag in soup(
+        ["script", "style", "nav", "footer", "header", "aside", "form", "button", "svg", "noscript"]
+    ):
+        tag.decompose()
+    for tag in soup.find_all(attrs={"role": ["navigation", "banner", "contentinfo", "dialog"]}):
+        tag.decompose()
+    for tag in soup.find_all(attrs={"aria-hidden": "true"}):
+        tag.decompose()
+    for tag in soup.find_all(True):
+        ident = f"{tag.get('id') or ''} {' '.join(tag.get('class') or [])}"
+        if ident.strip() and _CHROME_ATTR_RE.search(ident):
+            tag.decompose()
+
+
+def _find_main_container(soup):
+    """Best-guess posting container, cheapest signal first: a known ATS
+    container (PageUp's #job-content), then the semantic HTML5 landmarks,
+    then a naive largest-text-block heuristic.
+    ponytail: heuristic, not a readability port — upgrade if it misfires often.
+    """
+    job_content = soup.find(id="job-content")
+    if job_content is not None:
+        return job_content
+    for selector in ("main", "article", "[role=main]"):
+        el = soup.select_one(selector)
+        if el is not None:
+            return el
+    body = soup.find("body")
+    if body is None:
+        return None
+    body_len = len(_get_text_block(body))
+    if not body_len:
+        return None
+    best, best_len = None, 0
+    for el in body.find_all(["div", "section"]):
+        el_len = len(_get_text_block(el))
+        if el_len > best_len:
+            best, best_len = el, el_len
+    if best is not None and best_len / body_len >= _LARGEST_BLOCK_MIN_BODY_SHARE:
+        return best
+    return None
+
+
 def _fetch_plain_page_text(url: str) -> tuple[str, dict]:
     """Zero-cost requests+bs4 fetch of an arbitrary job page.
+
+    Extracts the posting body, not the whole page: JSON-LD JobPosting
+    description first, else the best-guess main container (see
+    _find_main_container), falling back to the full body when the container
+    doesn't hold enough of the page's text to trust.
 
     Returns (text, diagnostics). ``diagnostics`` always carries enough to log
     a failure with full context — url, status, response headers, first 300
@@ -211,11 +304,26 @@ def _fetch_plain_page_text(url: str) -> tuple[str, dict]:
     diag["body_head"] = resp.text[:300]
     if resp.status_code != 200:
         return "", diag
+
     soup = BeautifulSoup(resp.text, "html.parser")
-    for tag in soup(["script", "style", "nav", "footer", "header"]):
-        tag.decompose()
-    text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True)).strip()
-    return text, diag
+
+    jsonld_text = _extract_jsonld_job_description(soup)
+    if jsonld_text and len(jsonld_text) >= _CONTAINER_MIN_CHARS:
+        return jsonld_text, diag
+
+    _strip_chrome_elements(soup)
+    body = soup.find("body") or soup
+    body_text = _get_text_block(body)
+
+    container = _find_main_container(soup)
+    if container is not None:
+        container_text = _get_text_block(container)
+        if len(container_text) >= _CONTAINER_MIN_CHARS and (
+            not body_text or len(container_text) / len(body_text) >= _CONTAINER_MIN_BODY_SHARE
+        ):
+            return container_text, diag
+
+    return body_text, diag
 
 
 #: Below this share of the title's content words found in the fetched text,
@@ -259,6 +367,55 @@ def _has_whole_word_phrase(text_lower: str, phrase_lower: str) -> bool:
     if not phrase_lower:
         return False
     return re.search(r"(?<!\w)" + re.escape(phrase_lower) + r"(?!\w)", text_lower) is not None
+
+
+#: Whole-line chrome tokens dropped by _strip_chrome_lines. Exact matches
+#: only (whitespace/case-insensitive) so posting prose is never touched —
+#: e.g. a line that merely mentions "share" in a sentence survives.
+_CHROME_LINE_TOKENS = {
+    "skip to content",
+    "search",
+    "sign in",
+    "log in",
+    "share",
+    "facebook",
+    "twitter",
+    "x",
+    "linkedin",
+    "copy url",
+    "copy link",
+    "email",
+    "print",
+    "apply",
+    "apply now",
+    "menu",
+}
+_BACK_TO_RE = re.compile(r"^back to\b", re.IGNORECASE)
+_EMPTY_MD_LINK_RE = re.compile(r"^-?\s*\[\]\([^)]*\)\s*$")
+#: A Firecrawl markdown nav list renders each item as "- Sign In" — strip the
+#: bullet before comparing against the chrome-token whitelist so those still
+#: count as whole-line matches (the token check itself stays exact).
+_MD_BULLET_RE = re.compile(r"^(?:[-*+]|\d+\.)\s+")
+
+
+def _strip_chrome_lines(text: str) -> str:
+    """Shared post-clean for BOTH the plain-fetch and Firecrawl-markdown
+    text, before clean_description()/looks_like_this_role() ever see it:
+    drops empty markdown links (``- [](url)``) and lines that are exactly a
+    chrome token (nav/share/apply buttons page chrome leaves behind).
+    Line-exact only, so real prose is never touched."""
+    if not text:
+        return text
+    kept = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        low = _MD_BULLET_RE.sub("", stripped).lower()
+        if stripped and (
+            _EMPTY_MD_LINK_RE.match(stripped) or low in _CHROME_LINE_TOKENS or _BACK_TO_RE.match(low)
+        ):
+            continue
+        kept.append(line)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept))
 
 
 def looks_like_this_role(text: str, org: str, title: str) -> tuple[bool, str]:
@@ -375,9 +532,10 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
             continue
 
         text, diag = _fetch_plain_page_text(url)
+        text = _strip_chrome_lines(text)
         cleaned, verdict = clean_description(text)
         if (verdict != "ok" or len(cleaned or "") < _JS_SHELL_MAX_CHARS) and client:
-            fc_text = _scrape_job_page(client, url)
+            fc_text = _strip_chrome_lines(_scrape_job_page(client, url))
             fc_cleaned, fc_verdict = clean_description(fc_text)
             if fc_verdict == "ok" and len(fc_cleaned or "") > len(cleaned or ""):
                 cleaned, verdict, diag = (
