@@ -672,8 +672,8 @@ pilot_limit = 50
 source_fetch_max_age_days = 21
 
 # ===========================================================================
-# Judge — the nightly KEEP/UNSURE/KILL pass over board roles (DHA-711 piece 3)
-# and its second-reviewer audit (piece 4). brief_path / review_brief_path ship
+# Judge — the nightly KEEP/UNSURE/KILL pass over board roles
+# and its second-reviewer audit. brief_path / review_brief_path ship
 # empty: the brief is personal taste (visa status, targets, pay), never
 # tracked here, so a public checkout's judge and audit stages both skip with
 # a plain note. A private deployment sets both paths and provider/model.

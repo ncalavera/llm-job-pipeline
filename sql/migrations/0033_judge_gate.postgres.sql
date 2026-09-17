@@ -1,4 +1,4 @@
--- 0033_judge_gate — the LLM judge + human review layer (DHA-711).
+-- 0033_judge_gate — the LLM judge + human review layer.
 --
 -- `judge_state` is the judge's own verdict on a role, independent of `status`
 -- (the pipeline's inbox/decided lifecycle). 'pending' = not judged yet.
@@ -15,7 +15,7 @@
 -- (the board's own summary — not judgeable), NULL = legacy/unknown (direct-ATS
 -- rows, judgeable when text length clears the existing threshold).
 --
--- `judge_review` holds Nikita's own answers from the Review tab and Today
+-- `judge_review` holds the user's own answers from the Review tab and Today
 -- cards — one current answer per role (UNIQUE vacancy_id, upserted), plus a
 -- `draw`/`split` label frozen at first insert so a role's lesson/exam bucket
 -- never moves once assigned.
@@ -34,12 +34,12 @@ CREATE TABLE IF NOT EXISTS judge_review (
     -- Where the answer was given: the dedicated Review tab, or a Today card.
     source        TEXT NOT NULL CHECK (source IN ('review', 'today')),
 
-    -- Nikita's verdict. NULL means comment-only (he left a note but did not
+    -- the user's verdict. NULL means comment-only (he left a note but did not
     -- vote yet).
     verdict       TEXT CHECK (verdict IN ('keep', 'unsure', 'remove')),
     comment       TEXT,
 
-    -- Snapshot of the judge's own verdict at the time Nikita answered, so a
+    -- Snapshot of the judge's own verdict at the time the user answered, so a
     -- later re-judge does not rewrite what he was actually agreeing/disagreeing
     -- with.
     judge_verdict TEXT,

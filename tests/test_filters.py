@@ -683,7 +683,7 @@ def test_non_summary_board_never_flagged():
 # ---------------------------------------------------------------------------
 # Career-stage / eligibility junk words — NOT added to config/defaults.toml
 # [junk] (that list is universal-only; these are personal taste, per the
-# file's own docstring and Nikita's decision). This proves the matching is
+# file's own docstring). This proves the matching is
 # boundary-safe against a temp word list, so the exact same words are safe to
 # paste into config/user_profile.md's exclude_title_keywords (see the report
 # for the word list + diff).
