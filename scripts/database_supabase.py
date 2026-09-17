@@ -1800,6 +1800,178 @@ def backfill_deadline_from_text(cur, vacancy_id: str, text: str) -> bool:
     return True
 
 
+_PAY_CUE_RE = re.compile(
+    r"(?:salary|compensation|remuneration|stipend|pay\s+range|base\s+salary|"
+    r"pay\s+for\s+this\s+role|annual\s+salary|\bOTE\b|"
+    r"per\s+(?:annum|year|month|hour)|/\s*(?:yr|year|mo|month|hr|hour))",
+    re.IGNORECASE,
+)
+
+# Money mentioned near a cue word can still be a non-pay figure (a budget, a
+# grant, funds raised) rather than what someone is actually paid. Any of
+# these words in the same window kills the match — refusing is cheaper than
+# a wrong fill.
+_NEGATIVE_RE = re.compile(
+    r"(?:budget|grant|raised|revenue|portfolio|endowment|funding\s+round|market\s+cap|"
+    r"referral\s+bonus|sign(?:ing)?[\s-]on\s+bonus|relocation\s+bonus|joining\s+bonus)",
+    re.IGNORECASE,
+)
+
+_LOCATION_TIER_RE = re.compile(
+    r"(?:location|based\s+in|all\s+other|international|NYC|Bay\s+Area)",
+    re.IGNORECASE,
+)
+
+_CUR_SYM = r"[$£€]"
+_CUR_CODE = r"(?:USD|GBP|EUR|INR|CAD|AUD|NZD|CHF|SEK|NOK|DKK|ZAR)"
+# (?!%) after each number: "£39,163\n- 20%" (a bonus percentage on its own
+# bullet line, not a second salary figure) must never parse as a range.
+_NUM = r"(?:\d{1,3}(?:[,.]\d{3})+|\d+)(?:\.\d+)?(?!\s?%)"
+_NUM_K = rf"(?:{_NUM})[kK]?(?!\s?%)"
+# [ \t]* (not \s*): a range never spans a newline, so a new bullet point
+# ("- 20% quarterly bonus" on its own line below a salary line) can't be
+# mistaken for the range's second number.
+_RANGE_SEP = r"[ \t]*(?:-|–|to)[ \t]*"
+_PERIOD = r"(?:/\s*(?:yr|year|annum|mo|month|hr|hour)|\s+per\s+(?:year|annum|month|hour|yr|mo|hr))"
+
+_SYM_RANGE_RE = re.compile(
+    rf"{_CUR_SYM}\s?{_NUM_K}{_RANGE_SEP}(?:{_CUR_SYM}\s?)?{_NUM_K}(?:{_PERIOD})?", re.IGNORECASE
+)
+_CODE_RANGE_RE = re.compile(
+    rf"\b{_CUR_CODE}\s+{_NUM_K}{_RANGE_SEP}{_NUM_K}(?:{_PERIOD})?", re.IGNORECASE
+)
+_SYM_SINGLE_RE = re.compile(rf"({_CUR_SYM})\s?({_NUM_K})(?:{_PERIOD}|\s+stipend\b)?", re.IGNORECASE)
+_CODE_SINGLE_RE = re.compile(rf"\b({_CUR_CODE})\s+({_NUM_K})(?:{_PERIOD})?", re.IGNORECASE)
+
+_MIN_PLAUSIBLE_AMOUNT = 100.0
+_MIN_PLAUSIBLE_HOURLY = 5.0
+
+
+def _min_plausible_amount(match_text: str) -> float:
+    """Hourly rates are legitimately two orders of magnitude below an annual
+    figure ("$28/hr" vs. "$28,000"), so the plausibility floor for a match
+    that names an hourly period is much lower."""
+    if re.search(r"/\s*hr\b|/\s*hour\b|per\s+hour\b", match_text, re.IGNORECASE):
+        return _MIN_PLAUSIBLE_HOURLY
+    return _MIN_PLAUSIBLE_AMOUNT
+
+
+def _amount_to_float(num_str: str):
+    """Parse a matched number (with optional trailing k, comma or dot thousands
+    separators) to a float, or None if it doesn't look like a plausible amount."""
+    s = num_str.strip()
+    is_k = s[-1:].lower() == "k"
+    if is_k:
+        s = s[:-1]
+    s = s.replace(",", "")
+    if s.count(".") == 1:
+        intpart, frac = s.split(".")
+        if len(frac) == 3:  # "70.000" European thousands separator
+            s = intpart + frac
+    try:
+        val = float(s)
+    except ValueError:
+        return None
+    return val * 1000 if is_k else val
+
+
+def _clean_compensation_match(raw: str) -> str:
+    s = re.sub(r"\s+", " ", raw).strip()
+    s = re.sub(r"(?<=[$£€])\s+(?=\d)", "", s)
+    return s.rstrip(".,;: ")
+
+
+def _format_tiered_singles(matches: list) -> str:
+    """Two or more distinct single figures in a location-tiered pay statement
+    (GiveWell-style: "NYC: $308,000. All other U.S.: $280,000.") collapse to
+    one compact range. Returns "" when the figures aren't plausible pay or
+    there's only one distinct value (handled by the caller instead)."""
+    by_value = {}
+    for m in matches:
+        sym, num_str = m.group(1), m.group(2)
+        val = _amount_to_float(num_str)
+        if val is None or val < _min_plausible_amount(m.group(0)):
+            continue
+        by_value.setdefault(val, (sym, num_str))
+    if len(by_value) < 2:
+        return ""
+    lo, hi = min(by_value), max(by_value)
+    lo_sym, lo_str = by_value[lo]
+    _, hi_str = by_value[hi]
+    return f"{lo_sym}{lo_str}–{lo_sym}{hi_str} (by location)"
+
+
+def _parse_compensation_window(window: str) -> str:
+    m = _SYM_RANGE_RE.search(window) or _CODE_RANGE_RE.search(window)
+    if m:
+        return _clean_compensation_match(m.group(0))
+
+    sym_singles = list(_SYM_SINGLE_RE.finditer(window))
+    if sym_singles:
+        distinct_vals = {_amount_to_float(m.group(2)) for m in sym_singles}
+        distinct_vals.discard(None)
+        if len(distinct_vals) == 1:
+            first = sym_singles[0]
+            val = _amount_to_float(first.group(2))
+            if val is not None and val >= _min_plausible_amount(first.group(0)):
+                return _clean_compensation_match(first.group(0))
+        elif len(distinct_vals) >= 2 and _LOCATION_TIER_RE.search(window):
+            return _format_tiered_singles(sym_singles)
+        return ""
+
+    code_singles = list(_CODE_SINGLE_RE.finditer(window))
+    if code_singles:
+        val = _amount_to_float(code_singles[0].group(2))
+        if val is not None and val >= _min_plausible_amount(code_singles[0].group(0)):
+            return _clean_compensation_match(code_singles[0].group(0))
+    return ""
+
+
+def _extract_compensation_from_description(text: str) -> str:
+    """Find a pay figure in free-form posting text, deterministically.
+
+    Scans every pay-cue occurrence (salary, compensation, pay range, /year,
+    ...) in order and tries to parse a money amount from a window around it,
+    skipping any window that also mentions a budget/grant/revenue figure
+    (not pay). Returns the first successful, plausible parse as a compact
+    display string, or "" when nothing is confidently a salary.
+    """
+    if not text:
+        return ""
+    for cue in _PAY_CUE_RE.finditer(text):
+        start = max(0, cue.start() - 60)
+        end = min(len(text), cue.end() + 350)
+        window = text[start:end]
+        if _NEGATIVE_RE.search(window):
+            continue
+        result = _parse_compensation_window(window)
+        if result:
+            return result
+    return ""
+
+
+def backfill_compensation_from_text(cur, vacancy_id: str, text: str) -> bool:
+    """After (re)writing ``full_description``, try to fill ``compensation``
+    from it — same shape as backfill_deadline_from_text next to it, for the
+    same reason: a role's board summary often omits pay, but its full
+    posting text (fetched later) usually states it (found live: GiveWell's
+    "Senior Program Officer" named a location-tiered salary in
+    full_description while compensation stayed NULL).
+
+    COALESCE-only (empty string counts as missing too): never overwrites a
+    compensation value that is already set. Returns whether a value was
+    written, purely for caller-side reporting.
+    """
+    value = _extract_compensation_from_description(text or "")
+    if not value:
+        return False
+    cur.execute(
+        "UPDATE vacancy SET compensation = COALESCE(NULLIF(compensation, ''), %s) WHERE id = %s::uuid",
+        (value, vacancy_id),
+    )
+    return True
+
+
 def _strip_nul_bytes(job: dict) -> None:
     """Postgres TEXT can't contain 0x00. Strip from all string values in place."""
     for k, v in list(job.items()):

@@ -599,7 +599,12 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
     description_source resets to 'board_summary' (column permitting) and full
     diagnostics are printed; never silently dropped.
     """
-    from database_supabase import get_conn, _vacancy_has_column, backfill_deadline_from_text
+    from database_supabase import (
+        get_conn,
+        _vacancy_has_column,
+        backfill_deadline_from_text,
+        backfill_compensation_from_text,
+    )
     from psycopg2.extras import RealDictCursor
     import config
     import settings
@@ -717,6 +722,7 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
         )
         if success:
             backfill_deadline_from_text(cur, row["id"], cleaned)
+            backfill_compensation_from_text(cur, row["id"], cleaned)
 
     if not dry_run:
         conn.commit()
@@ -731,7 +737,12 @@ def main():
         if arg == "--limit" and i + 1 < len(sys.argv):
             limit = int(sys.argv[i + 1])
 
-    from database_supabase import load_vacancies, get_conn, backfill_deadline_from_text
+    from database_supabase import (
+        load_vacancies,
+        get_conn,
+        backfill_deadline_from_text,
+        backfill_compensation_from_text,
+    )
 
     # Scope to active-company, unscored vacancies only: enriching inactive or
     # already-scored rows wastes Firecrawl credits and re-parses vacancies the
@@ -815,8 +826,17 @@ def main():
                 (cleaned[:30000], vid),  # cap at 30K chars
             )
             filled_deadline = backfill_deadline_from_text(cur, vid, cleaned)
+            filled_comp = backfill_compensation_from_text(cur, vid, cleaned)
             enriched += 1
-            print(f"  -> {len(cleaned)} chars" + (" [+deadline]" if filled_deadline else ""))
+            tags = [
+                t
+                for t in (
+                    "+deadline" if filled_deadline else "",
+                    "+compensation" if filled_comp else "",
+                )
+                if t
+            ]
+            print(f"  -> {len(cleaned)} chars" + (f" [{' '.join(tags)}]" if tags else ""))
         elif verdict == "cookie_wall":
             # Cookie wall with no real content behind it — page needs JS, or
             # the banner (leading or trailing) ate almost everything. Saving
