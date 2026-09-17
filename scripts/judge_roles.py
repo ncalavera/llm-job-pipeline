@@ -58,9 +58,12 @@ def inject_today(brief_text: str, today: str | None = None) -> str:
 
 
 def brief_version(path: str) -> str:
-    """sha1[:8] of the brief file's bytes, plus its filename (contract format)."""
+    """Human-splittable version tag: the file's stem (e.g. ``brief_judge_v4``,
+    carrying the version number) plus sha1[:8] of its bytes as a suffix, so a
+    person can read the brief version at a glance and still detect a same-name
+    edit: ``brief_judge_v4:ab12cd34``."""
     data = Path(path).read_bytes()
-    return f"{hashlib.sha1(data).hexdigest()[:8]}:{Path(path).name}"
+    return f"{Path(path).stem}:{hashlib.sha1(data).hexdigest()[:8]}"
 
 
 # ---------------------------------------------------------------------------
@@ -77,8 +80,35 @@ def judge_columns_ready() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Selection
+# Selection — one role builder, all ten fields the bake-off payload used
+# (~/jobsearch/chat-screen-2026-09-17/eval/payload_batch_v4/b1.json), shared by
+# the judge batch payload and the audit's user_msg. The measured agreement
+# numbers only hold for this exact field set.
 # ---------------------------------------------------------------------------
+
+ROLE_FIELDS = (
+    "id",
+    "org",
+    "title",
+    "posting",
+    "deadline",
+    "locations",
+    "org_about",
+    "compensation",
+    "visa_sponsor",
+    "us_eligibility",
+)
+
+# SELECT columns for the role builder (dump.sh's query, minus posting_facts and
+# the cheap score, which the judge/audit briefs don't consume): org_about is
+# COALESCE(company.description, company.about->>'description') truncated to
+# 500 chars in Python (LEFT() is Postgres-only, no SQLite translation).
+_ROLE_SELECT = (
+    "v.id, c.canonical_name AS org, v.title, v.full_description, v.deadline, "
+    "v.locations, COALESCE(c.description, c.about->>'description', '') AS org_about, "
+    "v.compensation, c.visa_sponsor, v.us_eligibility"
+)
+_ROLE_JOIN = "FROM vacancy v LEFT JOIN company c ON v.company_id = c.id"
 
 
 def _decode_locations(row: dict) -> list | None:
@@ -91,14 +121,33 @@ def _decode_locations(row: dict) -> list | None:
     return loc
 
 
-def _row_to_role(row: dict) -> dict:
+def role_payload(row: dict) -> dict:
+    """One DB row (from ``_ROLE_SELECT``) -> the ten-field role dict."""
+    deadline = row.get("deadline")
+    if hasattr(deadline, "isoformat"):
+        deadline = deadline.isoformat()
+    org_about = row.get("org_about")
+    if isinstance(org_about, str):
+        org_about = org_about[:500]
     return {
         "id": str(row["id"]),
         "org": row.get("org"),
         "title": row.get("title"),
-        "locations": _decode_locations(row),
         "posting": row.get("full_description") or "",
+        "deadline": deadline,
+        "locations": _decode_locations(row),
+        "org_about": org_about or None,
+        "compensation": row.get("compensation"),
+        "visa_sponsor": row.get("visa_sponsor"),
+        "us_eligibility": row.get("us_eligibility"),
     }
+
+
+def role_fields(role: dict) -> dict:
+    """Exactly the ten fields both stages send the model — never more, never
+    fewer, whatever bookkeeping keys (``judge``, ``llm_score``, ...) the caller
+    piggybacked onto the role dict."""
+    return {k: role.get(k) for k in ROLE_FIELDS}
 
 
 def select_roles(cap: int) -> list[dict]:
@@ -110,18 +159,20 @@ def select_roles(cap: int) -> list[dict]:
 
     cur = get_conn().cursor(cursor_factory=RealDictCursor)
     cur.execute(
-        "SELECT v.id, c.canonical_name AS org, v.title, v.locations, v.full_description "
-        "FROM vacancy v LEFT JOIN company c ON v.company_id = c.id "
+        # .format(), not an f-string: keeps this a plain string literal so
+        # test_every_vacancy_column_a_reader_names_is_created_by_a_migration's
+        # AST scan (ast.Constant only) still sees v.judge_state / v.description_source.
+        "SELECT {select} {join} "
         "WHERE v.source_board IS NOT NULL AND v.status = 'unseen' "
         "AND v.scoring_excluded_reason IS NULL AND v.judge_state = 'pending' "
         "AND length(v.full_description) >= 400 "
         "AND v.description_source IS DISTINCT FROM 'board_summary' "
-        "ORDER BY v.created_at ASC LIMIT %s",
+        "ORDER BY v.created_at ASC LIMIT %s".format(select=_ROLE_SELECT, join=_ROLE_JOIN),
         (cap,),
     )
     rows = cur.fetchall()
     cur.close()
-    return [_row_to_role(r) for r in rows]
+    return [role_payload(r) for r in rows]
 
 
 def select_roles_by_ids(ids: list[str]) -> list[dict]:
@@ -134,14 +185,14 @@ def select_roles_by_ids(ids: list[str]) -> list[dict]:
     placeholders = ", ".join(["%s"] * len(ids))
     cur = get_conn().cursor(cursor_factory=RealDictCursor)
     cur.execute(
-        f"SELECT v.id, c.canonical_name AS org, v.title, v.locations, v.full_description "
-        f"FROM vacancy v LEFT JOIN company c ON v.company_id = c.id "
-        f"WHERE v.id IN ({placeholders})",
+        "SELECT {select} {join} WHERE v.id IN ({ph})".format(
+            select=_ROLE_SELECT, join=_ROLE_JOIN, ph=placeholders
+        ),
         tuple(ids),
     )
     rows = cur.fetchall()
     cur.close()
-    by_id = {str(r["id"]): _row_to_role(r) for r in rows}
+    by_id = {str(r["id"]): role_payload(r) for r in rows}
     return [by_id[i] for i in ids if i in by_id]
 
 
@@ -157,16 +208,7 @@ def build_batches(roles: list[dict], batch_size: int) -> list[list[dict]]:
 def payload_for(roles: list[dict], system_prompt: str) -> dict:
     return {
         "system_prompt": system_prompt,
-        "roles": [
-            {
-                "id": r["id"],
-                "org": r["org"],
-                "title": r["title"],
-                "locations": r["locations"],
-                "posting": r["posting"],
-            }
-            for r in roles
-        ],
+        "roles": [role_fields(r) for r in roles],
     }
 
 
@@ -553,9 +595,9 @@ def _tonight_kills() -> list[dict]:
 
     cur = get_conn().cursor(cursor_factory=RealDictCursor)
     cur.execute(
-        "SELECT v.id, c.canonical_name AS org, v.title, v.locations, v.full_description, "
-        "v.screening, v.llm_score FROM vacancy v LEFT JOIN company c ON v.company_id = c.id "
-        "WHERE v.judge_state = 'killed'"
+        "SELECT {select}, v.screening, v.llm_score {join} WHERE v.judge_state = 'killed'".format(
+            select=_ROLE_SELECT, join=_ROLE_JOIN
+        )
     )
     rows = cur.fetchall()
     cur.close()
@@ -568,7 +610,7 @@ def _tonight_kills() -> list[dict]:
             except (ValueError, TypeError):
                 screening = {}
         judge = (screening or {}).get("judge") or {}
-        role = _row_to_role(r)
+        role = role_payload(r)
         role["kill_kind"] = judge.get("kill_kind")
         role["judge"] = judge
         role["llm_score"] = r.get("llm_score")
@@ -587,6 +629,7 @@ def run_audit_stage(
     sample = sample_for_audit(kills, cfg["audit_min_score"], cfg["audit_sample_pct"], seed)
     by_id = {k["id"]: k for k in kills}
     review_brief = Path(cfg["review_brief_path"]).read_text(encoding="utf-8")
+    review_brief_ver = brief_version(cfg["review_brief_path"])
     scratch_root = Path(cfg.get("scratch_dir") or Path.cwd() / "audit_scratch")
     audited = flagged = 0
     decisions = []
@@ -601,13 +644,7 @@ def run_audit_stage(
         payload = {
             "system_prompt": review_brief,
             "judge": role["judge"],
-            "user_msg": {
-                "id": role["id"],
-                "org": role["org"],
-                "title": role["title"],
-                "locations": role["locations"],
-                "posting": role["posting"],
-            },
+            "user_msg": role_fields(role),
         }
         payload_path = scratch_dir / "payload.json"
         output_path = scratch_dir / "output.json"
@@ -638,6 +675,7 @@ def run_audit_stage(
             "verdict": result["audit"],
             "why": str(result.get("why") or "")[:200],
             "model": f"{cfg['audit_provider']}:{cfg['audit_model']}",
+            "brief_version": review_brief_ver,
             "audited_at": datetime.now(timezone.utc).isoformat(),
             "why_sampled": why,
         }

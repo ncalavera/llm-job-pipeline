@@ -32,6 +32,66 @@ def test_inject_today_no_match_leaves_brief_unchanged():
     assert jr.inject_today(brief, today="2026-10-02") == brief
 
 
+def test_brief_version_is_stem_colon_hash(tmp_path):
+    brief_path = tmp_path / "brief_judge_v4.md"
+    brief_path.write_text("some rules")
+    version = jr.brief_version(str(brief_path))
+    assert version.startswith("brief_judge_v4:")
+    assert len(version.split(":", 1)[1]) == 8
+
+
+# ---------------------------------------------------------------------------
+# Role payload parity (judge batch payload vs audit user_msg)
+# ---------------------------------------------------------------------------
+
+
+def test_role_fields_is_exactly_the_ten_bakeoff_fields():
+    role = {
+        "id": "r1",
+        "org": "Acme",
+        "title": "Ops",
+        "posting": "text",
+        "deadline": "2026-10-01",
+        "locations": ["Remote"],
+        "org_about": "about",
+        "compensation": "USD 100k",
+        "visa_sponsor": True,
+        "us_eligibility": None,
+        "kill_kind": "direction",  # bookkeeping key, must NOT leak into the payload
+        "judge": {"verdict": "KILL"},
+        "llm_score": 5,
+    }
+    fields = jr.role_fields(role)
+    assert set(fields) == set(jr.ROLE_FIELDS)
+    assert "kill_kind" not in fields and "judge" not in fields and "llm_score" not in fields
+
+
+def test_payload_for_roles_have_exactly_the_role_fields():
+    role = {k: None for k in jr.ROLE_FIELDS}
+    payload = jr.payload_for([role], "system prompt")
+    assert set(payload["roles"][0]) == set(jr.ROLE_FIELDS)
+
+
+def test_role_payload_decodes_row_into_the_ten_fields():
+    row = {
+        "id": "abc",
+        "org": "Acme",
+        "title": "Ops",
+        "full_description": "posting text",
+        "deadline": None,
+        "locations": '["Remote"]',
+        "org_about": "x" * 600,
+        "compensation": "USD 100k",
+        "visa_sponsor": None,
+        "us_eligibility": None,
+    }
+    role = jr.role_payload(row)
+    assert set(role) == set(jr.ROLE_FIELDS)
+    assert role["posting"] == "posting text"
+    assert role["locations"] == ["Remote"]
+    assert len(role["org_about"]) == 500  # truncated, matching dump.sh's LEFT(...,500)
+
+
 # ---------------------------------------------------------------------------
 # Completeness check
 # ---------------------------------------------------------------------------
