@@ -1604,6 +1604,35 @@ def load_candidate_vacancies_for_scoring(
     return result
 
 
+def find_vacancy_by_posting_url(locations, title: str):
+    """Id of a stored vacancy with the same posting URL AND title, any company.
+
+    dedup_hash is company-scoped (org + title), so one posting saved under two
+    employer spellings — "SASH (Seabridge AI)" by hand, "SASH" from 80,000
+    Hours — becomes two rows and an applied role comes back as unseen. A
+    normalized apply URL identifies one requisition whatever the employer
+    string says. The title must match too: many employers stamp one generic
+    careers/ATS landing URL on every one of their roles.
+
+    ponytail: compares URLs in Python for same-title rows (locations is JSON,
+    no URL index). Only the manual `vac add` path calls it, once per row; the board
+    paths build their URL index once per run instead.
+    """
+    urls = {normalize_apply_url(loc.get("url")) for loc in (locations or [])}
+    urls.discard("")
+    key = (title or "").strip().lower()
+    if not urls or not key:
+        return None
+    scan = get_conn().cursor(cursor_factory=RealDictCursor)
+    scan.execute("SELECT id, locations FROM vacancy WHERE lower(trim(title)) = %s", (key,))
+    for row in scan.fetchall():
+        if urls & {normalize_apply_url(loc.get("url")) for loc in (row.get("locations") or [])}:
+            scan.close()
+            return row["id"]
+    scan.close()
+    return None
+
+
 def upsert_vacancy(dedup_hash: str, data: dict):
     """Insert or update vacancy by dedup_hash. Returns UUID string."""
     conn = get_conn()
@@ -1611,12 +1640,21 @@ def upsert_vacancy(dedup_hash: str, data: dict):
 
     cur.execute("SELECT id FROM vacancy WHERE dedup_hash = %s", (dedup_hash,))
     existing = cur.fetchone()
+    # Same posting under another employer spelling: update that row instead of
+    # inserting a second one. Its company and locations stay — they belong to
+    # the row that already tracks this requisition.
+    url_match = (
+        None if existing else find_vacancy_by_posting_url(data.get("locations"), data.get("title"))
+    )
+    skip_fields = ("id", "dedup_hash", "created_at") + (
+        ("company_id", "locations") if url_match else ()
+    )
+    if url_match:
+        existing = (url_match,)
 
     if existing:
         uuid_val = existing[0]
-        fields_to_update = {
-            k: v for k, v in data.items() if k not in ("id", "dedup_hash", "created_at")
-        }
+        fields_to_update = {k: v for k, v in data.items() if k not in skip_fields}
         if fields_to_update:
             set_clauses = []
             vals = []

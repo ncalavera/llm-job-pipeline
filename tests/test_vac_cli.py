@@ -670,3 +670,75 @@ def test_min_score_filter_excludes_rather_than_crashes_on_an_unscored_row(vm, ca
     )
     out = capsys.readouterr().out
     assert "Coefficient Giving grant" not in out
+
+
+# ---------------------------------------------------------------------------
+# add — one posting URL is one row, whatever the employer is called
+# ---------------------------------------------------------------------------
+
+
+def _seed_board_row(env, *, org, title, url):
+    cid = env.dal.ensure_company(org, status="active")
+    env.dal.upsert_vacancy(
+        env.dal.make_vacancy_id(org, title),
+        {
+            "company_id": cid,
+            "title": title,
+            "status": "unseen",
+            "source_board": "80,000 Hours",
+            "first_seen": "2026-09-06",
+            "last_seen": "2026-09-06",
+            "locations": [{"url": url, "city": "London"}],
+        },
+    )
+    env.dal.get_conn().commit()
+
+
+def test_add_folds_onto_the_same_posting_under_another_employer_name(vm):
+    """Same URL + same title, different employer spelling → no second row."""
+    url = "https://jobs.example/SASH/1cfbcfb5?utm_source=80000hours"
+    _seed_board_row(vm, org="SASH", title="Head of Operations", url=url)
+
+    vm.mod.cmd_add(
+        _add_args(
+            company="SASH (Seabridge AI)",
+            title="Head of Operations",
+            kind="job",
+            status="applied",
+            url="https://jobs.example/SASH/1cfbcfb5/",
+        )
+    )
+
+    rows = [v for v in _all(vm) if v["title"] == "Head of Operations"]
+    assert len(rows) == 1
+    assert rows[0]["status"] == "applied"
+    assert rows[0]["org"] == "SASH"  # kept the row that already tracked the req
+    assert rows[0]["locations"][0]["city"] == "London"  # board location not wiped
+
+
+def test_add_keeps_a_separate_row_when_the_shared_url_carries_another_title(vm):
+    """A generic careers URL is stamped on many roles — title must match too."""
+    url = "https://careers.example/openings"
+    _seed_board_row(vm, org="SASH", title="Head of Operations", url=url)
+
+    vm.mod.cmd_add(
+        _add_args(
+            company="SASH (Seabridge AI)",
+            title="Verification Lead",
+            kind="job",
+            status="applied",
+            url=url,
+        )
+    )
+
+    assert (
+        len([v for v in _all(vm) if v["title"] in ("Head of Operations", "Verification Lead")]) == 2
+    )
+
+
+def _all(env):
+    return list(
+        env.dal.load_vacancies(
+            include_candidate_companies=True, include_inactive_companies=True
+        ).values()
+    )
