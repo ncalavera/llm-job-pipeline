@@ -51,6 +51,7 @@ def test_stage_order_is_the_documented_sequence(rd):
         "vacancy_scoring",
         "screening_prep",
         "judge",
+        "audit",
         "verdicts",
         "digest",
         "publish",

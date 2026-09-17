@@ -116,6 +116,7 @@ STAGE_ORDER = [
     "vacancy_scoring",  # SKIP — no numeric scores in the daily path
     "screening_prep",  # GATE — combined cheap scoring + facts
     "judge",  # AUTO — KEEP/UNSURE/KILL board roles against the judge brief
+    "audit",  # AUTO — second-reviewer flag-only pass over a sample of tonight's kills
     "verdicts",  # SKIP — human review lives in the dashboard
     "digest",  # AUTO  — tiered morning Telegram message (before publish, KTD5:
     #                     a dashboard refresh failure can never cost the digest)
@@ -182,6 +183,7 @@ STAGE_ABOUT = {
     "vacancy_scoring": "scoring new roles (cheap screen, then strong finalists)",
     "screening_prep": "scoring unscored roles and preparing review facts",
     "judge": "judging board roles against the screening brief",
+    "audit": "auditing a sample of tonight's kills with a second model",
     "verdicts": "collecting your like / pass verdicts",
     "digest": "sending the tiered morning digest to Telegram",
     "publish": "publishing the dashboard (warns if the run was not clean)",
@@ -2346,6 +2348,22 @@ def _h_judge(state, entry, opts):
     )
 
 
+def _h_audit(state, entry, opts):
+    """Self-contained: runs judge_roles.py --audit, emits no gate."""
+    import settings
+    import judge_roles
+
+    cfg = settings.judge()
+    cfg["scratch_dir"] = str(PROJECT_ROOT / "vacancies" / "audit_scratch")
+    seed = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    result = judge_roles.run_audit_stage(cfg, seed)
+    if result.get("skipped"):
+        return "skip", result["skipped"]
+    entry["counts"] = result["counts"]
+    c = result["counts"]
+    return "advance", f"audited {c.get('audited', 0)}, flagged {c.get('flagged', 0)}"
+
+
 HANDLERS = {
     "validate_profile": _h_validate_profile,
     "preflight": _h_preflight,
@@ -2359,6 +2377,7 @@ HANDLERS = {
     "vacancy_scoring": _h_optional_scoring,
     "screening_prep": _h_screening_prep,
     "judge": _h_judge,
+    "audit": _h_audit,
     "verdicts": lambda state, entry, opts: (
         "skip",
         "Review prepared roles in the dashboard Screen view.",
@@ -2428,6 +2447,11 @@ def _run_counts(state: dict) -> dict:
     try:
         judge_counts = _stage(state, "judge").get("counts") or {}
         counts.update({k: v for k, v in judge_counts.items() if v is not None})
+    except Exception:
+        pass
+    try:
+        audit_counts = _stage(state, "audit").get("counts") or {}
+        counts.update({k: v for k, v in audit_counts.items() if v is not None})
     except Exception:
         pass
     return counts

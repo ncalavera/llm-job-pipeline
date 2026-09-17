@@ -190,6 +190,32 @@ def test_apply_keep_and_unsure_map_directly():
 
 
 # ---------------------------------------------------------------------------
+# Seeded audit sample determinism
+# ---------------------------------------------------------------------------
+
+
+def test_sample_for_audit_direction_and_high_score_always_included():
+    kills = [
+        {"id": "d1", "kill_kind": "direction", "llm_score": 5},
+        {"id": "s1", "kill_kind": "location", "llm_score": 25},
+        {"id": "low1", "kill_kind": "location", "llm_score": 3},
+    ]
+    sample = jr.sample_for_audit(kills, min_score=20, sample_pct=0, seed="2026-09-17")
+    assert sample["d1"] == "direction"
+    assert sample["s1"] == "score>=20"
+    assert "low1" not in sample
+
+
+def test_sample_for_audit_is_deterministic_for_the_same_seed():
+    kills = [{"id": f"k{i}", "kill_kind": "location", "llm_score": 1} for i in range(20)]
+    a = jr.sample_for_audit(kills, min_score=20, sample_pct=30, seed="run-42")
+    b = jr.sample_for_audit(kills, min_score=20, sample_pct=30, seed="run-42")
+    assert a == b
+    c = jr.sample_for_audit(kills, min_score=20, sample_pct=30, seed="run-43")
+    assert a != c  # different seed, overwhelmingly likely a different draw
+
+
+# ---------------------------------------------------------------------------
 # Column-missing skip (migration 0033 not applied)
 # ---------------------------------------------------------------------------
 
@@ -214,6 +240,11 @@ def test_run_judge_stage_skips_cleanly_without_columns(monkeypatch):
 def test_run_judge_stage_skips_when_brief_path_empty():
     result = jr.run_judge_stage({"brief_path": "", "max_per_run": 10})
     assert result["skipped"] == "no judge brief configured ([judge] brief_path is empty)"
+
+
+def test_run_audit_stage_skips_when_review_brief_path_empty():
+    result = jr.run_audit_stage({"review_brief_path": ""}, seed="2026-09-17")
+    assert "skipped" in result
 
 
 if __name__ == "__main__":

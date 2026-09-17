@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
-"""Judge stage: KEEP/UNSURE/KILL board roles against a private brief.
+"""Judge stage: KEEP/UNSURE/KILL board roles against a
+private brief, then audit a sample of the kills with a second model.
 
 Self-contained script stage in run_daily.py's STAGE_ORDER, right after
 ``screening_prep``. It never emits a gate — the unattended night just runs it.
-Model: codex exec or ``claude -p``, launched the same way as the eval
+Judge model: codex exec or ``claude -p``, launched the same way as the eval
 prototype (~/jobsearch/chat-screen-2026-09-17/eval/run_batch_v4.sh): one batch
 of roles per model call, stdin from /dev/null, a scratch dir the child sees
-and nothing else.
+and nothing else. Audit model: one removal per call, flag-only — it can never
+restore a role, only write ``screening.audit`` for the weekly Review tab.
 
-Reads ``[judge]`` from config/defaults.toml (``settings.judge()``).
-``brief_path`` ships empty in the public repo, so a public checkout's stage
-skips with a plain note instead of erroring.
+Both stages read ``[judge]`` from config/defaults.toml (``settings.judge()``).
+``brief_path`` / ``review_brief_path`` ship empty in the public repo, so a
+public checkout's stages both skip with a plain note instead of erroring.
 
     judge_roles.py                              # run the judge stage (called by run_daily.py)
+    judge_roles.py --audit                      # run the audit stage
     judge_roles.py --dry-run --ids a,b,c        # read-only: judge 3 real roles, print, write nothing
 """
 
@@ -22,6 +25,7 @@ import argparse
 import hashlib
 import json
 import os
+import random
 import re
 import shlex
 import subprocess
@@ -448,6 +452,16 @@ def save_judge(conn, vac_id: str, judge_json: dict, judge_state: str, status_upd
     cur.close()
 
 
+def save_audit(conn, vac_id: str, audit_json: dict) -> None:
+    from db_backend import Json
+
+    screening = _current_screening(conn, vac_id)
+    screening["audit"] = audit_json
+    cur = conn.cursor()
+    cur.execute("UPDATE vacancy SET screening = %s WHERE id = %s", (Json(screening), vac_id))
+    cur.close()
+
+
 # ---------------------------------------------------------------------------
 # Judge stage
 # ---------------------------------------------------------------------------
@@ -507,12 +521,146 @@ def run_judge_stage(cfg: dict, dry_run: bool = False, roles: list[dict] | None =
 
 
 # ---------------------------------------------------------------------------
+# Audit stage
+# ---------------------------------------------------------------------------
+
+
+def sample_for_audit(kills: list[dict], min_score: int, sample_pct: int, seed: str) -> dict:
+    """id -> why_sampled, deterministic for a given ``seed`` (run id/date)."""
+    chosen: dict[str, str] = {}
+    rest = []
+    for k in kills:
+        if k.get("kill_kind") == "direction":
+            chosen[k["id"]] = "direction"
+            continue
+        score = k.get("llm_score")
+        if isinstance(score, (int, float)) and score >= min_score:
+            chosen[k["id"]] = f"score>={min_score}"
+            continue
+        rest.append(k)
+    rng = random.Random(seed)
+    n = round(len(rest) * sample_pct / 100)
+    for k in rng.sample(rest, min(n, len(rest))):
+        chosen.setdefault(k["id"], "random")
+    return chosen
+
+
+def _tonight_kills() -> list[dict]:
+    """Board roles this run just killed: judge_state='killed', judge.reason/kill_kind
+    read back from the stored screening.judge object."""
+    from db_backend import RealDictCursor
+    from db_conn import get_conn
+
+    cur = get_conn().cursor(cursor_factory=RealDictCursor)
+    cur.execute(
+        "SELECT v.id, c.canonical_name AS org, v.title, v.locations, v.full_description, "
+        "v.screening, v.llm_score FROM vacancy v LEFT JOIN company c ON v.company_id = c.id "
+        "WHERE v.judge_state = 'killed'"
+    )
+    rows = cur.fetchall()
+    cur.close()
+    out = []
+    for r in rows:
+        screening = r.get("screening")
+        if isinstance(screening, str):
+            try:
+                screening = json.loads(screening)
+            except (ValueError, TypeError):
+                screening = {}
+        judge = (screening or {}).get("judge") or {}
+        role = _row_to_role(r)
+        role["kill_kind"] = judge.get("kill_kind")
+        role["judge"] = judge
+        role["llm_score"] = r.get("llm_score")
+        out.append(role)
+    return out
+
+
+def run_audit_stage(
+    cfg: dict, seed: str, dry_run: bool = False, roles: list[dict] | None = None
+) -> dict:
+    if not cfg.get("review_brief_path"):
+        return {"skipped": "no audit brief configured ([judge] review_brief_path is empty)"}
+    kills = roles if roles is not None else _tonight_kills()
+    if not kills:
+        return {"counts": {"audited": 0, "flagged": 0}, "decisions": []}
+    sample = sample_for_audit(kills, cfg["audit_min_score"], cfg["audit_sample_pct"], seed)
+    by_id = {k["id"]: k for k in kills}
+    review_brief = Path(cfg["review_brief_path"]).read_text(encoding="utf-8")
+    scratch_root = Path(cfg.get("scratch_dir") or Path.cwd() / "audit_scratch")
+    audited = flagged = 0
+    decisions = []
+
+    from db_conn import get_conn
+
+    conn = get_conn()
+    for vid, why in sample.items():
+        role = by_id[vid]
+        scratch_dir = scratch_root / vid[:12]
+        scratch_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "system_prompt": review_brief,
+            "judge": role["judge"],
+            "user_msg": {
+                "id": role["id"],
+                "org": role["org"],
+                "title": role["title"],
+                "locations": role["locations"],
+                "posting": role["posting"],
+            },
+        }
+        payload_path = scratch_dir / "payload.json"
+        output_path = scratch_dir / "output.json"
+        payload_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        prompt_text = (
+            f"Read the payload file {payload_path}. Follow its system_prompt to review the ONE "
+            f"removal it describes. Write ONE JSON object to {output_path}: "
+            '{"id": "...", "audit": "UPHOLD|OVERTURN", "why": "one line, max 140 chars"}. '
+            "Read no other file."
+        )
+        _, err = run_model_call(
+            prompt_text,
+            cfg["audit_provider"],
+            cfg["audit_model"],
+            cfg["effort"],
+            scratch_dir,
+            cfg["timeout"],
+        )
+        if err or not output_path.exists():
+            continue
+        try:
+            result = json.loads(output_path.read_text(encoding="utf-8", errors="replace"))
+        except json.JSONDecodeError:
+            result = parse_llm_json(output_path.read_text(encoding="utf-8", errors="replace"))
+        if not isinstance(result, dict) or result.get("audit") not in ("UPHOLD", "OVERTURN"):
+            continue
+        audit_json = {
+            "verdict": result["audit"],
+            "why": str(result.get("why") or "")[:200],
+            "model": f"{cfg['audit_provider']}:{cfg['audit_model']}",
+            "audited_at": datetime.now(timezone.utc).isoformat(),
+            "why_sampled": why,
+        }
+        audited += 1
+        if audit_json["verdict"] == "OVERTURN":
+            flagged += 1
+        decisions.append({"id": vid, "audit": audit_json})
+        if not dry_run:
+            save_audit(conn, vid, audit_json)
+            conn.commit()
+    rate = round(100 * flagged / audited) if audited else 0
+    print(f"judge audit: {audited} audited, {flagged} flagged (flag rate {rate}%)", flush=True)
+    return {"counts": {"audited": audited, "flagged": flagged}, "decisions": decisions}
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--audit", action="store_true", help="run the audit stage instead")
     parser.add_argument("--dry-run", action="store_true", help="read-only: print, write nothing")
     parser.add_argument("--ids", help="comma-separated vacancy ids (dry-run only)")
     args = parser.parse_args()
@@ -524,7 +672,11 @@ def main() -> int:
     else:
         roles = None
 
-    result = run_judge_stage(cfg, dry_run=args.dry_run, roles=roles)
+    seed = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if args.audit:
+        result = run_audit_stage(cfg, seed, dry_run=args.dry_run, roles=roles)
+    else:
+        result = run_judge_stage(cfg, dry_run=args.dry_run, roles=roles)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0
 
