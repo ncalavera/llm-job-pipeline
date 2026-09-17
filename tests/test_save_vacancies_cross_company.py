@@ -65,9 +65,7 @@ def test_same_apply_url_different_company_rows_folds_to_one(dal):
     """
     dal.ensure_company("SASH Foundation", status="active")
     dal.get_conn().commit()
-    dal.save_vacancies(
-        "SASH Foundation", "B", [_job("Program Officer", url=_URL)]
-    )
+    dal.save_vacancies("SASH Foundation", "B", [_job("Program Officer", url=_URL)])
     dal.get_conn().commit()
 
     dal.ensure_company("SASH", status="active")

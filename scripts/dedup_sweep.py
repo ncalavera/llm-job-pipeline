@@ -333,9 +333,7 @@ def _cluster_cross_company(rows):
     groups: dict = {}
     for r in rows:
         groups.setdefault(uf.find(r["id"]), []).append(r)
-    return [
-        g for g in groups.values() if len(g) > 1 and len({x["company_id"] for x in g}) > 1
-    ]
+    return [g for g in groups.values() if len(g) > 1 and len({x["company_id"] for x in g}) > 1]
 
 
 def _live_rows(cluster):
