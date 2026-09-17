@@ -316,5 +316,36 @@ def test_audit_due_only_for_fresh_unaudited_kills():
     assert not jr._audit_due({"judge": {"judged_at": "2026-01-01T22:00:00+00:00"}}, cutoff)
     assert not jr._audit_due({"judge": {}}, cutoff)
 
+
+def test_save_judge_marks_too_senior_level_kill_as_north_star():
+    class Cur:
+        def __init__(self, log):
+            self.log = log
+
+        def execute(self, sql, params=()):
+            self.log.append(params)
+
+        def fetchone(self):
+            return ({},)
+
+        def close(self):
+            pass
+
+    class Conn:
+        def __init__(self):
+            self.log = []
+
+        def cursor(self):
+            return Cur(self.log)
+
+    def saved(reason, kind="level"):
+        conn = Conn()
+        jr.save_judge(conn, "id", {"kill_kind": kind, "reason": reason}, "killed", None)
+        return conn.log[-1][0].adapted
+
+    assert saved("Too senior: C-level post, 15+ years")["north_star"] is True
+    assert "north_star" not in saved("Entry-level internship")
+    assert "north_star" not in saved("Too senior: x", kind="experience")
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

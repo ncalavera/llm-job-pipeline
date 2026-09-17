@@ -480,6 +480,12 @@ def save_judge(conn, vac_id: str, judge_json: dict, judge_state: str, status_upd
 
     screening = _current_screening(conn, vac_id)
     screening["judge"] = judge_json
+    # A "too senior" removal is kept as a role model: the brief starts such a
+    # `level` reason with "Too senior:"; the dashboard lists marked roles.
+    if judge_json.get("kill_kind") == "level" and judge_json["reason"].lower().startswith(
+        "too senior"
+    ):
+        screening["north_star"] = True
     cur = conn.cursor()
     cur.execute(
         "UPDATE vacancy SET screening = %s, judge_state = %s WHERE id = %s",
