@@ -631,6 +631,23 @@ def _build_cross_company_url_index(cur) -> dict:
     return index
 
 
+def get_cross_company_url_index() -> dict:
+    """Public, self-contained wrapper of ``_build_cross_company_url_index``.
+
+    One SELECT over every vacancy row (~0.2s measured against production:
+    7471 rows). Building it PER COMPANY inside a ~150-company run was the
+    25s/run cost that made the direct-ATS save path skip cross-company dedup
+    entirely — a caller that loops over companies (fetch_vacancies.main)
+    should call this ONCE and thread the result into every ``save_vacancies``
+    call, exactly like ``get_archived_hashes``.
+    """
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    index = _build_cross_company_url_index(cur)
+    cur.close()
+    return index
+
+
 def _consume_index_entry(index: dict, row_id) -> None:
     """Drop every key pointing at row_id after it is claimed by a rename match.
 
@@ -2127,7 +2144,11 @@ def _print_merge_summary(
 
 
 def save_vacancies(
-    org_name: str, tier, jobs: list[dict], archived_hashes: set[str] | None = None
+    org_name: str,
+    tier,
+    jobs: list[dict],
+    archived_hashes: set[str] | None = None,
+    cross_company_urls: dict | None = None,
 ) -> int:
     """Save fetched jobs into the DB. Returns count of new vacancies.
 
@@ -2137,6 +2158,12 @@ def save_vacancies(
     A multi-company run (fetch_vacancies.main) loads it ONCE and passes it in;
     loading it here per company re-pulled the whole tombstone table for every
     org. When omitted (tests, one-off callers) it is loaded here as before.
+
+    ``cross_company_urls`` — ``get_cross_company_url_index()``'s result, so the
+    same posting saved under a board-created company row and a tracked company
+    row (e.g. "X Foundation" vs "X") folds into one vacancy instead of two.
+    Same hoist as archived_hashes: loaded ONCE per run and passed in. When
+    omitted it is built here (single-company callers, tests).
     """
     org_name = resolve_canonical_name(org_name)
     company_id = resolve_company_id(org_name)
@@ -2161,6 +2188,9 @@ def save_vacancies(
     # Index this company's existing rows once so a renamed / re-punctuated /
     # language variant merges onto the live row instead of forking a new one.
     dedup_index = _build_dedup_index(cur, org_name, company_id)
+    if cross_company_urls is None:
+        cross_company_urls = _build_cross_company_url_index(cur)
+    dedup_index["url"] = {**cross_company_urls, **dedup_index["url"]}
     # Exact hashes of every title in THIS fetch. If an existing row's own exact
     # title is in here it is still live, so a variant of it is a same-time pair
     # (keep both), not a rename (see _find_existing_vacancy's batch-alive guard).

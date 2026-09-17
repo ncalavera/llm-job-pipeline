@@ -298,6 +298,46 @@ def _cluster(rows):
     return clusters
 
 
+def _cluster_cross_company(rows):
+    """Report-only clusters spanning DIFFERENT companies: rows sharing a
+    normalized apply URL AND a matching title (same identity rule as the
+    within-company same-URL merge above — titles must contain each other or
+    differ only by connective words, so a shared generic careers URL never
+    counts).
+
+    This is the (b)/(d) gap made visible: ``save_vacancies`` folding two
+    company rows' postings onto one vacancy going forward does not retroactively
+    fix a company that was already split in two ("SASH" / "SASH Foundation").
+    That split is a company-registry decision — which row is canonical, which
+    FK rows re-point — never a dedup_sweep auto-merge. These clusters are
+    printed for a human every run, dry-run or --apply, and never enter
+    ``merges``.
+    """
+    uf = _Union()
+    by_id = {r["id"]: r for r in rows}
+    url_seen: dict = {}
+    for r in rows:
+        uf.find(r["id"])
+        for u in _urls(r):
+            prev_id = url_seen.setdefault(u, r["id"])
+            if prev_id == r["id"]:
+                continue
+            prev = by_id[prev_id]
+            if prev["company_id"] == r["company_id"]:
+                continue  # same-company match is _cluster's job, not this one
+            ta = _normalize_title_strong(r.get("title") or "")
+            tb = _normalize_title_strong(prev.get("title") or "")
+            if ta and tb and (ta in tb or tb in ta or _titles_equal_sans_stopwords(ta, tb)):
+                uf.union(r["id"], prev_id)
+
+    groups: dict = {}
+    for r in rows:
+        groups.setdefault(uf.find(r["id"]), []).append(r)
+    return [
+        g for g in groups.values() if len(g) > 1 and len({x["company_id"] for x in g}) > 1
+    ]
+
+
 def _live_rows(cluster):
     """Rows still live in the source: active status AND seen in the cluster's
     latest fetch (last_seen == the max last_seen across the cluster)."""
@@ -513,6 +553,17 @@ def _print_manual(clusters):
             print(f'    {tag} {r["status"]:<10} "{r["title"]}"  last seen {r.get("last_seen")}')
 
 
+def _print_cross_company(clusters):
+    """Report clusters that span different companies. Never merged — see
+    _cluster_cross_company."""
+    for i, cluster in enumerate(clusters, 1):
+        orgs = ", ".join(sorted({r["org"] for r in cluster}))
+        print(f"[X{i}] CROSS-COMPANY, same posting URL — {orgs}: recommend a company merge")
+        for r in cluster:
+            url = next(iter(_urls(r)), "")
+            print(f'    {r["org"]:<30} {r["status"]:<10} "{r["title"]}"  {url}')
+
+
 def _print_collapsible(merges):
     """Report clusters that would collapse, naming each loser and why."""
     for i, (survivor, losers) in enumerate(merges, 1):
@@ -549,14 +600,19 @@ def main() -> int:
     clusters = _cluster(rows)
     if args.limit is not None:
         clusters = clusters[: args.limit]
+    # Cross-company: report-only, never entered into merges, dry-run or --apply.
+    cross_company = _cluster_cross_company(rows)
 
-    if not clusters:
+    if not clusters and not cross_company:
         print("No cross-variant duplicates found. Nothing to do.")
         return 0
 
     manual = [c for c in clusters if _needs_manual_review(c)]
     merges = [_pick_survivor(c) for c in clusters if not _needs_manual_review(c)]
 
+    if cross_company:
+        _print_cross_company(cross_company)
+        print()
     if manual:
         _print_manual(manual)
         print()
@@ -566,7 +622,8 @@ def main() -> int:
     print(
         f"\n{len(merges)} duplicate cluster(s), {total_losers} row(s) "
         f"{'archived + merged + deleted' if args.apply else 'would be collapsed'}"
-        f"; {len(manual)} cluster(s) flagged for manual review."
+        f"; {len(manual)} cluster(s) flagged for manual review"
+        f"; {len(cross_company)} cross-company cluster(s) flagged for review (never auto-merged)."
     )
 
     if not args.apply:
