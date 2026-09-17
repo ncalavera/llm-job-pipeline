@@ -72,6 +72,22 @@ def prompt(payload):
     )
 
 
+def parse_result(raw):
+    """Model output -> the combined envelope.
+
+    Screening-only rows often come back as the bare screening object (the
+    screening prompt's own shape), sometimes with a stray envelope tail after
+    it. Read the first JSON object and wrap a bare one.
+    """
+    try:
+        result, _ = json.JSONDecoder().raw_decode(raw.lstrip())
+    except json.JSONDecodeError:
+        result = parse_llm_json(raw)
+    if isinstance(result, dict) and "posting_facts" in result and "screening" not in result:
+        result = {"scoring": None, "screening": result}
+    return result
+
+
 def terminate(proc):
     try:
         os.killpg(proc.pid, signal.SIGTERM)
@@ -140,7 +156,7 @@ def run_one(path, out_dir, model, deadline):
                 # Keep private audit evidence, including rejected attempts; .txt
                 # files are never picked up by the JSON save sweep.
                 (out_dir / f"{path.stem}.attempt-{attempt + 1}.txt").write_text(raw)
-                result = parse_llm_json(raw)
+                result = parse_result(raw)
                 if not isinstance(result, dict):
                     raise ValueError("result must be an object")
                 if result.get("error"):

@@ -47,3 +47,13 @@ def test_runner_fake_codex_retries_and_isolates_env(tmp_path, monkeypatch, capsy
     assert "--disable" in argv and "shell_tool" in argv and 'web_search="disabled"' in argv
     env = json.loads(env_log.read_text())
     assert all(v is None for v in env.values())
+
+
+def test_parse_result_wraps_bare_screening_object():
+    bare = {"id": "x", "posting_facts": {}, "profile_comparison": [], "unknowns": []}
+    want = {"scoring": None, "screening": bare}
+    assert runner.parse_result(json.dumps(bare)) == want
+    # 2026-09-16 night: bare object followed by a stray envelope tail
+    assert runner.parse_result(json.dumps(bare) + ',"screening":null}') == want
+    envelope = {"id": "x", "scoring": None, "screening": bare}
+    assert runner.parse_result(json.dumps(envelope)) == envelope
