@@ -194,6 +194,25 @@ def screening() -> dict:
     return out
 
 
+_ENRICH_DEFAULTS = {
+    "source_fetch_max_age_days": 21,
+}
+
+
+def enrich() -> dict:
+    """The [enrich] dials: ``source_fetch_max_age_days`` — a summary-board row
+    (board_summary/unfetched text) is only offered to the source-page fetch
+    pass while this young; older than that, its apply URL is likeliest dead,
+    so it is left on its board summary rather than refetched forever.
+    Non-positive / non-numeric falls back to the default; never raises."""
+    sec = _section("enrich")
+    out = {}
+    for key, default in _ENRICH_DEFAULTS.items():
+        val = int(_num(sec, key, default))
+        out[key] = val if val > 0 else default
+    return out
+
+
 def volume() -> dict:
     """The [volume] dials with neutral fallbacks. Never raises.
 

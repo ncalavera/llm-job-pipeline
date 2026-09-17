@@ -1461,10 +1461,22 @@ def _fetch_source_counters(stats: dict) -> str:
 
 
 def _h_enrich(state, entry, opts):
+    # The source-text pass (summary-only boards -> real posting) runs
+    # whatever FIRECRAWL_API_KEY is: it fetches with plain requests+bs4 first
+    # and only falls back to Firecrawl for a JS-shell page, so it must not be
+    # gated behind the key the blind-vacancy pass below needs.
+    rc_source = _run(
+        [sys.executable, "-u", str(SCRIPTS_DIR / "enrich_blind_vacancies.py"), "--source-text"],
+        opts,
+    )
+    if rc_source != 0:
+        return "error", f"source-text enrich exited with code {rc_source}"
+
     if not os.environ.get("FIRECRAWL_API_KEY"):
         return (
-            "skip",
-            "enrich skipped — FIRECRAWL_API_KEY unset (scoring tolerates blind rows; accuracy drops)",
+            "advance",
+            "source-text pass ran; blind-vacancy enrich skipped — "
+            "FIRECRAWL_API_KEY unset (scoring tolerates blind rows; accuracy drops)",
         )
     rc = _run([sys.executable, "-u", str(SCRIPTS_DIR / "enrich_blind_vacancies.py")], opts)
     if rc != 0:

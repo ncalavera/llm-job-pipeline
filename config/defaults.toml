@@ -663,6 +663,15 @@ nightly_limit = 400
 pilot_limit = 50
 
 # ===========================================================================
+# Enrich — the source-page fetch pass for summary-only boards (see
+# SUMMARY_ONLY_BOARDS in config.py). source_fetch_max_age_days is the retry
+# bound: a row older than this keeps its board summary rather than being
+# refetched forever against a likely-dead apply URL.
+# ===========================================================================
+[enrich]
+source_fetch_max_age_days = 21
+
+# ===========================================================================
 # Telegram digest — defaults for the optional daily digest. Env vars still win
 # (DIGEST_HOT_SCORE, DIGEST_DEADLINE_SOON_DAYS, DIGEST_LIMIT, DIGEST_MIN_SCORE).
 # ===========================================================================

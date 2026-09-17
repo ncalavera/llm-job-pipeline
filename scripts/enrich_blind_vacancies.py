@@ -13,6 +13,11 @@ server-rendered — fetched with plain requests, zero Firecrawl credits.
 Usage:
     python3 scripts/enrich_blind_vacancies.py [--limit N] [--dry-run]
     python3 scripts/enrich_blind_vacancies.py --clean-cookie-pages [--org unops] [--apply]
+    python3 scripts/enrich_blind_vacancies.py --source-text [--dry-run] [--limit N] [--ids id1,id2]
+        Upgrades summary-only board rows (config.SUMMARY_ONLY_BOARDS) from the
+        board's own text to the real posting page. Runs whether or not
+        FIRECRAWL_API_KEY is set (plain requests+bs4 first; Firecrawl is only
+        a fallback for a JS-shell page). See fetch_source_text_for_summary_boards.
 """
 
 import re
@@ -145,13 +150,27 @@ def _get_vacancy_url(vac: dict) -> str:
     return ""
 
 
+#: docs.google.com/forms.gle/... are shared collaborative documents, not a
+#: single role's page: found live (the source-text pass) fetching one
+#: returned "Chargé de mission - Opérations" at "GPAI Policy Lab" for a
+#: vacancy titled "Operations Manager" — Firecrawl's markdown scrape of a
+#: Google Doc is not reliably THIS role's text, so it must never be trusted
+#: as a posting body, whatever it returns.
+_SHARED_DOC_HOSTS = {"docs.google.com", "drive.google.com", "forms.gle", "sheets.google.com"}
+
+
 def _is_unscrapable_host(url: str) -> bool:
-    """Hosts Firecrawl demonstrably cannot scrape — spending credits is pure
-    waste. LinkedIn blocks scrapers outright (verified live 2026-07-03: a
+    """Hosts that cannot be trusted to return THIS role's own posting text —
+    spending a fetch (Firecrawl credits or otherwise) is pure waste, or worse,
+    wrong. LinkedIn blocks scrapers outright (verified live 2026-07-03: a
     guest job page returns 0 chars); such rows heal on the next fetch when
-    the detail pages aren't throttled, or age out via the stale-blind sweep."""
+    the detail pages aren't throttled, or age out via the stale-blind sweep.
+    A Google Doc/Form is a shared, often multi-role document — never a single
+    posting — so it is never fetched at all, whatever it would return."""
     host = urlparse(url).netloc.lower()
-    return host == "linkedin.com" or host.endswith(".linkedin.com")
+    if host == "linkedin.com" or host.endswith(".linkedin.com"):
+        return True
+    return host in _SHARED_DOC_HOSTS
 
 
 def _gate_scraped_description(text: str) -> tuple[str | None, str]:
@@ -165,6 +184,160 @@ def _gate_scraped_description(text: str) -> tuple[str | None, str]:
     means the vacancy stays blind and is retried on a future enrich run.
     """
     return clean_description(text)
+
+
+#: A plain-fetched page shorter than this is presumed a JS shell (React/Vue app
+#: root div, no server-rendered content) — same threshold the chat-screen
+#: prototype (fetch_missing.py) verified live against real ATS pages.
+_JS_SHELL_MAX_CHARS = 1200
+
+
+def _fetch_plain_page_text(url: str) -> tuple[str, dict]:
+    """Zero-cost requests+bs4 fetch of an arbitrary job page.
+
+    Returns (text, diagnostics). ``diagnostics`` always carries enough to log
+    a failure with full context — url, status, response headers, first 300
+    bytes of body — per the "no lazy design" rule (errors need the machine
+    context from day one, not just "it failed").
+    """
+    diag: dict = {"url": url}
+    try:
+        resp = requests.get(url, headers={"User-Agent": _LOCAL_UA}, timeout=20)
+    except Exception as e:
+        diag["error"] = str(e)
+        return "", diag
+    diag["status"] = resp.status_code
+    diag["headers"] = dict(resp.headers)
+    diag["body_head"] = resp.text[:300]
+    if resp.status_code != 200:
+        return "", diag
+    soup = BeautifulSoup(resp.text, "html.parser")
+    for tag in soup(["script", "style", "nav", "footer", "header"]):
+        tag.decompose()
+    text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True)).strip()
+    return text, diag
+
+
+def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
+    """The source-text pass: upgrade a summary-only board's row from the
+    board's own text to the real posting.
+
+    Selection: source_board in config.SUMMARY_ONLY_BOARDS, status='unseen',
+    still on board text (description_source NULL/'board_summary' once the
+    column exists; pre-migration, a length proxy), first_seen within
+    [enrich] source_fetch_max_age_days — the retry bound, so a dead apply URL
+    is not refetched forever.
+
+    Plain requests+bs4 first (free); Firecrawl fallback only when a key is
+    configured AND the plain text looks like a JS shell (< _JS_SHELL_MAX_CHARS).
+    Success: full_description + description_source='source_page' (column
+    permitting), the old board summary preserved into snippet if that was
+    empty, deadline backfilled from the new text. Failure: description_source
+    reset to 'board_summary' (column permitting) and the full fetch
+    diagnostics are printed — never silently dropped.
+    """
+    from database_supabase import get_conn, _vacancy_has_column, backfill_deadline_from_text
+    from psycopg2.extras import RealDictCursor
+    import config
+    import settings
+
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    has_desc_source = _vacancy_has_column("description_source")
+    max_age_days = settings.enrich()["source_fetch_max_age_days"]
+
+    if ids:
+        cur.execute(
+            "SELECT id, title, source_board, full_description, snippet, locations, first_seen "
+            "FROM vacancy WHERE id = ANY(%s::uuid[])",
+            (list(ids),),
+        )
+    else:
+        source_cond = (
+            "(description_source IS NULL OR description_source = 'board_summary')"
+            if has_desc_source
+            else "(full_description IS NULL OR length(full_description) < 400)"
+        )
+        query = f"""
+            SELECT id, title, source_board, full_description, snippet, locations, first_seen
+            FROM vacancy
+            WHERE status = 'unseen'
+              AND source_board = ANY(%s)
+              AND {source_cond}
+              AND first_seen >= (CURRENT_DATE - %s * INTERVAL '1 day')
+            ORDER BY first_seen DESC
+        """
+        params = [list(config.SUMMARY_ONLY_BOARDS), max_age_days]
+        if limit:
+            query += " LIMIT %s"
+            params.append(limit)
+        cur.execute(query, params)
+    rows = cur.fetchall()
+
+    print(f"Source-text pass: {len(rows)} candidate row(s){' (dry-run)' if dry_run else ''}")
+    client = get_firecrawl_client()
+    upgraded = 0
+    for row in rows:
+        url = _get_vacancy_url(row)
+        before_len = len(row.get("full_description") or "")
+        if not url:
+            print(f"  [{row['source_board']}] {row['title'][:45]:45s} -> SKIP, no apply URL")
+            continue
+        if _is_unscrapable_host(url):
+            print(
+                f"  [{row['source_board']}] {row['title'][:45]:45s} -> SKIP, unscrapable/shared-doc host ({url})"
+            )
+            continue
+
+        text, diag = _fetch_plain_page_text(url)
+        cleaned, verdict = clean_description(text)
+        if (verdict != "ok" or len(cleaned or "") < _JS_SHELL_MAX_CHARS) and client:
+            fc_text = _scrape_job_page(client, url)
+            fc_cleaned, fc_verdict = clean_description(fc_text)
+            if fc_verdict == "ok" and len(fc_cleaned or "") > len(cleaned or ""):
+                cleaned, verdict, diag = (
+                    fc_cleaned,
+                    fc_verdict,
+                    {**diag, "firecrawl_fallback": True},
+                )
+
+        success = verdict == "ok" and len(cleaned or "") >= filters.MIN_JUDGEABLE_DESC_CHARS
+        updates: dict = {}
+        if success:
+            updates["full_description"] = cleaned[:30000]
+            if has_desc_source:
+                updates["description_source"] = "source_page"
+            old_summary = (row.get("full_description") or "").strip()
+            if not (row.get("snippet") or "").strip() and old_summary:
+                updates["snippet"] = old_summary[:400]
+            upgraded += 1
+            print(
+                f"  [{row['source_board']}] {row['title'][:45]:45s} -> "
+                f"{before_len} -> {len(cleaned)} chars"
+                + (" [firecrawl]" if diag.get("firecrawl_fallback") else " [plain]")
+            )
+        else:
+            if has_desc_source:
+                updates["description_source"] = "board_summary"
+            print(
+                f"  [{row['source_board']}] {row['title'][:45]:45s} -> FAILED "
+                f"(verdict={verdict}, len={len(cleaned or '')}) diagnostics={diag}"
+            )
+
+        if dry_run or not updates:
+            continue
+        set_parts = [f"{k} = %s" for k in updates]
+        cur.execute(
+            f"UPDATE vacancy SET {', '.join(set_parts)} WHERE id = %s::uuid",
+            list(updates.values()) + [row["id"]],
+        )
+        if success:
+            backfill_deadline_from_text(cur, row["id"], cleaned)
+
+    if not dry_run:
+        conn.commit()
+    print(f"Source-text pass done: {upgraded}/{len(rows)} upgraded to source_page.")
+    return upgraded, len(rows)
 
 
 def main():
@@ -384,5 +557,15 @@ def clean_cookie_pages():
 if __name__ == "__main__":
     if "--clean-cookie-pages" in sys.argv:
         clean_cookie_pages()
+    elif "--source-text" in sys.argv:
+        _dry_run = "--dry-run" in sys.argv
+        _ids = None
+        _limit = None
+        for _i, _arg in enumerate(sys.argv):
+            if _arg == "--ids" and _i + 1 < len(sys.argv):
+                _ids = sys.argv[_i + 1].split(",")
+            if _arg == "--limit" and _i + 1 < len(sys.argv):
+                _limit = int(sys.argv[_i + 1])
+        fetch_source_text_for_summary_boards(ids=_ids, dry_run=_dry_run, limit=_limit)
     else:
         main()

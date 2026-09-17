@@ -727,6 +727,48 @@ class TestEnrichBlindVacancies:
         assert not ebv._is_unscrapable_host("https://careers.example.org/jobs/1")
         assert not ebv._is_unscrapable_host("https://notlinkedin.com/jobs/1")
 
+    def test_EBV08_shared_doc_hosts_never_scraped(self):
+        """A Google Doc/Form is a shared, often multi-role document — found
+        live: fetching one for an "Operations Manager" vacancy returned an
+        unrelated "Chargé de mission - Opérations" posting at a different
+        org. Never trusted as a single role's posting text."""
+        import enrich_blind_vacancies as ebv
+
+        assert ebv._is_unscrapable_host("https://docs.google.com/document/d/abc/edit")
+        assert ebv._is_unscrapable_host("https://forms.gle/xyz")
+        assert not ebv._is_unscrapable_host("https://jobs.ashbyhq.com/PRISM/abc")
+
+    def test_EBV09_plain_fetch_diagnostics_on_failure(self, monkeypatch):
+        """A failed fetch must carry full diagnostics (url, status, headers,
+        body head) per the 'no lazy design' rule — never just 'it failed'."""
+        import enrich_blind_vacancies as ebv
+
+        class _Resp:
+            status_code = 404
+            headers = {"Content-Type": "text/html"}
+            text = "<html>not found, sorry</html>"
+
+        monkeypatch.setattr(ebv.requests, "get", lambda *a, **k: _Resp())
+        text, diag = ebv._fetch_plain_page_text("https://example.org/gone")
+        assert text == ""
+        assert diag["url"] == "https://example.org/gone"
+        assert diag["status"] == 404
+        assert diag["headers"] == {"Content-Type": "text/html"}
+        assert "not found" in diag["body_head"]
+
+    def test_EBV10_plain_fetch_extracts_text_and_drops_scripts(self, monkeypatch):
+        import enrich_blind_vacancies as ebv
+
+        class _Resp:
+            status_code = 200
+            headers = {}
+            text = "<html><script>evil()</script><body><p>Real job text.</p></body></html>"
+
+        monkeypatch.setattr(ebv.requests, "get", lambda *a, **k: _Resp())
+        text, diag = ebv._fetch_plain_page_text("https://example.org/job/1")
+        assert text == "Real job text."
+        assert "evil" not in text
+
     def test_EBV06_quality_functions_accessible(self):
         # enrich_blind_vacancies must use clean_description from quality
         from quality import clean_description
