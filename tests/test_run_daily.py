@@ -50,6 +50,7 @@ def test_stage_order_is_the_documented_sequence(rd):
         "company_scoring",
         "vacancy_scoring",
         "screening_prep",
+        "judge",
         "verdicts",
         "digest",
         "publish",

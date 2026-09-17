@@ -213,6 +213,41 @@ def enrich() -> dict:
     return out
 
 
+_JUDGE_DEFAULTS = {
+    "batch_size": 15,
+    "kill_confidence": 5,
+    "max_per_run": 200,
+    "audit_min_score": 20,
+    "audit_sample_pct": 10,
+    "timeout": 180,
+}
+
+
+def judge() -> dict:
+    """The [judge] dials for ``scripts/judge_roles.py``, the KEEP/UNSURE/KILL judge
+    stage and its second-reviewer audit.
+
+    ``brief_path`` / ``review_brief_path`` default to "" (empty): a public
+    checkout ships no brief, so the judge and audit stages both skip with a
+    plain note instead of erroring — the brief is personal taste, not tool
+    mechanics, and never belongs in this repo. ``provider``/``audit_provider``
+    fall back to neutral values; every numeric key falls back like every other
+    dial here (non-positive/non-numeric -> default, never raises)."""
+    sec = _section("judge")
+    out = {}
+    for key, default in _JUDGE_DEFAULTS.items():
+        val = int(_num(sec, key, default))
+        out[key] = val if val > 0 else default
+    out["provider"] = str(sec.get("provider", "codex")).strip().lower()
+    out["model"] = str(sec.get("model", "")).strip()
+    out["effort"] = str(sec.get("effort", "medium")).strip()
+    out["brief_path"] = str(sec.get("brief_path", "")).strip()
+    out["review_brief_path"] = str(sec.get("review_brief_path", "")).strip()
+    out["audit_provider"] = str(sec.get("audit_provider", "claude")).strip().lower()
+    out["audit_model"] = str(sec.get("audit_model", "")).strip()
+    return out
+
+
 def volume() -> dict:
     """The [volume] dials with neutral fallbacks. Never raises.
 

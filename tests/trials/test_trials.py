@@ -300,6 +300,7 @@ def test_stage_order_and_handlers_are_owned_by_the_driver(monkeypatch, tmp_path)
         "company_scoring",
         "vacancy_scoring",
         "screening_prep",
+        "judge",
         "verdicts",
         "digest",
         "publish",

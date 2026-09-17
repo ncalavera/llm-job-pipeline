@@ -115,6 +115,7 @@ STAGE_ORDER = [
     "company_scoring",  # SKIP — legacy scripts remain available
     "vacancy_scoring",  # SKIP — no numeric scores in the daily path
     "screening_prep",  # GATE — combined cheap scoring + facts
+    "judge",  # AUTO — KEEP/UNSURE/KILL board roles against the judge brief
     "verdicts",  # SKIP — human review lives in the dashboard
     "digest",  # AUTO  — tiered morning Telegram message (before publish, KTD5:
     #                     a dashboard refresh failure can never cost the digest)
@@ -180,6 +181,7 @@ STAGE_ABOUT = {
     "company_scoring": "WANT-scoring new candidate companies",
     "vacancy_scoring": "scoring new roles (cheap screen, then strong finalists)",
     "screening_prep": "scoring unscored roles and preparing review facts",
+    "judge": "judging board roles against the screening brief",
     "verdicts": "collecting your like / pass verdicts",
     "digest": "sending the tiered morning digest to Telegram",
     "publish": "publishing the dashboard (warns if the run was not clean)",
@@ -2325,6 +2327,25 @@ def _h_optional_scoring(state, entry, opts):
     )
 
 
+def _h_judge(state, entry, opts):
+    """Self-contained: runs judge_roles.py, emits no gate (R15 unattended-safe)."""
+    import settings
+    import judge_roles
+
+    cfg = settings.judge()
+    cfg["scratch_dir"] = str(PROJECT_ROOT / "vacancies" / "judge_scratch")
+    result = judge_roles.run_judge_stage(cfg)
+    if result.get("skipped"):
+        return "skip", result["skipped"]
+    entry["counts"] = result["counts"]
+    c = result["counts"]
+    return "advance", (
+        f"judged {c.get('judged', 0)}: {c.get('keep', 0)} keep, {c.get('unsure', 0)} unsure, "
+        f"{c.get('killed', 0)} killed ({c.get('held_low_confidence', 0)} held low-confidence, "
+        f"{c.get('quote_refused', 0)} quote refused, {c.get('missing_after_retry', 0)} missing)"
+    )
+
+
 HANDLERS = {
     "validate_profile": _h_validate_profile,
     "preflight": _h_preflight,
@@ -2337,6 +2358,7 @@ HANDLERS = {
     "company_scoring": _h_optional_scoring,
     "vacancy_scoring": _h_optional_scoring,
     "screening_prep": _h_screening_prep,
+    "judge": _h_judge,
     "verdicts": lambda state, entry, opts: (
         "skip",
         "Review prepared roles in the dashboard Screen view.",
@@ -2401,6 +2423,11 @@ def _run_counts(state: dict) -> dict:
                 counts["scored"] = _safe_int(prep.get("scored"))
             if prep.get("skipped") is not None:
                 counts["discovery_skipped"] = _safe_int(prep.get("skipped"))
+    except Exception:
+        pass
+    try:
+        judge_counts = _stage(state, "judge").get("counts") or {}
+        counts.update({k: v for k, v in judge_counts.items() if v is not None})
     except Exception:
         pass
     return counts
