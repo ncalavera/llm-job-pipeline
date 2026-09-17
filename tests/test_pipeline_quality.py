@@ -1091,3 +1091,17 @@ class TestStripChromeLines:
         assert "We are looking to share our impact" in cleaned
         for chrome_line in ("Share", "Copy URL", "Apply now"):
             assert chrome_line not in cleaned.split("\n")
+
+
+def test_chrome_strip_keeps_big_block_and_survives_nested_removal():
+    from bs4 import BeautifulSoup
+    import enrich_blind_vacancies as ebv
+
+    html = (
+        '<body><div class="share-bar"><span class="social-icon">Facebook</span></div>'
+        '<div class="social-impact-role"><p>' + "Real posting text. " * 80 + "</p></div></body>"
+    )
+    soup = BeautifulSoup(html, "html.parser")
+    ebv._strip_chrome_elements(soup)
+    text = soup.get_text()
+    assert "Facebook" not in text and "Real posting text." in text

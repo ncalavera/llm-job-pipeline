@@ -307,5 +307,14 @@ def test_run_audit_stage_skips_when_review_brief_path_empty():
     assert "skipped" in result
 
 
+
+def test_audit_due_only_for_fresh_unaudited_kills():
+    cutoff = "2026-01-02T00:00:00+00:00"
+    fresh = {"judge": {"judged_at": "2026-01-02T22:00:00+00:00"}}
+    assert jr._audit_due(fresh, cutoff)
+    assert not jr._audit_due({**fresh, "audit": {"verdict": "UPHOLD"}}, cutoff)
+    assert not jr._audit_due({"judge": {"judged_at": "2026-01-01T22:00:00+00:00"}}, cutoff)
+    assert not jr._audit_due({"judge": {}}, cutoff)
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

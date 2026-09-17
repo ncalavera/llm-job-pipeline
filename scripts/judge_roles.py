@@ -32,7 +32,7 @@ import subprocess
 import sys
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -587,6 +587,14 @@ def sample_for_audit(kills: list[dict], min_score: int, sample_pct: int, seed: s
     return chosen
 
 
+def _audit_due(screening: dict, cutoff: str) -> bool:
+    """Tonight only: a kill already audited, or judged before ``cutoff`` (ISO UTC),
+    is history — without this every night re-audits every kill ever made.
+    ponytail: filters in Python over all killed rows; move into SQL if slow."""
+    judged_at = str((screening.get("judge") or {}).get("judged_at") or "")
+    return not screening.get("audit") and judged_at >= cutoff
+
+
 def _tonight_kills() -> list[dict]:
     """Board roles this run just killed: judge_state='killed', judge.reason/kill_kind
     read back from the stored screening.judge object."""
@@ -602,6 +610,7 @@ def _tonight_kills() -> list[dict]:
     rows = cur.fetchall()
     cur.close()
     out = []
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     for r in rows:
         screening = r.get("screening")
         if isinstance(screening, str):
@@ -610,6 +619,8 @@ def _tonight_kills() -> list[dict]:
             except (ValueError, TypeError):
                 screening = {}
         judge = (screening or {}).get("judge") or {}
+        if not _audit_due(screening or {}, cutoff):
+            continue
         role = role_payload(r)
         role["kill_kind"] = judge.get("kill_kind")
         role["judge"] = judge

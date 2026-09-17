@@ -127,6 +127,8 @@ def _scrape_job_page(client, url: str) -> str:
             is_overload = "429" in err_str or "overloaded" in err_str.lower()
             if is_overload and attempt < len(delays):
                 continue
+            # Never silent: an expired key looked like "every JS page is empty".
+            print(f"  Firecrawl scrape failed for {url}: {type(e).__name__}: {err_str[:300]}")
             return ""
     return ""
 
@@ -246,8 +248,12 @@ def _strip_chrome_elements(soup) -> None:
     for tag in soup.find_all(attrs={"aria-hidden": "true"}):
         tag.decompose()
     for tag in soup.find_all(True):
+        if tag.decomposed:  # child of an element removed earlier in this loop
+            continue
         ident = f"{tag.get('id') or ''} {' '.join(tag.get('class') or [])}"
-        if ident.strip() and _CHROME_ATTR_RE.search(ident):
+        # Chrome blocks are small; a big block named e.g. "social-impact-role"
+        # is the posting itself, so it stays.
+        if ident.strip() and _CHROME_ATTR_RE.search(ident) and len(tag.get_text()) < 1000:
             tag.decompose()
 
 
