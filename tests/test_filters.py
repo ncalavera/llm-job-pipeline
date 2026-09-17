@@ -640,3 +640,41 @@ def test_filters_matches_frozen_reference(case_id, title, description):
         f"[{case_id}] filters != frozen: filters={got}, frozen={ref}\n"
         f"  title={title!r}\n  desc={desc_snip!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# is_unjudgeable_board_text — "never score an AI summary or empty text":
+# a summary-only board's own board text is not a real posting.
+# ---------------------------------------------------------------------------
+
+
+def test_unjudgeable_when_source_is_board_summary():
+    row = {
+        "source_board": "80,000 Hours",
+        "description_source": "board_summary",
+        "full_description": "x" * 900,  # length alone would pass — source wins
+    }
+    assert filters.is_unjudgeable_board_text(row) is True
+
+
+def test_unjudgeable_when_text_too_short_even_with_no_description_source():
+    # Pre-migration / not-yet-enriched row: no description_source column value
+    # at all, but the board's short summary is still not judgeable on length.
+    row = {"source_board": "Impactpool", "full_description": "short summary"}
+    assert filters.is_unjudgeable_board_text(row) is True
+
+
+def test_judgeable_once_upgraded_to_source_page():
+    row = {
+        "source_board": "Probably Good",
+        "description_source": "source_page",
+        "full_description": "short",  # source_page always wins, whatever the length
+    }
+    assert filters.is_unjudgeable_board_text(row) is False
+
+
+def test_non_summary_board_never_flagged():
+    # ReliefWeb's full feed body and any direct-ATS row are untouched by this
+    # check, however short (the existing blind/boilerplate gates decide those).
+    row = {"source_board": "ReliefWeb", "description_source": "feed", "full_description": "x"}
+    assert filters.is_unjudgeable_board_text(row) is False

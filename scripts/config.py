@@ -384,6 +384,18 @@ GLOBAL_BLACKLIST_DESC_SUBSTR = list(_JUNK["desc_substr"])
 # empty board_blacklist; narrow per board via the documented env vars.
 _ALL_JOB_BOARDS = settings.boards()
 
+#: Board names (vacancy.source_board values) whose posting text at fetch time
+#: is the BOARD's own text — a short summary, or nothing at all (Impactpool is
+#: listing-only) — never the real posting. Derived from each board's own
+#: `summary_only` flag in defaults.toml, so a new summary-style board only
+#: needs the flag, not a second list to keep in sync. Two consumers: the
+#: enrich stage (which boards get a source-page fetch pass) and the scoring
+#: selectors (a row from one of these boards is never judged/scored on
+#: unfetched board text — see filters.is_unjudgeable_board_text).
+SUMMARY_ONLY_BOARDS = frozenset(
+    b["name"] for b in _ALL_JOB_BOARDS.values() if b.get("summary_only")
+)
+
 
 def _select_enabled_boards() -> dict:
     """Return the boards enabled via the JOB_BOARDS env var.

@@ -701,6 +701,8 @@ screener_base_url = ""
 [boards.80k_hours]
 strategy = "algolia_api"
 name = "80,000 Hours"
+# The board's own summary text, not the real posting — see config.SUMMARY_ONLY_BOARDS.
+summary_only = true
 audience = "Effective altruism, AI safety, global-priorities policy and research."
 audience_ru = "Эффективный альтруизм, безопасность ИИ, политика и исследования глобальных приоритетов."
 audience_tags = ["effective altruism", "ai safety", "policy", "research", "global health", "biosecurity", "nonprofit"]
@@ -788,6 +790,8 @@ free = true
 [boards.impactpool]
 strategy = "impactpool_html"
 name = "Impactpool"
+# Listing-only: no posting text at fetch time — see config.SUMMARY_ONLY_BOARDS.
+summary_only = true
 audience = "Nonprofit, UN and multilateral / international-organisation roles."
 audience_ru = "НКО, ООН и роли в международных организациях."
 audience_tags = ["nonprofit", "development", "humanitarian", "multilateral", "un", "policy", "global health"]
@@ -924,6 +928,8 @@ free = true
 [boards.probablygood]
 strategy = "probablygood_algolia"
 name = "Probably Good"
+# The board's own summary text, not the real posting — see config.SUMMARY_ONLY_BOARDS.
+summary_only = true
 audience = "High-impact roles across global health, biosecurity, AI safety, and nonprofit operations."
 audience_ru = "Высокоэффективные вакансии: глобальное здравоохранение, биобезопасность, безопасность ИИ, операции в НКО."
 audience_tags = ["effective altruism", "global health", "biosecurity", "ai safety", "policy", "nonprofit", "operations"]
@@ -936,6 +942,8 @@ free = true
 [boards.ea_opportunities]
 strategy = "ea_opportunities_next_data"
 name = "EA Opportunities Board"
+# The board's own summary text, not the real posting — see config.SUMMARY_ONLY_BOARDS.
+summary_only = true
 audience = "Roles, fellowships and internships at effective altruism organisations."
 audience_ru = "Вакансии, стипендии и стажировки в организациях эффективного альтруизма."
 audience_tags = ["effective altruism", "global health", "animal welfare", "ai safety", "policy", "research", "operations"]

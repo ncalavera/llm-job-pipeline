@@ -25,8 +25,35 @@ from config import (
     COMPANY_TITLE_FILTERS,
     COMPANY_NEVER_FETCH,
     DESC_PATTERN_PREFIX,
+    SUMMARY_ONLY_BOARDS,
     resolve_canonical_name,
 )
+
+#: Below this length a "posting" is really just a title + a line or two —
+#: never enough to judge a role on, whatever its source.
+MIN_JUDGEABLE_DESC_CHARS = 400
+
+
+def is_unjudgeable_board_text(row: dict) -> bool:
+    """True when a row from a summary-only board must NOT be scored/judged yet.
+
+    "Never score an AI summary or empty text": a row from a board in
+    SUMMARY_ONLY_BOARDS is unjudgeable while its text is still the board's own
+    summary (description_source == 'board_summary') or simply too short —
+    either way it is not the real posting, whatever description_source says
+    (a pre-migration or not-yet-enriched row has no description_source at
+    all). Rows from every other source (direct ATS, ReliefWeb's full feed
+    body, or a summary-board row already upgraded to 'source_page') are
+    untouched by this check — the existing blind/boilerplate gates decide
+    those. One place, so the two scoring selectors can't drift apart.
+    """
+    if row.get("source_board") not in SUMMARY_ONLY_BOARDS:
+        return False
+    if row.get("description_source") == "source_page":
+        return False
+    text = (row.get("full_description") or "").strip()
+    return row.get("description_source") == "board_summary" or len(text) < MIN_JUDGEABLE_DESC_CHARS
+
 
 # ---------------------------------------------------------------------------
 # Blacklist constants — self-describing names, data sourced from config.
