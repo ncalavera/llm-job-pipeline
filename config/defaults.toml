@@ -692,7 +692,9 @@ audit_model = ""
 review_brief_path = ""
 audit_min_score = 20
 audit_sample_pct = 10
-timeout = 180
+# One batch of 15 takes 150-200 s; at 180 s four finished batches were killed
+# and 60 verdicts lost on 2026-09-21.
+timeout = 600
 
 # ===========================================================================
 # Telegram digest — defaults for the optional daily digest. Env vars still win
