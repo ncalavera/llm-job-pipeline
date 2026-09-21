@@ -125,7 +125,8 @@ def _scrape_job_page(client, url: str) -> str:
             return ""
         except Exception as e:
             err_str = str(e)
-            is_overload = "429" in err_str or "overloaded" in err_str.lower()
+            # The SDK's RateLimitError says "Rate Limit Exceeded", with no "429".
+            is_overload = "429" in err_str or "overloaded" in err_str.lower() or "rate limit" in err_str.lower()
             if is_overload and attempt < len(delays):
                 continue
             # Never silent: an expired key looked like "every JS page is empty".
