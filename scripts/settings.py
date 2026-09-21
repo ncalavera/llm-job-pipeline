@@ -220,7 +220,7 @@ _JUDGE_DEFAULTS = {
     "max_per_run": 200,
     "audit_min_score": 20,
     "audit_sample_pct": 10,
-    "timeout": 180,
+    "timeout": 600,
 }
 
 
