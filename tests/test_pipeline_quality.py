@@ -477,6 +477,22 @@ class TestCleanDescriptionTooShort:
         assert verdict == "too_short"
 
 
+class TestCleanDescriptionHtml:
+    """Raw HTML (a JSON-LD JobPosting.description) → plain text, structure kept."""
+
+    def test_QD16_tags_stripped_breaks_kept(self):
+        html = (
+            "<p><strong>Examples of our work to date:</strong></p>"
+            "<ul><li>Filed two disclosures</li><li>Trained 40 insiders</li></ul>"
+            "<p>We are hiring a delivery lead to grow this programme. " + "Details. " * 20 + "</p>"
+        )
+        cleaned, verdict = clean_description(html)
+        assert verdict == "ok"
+        assert "<" not in cleaned
+        assert cleaned.startswith("Examples of our work to date:")
+        assert "\n- Filed two disclosures" in cleaned
+
+
 class TestCleanDescriptionNoFalsePositives:
     """Legitimate JDs that mention privacy/cookie phrases → ok."""
 

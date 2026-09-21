@@ -7,6 +7,11 @@ snippet trimming, compensation/deadline extraction, markdown conversion.
 import html as html_module
 import re
 
+# _html_to_multiline now lives in quality.py — the description gate needs it
+# too, and importing this package from there would drag in requests and the
+# SQLite connection. Re-exported so every adapter keeps its existing import.
+from quality import _html_to_multiline  # noqa: F401
+
 
 def _html_to_text(html: str) -> str:
     """Decode HTML entities and strip tags, return clean text."""
@@ -149,24 +154,3 @@ def _absolutize_links(html: str, base_url: str) -> str:
     from urllib.parse import urljoin
 
     return re.sub(r'(href=")(/[^"]+)', lambda m: m.group(1) + urljoin(base_url, m.group(2)), html)
-
-
-def _html_to_multiline(html_text: str) -> str:
-    """Strip HTML but keep paragraph/list structure as newlines.
-
-    Unlike _html_to_text (which collapses everything to one line), this keeps
-    descriptions readable for LLM scoring: <br>, </p>, </div> become newlines,
-    <li> becomes a bullet.
-    """
-    if not html_text:
-        return ""
-    t = html_module.unescape(html_text)
-    # Both opening and closing block tags break the line (HN comments often
-    # start the body with an opening <p> right after the header line).
-    t = re.sub(r"(?i)<\s*/?\s*(?:br|p|div|h[1-6]|ul|ol)(?:\s[^>]*)?\s*/?\s*>", "\n", t)
-    t = re.sub(r"(?i)<\s*li\b[^>]*>", "\n- ", t)
-    t = re.sub(r"<[^>]+>", " ", t)
-    t = re.sub(r"[ \t]+", " ", t)
-    t = re.sub(r" ?\n ?", "\n", t)
-    t = re.sub(r"\n{3,}", "\n\n", t)
-    return t.strip()
