@@ -692,6 +692,20 @@ MUST_MATCH = [
     ("Resolution", "Resolution Foundation"),
     # Accent folding: NFKD-normalized names must dedup.
     ("Médecins Sans Frontières", "Medecins Sans Frontieres"),
+    # A trailing parenthetical is a board's gloss on the same org, not an extra
+    # word. Every one of these split a real company row in two (2026-09-21 audit).
+    ("SASH (Seabridge AI)", "SASH"),
+    ("Safe AI Netherlands (SAIN)", "Safe AI Netherlands"),
+    ("Institute for Law & AI (LawAI)", "Institute for Law and AI"),
+    ("Anser (US government role)", "ANSER"),
+    (
+        "Canadian Institute for Advanced Research (CIFAR)",
+        "Canadian Institute for Advanced Research",
+    ),
+    # One board glues the name, the next spaces it.
+    ("PauseAI", "Pause AI"),
+    ("MiracleFeet", "Miracle Feet"),
+    ("Trajectory Labs, PBC", "Trajectory Labs"),
 ]
 
 MUST_NOT_MATCH = [
@@ -719,6 +733,18 @@ MUST_NOT_MATCH = [
     ("FAI - Fund International Agricultural", "Fund International Agricultural"),
     # A lone generic org-suffix token carries no identity — never merge on it.
     ("The Foundation", "Foundation Inc"),
+    # Two unrelated orgs abbreviate to the same letters often enough that a
+    # parenthetical's CONTENT is never a reading of the name.
+    ("AI Security Institute (AISI)", "AI Safety Ideas (AISI)"),
+    ("Center for Human-Compatible AI (CHAI)", "Clinton Health Access Initiative"),
+    ("WHO Foundation", "World Health Organization (WHO)"),
+    # A bare acronym never matches the spelled-out name on initials alone.
+    ("SAC GmbH", "State AI Collaborative"),
+    ("ODI", "Overseas Development Institute"),
+    # Names differing by a real word stay apart, parenthetical or not.
+    ("Social Finance US", "Social Finance UK"),
+    ("U.S. Department of Energy (DOE)", "US Government, Department of Energy"),
+    ("Guardian Project", "The Guardian"),
 ]
 
 
