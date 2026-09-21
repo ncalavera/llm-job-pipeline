@@ -195,15 +195,16 @@ def screening() -> dict:
 
 
 _ENRICH_DEFAULTS = {
-    "source_fetch_max_age_days": 21,
+    "source_fetch_nightly_limit": 25,
 }
 
 
 def enrich() -> dict:
-    """The [enrich] dials: ``source_fetch_max_age_days`` — a summary-board row
-    (board_summary/unfetched text) is only offered to the source-page fetch
-    pass while this young; older than that, its apply URL is likeliest dead,
-    so it is left on its board summary rather than refetched forever.
+    """The [enrich] dials: ``source_fetch_nightly_limit`` — how many
+    summary-board rows (board_summary/unfetched text) the source-page fetch
+    pass attempts per run, oldest attempt first. It is the retry bound: every
+    still-open row is eventually fetched, and a hopeless apply URL comes round
+    again only after the rest of the queue, instead of being retried nightly.
     Non-positive / non-numeric falls back to the default; never raises."""
     sec = _section("enrich")
     out = {}

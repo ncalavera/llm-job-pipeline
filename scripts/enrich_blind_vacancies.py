@@ -47,6 +47,12 @@ import filters
 import run_status  # progress heartbeat (vacancies/run_status.json)
 from filter_vacancies import _all_locations_excluded
 
+#: Statuses the source-text pass still fetches for: the user has not decided,
+#: so he will still read this row and needs the real posting behind it. Not in
+#: statuses.py — the decided/application vocabularies there answer a different
+#: question, and nothing else asks this one.
+OPEN_STATUSES = ("unseen", "liked", "to_apply", "expiring")
+
 
 # ---------------------------------------------------------------------------
 # Direct (no-Firecrawl) detail fetchers for server-rendered ATS hosts
@@ -586,11 +592,16 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
     """The source-text pass: upgrade a summary-only board's row from the
     board's own text to the real posting.
 
-    Selection: source_board in config.SUMMARY_ONLY_BOARDS, status='unseen',
-    still on board text (description_source NULL/'board_summary' once the
-    column exists; pre-migration, a length proxy), first_seen within
-    [enrich] source_fetch_max_age_days — the retry bound, so a dead apply URL
-    is not refetched forever.
+    Selection: status still open (OPEN_STATUSES — a row the user can still act
+    on) and still on board text — description_source='board_summary' from any
+    board, or NULL on a config.SUMMARY_ONLY_BOARDS row (pre-migration, a length
+    proxy). No age window: a row that failed while the
+    Firecrawl key was dead used to age past it and keep the 800-char board
+    card forever, which the nightly judge then skips — it sat unjudged in the
+    queue. The retry bound is now work per night, not row age: oldest
+    updated_at first (every attempt, success or failure, writes the row and so
+    bumps updated_at) and [enrich] source_fetch_nightly_limit rows per run, so
+    hopeless URLs are retried rarely and in rotation instead of never.
 
     Plain requests+bs4 first (free); Firecrawl fallback only when a key is
     configured AND the plain text looks like a JS shell (< _JS_SHELL_MAX_CHARS).
@@ -617,7 +628,7 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     has_desc_source = _vacancy_has_column("description_source")
-    max_age_days = settings.enrich()["source_fetch_max_age_days"]
+    nightly_limit = settings.enrich()["source_fetch_nightly_limit"]
 
     if ids:
         cur.execute(
@@ -628,25 +639,34 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
             (list(ids),),
         )
     else:
+        # description_source='board_summary' IS the condition, whatever board
+        # wrote it: it is exactly what the nightly judge refuses to read, and
+        # boards outside SUMMARY_ONLY_BOARDS carry it too (74 of the 93 open
+        # rows on 2026-09-21 — Consultants for Impact, Idealist, LinkedIn).
+        # The board list only widens this to NULL description_source, where it
+        # means "never fetched" for a summary board rather than "this text is
+        # already the posting" as it does for every ATS row.
         source_cond = (
-            "(v.description_source IS NULL OR v.description_source = 'board_summary')"
+            "(v.description_source = 'board_summary' OR "
+            "(v.source_board = ANY(%s) AND v.description_source IS NULL))"
             if has_desc_source
-            else "(v.full_description IS NULL OR length(v.full_description) < 400)"
+            else "(v.source_board = ANY(%s) AND "
+            "(v.full_description IS NULL OR length(v.full_description) < 400))"
         )
         query = f"""
             SELECT v.id, v.title, v.source_board, v.full_description, v.snippet,
                    v.locations, v.first_seen, c.canonical_name AS org
             FROM vacancy v JOIN company c ON v.company_id = c.id
-            WHERE v.status = 'unseen'
-              AND v.source_board = ANY(%s)
+            WHERE v.status = ANY(%s)
               AND {source_cond}
-              AND v.first_seen >= (CURRENT_DATE - %s * INTERVAL '1 day')
-            ORDER BY v.first_seen DESC
+            ORDER BY v.updated_at ASC
+            LIMIT %s
         """
-        params = [list(config.SUMMARY_ONLY_BOARDS), max_age_days]
-        if limit:
-            query += " LIMIT %s"
-            params.append(limit)
+        params = [
+            list(OPEN_STATUSES),
+            list(config.SUMMARY_ONLY_BOARDS),
+            limit or nightly_limit,
+        ]
         cur.execute(query, params)
     rows = cur.fetchall()
 

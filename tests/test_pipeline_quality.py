@@ -788,6 +788,37 @@ class TestEnrichBlindVacancies:
         assert text == "Real job text."
         assert "evil" not in text
 
+    def test_EBV13_source_text_pass_selects_every_open_row_not_just_recent(self, monkeypatch):
+        """No age window on the source-text pass. A row that failed while the
+        Firecrawl key was dead used to age past source_fetch_max_age_days and
+        keep its 800-char board card forever; the judge skips board_summary,
+        so it sat unjudged in the queue (93 rows on 2026-09-21). Selection is
+        now every still-open row, oldest attempt first, capped per run."""
+        import enrich_blind_vacancies as ebv
+        import database_supabase as dal
+
+        seen = {}
+
+        class _Cur:
+            def execute(self, sql, params=None):
+                seen["sql"], seen["params"] = sql, params
+
+            def fetchall(self):
+                return []
+
+        monkeypatch.setattr(
+            dal, "get_conn", lambda: type("C", (), {"cursor": lambda s, **k: _Cur()})()
+        )
+        monkeypatch.setattr(dal, "_vacancy_has_column", lambda col: True)
+        # No Firecrawl key in CI, and this test never fetches anything.
+        monkeypatch.setattr(ebv, "get_firecrawl_client", lambda: None)
+        ebv.fetch_source_text_for_summary_boards(dry_run=True)
+
+        assert "first_seen >=" not in seen["sql"], "age window still bounds the pass"
+        assert "ORDER BY v.updated_at ASC" in seen["sql"]
+        assert "LIMIT" in seen["sql"]
+        assert list(ebv.OPEN_STATUSES) == seen["params"][0]
+
     def test_EBV12_workday_url_maps_to_cxs_endpoint(self):
         import enrich_blind_vacancies as ebv
 
