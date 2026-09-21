@@ -21,7 +21,40 @@ DAL, the importers, and the enrichers without dragging in Firecrawl, psycopg2,
 or the company registry.
 """
 
+import html as html_module
 import re
+
+# ---------------------------------------------------------------------------
+# HTML → text
+# ---------------------------------------------------------------------------
+
+# A real tag, raw or entity-encoded. A JSON-LD JobPosting.description ships
+# its tags entity-encoded; parsing the page decodes them once, so the string
+# that reaches the gate is raw HTML ("<p><strong>…"), which without this check
+# lands verbatim — tags and all — in vacancy.full_description.
+_HTML_TAG_RE = re.compile(r"<\s*/?\s*(?:br|p|div|li|ul|ol|h[1-6]|span|strong|em|b|i)\b[^>]*>", re.I)
+
+
+def _html_to_multiline(html_text: str) -> str:
+    """Strip HTML but keep paragraph/list structure as newlines.
+
+    Unlike _html_to_text (which collapses everything to one line), this keeps
+    descriptions readable for LLM scoring: <br>, </p>, </div> become newlines,
+    <li> becomes a bullet.
+    """
+    if not html_text:
+        return ""
+    t = html_module.unescape(html_text)
+    # Both opening and closing block tags break the line (HN comments often
+    # start the body with an opening <p> right after the header line).
+    t = re.sub(r"(?i)<\s*/?\s*(?:br|p|div|h[1-6]|ul|ol)(?:\s[^>]*)?\s*/?\s*>", "\n", t)
+    t = re.sub(r"(?i)<\s*li\b[^>]*>", "\n- ", t)
+    t = re.sub(r"<[^>]+>", " ", t)
+    t = re.sub(r"[ \t]+", " ", t)
+    t = re.sub(r" ?\n ?", "\n", t)
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
+
 
 # ---------------------------------------------------------------------------
 # Cookie / consent boilerplate detection
@@ -367,6 +400,11 @@ def clean_description(text: str, *, min_chars: int = MIN_DESCRIPTION_CHARS):
     """
     if not text or not text.strip():
         return None, "empty"
+
+    # HTML in, plain text out — every detector below reads prose, and the
+    # dashboard renders this field as text.
+    if _HTML_TAG_RE.search(html_module.unescape(text)):
+        text = _html_to_multiline(text)
 
     # Pure boilerplate pages — reject outright, nothing real behind them.
     if is_cookie_boilerplate(text):
