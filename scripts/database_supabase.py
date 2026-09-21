@@ -1227,6 +1227,73 @@ def ensure_company(org_name: str, status: str = "candidate"):
     return cid
 
 
+def table_exists(name: str) -> bool:
+    """True when this database has that table.
+
+    The screener owns ``application`` and ``judge_review``; a pipeline-only
+    database (and the SQLite test backend) has neither. Asked, not caught: a
+    failed statement aborts the whole transaction on Postgres.
+    """
+    import db_backend
+
+    cur = get_conn().cursor()
+    if db_backend.IS_SQLITE:
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name = %s", (name,))
+    else:
+        cur.execute("SELECT to_regclass(%s)", (name,))
+    row = cur.fetchone()
+    cur.close()
+    return bool(row and row[0])
+
+
+def merge_companies(winner_id, loser_id) -> dict:
+    """Re-point every row owned by ``loser_id`` at ``winner_id``, then delete it.
+
+    Two company rows for one organisation ("SASH" from 80,000 Hours, "SASH
+    (Seabridge AI)" typed by hand) split that org's postings in two, so a role
+    already applied to comes back under the other row as unseen. ensure_company
+    stops NEW splits (company_name_variants_match); this repairs the ones
+    already stored.
+
+    The loser's canonical_name and aliases are folded into the winner's aliases,
+    so a board still sending the old spelling resolves straight to the winner.
+    Caller commits. Returns the moved row counts.
+    """
+    if str(winner_id) == str(loser_id):
+        raise ValueError("A company cannot be merged into itself")
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT canonical_name, aliases FROM company WHERE id = %s", (str(winner_id),))
+    row = cur.fetchone()
+    if row is None:
+        raise ValueError(f"No company {winner_id}")
+    win_name, win_aliases = row[0], list(row[1] or [])
+    cur.execute("SELECT canonical_name, aliases FROM company WHERE id = %s", (str(loser_id),))
+    row = cur.fetchone()
+    if row is None:
+        raise ValueError(f"No company {loser_id}")
+    lose_name, lose_aliases = row[0], list(row[1] or [])
+
+    known = {n.lower() for n in [win_name, *win_aliases]}
+    merged = win_aliases + [n for n in [lose_name, *lose_aliases] if n and n.lower() not in known]
+    moved = {}
+    for table in ("vacancy", "application", "company_evidence"):
+        if not table_exists(table):
+            continue
+        cur.execute(
+            f"UPDATE {table} SET company_id = %s WHERE company_id = %s",
+            (str(winner_id), str(loser_id)),
+        )
+        moved[table] = cur.rowcount
+    cur.execute(
+        "UPDATE company SET aliases = %s WHERE id = %s",
+        (merged, str(winner_id)),
+    )
+    cur.execute("DELETE FROM company WHERE id = %s", (str(loser_id),))
+    cur.close()
+    return moved
+
+
 def activate_company(company_id, reason: str) -> bool:
     """Force a company to 'active'. Returns True if the status actually changed.
 

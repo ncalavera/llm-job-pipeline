@@ -60,8 +60,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from company_registry import company_name_variants_match  # noqa: E402
 from db_backend import Json, RealDictCursor, IS_SQLITE, print_backend_banner  # noqa: E402
 from database_supabase import (  # noqa: E402
+    merge_companies,
+    table_exists,
     APPLICATION_STATUSES,
     ApplicationArchiveBlocked,
     VACANCIES_DIR,
@@ -305,13 +308,12 @@ def _cluster_cross_company(rows):
     differ only by connective words, so a shared generic careers URL never
     counts).
 
-    This is the (b)/(d) gap made visible: ``save_vacancies`` folding two
-    company rows' postings onto one vacancy going forward does not retroactively
-    fix a company that was already split in two ("SASH" / "SASH Foundation").
-    That split is a company-registry decision — which row is canonical, which
-    FK rows re-point — never a dedup_sweep auto-merge. These clusters are
-    printed for a human every run, dry-run or --apply, and never enter
-    ``merges``.
+    A cluster whose company names read as the same organisation
+    (``company_name_variants_match``: "SASH" / "SASH (Seabridge AI)") IS merged
+    on ``--apply`` — see ``_company_merge_pairs``. The rest are printed for a
+    human every run, dry-run or --apply, and never merged: deciding that
+    "Kairos" and "Kairos Project" are one org is a judgement call, and a wrong
+    company merge moves every posting of a real company onto another.
     """
     uf = _Union()
     by_id = {r["id"]: r for r in rows}
@@ -334,6 +336,62 @@ def _cluster_cross_company(rows):
     for r in rows:
         groups.setdefault(uf.find(r["id"]), []).append(r)
     return [g for g in groups.values() if len(g) > 1 and len({x["company_id"] for x in g}) > 1]
+
+
+def _company_merge_pairs(cross_clusters, rows):
+    """(loser_id, winner_id, loser_name, winner_name) per cross-company cluster
+    whose company names read as one organisation.
+
+    The winner is the row that already owns more postings, then the older row —
+    it carries the enrichment and the WANT score, and re-pointing the few onto
+    the many moves the least. The id breaks a remaining tie so the choice is
+    deterministic.
+    """
+    counts = {}
+    names = {}
+    for r in rows:
+        counts[r["company_id"]] = counts.get(r["company_id"], 0) + 1
+        names[r["company_id"]] = r["org"]
+    cur = get_conn().cursor()
+    cur.execute("SELECT id, created_at FROM company")
+    born = {cid: str(ts or "") for cid, ts in cur.fetchall()}
+    cur.close()
+    pairs = {}
+    for cluster in cross_clusters:
+        ids = sorted(
+            {r["company_id"] for r in cluster},
+            key=lambda i: (-counts.get(i, 0), born.get(i, ""), str(i)),
+        )
+        winner = ids[0]
+        for loser in ids[1:]:
+            if loser in pairs or not company_name_variants_match(names[winner], names[loser]):
+                continue
+            pairs[loser] = (loser, winner, names[loser], names[winner])
+    return list(pairs.values())
+
+
+def _repoint_judge_reviews(survivor_id, loser_ids):
+    """Move each loser's judge_review row onto the survivor before it is deleted.
+
+    judge_review.vacancy_id is UNIQUE and its FK is NO ACTION: a loser carrying
+    Nikita's keep/unsure answer would otherwise block the DELETE outright, and
+    dropping the row would throw away the answer the agreement scoreboard is
+    built from. A survivor that already has an answer keeps it — his later
+    decision on the row that survived is the current one.
+    """
+    if not table_exists("judge_review"):
+        return
+    cur = get_conn().cursor()
+    for lid in loser_ids:
+        cur.execute("SELECT 1 FROM judge_review WHERE vacancy_id = %s", (str(survivor_id),))
+        if cur.fetchone():
+            cur.execute("DELETE FROM judge_review WHERE vacancy_id = %s", (str(lid),))
+        else:
+            cur.execute(
+                "UPDATE judge_review SET vacancy_id = %s WHERE vacancy_id = %s",
+                (str(survivor_id), str(lid)),
+            )
+    cur.close()
 
 
 def _live_rows(cluster):
@@ -494,6 +552,7 @@ def _apply_merge(survivor, losers):
         ),
     )
     loser_ids = [loser["id"] for loser in losers]
+    _repoint_judge_reviews(survivor["id"], loser_ids)
     if IS_SQLITE:
         placeholders = ",".join(["%s"] * len(loser_ids))
         cur.execute(f"DELETE FROM vacancy WHERE id IN ({placeholders})", loser_ids)
@@ -588,6 +647,16 @@ def main() -> int:
         help="archive losers + merge + delete (default is a read-only dry-run)",
     )
     ap.add_argument("--limit", type=int, default=None, help="cap the number of clusters processed")
+    ap.add_argument(
+        "--merge-company",
+        nargs=2,
+        metavar=("LOSER_ID", "WINNER_ID"),
+        action="append",
+        default=[],
+        help="fold one company row into another (needs --apply). For the "
+        "cross-company pairs the name rule will not decide, e.g. "
+        "'Kairos Project' / 'Kairos' — judge them from the X-report first.",
+    )
     args = ap.parse_args()
 
     print_backend_banner()
@@ -595,10 +664,27 @@ def main() -> int:
     print(f"dedup_sweep: {mode}\n")
 
     rows = _load_rows()
+    company_merges = _company_merge_pairs(_cluster_cross_company(rows), rows) + [
+        (loser, winner, "", "(named on the command line)") for loser, winner in args.merge_company
+    ]
+    if company_merges:
+        for loser, winner, lose_name, win_name in company_merges:
+            print(f"[C] company merge: {lose_name!r} → {win_name!r}  ({loser} → {winner})")
+        if args.apply:
+            for loser, winner, _, _ in company_merges:
+                moved = merge_companies(winner, loser)
+                print(f"    moved {moved}")
+            get_conn().commit()
+            # The re-pointed postings are now one company's rows, so the
+            # ordinary within-company clustering below collapses them.
+            rows = _load_rows()
+        print()
+
     clusters = _cluster(rows)
     if args.limit is not None:
         clusters = clusters[: args.limit]
-    # Cross-company: report-only, never entered into merges, dry-run or --apply.
+    # What is left after the company merges above: names the rule will not call
+    # one organisation. Report-only — a human decides, then --merge-company.
     cross_company = _cluster_cross_company(rows)
 
     if not clusters and not cross_company:

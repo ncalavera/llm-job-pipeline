@@ -110,6 +110,55 @@ def test_different_title_same_company_url_not_flagged(dal):
     assert cross == []
 
 
+def test_main_merges_cross_company_cluster_when_names_are_one_org(monkeypatch, dal, capsys):
+    """The 2026-09-21 bug: he applied under "SASH (Seabridge AI)", the board
+    listed the same posting under "SASH", and the second row came back as
+    unseen. The names read as one org, so --apply folds the company rows and
+    the postings then collapse onto the applied row.
+    """
+    import dedup_sweep
+
+    dal.ensure_company("SASH", status="active")
+    _commit(dal)
+    # Two postings, so "SASH" is the company row the other folds into.
+    dal.save_vacancies(
+        "SASH",
+        "B",
+        [
+            _job("Head of Operations", url=_URL),
+            _job("Verification Lead", url="https://sash.org/careers/verification-lead"),
+        ],
+    )
+    _commit(dal)
+    # Inserted directly: ensure_company now folds this spelling onto "SASH"
+    # (the source fix), so the split can only be staged behind its back.
+    cur = dal.get_conn().cursor()
+    cur.execute(
+        "INSERT INTO company (id, canonical_name, status) VALUES (%s, %s, 'active')",
+        ("11111111-1111-1111-1111-111111111111", "SASH (Seabridge AI)"),
+    )
+    _commit(dal)
+    dal.save_vacancies("SASH (Seabridge AI)", "B", [_job("Head of Operations", url=_URL)], None, {})
+    _commit(dal)
+    cur.execute("SELECT COUNT(*) FROM company WHERE canonical_name LIKE 'SASH%'")
+    assert cur.fetchone()[0] == 2, "the split this test repairs must exist first"
+    # The hand-added row is the one he applied through.
+    cur.execute(
+        "UPDATE vacancy SET status = 'applied' WHERE company_id = "
+        "(SELECT id FROM company WHERE canonical_name = 'SASH (Seabridge AI)')"
+    )
+    _commit(dal)
+
+    monkeypatch.setattr(sys, "argv", ["dedup_sweep.py", "--apply"])
+    dedup_sweep.main()
+
+    cur.execute("SELECT canonical_name FROM company WHERE canonical_name LIKE 'SASH%'")
+    assert cur.fetchall() == [("SASH",)]
+    cur.execute("SELECT status FROM vacancy WHERE title = 'Head of Operations'")
+    assert cur.fetchall() == [("applied",)], "one row left, and it is the applied one"
+    cur.close()
+
+
 def test_main_never_merges_cross_company_cluster(monkeypatch, dal, capsys):
     """main() --apply must still leave a cross-company duplicate as two rows —
     only same-company merges are ever written."""

@@ -331,10 +331,19 @@ _MATCH_ORG_SUFFIXES = frozenset(
         "group",
         "holdings",
         "worldwide",
+        # "Trajectory Labs, PBC" / "Trajectory Labs".
+        "pbc",
     }
 )
 
 _MATCH_PUNCT_RE = re.compile(r"[^0-9a-z]+")
+# A parenthetical is a board's gloss on the SAME org, never an extra word:
+# "SASH (Seabridge AI)", "Safe AI Netherlands (SAIN)", "Anser (US government
+# role)". The name WITHOUT it is matched as a second reading, so either
+# spelling folds. The parenthetical's own content is deliberately NOT a
+# reading: two unrelated orgs share an abbreviation often enough ("AI Security
+# Institute (AISI)" / "AI Safety Ideas (AISI)") that it would merge them.
+_MATCH_PAREN_RE = re.compile(r"\(([^)]*)\)")
 
 
 def _normalize_name_tokens(name: str) -> list[str]:
@@ -367,23 +376,52 @@ def _normalize_name_tokens(name: str) -> list[str]:
     return tokens
 
 
+def _name_readings(name: str) -> list[list[str]]:
+    """Token lists for every reading of one raw name: the name itself, and — when
+    it carries a parenthetical — the name without it. "Safe AI Netherlands
+    (SAIN)" also reads as "Safe AI Netherlands", so either board spelling
+    folds onto the other."""
+    names = [name]
+    if "(" in name:
+        names.append(_MATCH_PAREN_RE.sub(" ", name))
+    readings = []
+    for n in names:
+        tokens = _normalize_name_tokens(n)
+        if tokens and tokens not in readings:
+            readings.append(tokens)
+    return readings
+
+
 def company_name_variants_match(a: str, b: str) -> bool:
     """True if two raw company-name strings denote the same organisation.
 
-    Matches on either:
+    Every reading of each name (see ``_name_readings``) is compared, so a
+    trailing parenthetical folds: "SASH (Seabridge AI)" ↔ "SASH".
+
+    Two readings match on any of:
       * normalized-token equality — same significant tokens after lowercase /
-        punctuation / stopword / suffix normalization (word order ignored); or
+        punctuation / stopword / suffix normalization (word order ignored);
+      * glued-token equality — "PauseAI" ↔ "Pause AI", the same letters with a
+        space a board did or did not insert;
       * "ACRONYM - Full Name" containment — one token set is a proper subset of
         the other and the single extra token is exactly the acronym (initials)
         of the shorter set, e.g. "IFAD - International Fund for Agricultural
         Development" ↔ "International Fund for Agricultural Development".
 
+    Deliberately does NOT match a bare acronym against the spelled-out name
+    ("ODI" ↔ "Overseas Development Institute"): 2–4 letter acronyms collide
+    across unrelated orgs ("SAC GmbH" ↔ "State AI Collaborative", "WHO
+    Foundation" ↔ "World Health Organization"). Those are merged by hand.
     Deliberately does NOT match on generic single-token containment (guards
     "Via" ↔ "[via Fast Forward]", "Apple" ↔ "Apple CSR") or on partial token
-    overlap ("Henley & Partners" ↔ "Global Partners").
+    overlap ("Henley & Partners" ↔ "Global Partners"). Names differing by a
+    real word ("Social Finance US" ↔ "Social Finance UK", "Department of
+    Energy" ↔ "US Government, Department of Energy") stay apart.
     """
-    ta = _normalize_name_tokens(a)
-    tb = _normalize_name_tokens(b)
+    return any(_readings_match(ra, rb) for ra in _name_readings(a) for rb in _name_readings(b))
+
+
+def _readings_match(ta: list[str], tb: list[str]) -> bool:
     sa, sb = set(ta), set(tb)
     if not sa or not sb:
         return False
@@ -393,6 +431,11 @@ def company_name_variants_match(a: str, b: str) -> bool:
         # single tokens ("Resolution" ↔ "Resolution Foundation") still match.
         if len(sa) == 1 and next(iter(sa)) in _MATCH_ORG_SUFFIXES:
             return False
+        return True
+    # One board writes the name glued, the next spaced: "PauseAI" / "Pause AI".
+    # Length floor so two short generic fragments cannot meet here.
+    glued = "".join(ta)
+    if glued == "".join(tb) and len(glued) >= 5 and glued not in _MATCH_ORG_SUFFIXES:
         return True
     if sa < sb:
         small_tokens, big = ta, sb
