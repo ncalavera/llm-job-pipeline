@@ -794,6 +794,8 @@ class TestEnrichBlindVacancies:
             dal, "get_conn", lambda: type("C", (), {"cursor": lambda s, **k: _Cur()})()
         )
         monkeypatch.setattr(dal, "_vacancy_has_column", lambda col: True)
+        # No Firecrawl key in CI, and this test never fetches anything.
+        monkeypatch.setattr(ebv, "get_firecrawl_client", lambda: None)
         ebv.fetch_source_text_for_summary_boards(dry_run=True)
 
         assert "first_seen >=" not in seen["sql"], "age window still bounds the pass"
