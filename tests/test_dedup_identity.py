@@ -827,3 +827,43 @@ def test_new_org_still_creates_candidate(dal):
     assert rows[0][0] == "Wholly Novel Org"
     assert rows[0][1] == "candidate"
     cur.close()
+
+
+def test_same_url_locations_fold_into_the_resolved_one(dal):
+    """Two boards list the same req: 80,000 Hours adds utm decoration and
+    calls it remote with no city, the ATS says San Francisco / onsite.
+    _loc_key keyed them "remote" vs "San Francisco" and kept both, so the row
+    carried a phantom remote location that blocked the judge's location rule
+    (live: CAIS "Product Manager, Agentic Products"). Same URL = one place."""
+    url = "https://job-boards.greenhouse.io/cais/jobs/4342209009"
+    folded = dal.dedupe_locations(
+        [
+            {"url": url, "city": None, "country": None, "work_mode": "remote"},
+            {
+                "url": url + "?utm_source=80000hours&utm_medium=job-board",
+                "city": "San Francisco",
+                "country": "United States",
+                "work_mode": "onsite",
+            },
+        ]
+    )
+    assert len(folded) == 1
+    assert folded[0]["city"] == "San Francisco"
+    assert folded[0]["country"] == "United States"
+    assert folded[0]["work_mode"] == "onsite"
+
+    # A genuinely different posting URL stays its own location.
+    assert len(dal.dedupe_locations([{"url": url}, {"url": url + "1"}])) == 2
+
+    # One req open in two named cities carries one apply URL — still two.
+    assert (
+        len(
+            dal.dedupe_locations(
+                [
+                    {"url": url, "city": "Berlin", "country": "Germany"},
+                    {"url": url, "city": "Lisbon", "country": "Portugal"},
+                ]
+            )
+        )
+        == 2
+    )

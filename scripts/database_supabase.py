@@ -2106,6 +2106,66 @@ def _loc_key(loc: dict) -> str:
     return loc.get("city") or loc.get("country") or loc.get("work_mode") or ""
 
 
+def dedupe_locations(locs: list) -> list:
+    """Fold locations[] entries that are the same posting URL into one.
+
+    Two boards listing the same req hand us the same apply URL with different
+    decoration ("...?utm_source=80000hours") and different resolution: one says
+    {city: null, country: null, work_mode: "remote"}, the other
+    {city: "San Francisco", country: "United States", work_mode: "onsite"}.
+    _loc_key sees "remote" vs "San Francisco" and appends both, so the row
+    carries a phantom remote location that the judge's location rule reads as
+    real (found live: CAIS "Product Manager, Agentic Products").
+
+    Folded only when the two entries can be the same place: same
+    normalize_apply_url() (utm/fragment/trailing-slash stripped) AND one of
+    them names no place at all, or both name the same one. One req genuinely
+    open in Berlin and Lisbon carries one apply URL and two named cities —
+    those stay two entries. The entry that names a place wins, and any field
+    it is missing is filled from the other. Entries with no URL are left
+    alone; order is preserved.
+    """
+    out: list = []
+    for loc in locs or []:
+        url = normalize_apply_url(loc.get("url"))
+        i = _same_place_index(out, url, loc) if url else None
+        if i is None:
+            out.append(loc)
+            continue
+        kept, dropped = out[i], loc
+        if _loc_place(dropped) and not _loc_place(kept):
+            kept, dropped = dropped, kept
+        merged = dict(kept)
+        for k, v in dropped.items():
+            # Falsy, not just None: boards write "" as often as null for a
+            # field they do not know (seen live on region/work_mode).
+            if not merged.get(k) and v:
+                merged[k] = v
+        out[i] = merged
+    return out
+
+
+def _loc_place(loc: dict) -> tuple:
+    """The place an entry actually names — city and country, normalized.
+    Empty means it names none (work_mode alone is not a place)."""
+    city = (loc.get("city") or "").strip().lower()
+    country = (loc.get("country") or "").strip().lower()
+    return (city, country) if (city or country) else ()
+
+
+def _same_place_index(out: list, url: str, loc: dict):
+    """Index in ``out`` of an entry that is the same posting and the same (or
+    an unnamed) place, else None."""
+    place = _loc_place(loc)
+    for i, other in enumerate(out):
+        if normalize_apply_url(other.get("url")) != url:
+            continue
+        other_place = _loc_place(other)
+        if not place or not other_place or place == other_place:
+            return i
+    return None
+
+
 def _resolve_new_deadline(job: dict) -> str | None:
     """Deadline for a brand-new row: fetcher-provided, else a regex fallback from
     the description. Returns a parsed date string or None."""
@@ -2305,14 +2365,14 @@ def save_vacancies(
             existing_loc_keys = {_loc_key(l) for l in locs}
             if loc_key not in existing_loc_keys:
                 locs.append(loc_entry)
-                updates["locations"] = Json(locs)
+                updates["locations"] = Json(dedupe_locations(locs))
             elif loc_entry.get("url"):
                 for loc in locs:
                     lk = loc.get("city") or loc.get("country") or loc.get("work_mode") or ""
                     if lk == loc_key:
                         loc["url"] = loc_entry["url"]
                         break
-                updates["locations"] = Json(locs)
+                updates["locations"] = Json(dedupe_locations(locs))
 
             set_parts = [f"{k} = %s" for k in updates]
             vals = list(updates.values()) + [existing["id"]]
@@ -2545,7 +2605,7 @@ def save_board_vacancies(
             existing_loc_keys = {_loc_key(l) for l in locs}
             if loc_key not in existing_loc_keys:
                 locs.append(loc_entry)
-                updates["locations"] = Json(locs)
+                updates["locations"] = Json(dedupe_locations(locs))
             elif loc_entry.get("url"):
                 # Same loc_key but a fresh apply URL — keep it (mirrors
                 # save_vacancies). Without this, a same-title same-location
@@ -2555,7 +2615,7 @@ def save_board_vacancies(
                     if lk == loc_key:
                         loc["url"] = loc_entry["url"]
                         break
-                updates["locations"] = Json(locs)
+                updates["locations"] = Json(dedupe_locations(locs))
 
             # Backfill board provenance on a row that predates the column / was
             # first saved by another source but is now confirmed on this board.
