@@ -25,7 +25,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -34,7 +34,7 @@ from bs4 import BeautifulSoup
 
 from config import get_firecrawl_client
 from fetchers import _fetch_unops_job_detail, _LOCAL_UA
-from fetchers.html_utils import _html_to_text
+from fetchers.html_utils import _html_to_multiline, _html_to_text
 from quality import (
     _COOKIE_BANNER_RE,
     COOKIE_MIN_REMAINDER,
@@ -189,15 +189,16 @@ def _google_doc_id(url: str) -> str | None:
 def _is_unscrapable_host(url: str) -> bool:
     """Hosts that cannot be trusted to return THIS role's own posting text —
     spending a fetch (Firecrawl credits or otherwise) is pure waste, or worse,
-    wrong. LinkedIn blocks scrapers outright (verified live 2026-07-03: a
-    guest job page returns 0 chars); such rows heal on the next fetch when
-    the detail pages aren't throttled, or age out via the stale-blind sweep.
-    A shared drive/form/spreadsheet is never a single posting, so it is never
-    fetched. docs.google.com is fetchable only for a single /document/d/<id>
-    doc — a form under the same host stays blocked."""
+    wrong. A LinkedIn job page itself answers 999 to any logged-out client,
+    but one /jobs/view/ posting is readable through the guest endpoint (see
+    _linkedin_job_id) — only a search/collections URL, which names no single
+    posting, stays unscrapable. A shared drive/form/spreadsheet is never a
+    single posting, so it is never fetched. docs.google.com is fetchable only
+    for a single /document/d/<id> doc — a form under the same host stays
+    blocked."""
     host = urlparse(url).netloc.lower()
     if host == "linkedin.com" or host.endswith(".linkedin.com"):
-        return True
+        return _linkedin_job_id(url) is None
     if host == "docs.google.com":
         return _google_doc_id(url) is None
     return host in _SHARED_DOC_HOSTS
@@ -373,6 +374,70 @@ def _fetch_google_doc_text(doc_id: str, diag: dict) -> tuple[str, dict]:
     return resp.text.strip(), diag
 
 
+#: LinkedIn's own job page answers HTTP 999 to a logged-out client, but the
+#: guest endpoint serves the same posting as plain HTML with no auth
+#: (verified live 2026-09-22, ~60 KB, full description). The id is the
+#: trailing number of /jobs/view/<slug>-<id>, or the currentJobId query.
+_LINKEDIN_JOB_ID_RE = re.compile(r"/jobs/view/(?:[^/?#]*-)?(\d{6,})")
+
+#: LinkedIn throttles hard; keep at least this long between guest calls.
+_LINKEDIN_MIN_INTERVAL_S = 2.0
+_linkedin_last_call = 0.0
+
+
+def _linkedin_job_id(url: str) -> str | None:
+    """The numeric job id of a single LinkedIn posting URL, else None.
+
+    None for a /jobs/search or /jobs/collections URL with no currentJobId:
+    it names a result list, not one posting, so it stays unscrapable.
+    """
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if host != "linkedin.com" and not host.endswith(".linkedin.com"):
+        return None
+    m = _LINKEDIN_JOB_ID_RE.search(parsed.path)
+    if m:
+        return m.group(1)
+    current = parse_qs(parsed.query).get("currentJobId", [""])[0]
+    return current if current.isdigit() else None
+
+
+def _fetch_linkedin_guest_text(job_id: str, diag: dict) -> tuple[str, dict]:
+    """The posting behind a LinkedIn job id, via the keyless guest endpoint.
+
+    Title and company from the top card are prepended so looks_like_this_role()
+    has the same signals a normal posting page carries. A non-200 (429 throttle,
+    999 block, 403) returns "" with status and headers in diag.
+    """
+    global _linkedin_last_call
+    guest_url = f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}"
+    diag["guest_url"] = guest_url
+    wait = _LINKEDIN_MIN_INTERVAL_S - (time.monotonic() - _linkedin_last_call)
+    if wait > 0:
+        time.sleep(wait)
+    try:
+        resp = requests.get(guest_url, headers={"User-Agent": _LOCAL_UA}, timeout=20)
+    except Exception as e:
+        diag["error"] = str(e)
+        return "", diag
+    finally:
+        _linkedin_last_call = time.monotonic()
+    diag["status"] = resp.status_code
+    diag["headers"] = dict(resp.headers)
+    if resp.status_code != 200:
+        diag["body_head"] = resp.text[:300]
+        return "", diag
+    soup = BeautifulSoup(resp.text, "html.parser")
+    desc = soup.find("div", class_="description__text")
+    if desc is None:
+        diag["error"] = "no description__text in guest response"
+        diag["body_head"] = resp.text[:300]
+        return "", diag
+    top = (soup.find(class_=c) for c in ("top-card-layout__title", "topcard__org-name-link"))
+    lines = [el.get_text(" ", strip=True) for el in top if el is not None]
+    return "\n".join(lines + [_html_to_multiline(str(desc))]).strip(), diag
+
+
 def _looks_like_pdf(resp) -> bool:
     ctype = resp.headers.get("Content-Type", "")
     if "application/pdf" in ctype.lower():
@@ -421,6 +486,10 @@ def _fetch_plain_page_text(url: str) -> tuple[str, dict]:
     cxs_url = _workday_cxs_url(url)
     if cxs_url:
         return _fetch_workday_detail_text(cxs_url, diag)
+
+    linkedin_id = _linkedin_job_id(url)
+    if linkedin_id:
+        return _fetch_linkedin_guest_text(linkedin_id, diag)
 
     try:
         resp = requests.get(url, headers={"User-Agent": _LOCAL_UA}, timeout=20)

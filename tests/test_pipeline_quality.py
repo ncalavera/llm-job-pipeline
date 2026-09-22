@@ -14,6 +14,7 @@ import os
 import sys
 import pytest
 from datetime import date, timedelta
+from pathlib import Path
 
 # Make sure scripts/ is on the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
@@ -731,17 +732,64 @@ class TestEnrichBlindVacancies:
 
         assert "jobs.unicef.org" in enrich_blind_vacancies._DIRECT_HOST_FETCHERS
 
-    def test_EBV07_linkedin_hosts_never_scraped(self):
-        """LinkedIn blocks scrapers (verified live: 0 chars back) — spending
-        Firecrawl credits there is pure waste; such rows heal on the next
-        fetch or age out (review finding on #51)."""
+    def test_EBV07_linkedin_single_posting_scrapable_search_is_not(self):
+        """One /jobs/view/ posting is readable through the guest endpoint
+        (verified live 2026-09-22); a search/collections URL names a result
+        list, not a posting, so it stays unscrapable."""
         import enrich_blind_vacancies as ebv
 
-        assert ebv._is_unscrapable_host("https://uk.linkedin.com/jobs/view/x-123")
-        assert ebv._is_unscrapable_host("https://www.linkedin.com/jobs/view/y-456")
-        assert ebv._is_unscrapable_host("https://linkedin.com/jobs/view/z-789")
+        assert not ebv._is_unscrapable_host(
+            "https://uk.linkedin.com/jobs/view/head-of-ops-4469178153"
+        )
+        assert ebv._linkedin_job_id(
+            "https://fr.linkedin.com/jobs/view/chief-of-staff-4468380798"
+        ) == ("4468380798")
+        assert ebv._linkedin_job_id("https://www.linkedin.com/jobs/search?keywords=ops") is None
+        assert ebv._is_unscrapable_host("https://www.linkedin.com/jobs/collections/recommended/")
         assert not ebv._is_unscrapable_host("https://careers.example.org/jobs/1")
         assert not ebv._is_unscrapable_host("https://notlinkedin.com/jobs/1")
+
+    def test_EBV07b_linkedin_guest_fetch_returns_description(self, monkeypatch):
+        """The guest endpoint's HTML yields title, company and the full
+        description body — without the fetcher the row keeps its board card."""
+        import enrich_blind_vacancies as ebv
+
+        html = (Path(__file__).parent / "fixtures" / "linkedin_guest_job.html").read_text()
+
+        class _Resp:
+            status_code = 200
+            headers: dict = {}
+            text = html
+
+        calls = []
+        monkeypatch.setattr(ebv.requests, "get", lambda url, **kw: calls.append(url) or _Resp())
+        monkeypatch.setattr(ebv, "_LINKEDIN_MIN_INTERVAL_S", 0)
+        text, diag = ebv._fetch_plain_page_text(
+            "https://de.linkedin.com/jobs/view/head-of-operations-at-prior-labs-4469178153"
+        )
+
+        assert calls == ["https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/4469178153"]
+        assert text.startswith("Head of Operations\nPrior Labs")
+        assert "tabular foundation models" in text
+        assert diag["status"] == 200
+
+    def test_EBV07c_linkedin_guest_block_returns_empty_with_diagnostics(self, monkeypatch):
+        """A 999/429 block returns "" with status and headers logged."""
+        import enrich_blind_vacancies as ebv
+
+        class _Resp:
+            status_code = 999
+            headers = {"x-li-pop": "block"}
+            text = "<html>blocked</html>"
+
+        monkeypatch.setattr(ebv.requests, "get", lambda url, **kw: _Resp())
+        monkeypatch.setattr(ebv, "_LINKEDIN_MIN_INTERVAL_S", 0)
+        text, diag = ebv._fetch_plain_page_text("https://uk.linkedin.com/jobs/view/x-4468323698")
+
+        assert text == ""
+        assert diag["status"] == 999
+        assert diag["headers"] == {"x-li-pop": "block"}
+        assert diag["body_head"]
 
     def test_EBV08_shared_doc_hosts_never_scraped(self):
         """A form or shared drive/spreadsheet is a multi-role page, never a
