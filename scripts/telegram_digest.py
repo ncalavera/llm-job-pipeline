@@ -127,7 +127,7 @@ SELECT_READY_TO_SCREEN_SQL = """
 SELECT v.id
 FROM vacancy v
 JOIN company c ON v.company_id = c.id
-WHERE v.source_board IS NOT NULL AND v.status = 'unseen'
+WHERE v.status = 'unseen'
 """
 
 # Tier 2: mid scores — one line each (title, company, score, link), stamped

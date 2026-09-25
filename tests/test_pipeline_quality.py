@@ -841,7 +841,7 @@ class TestEnrichBlindVacancies:
         Firecrawl key was dead used to age past source_fetch_max_age_days and
         keep its 800-char board card forever; the judge skips board_summary,
         so it sat unjudged in the queue (93 rows on 2026-09-21). Selection is
-        now every still-open row, oldest attempt first, capped per run."""
+        now every still-open row; only retries are capped (EBV13d)."""
         import enrich_blind_vacancies as ebv
         import database_supabase as dal
 
@@ -863,9 +863,136 @@ class TestEnrichBlindVacancies:
         ebv.fetch_source_text_for_summary_boards(dry_run=True)
 
         assert "first_seen >=" not in seen["sql"], "age window still bounds the pass"
-        assert "ORDER BY v.updated_at ASC" in seen["sql"]
-        assert "LIMIT" in seen["sql"]
         assert list(ebv.OPEN_STATUSES) == seen["params"][0]
+
+    def test_EBV13b_source_text_pass_takes_every_unattempted_row_and_skips_excluded(
+        self, monkeypatch
+    ):
+        """Every board row gets its one attempt the night it arrives: no cap,
+        no rotation (a cap of 25 left 184 of 198 rows never tried, 2026-09-25).
+        Filter-excluded rows are never picked — the judge would not read them."""
+        import enrich_blind_vacancies as ebv
+        import database_supabase as dal
+
+        seen = {}
+
+        class _Cur:
+            def execute(self, sql, params=None):
+                seen["sql"] = sql
+
+            def fetchall(self):
+                return []
+
+        monkeypatch.setattr(
+            dal, "get_conn", lambda: type("C", (), {"cursor": lambda s, **k: _Cur()})()
+        )
+        monkeypatch.setattr(dal, "_vacancy_has_column", lambda col: True)
+        monkeypatch.setattr(ebv, "get_firecrawl_client", lambda: None)
+        ebv.fetch_source_text_for_summary_boards(dry_run=True)
+
+        assert "v.scoring_excluded_reason IS NULL" in seen["sql"]
+        assert "v.description_source = 'board_summary'" in seen["sql"]
+        assert "LIMIT" not in seen["sql"], "the one attempt must never be capped"
+
+    @staticmethod
+    def _one_row_pass(monkeypatch, url, row_title="Chief of Staff", org="X"):
+        """Run the pass over one row; return the SQL writes it made."""
+        import enrich_blind_vacancies as ebv
+        import database_supabase as dal
+
+        writes = []
+
+        class _Cur:
+            def execute(self, sql, params=None):
+                if sql.startswith("UPDATE"):
+                    writes.append((sql, params))
+
+            def fetchall(self):
+                return [
+                    {
+                        "id": "r1",
+                        "title": row_title,
+                        "source_board": "80,000 Hours",
+                        "full_description": "board card",
+                        "snippet": "",
+                        "locations": [],
+                        "first_seen": None,
+                        "org": org,
+                    }
+                ]
+
+        cur = _Cur()
+        conn = type("C", (), {"cursor": lambda s, **k: cur, "commit": lambda s: None})()
+        monkeypatch.setattr(dal, "get_conn", lambda: conn)
+        monkeypatch.setattr(dal, "_vacancy_has_column", lambda col: True)
+        monkeypatch.setattr(dal, "backfill_deadline_from_text", lambda *a: None)
+        monkeypatch.setattr(dal, "backfill_compensation_from_text", lambda *a: None)
+        monkeypatch.setattr(ebv, "get_firecrawl_client", lambda: None)
+        monkeypatch.setattr(ebv, "_get_vacancy_url", lambda row: url)
+        ebv.fetch_source_text_for_summary_boards()
+        return writes
+
+    def test_EBV13c_failed_attempt_marks_board_text_final(self, monkeypatch):
+        """A skipped row (no apply URL) used to `continue` without a write and
+        took a slot every night. Now its one attempt is stamped and marked
+        board_summary_final, which the judge reads as it is."""
+        writes = self._one_row_pass(monkeypatch, url=None)
+
+        assert len(writes) == 1
+        sql, params = writes[0]
+        assert "source_fetch_attempted_at = now()" in sql
+        assert params == ["board_summary_final", "r1"]
+
+    def test_EBV13d_ats_adapter_step_wins_before_the_plain_download(self, monkeypatch):
+        """An apply URL on an ATS we read comes from the company adapter's
+        list, picked by posting id — the plain download never runs."""
+        import enrich_blind_vacancies as ebv
+
+        body = "Rethink Priorities is hiring a Special Projects Director. " * 20
+        monkeypatch.setattr(
+            ebv,
+            "_ats_jobs",
+            lambda strategy, slug: (
+                {
+                    "external_id": "111",
+                    "url": "https://job-boards.greenhouse.io/rp/jobs/111",
+                    "full_description": "another role " * 50,
+                },
+                {
+                    "external_id": "222",
+                    "url": "https://job-boards.greenhouse.io/rp/jobs/222",
+                    "full_description": body,
+                },
+            ),
+        )
+        monkeypatch.setattr(
+            ebv, "_fetch_plain_page_text", lambda url: pytest.fail("plain step ran")
+        )
+        writes = self._one_row_pass(
+            monkeypatch,
+            "https://job-boards.greenhouse.io/rp/jobs/222",
+            row_title="Special Projects Director",
+            org="Rethink Priorities",
+        )
+
+        sql, params = writes[0]
+        assert "description_source = %s" in sql
+        assert "source_page" in params and body.strip() in params[0]
+
+    def test_EBV13e_plain_404_closes_the_role(self, monkeypatch):
+        """A clear 404/410 means the posting is gone: close the role (passed,
+        'expired: ...') instead of judging its board card."""
+        import enrich_blind_vacancies as ebv
+
+        monkeypatch.setattr(
+            ebv, "_fetch_plain_page_text", lambda url: ("", {"url": url, "status": 404})
+        )
+        writes = self._one_row_pass(monkeypatch, "https://example.org/jobs/gone")
+
+        closes = [w for w in writes if "status = 'passed'" in w[0]]
+        assert len(closes) == 1
+        assert "AND status IN ('unseen', 'expiring')" in closes[0][0]
+        assert closes[0][1] == ("expired: posting returns HTTP 404", "r1")
 
     def test_EBV12_workday_url_maps_to_cxs_endpoint(self):
         import enrich_blind_vacancies as ebv

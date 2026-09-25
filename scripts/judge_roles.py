@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Judge stage: KEEP/UNSURE/KILL board roles against a
+"""Judge stage: KEEP/UNSURE/KILL open roles against a
 private brief, then audit a sample of the kills with a second model.
 
 Self-contained script stage in run_daily.py's STAGE_ORDER, right after
@@ -151,7 +151,8 @@ def role_fields(role: dict) -> dict:
 
 
 def select_roles(cap: int) -> list[dict]:
-    """Board roles waiting for a judge verdict, oldest first, capped at ``cap``.
+    """Roles (board and career-page) waiting for a judge verdict, oldest
+    first, capped at ``cap``.
 
     Requires judge_columns_ready() — callers check that first."""
     from db_backend import RealDictCursor
@@ -163,10 +164,15 @@ def select_roles(cap: int) -> list[dict]:
         # test_every_vacancy_column_a_reader_names_is_created_by_a_migration's
         # AST scan (ast.Constant only) still sees v.judge_state / v.description_source.
         "SELECT {select} {join} "
-        "WHERE v.source_board IS NOT NULL AND v.status = 'unseen' "
+        "WHERE v.status = 'unseen' "
         "AND v.scoring_excluded_reason IS NULL AND v.judge_state = 'pending' "
-        "AND length(v.full_description) >= 400 "
-        "AND v.description_source IS DISTINCT FROM 'board_summary' "
+        # board_summary = its one source-page fetch has not run yet; wait.
+        # board_summary_final = that fetch failed: judge the board text as it
+        # is, however short, as long as there is some.
+        "AND (v.description_source = 'board_summary_final' "
+        "AND length(trim(v.full_description)) > 0 "
+        "OR v.description_source IS DISTINCT FROM 'board_summary' "
+        "AND length(v.full_description) >= 400) "
         "ORDER BY v.created_at ASC LIMIT %s".format(select=_ROLE_SELECT, join=_ROLE_JOIN),
         (cap,),
     )

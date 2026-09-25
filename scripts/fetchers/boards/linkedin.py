@@ -267,6 +267,9 @@ def fetch_linkedin_board(board_cfg: dict) -> list[dict]:
                 "external_id": rec["external_id"],
                 "snippet": snippet,
                 "full_description": full_description,
+                # The detail page IS the posting; without it only the card
+                # summary is left, which the save layer labels board_summary.
+                "description_source": "source_page" if desc_html else None,
                 "compensation": "",
                 "org_override": rec["org"],
                 "org_url": rec["org_url"] or board_cfg["url"],

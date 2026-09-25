@@ -1031,9 +1031,9 @@ def test_skip_reasons_are_russian_in_russian(monkeypatch):
 
 
 def _seed_board_roles(db):
-    """Three unseen board roles across every company status, plus three rows
-    the screener's /today does not show: a company-site role, a liked board
-    role, and a board role already passed."""
+    """Three unseen board roles across every company status and one unseen
+    company-site role (judged and shown too since 2026-09-25), plus two rows
+    the screener's /today does not show: a liked role and a passed role."""
     ids = {
         "board-active": _seed(db, "Org A", "Policy Analyst", source_board="80,000 Hours"),
         "board-candidate": _seed(
@@ -1051,14 +1051,14 @@ def _seed_board_roles(db):
             source_board="Idealist",
         ),
     }
-    _seed(db, "Org D", "Site Role")  # no source_board
+    ids["site"] = _seed(db, "Org D", "Site Role")  # no source_board
     _seed(db, "Org E", "Liked Role", status="liked", source_board="Idealist")
     _seed(db, "Org F", "Passed Role", status="passed", source_board="Idealist")
     return set(ids.values())
 
 
 def test_ready_to_screen_sql_is_the_screeners_today_predicate(denv):
-    """Board role + unseen, whatever the company status — the same rows
+    """Unseen role, board or company site, whatever the company status — the same rows
     screener.py today_page renders, so the headline number is the card count."""
     expected = _seed_board_roles(denv.db)
     cur = denv.db.get_conn().cursor()
@@ -1073,12 +1073,12 @@ def test_digest_headline_counts_board_roles_and_links_to_the_screener(denv, monk
     _seed_board_roles(denv.db)
     td.cmd_send(_args())
     body = "\n".join(_sent_texts(denv.calls))
-    assert "3 roles ready to screen" in body
+    assert "4 roles ready to screen" in body
     assert 'href="https://screener.example.test/today"' in body
 
 
-def test_no_ready_line_when_no_board_role_is_unseen(denv):
-    _seed(denv.db, "Org A", "Top Role", score=80)  # company site, not a board
+def test_no_ready_line_when_no_role_is_unseen(denv):
+    _seed(denv.db, "Org A", "Top Role", score=80, status="liked")
     td.cmd_send(_args())
     assert "ready to screen" not in "\n".join(_sent_texts(denv.calls))
 
@@ -1089,7 +1089,7 @@ def test_the_screener_link_does_not_depend_on_the_dashboard_url(denv, monkeypatc
     _seed_board_roles(denv.db)
     td.cmd_send(_args())
     body = "\n".join(_sent_texts(denv.calls))
-    assert "3 roles ready to screen" in body
+    assert "4 roles ready to screen" in body
     assert "https://screener.example.test/today" in body
 
 
@@ -1098,7 +1098,7 @@ def test_the_count_still_goes_out_without_a_screener_url(denv, monkeypatch):
     _seed_board_roles(denv.db)
     td.cmd_send(_args(details=False))
     body = "\n".join(_sent_texts(denv.calls))
-    assert "Vacancies to review: 3." in body
+    assert "Vacancies to review: 4." in body
     assert "<a href" not in body
 
 

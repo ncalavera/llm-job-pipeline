@@ -168,6 +168,9 @@ def fetch_idealist_board(board_cfg: dict) -> list[dict]:
                 "external_id": external_id,
                 "snippet": snippet,
                 "full_description": full_description,
+                # The Algolia hit carries the whole posting body, like
+                # ReliefWeb's feed; an empty one falls back to board_summary.
+                "description_source": "feed" if raw_desc else None,
                 "compensation": compensation,
                 "org_override": org,
                 "org_url": org_url,

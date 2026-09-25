@@ -663,16 +663,6 @@ nightly_limit = 400
 pilot_limit = 50
 
 # ===========================================================================
-# Enrich — the source-page fetch pass for summary-only boards (see
-# SUMMARY_ONLY_BOARDS in config.py). source_fetch_nightly_limit is the retry
-# bound: every still-open row is attempted eventually, oldest attempt first,
-# this many per run — so a likely-dead apply URL is retried rarely and in
-# rotation, never nightly and never forever-skipped because it aged out.
-# ===========================================================================
-[enrich]
-source_fetch_nightly_limit = 25
-
-# ===========================================================================
 # Judge — the nightly KEEP/UNSURE/KILL pass over board roles
 # and its second-reviewer audit. brief_path / review_brief_path ship
 # empty: the brief is personal taste (visa status, targets, pay), never

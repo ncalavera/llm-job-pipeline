@@ -115,7 +115,7 @@ STAGE_ORDER = [
     "company_scoring",  # SKIP — legacy scripts remain available
     "vacancy_scoring",  # SKIP — no numeric scores in the daily path
     "screening_prep",  # GATE — combined cheap scoring + facts
-    "judge",  # AUTO — KEEP/UNSURE/KILL board roles against the judge brief
+    "judge",  # AUTO — KEEP/UNSURE/KILL open roles against the judge brief
     "audit",  # AUTO — second-reviewer flag-only pass over a sample of tonight's kills
     "verdicts",  # SKIP — human review lives in the dashboard
     "digest",  # AUTO  — tiered morning Telegram message (before publish, KTD5:
@@ -182,7 +182,7 @@ STAGE_ABOUT = {
     "company_scoring": "WANT-scoring new candidate companies",
     "vacancy_scoring": "scoring new roles (cheap screen, then strong finalists)",
     "screening_prep": "scoring unscored roles and preparing review facts",
-    "judge": "judging board roles against the screening brief",
+    "judge": "judging open roles against the screening brief",
     "audit": "auditing a sample of tonight's kills with a second model",
     "verdicts": "collecting your like / pass verdicts",
     "digest": "sending the tiered morning digest to Telegram",
@@ -1464,17 +1464,47 @@ def _fetch_source_counters(stats: dict) -> str:
     return " · ".join(parts) if parts else "no sources fetched"
 
 
+#: Rows whose one full-posting download failed in this run (every step of the
+#: chain) — the judge reads their board text. A gone posting (closed as
+#: 'passed') is not a broken source, so it is not counted.
+_FAILED_DOWNLOADS_SQL = (
+    "SELECT count(*) FROM vacancy v "
+    "WHERE v.description_source = 'board_summary_final' "
+    "AND v.status <> 'passed' AND v.source_fetch_attempted_at >= %s"
+)
+
+
+def _warn_failed_downloads(state, since: datetime) -> None:
+    """Failed downloads reach the report card every night, so a broken source
+    gets fixed instead of silently feeding the judge board text (2026-09-25:
+    198 roles sat on board text, unjudged, with no warning)."""
+    try:
+        failed = _scalar(_FAILED_DOWNLOADS_SQL, (since,))
+    except Exception as exc:
+        _add_warning(state, "enrich", f"could not count failed posting downloads: {exc!r}")
+        return
+    if failed:
+        _add_warning(
+            state,
+            "enrich",
+            f"{_roles(failed)} could not be downloaded from the source page and "
+            "the judge reads their board text — the enrich log lists each failed step",
+        )
+
+
 def _h_enrich(state, entry, opts):
     # The source-text pass (summary-only boards -> real posting) runs
     # whatever FIRECRAWL_API_KEY is: it fetches with plain requests+bs4 first
     # and only falls back to Firecrawl for a JS-shell page, so it must not be
     # gated behind the key the blind-vacancy pass below needs.
+    started = datetime.now(timezone.utc)
     rc_source = _run(
         [sys.executable, "-u", str(SCRIPTS_DIR / "enrich_blind_vacancies.py"), "--source-text"],
         opts,
     )
     if rc_source != 0:
         return "error", f"source-text enrich exited with code {rc_source}"
+    _warn_failed_downloads(state, started)
 
     if not os.environ.get("FIRECRAWL_API_KEY"):
         return (
