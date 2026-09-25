@@ -323,7 +323,7 @@ def test_audit_due_only_for_fresh_unaudited_kills():
     assert not jr._audit_due({"judge": {}}, cutoff)
 
 
-def test_save_judge_marks_too_senior_level_kill_as_north_star():
+def test_save_judge_never_sets_north_star():
     class Cur:
         def __init__(self, log):
             self.log = log
@@ -349,9 +349,8 @@ def test_save_judge_marks_too_senior_level_kill_as_north_star():
         jr.save_judge(conn, "id", {"kill_kind": kind, "reason": reason}, "killed", None)
         return conn.log[-1][0].adapted
 
-    assert saved("Too senior: C-level post, 15+ years")["north_star"] is True
+    assert "north_star" not in saved("Too senior: C-level post, 15+ years")
     assert "north_star" not in saved("Entry-level internship")
-    assert "north_star" not in saved("Too senior: x", kind="experience")
 
 
 if __name__ == "__main__":
