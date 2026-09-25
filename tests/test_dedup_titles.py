@@ -788,7 +788,7 @@ def test_same_url_retitle_merges_over_time(dal):
 #   * the save path folds a board copy whose full title equals a segment of a
 #     stored title (and vice versa) — the body guard, not the apply URL, decides
 #     distinctness; segment-vs-segment never matches;
-#   * _titles_equal_sans_stopwords() is word-order insensitive, so the same-URL
+#   * _same_url_titles_match() is word-order insensitive, so the same-URL
 #     merge folds reordered retitles of one req;
 #   * dedup_sweep clusters a board-prefix pair and auto-collapses it even when
 #     both rows are live, the survivor keeping the most-decided status.
@@ -849,9 +849,9 @@ def test_segment_keys_are_org_scoped(dal):
     assert a and b and set(a).isdisjoint(b)
 
 
-def test_titles_equal_sans_stopwords_ignores_word_order(dal):
+def test_same_url_titles_match_ignores_word_order(dal):
     strong = dal._normalize_title_strong
-    eq = dal._titles_equal_sans_stopwords
+    eq = dal._same_url_titles_match
     assert eq(
         strong("Fellowship Program, Charity Kitchen"),
         strong("Charity Kitchen Fellowship Program"),
