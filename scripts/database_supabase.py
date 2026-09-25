@@ -2691,9 +2691,22 @@ def save_board_vacancies(
 
             # Never overwrite a 'source_page' value — that means the enrich
             # stage already fetched the real posting, which outranks whatever
-            # the board feed/summary says.
-            if write_description_source and existing.get("description_source") != "source_page":
-                updates["description_source"] = job.get("description_source") or "board_summary"
+            # the board feed/summary says — nor 'board_summary_final': its one
+            # fetch attempt failed, and resetting it would queue it again and
+            # hide that its verdict came from board text.
+            # The job's own label describes the job's text: trust it only when
+            # that text is (or replaces) the row's — not on a row whose text
+            # another board wrote (a cross-board match keeps its old card).
+            if write_description_source and existing.get("description_source") not in (
+                "source_page",
+                "board_summary_final",
+            ):
+                owns_text = (
+                    "full_description" in updates or existing.get("source_board") == board_name
+                )
+                updates["description_source"] = (
+                    owns_text and job.get("description_source")
+                ) or "board_summary"
 
             set_parts = [f"{k} = %s" for k in updates]
             vals = list(updates.values()) + [existing["id"]]

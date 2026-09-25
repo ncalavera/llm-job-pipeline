@@ -194,26 +194,6 @@ def screening() -> dict:
     return out
 
 
-_ENRICH_DEFAULTS = {
-    "source_fetch_nightly_limit": 25,
-}
-
-
-def enrich() -> dict:
-    """The [enrich] dials: ``source_fetch_nightly_limit`` — how many
-    summary-board rows (board_summary/unfetched text) the source-page fetch
-    pass attempts per run, oldest attempt first. It is the retry bound: every
-    still-open row is eventually fetched, and a hopeless apply URL comes round
-    again only after the rest of the queue, instead of being retried nightly.
-    Non-positive / non-numeric falls back to the default; never raises."""
-    sec = _section("enrich")
-    out = {}
-    for key, default in _ENRICH_DEFAULTS.items():
-        val = int(_num(sec, key, default))
-        out[key] = val if val > 0 else default
-    return out
-
-
 _JUDGE_DEFAULTS = {
     "batch_size": 15,
     "kill_confidence": 5,

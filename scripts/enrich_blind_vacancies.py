@@ -20,6 +20,7 @@ Usage:
         a fallback for a JS-shell page). See fetch_source_text_for_summary_boards.
 """
 
+import functools
 import json
 import re
 import sys
@@ -462,6 +463,54 @@ def _extract_pdf_text(content: bytes) -> str:
         return ""
 
 
+#: Apply URLs on an ATS whose company adapter (fetchers/ats) returns the full
+#: posting body in its list: (strategy, regex with slug + posting-id groups).
+#: Workday is read in _fetch_plain_page_text (its cxs detail API); Workable and
+#: SmartRecruiters list no body, so their pages go through the plain step.
+_ATS_POSTING_URL_RES = (
+    (
+        "greenhouse",
+        re.compile(r"^https?://(?:boards|job-boards)\.greenhouse\.io/([^/?#]+)/jobs/(\d+)"),
+    ),
+    (
+        "greenhouse_eu",
+        re.compile(r"^https?://(?:boards|job-boards)\.eu\.greenhouse\.io/([^/?#]+)/jobs/(\d+)"),
+    ),
+    ("lever", re.compile(r"^https?://jobs\.lever\.co/([^/?#]+)/([0-9a-f-]{36})")),
+    ("ashby", re.compile(r"^https?://jobs\.ashbyhq\.com/([^/?#]+)/([0-9a-f-]{36})")),
+    ("bamboohr", re.compile(r"^https?://([a-z0-9-]+)\.bamboohr\.com/careers/(\d+)")),
+)
+
+
+@functools.lru_cache(maxsize=None)
+def _ats_jobs(strategy: str, slug: str) -> tuple:
+    """One company's live postings from its ATS adapter, once per run."""
+    from fetchers.registry import COMPANY_FETCHERS
+    import fetchers.ats  # noqa: F401  (registers the adapters)
+
+    eu = strategy == "greenhouse_eu"
+    fetch = COMPANY_FETCHERS["greenhouse" if eu else strategy]
+    return tuple(fetch(slug, {"slug": slug, "eu": eu}))
+
+
+def _fetch_ats_posting_text(url: str) -> tuple[str, dict | None]:
+    """The posting body from the company's ATS adapter; diag None = not an
+    ATS URL we read. The posting is picked from the adapter's list by id."""
+    for strategy, pattern in _ATS_POSTING_URL_RES:
+        m = pattern.match(url)
+        if not m:
+            continue
+        slug, posting_id = m.group(1), m.group(2)
+        jobs = _ats_jobs(strategy, slug)
+        diag = {"url": url, "ats": strategy, "slug": slug, "jobs_listed": len(jobs)}
+        for job in jobs:
+            if posting_id == job.get("external_id") or posting_id in (job.get("url") or ""):
+                return job.get("full_description") or "", diag
+        diag["error"] = f"posting {posting_id} not in the live list"
+        return "", diag
+    return "", None
+
+
 def _fetch_plain_page_text(url: str) -> tuple[str, dict]:
     """Zero-cost requests+bs4 fetch of an arbitrary job page.
 
@@ -667,10 +716,15 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
     proxy). No age window: a row that failed while the
     Firecrawl key was dead used to age past it and keep the 800-char board
     card forever, which the nightly judge then skips — it sat unjudged in the
-    queue. The retry bound is now work per night, not row age: oldest
-    updated_at first (every attempt, success or failure, writes the row and so
-    bumps updated_at) and [enrich] source_fetch_nightly_limit rows per run, so
-    hopeless URLs are retried rarely and in rotation instead of never.
+    queue. Now every row gets exactly ONE attempt, the night it arrives,
+    uncapped: success -> 'source_page'; any failure (fetch failure, content
+    mismatch, no URL, unscrapable host) -> 'board_summary_final', which the
+    judge accepts as it is (judged from the board text) and which no later
+    board fetch resets. So 'board_summary' means "not attempted yet" and the
+    queue can never grow stuck. source_fetch_attempted_at stamps every attempt
+    (the nightly report counts that night's failures from it). ``limit``
+    (--limit) caps a manual run. Rows the filter already excluded are never
+    picked: the judge would not read them.
 
     Plain requests+bs4 first (free); Firecrawl fallback only when a key is
     configured AND the plain text looks like a JS shell (< _JS_SHELL_MAX_CHARS).
@@ -681,8 +735,8 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
     description_source='source_page' (column permitting), the old board
     summary preserved into snippet if that was empty, deadline backfilled
     from the new text. Failure — fetch failure OR a content mismatch —
-    description_source resets to 'board_summary' (column permitting) and full
-    diagnostics are printed; never silently dropped.
+    description_source becomes 'board_summary_final' (column permitting) and
+    full diagnostics are printed; never silently dropped.
     """
     from database_supabase import (
         get_conn,
@@ -692,12 +746,11 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
     )
     from psycopg2.extras import RealDictCursor
     import config
-    import settings
 
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     has_desc_source = _vacancy_has_column("description_source")
-    nightly_limit = settings.enrich()["source_fetch_nightly_limit"]
+    has_attempt_clock = _vacancy_has_column("source_fetch_attempted_at")
 
     if ids:
         cur.execute(
@@ -727,54 +780,93 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
                    v.locations, v.first_seen, c.canonical_name AS org
             FROM vacancy v JOIN company c ON v.company_id = c.id
             WHERE v.status = ANY(%s)
+              AND v.scoring_excluded_reason IS NULL
               AND {source_cond}
-            ORDER BY v.updated_at ASC
-            LIMIT %s
+            ORDER BY v.created_at ASC
         """
-        params = [
-            list(OPEN_STATUSES),
-            list(config.SUMMARY_ONLY_BOARDS),
-            limit or nightly_limit,
-        ]
-        cur.execute(query, params)
+        cur.execute(query, [list(OPEN_STATUSES), list(config.SUMMARY_ONLY_BOARDS)])
     rows = cur.fetchall()
+    rows = rows[:limit] if limit else rows
 
     print(f"Source-text pass: {len(rows)} candidate row(s){' (dry-run)' if dry_run else ''}")
     client = get_firecrawl_client()
-    upgraded = 0
+    upgraded = closed = 0
+
+    # The one attempt failed: the judge takes the board text as it is.
+    final = {"description_source": "board_summary_final"} if has_desc_source else {}
+
+    def _write(row_id, updates):
+        # Committed per row: a crash mid-pass keeps what was already fetched.
+        if dry_run:
+            return
+        set_parts = [f"{k} = %s" for k in updates]
+        if has_attempt_clock:
+            set_parts.append("source_fetch_attempted_at = now()")
+        if set_parts:
+            cur.execute(
+                f"UPDATE vacancy SET {', '.join(set_parts)} WHERE id = %s::uuid",
+                list(updates.values()) + [row_id],
+            )
+            conn.commit()
+
     for row in rows:
         url = _get_vacancy_url(row)
         before_len = len(row.get("full_description") or "")
         if not url:
             print(f"  [{row['source_board']}] {row['title'][:45]:45s} -> SKIP, no apply URL")
+            _write(row["id"], final)
             continue
         if _is_unscrapable_host(url):
             print(
                 f"  [{row['source_board']}] {row['title'][:45]:45s} -> SKIP, unscrapable/shared-doc host ({url})"
             )
+            _write(row["id"], final)
             continue
 
-        text, diag = _fetch_plain_page_text(url)
-        text = _strip_chrome_lines(text)
-        cleaned, verdict = clean_description(text)
-        if (verdict != "ok" or len(cleaned or "") < _JS_SHELL_MAX_CHARS) and client:
-            fc_text = _strip_chrome_lines(_scrape_job_page(client, url))
-            fc_cleaned, fc_verdict = clean_description(fc_text)
-            if fc_verdict == "ok" and len(fc_cleaned or "") > len(cleaned or ""):
-                cleaned, verdict, diag = (
-                    fc_cleaned,
-                    fc_verdict,
-                    {**diag, "firecrawl_fallback": True},
+        # The one attempt is a chain, first success wins: the company's ATS
+        # adapter, a plain download, then Firecrawl (only when the plain page
+        # looked like a JS shell or failed — a long mismatched page would
+        # come back the same and waste a credit). Every step's text is
+        # content-checked (looks_like_this_role) before it is trusted.
+        success, gone, cleaned, verdict, content_reason, method = False, None, "", "", "", ""
+        for method in ("ats", "plain", "firecrawl"):
+            if method == "ats":
+                text, diag = _fetch_ats_posting_text(url)
+                if diag is None:
+                    continue
+            elif method == "plain":
+                text, diag = _fetch_plain_page_text(url)
+            else:
+                if not client or (verdict == "ok" and len(cleaned or "") >= _JS_SHELL_MAX_CHARS):
+                    break
+                text, diag = _scrape_job_page(client, url), {"url": url}
+            cleaned, verdict = clean_description(_strip_chrome_lines(text))
+            length_ok = verdict == "ok" and len(cleaned or "") >= filters.MIN_JUDGEABLE_DESC_CHARS
+            content_ok, content_reason = (
+                looks_like_this_role(cleaned, row.get("org", ""), row["title"])
+                if length_ok
+                else (False, "n/a (verdict/length gate failed)")
+            )
+            if length_ok and content_ok:
+                success = True
+                break
+            if length_ok:
+                # Long and clean-looking, but it does not mention this role —
+                # a shared/misdirected page (the Google Doc bug). Never save it.
+                print(
+                    f"  [{row['source_board']}] {row['title'][:45]:45s} -> [{method}] CONTENT MISMATCH "
+                    f"org={row.get('org', '')!r} url={url} reason={content_reason!r} "
+                    f"first_200={cleaned[:200]!r}"
                 )
+            else:
+                print(
+                    f"  [{row['source_board']}] {row['title'][:45]:45s} -> [{method}] FAILED "
+                    f"(verdict={verdict}, len={len(cleaned or '')}) diagnostics={diag}"
+                )
+            if method == "plain" and diag.get("status") in (404, 410):
+                gone = diag["status"]
+                break
 
-        method = "firecrawl" if diag.get("firecrawl_fallback") else "plain"
-        length_ok = verdict == "ok" and len(cleaned or "") >= filters.MIN_JUDGEABLE_DESC_CHARS
-        content_ok, content_reason = (
-            looks_like_this_role(cleaned, row.get("org", ""), row["title"])
-            if length_ok
-            else (False, "n/a (verdict/length gate failed)")
-        )
-        success = length_ok and content_ok
         updates: dict = {}
         if success:
             updates["full_description"] = cleaned[:30000]
@@ -788,39 +880,38 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
                 f"  [{row['source_board']}] {row['title'][:45]:45s} -> "
                 f"{before_len} -> {len(cleaned)} chars [{method}] ({content_reason})"
             )
-        elif length_ok and not content_ok:
-            # Fetched something long and clean-looking, but it does not
-            # mention this role at all — a shared/misdirected page (the
-            # Google Doc bug), not a real posting. Never save it.
-            if has_desc_source:
-                updates["description_source"] = "board_summary"
-            print(
-                f"  [{row['source_board']}] {row['title'][:45]:45s} -> CONTENT MISMATCH "
-                f"org={row.get('org', '')!r} url={url} method={method} reason={content_reason!r} "
-                f"first_200={cleaned[:200]!r}"
-            )
         else:
-            if has_desc_source:
-                updates["description_source"] = "board_summary"
-            print(
-                f"  [{row['source_board']}] {row['title'][:45]:45s} -> FAILED "
-                f"(verdict={verdict}, len={len(cleaned or '')}) diagnostics={diag}"
-            )
+            updates.update(final)
+            if gone:
+                # The posting itself is gone: close the role instead of
+                # judging its board card. A row the user already acted on
+                # (liked, to_apply) keeps its status.
+                closed += 1
+                print(
+                    f"  [{row['source_board']}] {row['title'][:45]:45s} -> CLOSED, posting returns {gone}"
+                )
+                if not dry_run:
+                    cur.execute(
+                        "UPDATE vacancy SET status = 'passed', status_reason = %s, "
+                        "status_updated_at = now() WHERE id = %s::uuid "
+                        "AND status IN ('unseen', 'expiring')",
+                        (f"expired: posting returns HTTP {gone}", row["id"]),
+                    )
+            else:
+                print(
+                    f"  [{row['source_board']}] {row['title'][:45]:45s} -> BOARD TEXT ONLY, every step failed"
+                )
 
-        if dry_run or not updates:
-            continue
-        set_parts = [f"{k} = %s" for k in updates]
-        cur.execute(
-            f"UPDATE vacancy SET {', '.join(set_parts)} WHERE id = %s::uuid",
-            list(updates.values()) + [row["id"]],
-        )
-        if success:
+        if success and not dry_run:
             backfill_deadline_from_text(cur, row["id"], cleaned)
             backfill_compensation_from_text(cur, row["id"], cleaned)
+        _write(row["id"], updates)
 
-    if not dry_run:
-        conn.commit()
-    print(f"Source-text pass done: {upgraded}/{len(rows)} upgraded to source_page.")
+    print(
+        f"Source-text pass done: {upgraded}/{len(rows)} upgraded to source_page, "
+        f"{closed} closed (posting gone), "
+        f"{len(rows) - upgraded - closed} left on board text (board_summary_final)."
+    )
     return upgraded, len(rows)
 
 
