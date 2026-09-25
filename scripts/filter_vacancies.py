@@ -641,8 +641,10 @@ def classify_vacancies(db: dict = None) -> dict:
             categories[geo_cat].append((vid, vac))
             continue
 
-        # Priority 6: stale blind (has URL, no description, >7 days old)
-        if has_url and not has_desc:
+        # Priority 6: stale blind (has URL, no description, >7 days old).
+        # Not after its one source-page attempt failed (board_summary_final):
+        # the judge reads whatever text it has instead.
+        if has_url and not has_desc and vac.get("description_source") != "board_summary_final":
             first_seen = vac.get("first_seen", "")
             if first_seen:
                 try:

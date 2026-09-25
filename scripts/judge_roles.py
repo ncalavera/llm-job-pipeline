@@ -106,7 +106,7 @@ ROLE_FIELDS = (
 _ROLE_SELECT = (
     "v.id, c.canonical_name AS org, v.title, v.full_description, v.deadline, "
     "v.locations, COALESCE(c.description, c.about->>'description', '') AS org_about, "
-    "v.compensation, c.visa_sponsor, v.us_eligibility"
+    "v.compensation, c.visa_sponsor, v.us_eligibility, v.snippet"
 )
 _ROLE_JOIN = "FROM vacancy v LEFT JOIN company c ON v.company_id = c.id"
 
@@ -133,7 +133,9 @@ def role_payload(row: dict) -> dict:
         "id": str(row["id"]),
         "org": row.get("org"),
         "title": row.get("title"),
-        "posting": row.get("full_description") or "",
+        # A failed download with no text at all: the listing snippet (a
+        # career-page ADP row carries only "location. pay"), else just the title.
+        "posting": row.get("full_description") or row.get("snippet") or "",
         "deadline": deadline,
         "locations": _decode_locations(row),
         "org_about": org_about or None,
@@ -167,10 +169,9 @@ def select_roles(cap: int) -> list[dict]:
         "WHERE v.status = 'unseen' "
         "AND v.scoring_excluded_reason IS NULL AND v.judge_state = 'pending' "
         # board_summary = its one source-page fetch has not run yet; wait.
-        # board_summary_final = that fetch failed: judge the board text as it
-        # is, however short, as long as there is some.
+        # board_summary_final = that fetch failed: judge the text as it is,
+        # however short — a role with none is judged on its title.
         "AND (v.description_source = 'board_summary_final' "
-        "AND length(trim(v.full_description)) > 0 "
         "OR v.description_source IS DISTINCT FROM 'board_summary' "
         "AND length(v.full_description) >= 400) "
         "ORDER BY v.created_at ASC LIMIT %s".format(select=_ROLE_SELECT, join=_ROLE_JOIN),

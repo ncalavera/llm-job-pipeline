@@ -26,7 +26,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -35,6 +35,9 @@ from bs4 import BeautifulSoup
 
 from config import get_firecrawl_client
 from fetchers import _fetch_unops_job_detail, _LOCAL_UA
+from fetchers.ats.adp import adp_posting_text
+from fetchers.ats.workable import workable_posting_text
+from fetchers.http import FetchError
 from fetchers.html_utils import _html_to_multiline, _html_to_text
 from quality import (
     _COOKIE_BANNER_RE,
@@ -53,6 +56,10 @@ from filter_vacancies import _all_locations_excluded
 #: statuses.py — the decided/application vocabularies there answer a different
 #: question, and nothing else asks this one.
 OPEN_STATUSES = ("unseen", "liked", "to_apply", "expiring")
+
+#: filter_vacancies' stale-blind reason. The source-text pass still takes such
+#: a row (its one attempt) and clears the reason, so the judge reads it.
+NO_DESCRIPTION_REASON = "no description after enrichment"
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +449,48 @@ def _fetch_linkedin_guest_text(job_id: str, diag: dict) -> tuple[str, dict]:
     return "\n".join(lines + [_html_to_multiline(str(desc))]).strip(), diag
 
 
+#: apply.workable.com/[<slug>/]j/<shortcode>: the page is a JS shell, the job
+#: API serves the body. A slug-less /j/ link 301-redirects to the slugged one.
+_WORKABLE_JOB_RE = re.compile(r"^https?://apply\.workable\.com/(?:([^/?#]+)/)?j/(\w+)")
+
+
+def _api_text(fetch, diag: dict) -> tuple[str, dict]:
+    """Run one ATS API call. Its HTTP error status lands in diag["status"],
+    so a 404/410 closes the role like a plain-page 404 does."""
+    try:
+        text = fetch()
+        if not text:
+            diag["error"] = "API returned no body (posting closed?)"
+        return text, diag
+    except FetchError as e:
+        diag["error"] = f"{e.reason}: {e.detail}"
+        if e.reason[5:].isdigit():  # "http_404"
+            diag["status"] = int(e.reason[5:])
+    except ValueError as e:
+        diag["error"] = f"bad json: {e}"
+    return "", diag
+
+
+def _fetch_workable_text(slug: str, shortcode: str, url: str, diag: dict) -> tuple[str, dict]:
+    if not slug:
+        # First hop only: a closed job's second hop leaves /j/ for the account
+        # page, and the job API's 404 for it is what closes the role.
+        try:
+            resp = requests.get(
+                url, headers={"User-Agent": _LOCAL_UA}, timeout=20, allow_redirects=False
+            )
+        except requests.RequestException as e:
+            diag["error"] = repr(e)
+            return "", diag
+        landed = urljoin(url, resp.headers.get("Location", ""))
+        slug = (_WORKABLE_JOB_RE.match(landed) or [None, None])[1]
+        if not slug:
+            diag["error"] = f"no account slug in redirect {landed!r}"
+            return "", diag
+    diag["workable_slug"] = slug
+    return _api_text(lambda: workable_posting_text(slug, shortcode), diag)
+
+
 def _looks_like_pdf(resp) -> bool:
     ctype = resp.headers.get("Content-Type", "")
     if "application/pdf" in ctype.lower():
@@ -542,6 +591,15 @@ def _fetch_plain_page_text(url: str) -> tuple[str, dict]:
     linkedin_id = _linkedin_job_id(url)
     if linkedin_id:
         return _fetch_linkedin_guest_text(linkedin_id, diag)
+
+    workable = _WORKABLE_JOB_RE.match(url)
+    if workable:
+        return _fetch_workable_text(*workable.groups(), url, diag)
+
+    # ADP's recruitment.html is a JS app; the requisition's detail JSON is public.
+    adp = parse_qs(urlparse(url).query) if "workforcenow.adp.com" in url else {}
+    if adp.get("cid") and adp.get("jobId"):
+        return _api_text(lambda: adp_posting_text(adp["cid"][0], adp["jobId"][0]), diag)
 
     try:
         resp = requests.get(url, headers={"User-Agent": _LOCAL_UA}, timeout=20)
@@ -758,7 +816,7 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
     if ids:
         cur.execute(
             "SELECT v.id, v.title, v.source_board, v.full_description, v.snippet, "
-            "v.locations, v.first_seen, c.canonical_name AS org "
+            "v.locations, v.first_seen, v.scoring_excluded_reason, c.canonical_name AS org "
             "FROM vacancy v JOIN company c ON v.company_id = c.id "
             "WHERE v.id = ANY(%s::uuid[])",
             (list(ids),),
@@ -771,23 +829,31 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
         # The board list only widens this to NULL description_source, where it
         # means "never fetched" for a summary board rather than "this text is
         # already the posting" as it does for every ATS row.
+        # A career-page row (no board) with no or short text takes the same
+        # one attempt: its adapter listed no body and nothing fetched it since.
         source_cond = (
             "(v.description_source = 'board_summary' OR "
-            "(v.source_board = ANY(%s) AND v.description_source IS NULL))"
+            "(v.source_board = ANY(%s) AND v.description_source IS NULL) OR "
+            "(v.source_board IS NULL AND v.description_source IS NULL AND "
+            "length(trim(coalesce(v.full_description, ''))) < 400))"
             if has_desc_source
             else "(v.source_board = ANY(%s) AND "
             "(v.full_description IS NULL OR length(v.full_description) < 400))"
         )
         query = f"""
             SELECT v.id, v.title, v.source_board, v.full_description, v.snippet,
-                   v.locations, v.first_seen, c.canonical_name AS org
+                   v.locations, v.first_seen, v.scoring_excluded_reason,
+                   c.canonical_name AS org
             FROM vacancy v JOIN company c ON v.company_id = c.id
             WHERE v.status = ANY(%s)
-              AND v.scoring_excluded_reason IS NULL
+              AND (v.scoring_excluded_reason IS NULL
+                   OR v.scoring_excluded_reason = %s)
               AND {source_cond}
             ORDER BY v.created_at ASC
         """
-        cur.execute(query, [list(OPEN_STATUSES), list(config.SUMMARY_ONLY_BOARDS)])
+        cur.execute(
+            query, [list(OPEN_STATUSES), NO_DESCRIPTION_REASON, list(config.SUMMARY_ONLY_BOARDS)]
+        )
     rows = cur.fetchall()
     rows = rows[:limit] if limit else rows
 
@@ -795,13 +861,17 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
     client = get_firecrawl_client()
     upgraded = closed = 0
 
-    # The one attempt failed: the judge takes the board text as it is.
+    # The one attempt failed: the judge takes the text as it is (a career-page
+    # row with none: its title and listing snippet, see judge_roles).
     final = {"description_source": "board_summary_final"} if has_desc_source else {}
 
-    def _write(row_id, updates):
+    def _write(row, updates):
         # Committed per row: a crash mid-pass keeps what was already fetched.
         if dry_run:
             return
+        if row.get("scoring_excluded_reason") == NO_DESCRIPTION_REASON:
+            updates = {**updates, "scoring_excluded_reason": None}  # attempted: judge it
+        row_id = row["id"]
         set_parts = [f"{k} = %s" for k in updates]
         if has_attempt_clock:
             set_parts.append("source_fetch_attempted_at = now()")
@@ -817,13 +887,13 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
         before_len = len(row.get("full_description") or "")
         if not url:
             print(f"  [{row['source_board']}] {row['title'][:45]:45s} -> SKIP, no apply URL")
-            _write(row["id"], final)
+            _write(row, final)
             continue
         if _is_unscrapable_host(url):
             print(
                 f"  [{row['source_board']}] {row['title'][:45]:45s} -> SKIP, unscrapable/shared-doc host ({url})"
             )
-            _write(row["id"], final)
+            _write(row, final)
             continue
 
         # The one attempt is a chain, first success wins: the company's ATS
@@ -908,7 +978,7 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
         if success and not dry_run:
             backfill_deadline_from_text(cur, row["id"], cleaned)
             backfill_compensation_from_text(cur, row["id"], cleaned)
-        _write(row["id"], updates)
+        _write(row, updates)
 
     print(
         f"Source-text pass done: {upgraded}/{len(rows)} upgraded to source_page, "
@@ -947,8 +1017,8 @@ def main():
     skipped_unscrapable = 0
     for vid, vac in all_vacs.items():
         desc = (vac.get("full_description") or "").strip()
-        if len(desc) >= 100:
-            continue
+        if len(desc) >= 100 or vac.get("description_source") == "board_summary_final":
+            continue  # the source-text pass already made its one attempt
         if filters.title_words_blacklisted(vac.get("title", "")):
             skipped_blacklist += 1
             continue
