@@ -1133,3 +1133,29 @@ def test_the_scorer_reaches_the_same_verdict_on_the_same_role(monkeypatch):
     # Title alone -> dropped. This is the disagreement the call sites must avoid
     # by passing the body they already hold.
     assert filters.company_title_filter_reason("Initech", "Senior Delivery Partner") is not None
+
+
+def test_failed_source_attempt_is_not_stale_blind(monkeypatch):
+    """After its one source-page attempt failed (board_summary_final), a row
+    with little text goes to the judge as it is — it must never be excluded
+    as stale blind again (20 career-page roles were, 2026-09-25)."""
+    import filter_vacancies as fv
+
+    def vac(source):
+        return {
+            "title": "Associate General Counsel",
+            "org": "Rockefeller Foundation",
+            "full_description": "",
+            "description_source": source,
+            "first_seen": "2026-01-01",
+            "status": "unseen",
+            "locations": [{"url": "https://example.org/job", "location": ""}],
+        }
+
+    rows = {"a": vac("board_summary_final"), "b": vac(None)}
+    monkeypatch.setattr(fv, "load_vacancies", lambda **k: rows)
+    monkeypatch.setattr(fv, "get_archived_hashes", lambda: set())
+    cats = fv.classify_vacancies()
+
+    stale = [vid for vid, _ in cats["delete_stale_blind"]]
+    assert stale == ["b"]

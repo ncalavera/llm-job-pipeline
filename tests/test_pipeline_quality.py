@@ -895,7 +895,7 @@ class TestEnrichBlindVacancies:
         assert "LIMIT" not in seen["sql"], "the one attempt must never be capped"
 
     @staticmethod
-    def _one_row_pass(monkeypatch, url, row_title="Chief of Staff", org="X"):
+    def _one_row_pass(monkeypatch, url, row_title="Chief of Staff", org="X", **row):
         """Run the pass over one row; return the SQL writes it made."""
         import enrich_blind_vacancies as ebv
         import database_supabase as dal
@@ -918,6 +918,7 @@ class TestEnrichBlindVacancies:
                         "locations": [],
                         "first_seen": None,
                         "org": org,
+                        **row,
                     }
                 ]
 
@@ -942,6 +943,50 @@ class TestEnrichBlindVacancies:
         sql, params = writes[0]
         assert "source_fetch_attempted_at = now()" in sql
         assert params == ["board_summary_final", "r1"]
+
+    def test_EBV13f_failed_career_page_row_is_attempted_and_unexcluded(self, monkeypatch):
+        """A career-page row the filter excluded as stale blind (20 rows on
+        2026-09-25) still gets its one attempt. When it fails, it is marked
+        final and the exclusion is cleared, so the judge reads what it has."""
+        writes = self._one_row_pass(
+            monkeypatch,
+            url=None,
+            source_board=None,
+            full_description="",
+            snippet="New York, NY. USD 200,000",
+            scoring_excluded_reason="no description after enrichment",
+        )
+
+        sql, params = writes[0]
+        assert "scoring_excluded_reason = %s" in sql
+        assert params == ["board_summary_final", None, "r1"]
+
+    def test_EBV13g_workable_and_adp_pages_read_through_their_job_apis(self, monkeypatch):
+        """Both pages are JS shells (Workable: empty, ADP: "switch to a supported
+        browser"), so the plain download found nothing. Their public job APIs
+        serve the body; a slug-less Workable /j/ link resolves by its redirect."""
+        import enrich_blind_vacancies as ebv
+
+        calls = []
+        monkeypatch.setattr(
+            ebv, "workable_posting_text", lambda *a: calls.append(("workable", a)) or "W body"
+        )
+        monkeypatch.setattr(
+            ebv, "adp_posting_text", lambda *a: calls.append(("adp", a)) or "A body"
+        )
+        redirect = type("R", (), {"headers": {"Location": "/ellison/j/AE604DBAD9"}})()
+        monkeypatch.setattr(ebv.requests, "get", lambda *a, **k: redirect)
+
+        assert ebv._fetch_plain_page_text("https://apply.workable.com/j/AE604DBAD9")[0] == "W body"
+        adp = (
+            "https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html"
+            "?cid=24726181-f57f&jobId=9201145556177_1"
+        )
+        assert ebv._fetch_plain_page_text(adp)[0] == "A body"
+        assert calls == [
+            ("workable", ("ellison", "AE604DBAD9")),
+            ("adp", ("24726181-f57f", "9201145556177_1")),
+        ]
 
     def test_EBV13d_ats_adapter_step_wins_before_the_plain_download(self, monkeypatch):
         """An apply URL on an ATS we read comes from the company adapter's

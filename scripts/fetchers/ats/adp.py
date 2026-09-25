@@ -3,7 +3,8 @@
 import hashlib
 
 from fetchers import http
-from fetchers.http import _LOCAL_UA
+from fetchers.html_utils import _html_to_multiline
+from fetchers.http import _LOCAL_UA, FetchError
 from fetchers.registry import company_fetcher, register_company
 
 
@@ -36,6 +37,25 @@ def _adp_location(locs) -> str:
         if name:
             names.append(name.strip())
     return " | ".join(dict.fromkeys(names))
+
+
+_REQUISITIONS = (
+    "https://workforcenow.adp.com/mascsr/default/careercenter/public/"
+    "events/staffing/v1/job-requisitions"
+)
+
+
+def adp_posting_text(cid: str, job_id: str, cc_id: str = "") -> str:
+    """One requisition's description from the public detail endpoint (free,
+    no auth). "" when ADP answers with an empty requisition: a closed posting,
+    or a portal that needs its ``ccId`` (Skoll). Raises FetchError."""
+    url = f"{_REQUISITIONS}/{job_id}?cid={cid}&lang=en_US"
+    if cc_id:
+        url += f"&ccId={cc_id}"
+    resp = http.get(
+        url, headers={"Accept": "application/json", "User-Agent": _LOCAL_UA}, timeout=20
+    )
+    return _html_to_multiline(resp.json().get("requisitionDescription") or "")
 
 
 def _adp_job_url(portal: str, cid: str, item_id: str) -> str:
@@ -72,18 +92,15 @@ def fetch_adp_json(org_name: str, config: dict) -> list[dict]:
     Some portals (e.g. Skoll) return an empty feed unless the career-center id
     ``ccId`` is also passed; set ``ats_config.ccId`` to append it.
     Parses ``jobRequisitions`` into job dicts. The list feed carries no
-    description, so the snippet is built from location + pay range (a per-job
-    detail fetch is skipped — these boards are low-fit/US-only). Unblocks
-    Rockefeller and Carnegie (WS3/U5).
+    description: each job's body comes from its detail endpoint
+    (adp_posting_text), and the snippet is built from location + pay range.
+    Unblocks Rockefeller and Carnegie (WS3/U5).
     """
     cid = _adp_cid(config)
     if not cid:
         print(f"  [{org_name}] ADP: no cid configured (ats_slug/ats_config.cid)")
         return []
-    url = (
-        "https://workforcenow.adp.com/mascsr/default/careercenter/public/"
-        f"events/staffing/v1/job-requisitions?cid={cid}"
-    )
+    url = f"{_REQUISITIONS}?cid={cid}"
     cc_id = ((config.get("ats_config") or {}).get("ccId") or config.get("ccId") or "").strip()
     if cc_id:
         url += f"&ccId={cc_id}&lang=en_US"
@@ -103,6 +120,11 @@ def fetch_adp_json(org_name: str, config: dict) -> list[dict]:
             continue
         item_id = str(r.get("itemID") or "")
         location = _adp_location(r.get("requisitionLocations"))
+        try:
+            body = adp_posting_text(cid, item_id, cc_id) if item_id else ""
+        except (FetchError, ValueError) as e:  # ValueError: not JSON
+            print(f"  [{org_name}] ADP detail failed for {item_id}: {e!r}")
+            body = ""
         jobs.append(
             {
                 "title": title,
@@ -112,6 +134,7 @@ def fetch_adp_json(org_name: str, config: dict) -> list[dict]:
                 "external_id": item_id
                 or hashlib.md5(f"{org_name}:{title}".encode()).hexdigest()[:12],
                 "snippet": _adp_snippet(location, r.get("payGradeRange")),
+                "full_description": body,
             }
         )
     print(f"  [{org_name}] Found {len(jobs)} vacancies")

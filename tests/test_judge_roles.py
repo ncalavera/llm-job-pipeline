@@ -92,6 +92,13 @@ def test_role_payload_decodes_row_into_the_ten_fields():
     assert len(role["org_about"]) == 500  # truncated, matching dump.sh's LEFT(...,500)
 
 
+def test_role_payload_sends_the_snippet_when_the_download_left_no_text():
+    """A career-page role whose one download failed has no posting text; the
+    judge reads its listing snippet instead of an empty posting."""
+    role = jr.role_payload({"id": "a", "full_description": "", "snippet": "New York. USD 200k"})
+    assert role["posting"] == "New York. USD 200k"
+
+
 # ---------------------------------------------------------------------------
 # Completeness check
 # ---------------------------------------------------------------------------
