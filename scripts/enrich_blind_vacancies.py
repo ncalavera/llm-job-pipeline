@@ -328,7 +328,10 @@ def _workday_cxs_url(url: str) -> str | None:
     if not _WORKDAY_HOST_RE.match(parsed.netloc.lower()):
         return None
     tenant = parsed.netloc.split(".", 1)[0].lower()
-    parts = parsed.path.strip("/").split("/", 1)
+    # A locale prefix (/en-GB/SITE/job/...) is not part of the cxs path:
+    # with it the API answers HTTP 406 (found live 2026-09-25, usyd.wd105).
+    path = re.sub(r"^/[a-z]{2}-[A-Z]{2}(?=/)", "", parsed.path)
+    parts = path.strip("/").split("/", 1)
     if len(parts) < 2 or not parts[1]:
         return None
     site, rest = parts

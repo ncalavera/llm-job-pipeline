@@ -1007,6 +1007,12 @@ class TestEnrichBlindVacancies:
             "United-States-Washington-DC-Headquarters-Office/"
             "Senior-HR-Business-Partner_JR2708"
         )
+        # A locale prefix is dropped: the cxs API answers 406 with it.
+        assert ebv._workday_cxs_url(
+            "https://usyd.wd105.myworkdayjobs.com/en-GB/USYD_EXTERNAL_CAREER_SITE/job/C/R_1"
+        ) == (
+            "https://usyd.wd105.myworkdayjobs.com/wday/cxs/usyd/USYD_EXTERNAL_CAREER_SITE/job/C/R_1"
+        )
         # A non-Workday host never maps.
         assert ebv._workday_cxs_url("https://jobs.ashbyhq.com/PRISM/abc") is None
 
