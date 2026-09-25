@@ -72,7 +72,7 @@ from database_supabase import (  # noqa: E402
     _normalize_title_strong,
     _title_segment_keys,
     _title_token_overlap,
-    _titles_equal_sans_stopwords,
+    _same_url_titles_match,
     extract_req_key,
     make_normalized_id,
     description_fingerprint,
@@ -271,9 +271,9 @@ def _cluster(rows):
             # Shared normalized apply URL = one requisition — union even when
             # neither the title key nor the description fingerprint matches (a
             # board's stub body vs the ATS's full JD). Mirrors the save-path
-            # same-URL merge: titles must contain each other or differ only by
-            # connective words, so orgs stamping one generic careers URL on
-            # every role never collapse together.
+            # same-URL merge (_same_url_titles_match): one title's significant
+            # words must be a subset of the other's, so orgs stamping one
+            # generic careers URL on every role never collapse together.
             for u in _urls(r):
                 prev_u = url_seen.get(u)
                 if prev_u is None:
@@ -281,7 +281,7 @@ def _cluster(rows):
                     continue
                 ta = _normalize_title_strong(r.get("title") or "")
                 tb = _normalize_title_strong(by_id[prev_u].get("title") or "")
-                if ta and tb and (ta in tb or tb in ta or _titles_equal_sans_stopwords(ta, tb)):
+                if _same_url_titles_match(ta, tb):
                     uf.union(r["id"], prev_u)
             # Shared ATS requisition key = one posting even when the boards
             # mangled everything else (org spelling, title wording, URL
@@ -329,7 +329,7 @@ def _cluster_cross_company(rows):
                 continue  # same-company match is _cluster's job, not this one
             ta = _normalize_title_strong(r.get("title") or "")
             tb = _normalize_title_strong(prev.get("title") or "")
-            if ta and tb and (ta in tb or tb in ta or _titles_equal_sans_stopwords(ta, tb)):
+            if _same_url_titles_match(ta, tb):
                 uf.union(r["id"], prev_id)
 
     groups: dict = {}

@@ -358,9 +358,9 @@ def test_job_identifying_params_survive(dal):
     assert n(gh) == gh
 
 
-def test_titles_equal_sans_stopwords(dal):
+def test_same_url_titles_match(dal):
     strong = dal._normalize_title_strong
-    eq = dal._titles_equal_sans_stopwords
+    eq = dal._same_url_titles_match
     assert eq(strong("Director of GLP-1 in India Fund"), strong("Director, GLP-1 in India Fund"))
     assert not eq(strong("Director of Finance"), strong("Director of Programs"))
 
@@ -510,9 +510,23 @@ def test_trailing_slash_is_not_a_second_req(dal):
     assert n("https://acme.test/") == n("https://acme.test")
 
 
-def test_titles_equal_sans_stopwords_tolerates_or(dal):
+def test_same_url_titles_match_word_subset(dal):
     strong = dal._normalize_title_strong
-    eq = dal._titles_equal_sans_stopwords
+    eq = dal._same_url_titles_match
+    # One req on 80,000 Hours and Consultants for Impact (live pair, 2026-09-25).
+    assert eq(
+        strong("Programme Manager, International Programme on AI Evaluation"),
+        strong(
+            "Programme Manager, International Programme, AI Evaluation, Capabilities and Safety"
+        ),
+    )
+    # Two roles on one generic careers URL stay apart.
+    assert not eq(strong("Programme Manager, Health"), strong("Programme Manager, Climate"))
+
+
+def test_same_url_titles_match_tolerates_or(dal):
+    strong = dal._normalize_title_strong
+    eq = dal._same_url_titles_match
     assert eq(strong("COO / Director of Operations"), strong("COO or Director of Operations"))
     assert not eq(strong("Director of Finance"), strong("Director or Head of Programs"))
 

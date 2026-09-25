@@ -677,22 +677,26 @@ _TRACKING_PARAMS = {"ref", "src", "source", "fbclid", "gclid", "mc_cid", "mc_eid
 # the slash already normalizes to whitespace, so the spelled-out connective must
 # fold too. Role NAMES are never stopwords, so two different roles sharing one
 # generic careers URL still keep distinct significant words.
-_TITLE_STOPWORDS = {"of", "the", "a", "an", "and", "or", "for", "to"}
+_TITLE_STOPWORDS = {"of", "the", "a", "an", "and", "or", "for", "to", "on", "in", "at"}
 
 
-def _titles_equal_sans_stopwords(a: str, b: str) -> bool:
-    """True when two strong-normalized titles carry the same significant words.
+def _same_url_titles_match(a: str, b: str) -> bool:
+    """Title rule for two rows sharing one apply URL (save path and sweep).
 
-    Used ONLY under the same-apply-URL merge — multiset equality (not
-    containment) of non-stopword tokens, so connective-word retitles
-    ("Director of X" == "Director, X") and reorderings ("Incubation Program,
-    Charity Entrepreneurship" == "Charity Entrepreneurship Incubation
-    Program") of ONE req's title match, while different roles that happen to
-    share a generic careers URL never do.
+    Strong-normalized titles match when one contains the other, or when one
+    title's significant words are a subset of the other's ("Programme Manager,
+    International Programme on AI Evaluation" vs "..., AI Evaluation,
+    Capabilities and Safety"). Two roles on one generic careers URL each keep
+    a word the other lacks ("Manager, Health" vs "Manager, Climate"), so they
+    never match.
     """
-    fold_a = sorted(w for w in a.split() if w not in _TITLE_STOPWORDS)
-    fold_b = sorted(w for w in b.split() if w not in _TITLE_STOPWORDS)
-    return bool(fold_a) and fold_a == fold_b
+    if not a or not b:
+        return False
+    if a in b or b in a:
+        return True
+    sa = {w for w in a.split() if w not in _TITLE_STOPWORDS}
+    sb = {w for w in b.split() if w not in _TITLE_STOPWORDS}
+    return bool(sa and sb) and (sa <= sb or sb <= sa)
 
 
 def normalize_apply_url(url) -> str:
@@ -985,9 +989,9 @@ def _find_existing_vacancy(
     # a retitled re-listing of it ("Director of MEAL" -> "Director of MEAL,
     # Africa"; "Program Manager, X" -> "Program Manager, X - Deal Operations")
     # is the SAME role even when the normalized titles no longer match. Two
-    # guards keep this from over-merging: one normalized title must CONTAIN the
-    # other (orgs whose fetcher stamps one generic careers URL on every role
-    # never pass this), and the batch-alive rule below still applies (both
+    # guards keep this from over-merging: one title's significant words must be
+    # a subset of the other's (_same_url_titles_match; orgs whose fetcher
+    # stamps one generic careers URL on every role never pass this), and the batch-alive rule below still applies (both
     # spellings live in ONE fetch stay two rows — e.g. a level pair sharing a
     # landing URL).
     if candidate_url and candidate_title:
@@ -995,7 +999,7 @@ def _find_existing_vacancy(
         if hit is not None and hit["dedup_hash"] not in batch_hashes:
             a = _normalize_title_strong(candidate_title)
             b = _normalize_title_strong(hit.get("title", ""))
-            if a and b and (a in b or b in a or _titles_equal_sans_stopwords(a, b)):
+            if _same_url_titles_match(a, b):
                 cur.execute("SELECT * FROM vacancy WHERE id = %s", (hit["id"],))
                 cand = cur.fetchone()
                 if cand is not None:
