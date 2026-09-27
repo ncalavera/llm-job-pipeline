@@ -2,6 +2,7 @@
 .env
 .env.local
 config/user_profile.md
+config/junk_profile.json
 # Backups of the two secret-bearing files above. Without these lines a plain
 # `git add -A` publishes database passwords and the owner's profile to a PUBLIC
 # repo (found 2026-08-24: .env.pre-migration-backup was untracked, not ignored).

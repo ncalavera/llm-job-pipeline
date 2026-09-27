@@ -26,9 +26,13 @@ Layout on the server (user `jobsearch` — replace with your own):
    install `requirements.txt`. Then replace the `jobsearch` placeholder in
    the unit files with that user's actual name:
    `sed -i "s|/home/jobsearch|/home/$USER|g; s|^User=jobsearch|User=$USER|" deploy/forge/*.service deploy/forge/*.timer`.
+   The junk filter needs the private tool, outside `requirements.txt`:
+   `uv pip install --python .venv/bin/python -e ~/Projects/tools/nikita-tools[baseline]`.
 2. Create `/home/$USER/jobsearch/` with `.env` and `claude-token` (mode 600).
    The token comes from `claude setup-token` run on any logged-in machine.
-3. Copy `config/user_profile.md` from the laptop into the checkout.
+3. Copy `config/user_profile.md` and `config/junk_profile.json` (the junk
+   filter's profile card; format in `config/junk_profile.example.json`) from
+   the laptop into the checkout.
 4. Apply migrations: `.venv/bin/python scripts/migrate.py`.
 5. Set Claude Code retention and privacy on forge:
    `chmod 700 ~/.claude` and `"cleanupPeriodDays": 7` in `~/.claude/settings.json`.

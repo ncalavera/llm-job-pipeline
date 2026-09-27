@@ -61,6 +61,11 @@ os.environ["USER_PROFILE_PATH"] = os.path.join(
     "config",
     "user_profile.example.md",
 )
+# Same for the junk filter's profile card (config/junk_profile.json, gitignored):
+# tests read a neutral fixture, never the maintainer's real card.
+os.environ["JUNK_PROFILE_PATH"] = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "fixtures", "junk_profile.json"
+)
 
 
 @pytest.fixture(autouse=True)

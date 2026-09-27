@@ -57,7 +57,7 @@ export const ARCHITECTURE_DETAILS = [
     src: `flowchart LR
     V[validate profile] --> P[preflight DB check] --> LR2[learning review]
     LR2 --> F[fetch: career sites + boards] --> EN[enrich blind roles]
-    EN --> FI[filter junk] --> SP[combined discovery<br/>unscored: score + missing facts<br/>below 40: missing facts only<br/>40+: unchanged]
+    EN --> FI[filter junk] --> JF[junk filter<br/>off / shadow / live] --> SP[combined discovery<br/>unscored: score + missing facts<br/>below 40: missing facts only<br/>40+: unchanged]
     SP --> TG[Inbox count + link] --> PU[publish snapshot once]
     PU --> VD[all retained vacancies in Inbox<br/>preparation never hides a role]
     F --> RAW[Algolia source observations<br/>raw listings + complete or partial run]

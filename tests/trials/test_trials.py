@@ -297,6 +297,7 @@ def test_stage_order_and_handlers_are_owned_by_the_driver(monkeypatch, tmp_path)
         "enrich",
         "dedup",
         "filter",
+        "junk_filter",
         "company_scoring",
         "vacancy_scoring",
         "screening_prep",

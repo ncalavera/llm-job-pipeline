@@ -1,0 +1,12 @@
+{
+  "pay_target_eur_month": 8000,
+  "card": {
+    "lives_in": "Test City (UTC+0)",
+    "target_places": ["remote worldwide"],
+    "needs_visa_sponsorship": false,
+    "experience": "about 6 years in operations",
+    "degrees": "no PhD",
+    "languages": ["English (native)"],
+    "pay_target": "about EUR 8,000 per month gross"
+  }
+}

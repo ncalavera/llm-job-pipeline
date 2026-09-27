@@ -19,6 +19,7 @@ scheduler — one command a day.
 | `scripts/prompts/` | The LLM prompt templates (Markdown). Owner-agnostic: the rubric, salary anchor and reference orgs are injected from your profile, never baked in. |
 | `config/defaults.toml` | Machine mechanics — thresholds, geo tables, junk words, the `[boards.*]` catalogue, the `[volume]` window. Neutral; ships for any field. |
 | `config/user_profile.example.md` | The template for your candidate profile. Copy to `config/user_profile.md` (gitignored) — the single place personal taste lives. |
+| `config/junk_profile.example.json` | The template for the junk filter's profile card and pay target. Copy to `config/junk_profile.json` (gitignored); without it the junk filter skips and every role goes to scoring. |
 | `sql/` | `schema.sql` (Postgres) + `schema.sqlite.sql` (SQLite) and `migrations/` (numbered, dual-dialect). |
 | `server.js` | The dashboard server — static `public/` plus every `/api/*` route against local Postgres. Contracts in [`DASHBOARD.md`](../DASHBOARD.md). |
 | `public/` | The static dashboard (vanilla JS/CSS) — six sections: Today, Vacancies, Companies, Applications, Boards, Settings. |
@@ -66,12 +67,13 @@ not in a runbook and not in anyone's head (STRATEGY guardrail 4).
 | 5 | `fetch` | AUTO | Pull new vacancies from tracked companies + enabled boards (heartbeat to disk). |
 | 6 | `enrich` | AUTO | Backfill blind descriptions via Firecrawl (skips cleanly if unset). |
 | 7 | `filter` | AUTO | Quality report, dedup, geo buckets, gone-from-source archive. Never auto-deletes silently. |
-| 8 | `company_scoring` | SKIP | Historical checkpoint retained; optional `score_companies.py` is outside the daily path. |
-| 9 | `vacancy_scoring` | SKIP | Historical checkpoint retained; optional `score_vacancies.py` is outside the daily path. |
-| 10 | `screening_prep` | GATE | Combined discovery: one request per vacancy. Unscored roles get numeric scoring plus quoted facts/profile comparison; existing roles below 40 get only stale or missing facts; roles at 40+ are untouched. |
-| 11 | `verdicts` | SKIP | Human decisions happen in the dashboard Screen view. |
-| 12 | `digest` | AUTO | One score-free Telegram summary (scheduled runs only), before publish. |
-| 13 | `publish` | AUTO | Always publish; warn loudly on a dirty run (see the publish gate). |
+| 8 | `junk_filter` | AUTO | `[junk_filter] mode` off (default), shadow or live: asks the junk task about each role the scorer would score tonight; live marks clear junk `junk_filter: <question> <p>` (undo with `junk_filter_stage.py --restore`). Fails open. |
+| 9 | `company_scoring` | SKIP | Historical checkpoint retained; optional `score_companies.py` is outside the daily path. |
+| 10 | `vacancy_scoring` | SKIP | Historical checkpoint retained; optional `score_vacancies.py` is outside the daily path. |
+| 11 | `screening_prep` | GATE | Combined discovery: one request per vacancy. Unscored roles get numeric scoring plus quoted facts/profile comparison; existing roles below 40 get only stale or missing facts; roles at 40+ are untouched. |
+| 12 | `verdicts` | SKIP | Human decisions happen in the dashboard Screen view. |
+| 13 | `digest` | AUTO | One score-free Telegram summary (scheduled runs only), before publish. |
+| 14 | `publish` | AUTO | Always publish; warn loudly on a dirty run (see the publish gate). |
 
 Exit codes the runbook branches on: `0` done, `10` gate, `20` abort
 (bad profile / DB outage — fix, do not retry blindly), `30` stage error

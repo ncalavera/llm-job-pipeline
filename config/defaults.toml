@@ -687,6 +687,24 @@ audit_sample_pct = 10
 timeout = 600
 
 # ===========================================================================
+# Junk filter in front of the scorer (scripts/junk_filter_stage.py). off by
+# default: shadow logs what it would skip, live marks skipped roles
+# "junk_filter: <question> <p>" (undo: junk_filter_stage.py --restore).
+# ===========================================================================
+[junk_filter]
+mode = "off"
+engine = "jev"
+cut = 0.95
+max_per_run = 200
+scratch_dir = ""
+baseline_model = ""
+# Live mode sends this % of each night's skips to the screener Review tab. A
+# keep/unsure verdict there, given after live_since (ISO date, set on go-live),
+# restores the role and forces the stage back to shadow until the date moves.
+sample_pct = 10
+live_since = ""
+
+# ===========================================================================
 # Telegram digest — defaults for the optional daily digest. Env vars still win
 # (DIGEST_HOT_SCORE, DIGEST_DEADLINE_SOON_DAYS, DIGEST_LIMIT, DIGEST_MIN_SCORE).
 # ===========================================================================

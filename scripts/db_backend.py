@@ -638,6 +638,9 @@ _PIPELINE_ENTRYPOINTS = frozenset(
         # (the one exclusion pass) on every default run.
         "filter_vacancies.py",
         "find_company_urls.py",
+        # Writes vacancy.screening['junk'] and, in live mode, the junk-filter
+        # reason; run_daily.py runs it as a subprocess stage.
+        "junk_filter_stage.py",
         "learning.py",
         "migrate.py",
         # Writes the combined nightly discovery result (score + facts). Missing

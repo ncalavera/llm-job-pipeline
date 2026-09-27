@@ -824,6 +824,7 @@ def persist_scoring_exclusions(categories: dict) -> dict:
       reasons       — histogram of the reasons actually stamped
     """
     from database_supabase import _scoring_excluded_supported
+    from junk_task import REASON_PREFIX
 
     empty = {
         "persisted": False,
@@ -853,7 +854,11 @@ def persist_scoring_exclusions(categories: dict) -> dict:
     for vid, reason in reason_by_id.items():
         whens.append("WHEN id = %s::uuid THEN %s")
         params.extend([vid, reason])
-    case_sql = "CASE " + " ".join(whens) + " ELSE NULL END" if whens else "NULL"
+    # A junk-filter skip is not this pass's to clear (KTD3): only its restore does that.
+    # The pattern is a parameter: a literal % would clash with psycopg's %s.
+    keep_sql = "CASE WHEN scoring_excluded_reason LIKE %s THEN scoring_excluded_reason END"
+    params.append(REASON_PREFIX + "%")
+    case_sql = "CASE " + " ".join(whens) + f" ELSE {keep_sql} END" if whens else keep_sql
 
     scope_sql = (
         "WHERE (llm_score IS NULL OR llm_score < 0) AND status = 'unseen' AND id = ANY(%s::uuid[])"
@@ -876,7 +881,7 @@ def persist_scoring_exclusions(categories: dict) -> dict:
     conn.commit()
     cur.close()
 
-    stamped = [reason for vid, reason in written if reason]
+    stamped = [reason for vid, reason in written if reason and vid in reason_by_id]
     cleared = sum(1 for vid, reason in written if not reason and before.get(vid))
     return {
         "persisted": True,

@@ -364,6 +364,19 @@ def test_stale_reason_is_cleared_in_the_same_statement(env):
     assert result["cleared"] == 1
 
 
+def test_junk_filter_reason_survives_the_rule_filter(env):
+    """KTD3: the rule filter keeps a junk-filter skip; other stale reasons still clear."""
+    db, fv = env
+    junk = _seed(db, "JunkOrg", "Operations Lead", reason="junk_filter: right_to_work 0.98")
+    stale = _seed(db, "CleanOrg", "Backend Engineer", reason="junk title: talent pool")
+
+    result = _run_pass(fv)
+
+    assert _reason(db, junk) == "junk_filter: right_to_work 0.98"
+    assert _reason(db, stale) is None
+    assert result["cleared"] == 1
+
+
 # ---------------------------------------------------------------------------
 # What was DECIDED vs what the database actually carries
 # ---------------------------------------------------------------------------

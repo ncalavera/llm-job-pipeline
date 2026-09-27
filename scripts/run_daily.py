@@ -112,6 +112,7 @@ STAGE_ORDER = [
     "enrich",  # AUTO  — backfill blind descriptions (Firecrawl)
     "dedup",  # AUTO  — merge repeated copies of one role; report look-alikes
     "filter",  # AUTO  — quality report; never auto-deletes
+    "junk_filter",  # AUTO  — skip clear junk before the scorer; off | shadow | live, fails open
     "company_scoring",  # SKIP — legacy scripts remain available
     "vacancy_scoring",  # SKIP — no numeric scores in the daily path
     "screening_prep",  # GATE — combined cheap scoring + facts
@@ -179,6 +180,7 @@ STAGE_ABOUT = {
     "enrich": "backfilling blind vacancy descriptions",
     "dedup": "removing repeated copies of the same role",
     "filter": "quality-filtering the freshly fetched roles",
+    "junk_filter": "asking the junk filter which roles the scorer can skip",
     "company_scoring": "WANT-scoring new candidate companies",
     "vacancy_scoring": "scoring new roles (cheap screen, then strong finalists)",
     "screening_prep": "scoring unscored roles and preparing review facts",
@@ -1614,6 +1616,37 @@ def _h_filter(state, entry, opts):
     return "advance", note
 
 
+def _h_junk_filter(state, entry, opts):
+    """Runs junk_filter_stage.py. Fails open: a crash never stops the night and
+    never skips a role, so it is recorded and the run moves on to scoring."""
+    res = _run_capture(_py("junk_filter_stage.py"), opts)
+    if res.returncode != 0:
+        return "error_continue", f"junk filter exited with code {res.returncode}: {res.stderr[-400:]}"
+    try:
+        data = _extract_json(res.stdout)
+    except Exception:
+        return "error_continue", "junk filter did not emit valid JSON"
+    skipped = data.get("skipped")
+    if skipped:
+        # Off is a choice; a missing key or engine is a note, like company_scoring without Firecrawl.
+        return ("skip" if skipped.startswith("junk filter is off") else "advance"), skipped
+    c = data.get("counts") or {}
+    entry["junk_filter"] = {k: data.get(k) for k in ("mode", "engine", "counts", "by_question",
+                                                      "seconds_saved", "errors")}
+    verb = "skipped" if data.get("mode") == "live" else "would skip"
+    n = c.get("skipped", 0) if data.get("mode") == "live" else c.get("would_skip", 0)
+    note = (
+        f"Junk filter ({data.get('mode')}, {data.get('engine')}) checked {_roles(c.get('checked', 0))}: "
+        f"{verb} {n}, {c.get('overridden', 0)} kept by an override, {c.get('errors', 0)} errors sent "
+        f"to scoring; about {round((data.get('seconds_saved') or 0) / 60)} scorer minutes saved."
+    )
+    if data.get("stopped"):
+        note = f"Live skipping stopped, ran as shadow: {data['stopped']}. " + note
+    if data.get("by_question"):
+        note += " By question: " + ", ".join(f"{q} {k}" for q, k in sorted(data["by_question"].items())) + "."
+    return "advance", note
+
+
 def _h_company_scoring(state, entry, opts):
     # Screen-gate resume: the agent screened the pending payloads with cheap
     # subagents and applied decisions via screen_candidates --save (an
@@ -2403,6 +2436,7 @@ HANDLERS = {
     "enrich": _h_enrich,
     "dedup": _h_dedup,
     "filter": _h_filter,
+    "junk_filter": _h_junk_filter,
     "company_scoring": _h_optional_scoring,
     "vacancy_scoring": _h_optional_scoring,
     "screening_prep": _h_screening_prep,

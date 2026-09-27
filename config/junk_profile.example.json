@@ -1,0 +1,14 @@
+{
+  "pay_target_eur_month": 5000,
+  "card": {
+    "passport": "<your citizenship>",
+    "lives_in": "<city, country (UTC offset)>",
+    "target_places": ["<city>", "remote worldwide"],
+    "needs_visa_sponsorship": true,
+    "cannot_meet": "<work-authorisation requirements you cannot meet>",
+    "experience": "<years and fields of experience>",
+    "degrees": "<degrees you do not hold, e.g. no PhD, no law degree>",
+    "languages": ["English (fluent)"],
+    "pay_target": "about EUR 5,000 per month gross"
+  }
+}

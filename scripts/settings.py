@@ -229,6 +229,32 @@ def judge() -> dict:
     return out
 
 
+def junk_filter() -> dict:
+    """The [junk_filter] dials for ``scripts/junk_filter_stage.py`` (plan
+    2026-09-27 jev junk filter, KTD5). ``mode`` is off | shadow | live and
+    defaults to off; ``engine`` is jev | baseline. ``cut`` and
+    ``baseline_model`` feed the baseline engine only (Jev uses junk_task.CUT).
+    ``sample_pct`` of live skips go to the Review tab; ``live_since`` (ISO date)
+    bounds the R17 stop check to verdicts given after go-live (KTD10).
+    An unknown mode or engine falls back to the safe default, never raises."""
+    sec = _section("junk_filter")
+    mode = str(sec.get("mode", "off")).strip().lower()
+    engine = str(sec.get("engine", "jev")).strip().lower()
+    cut = float(_num(sec, "cut", 0.95))
+    max_per_run = int(_num(sec, "max_per_run", 200))
+    sample_pct = int(_num(sec, "sample_pct", 10))
+    return {
+        "mode": mode if mode in ("off", "shadow", "live") else "off",
+        "engine": engine if engine in ("jev", "baseline") else "jev",
+        "cut": cut if 0 < cut <= 1 else 0.95,
+        "max_per_run": max_per_run if max_per_run > 0 else 200,
+        "scratch_dir": str(sec.get("scratch_dir", "")).strip(),
+        "baseline_model": str(sec.get("baseline_model", "")).strip(),
+        "sample_pct": sample_pct if 0 <= sample_pct <= 100 else 10,
+        "live_since": str(sec.get("live_since", "")).strip(),
+    }
+
+
 def volume() -> dict:
     """The [volume] dials with neutral fallbacks. Never raises.
 
