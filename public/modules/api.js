@@ -77,6 +77,10 @@ export function saveToServer(id, status) {
           false,
         );
         return true;
+      } else if (r.status === 410) {
+        // Verdicts live in the Screener only (server.js verdictsInScreener).
+        showSyncStatus("Use the Screener for verdicts: screener.nikitasolovev.com", true);
+        return false;
       } else {
         console.error("Save API error:", r.status, r.statusText);
         state.apiHealthy = false;
