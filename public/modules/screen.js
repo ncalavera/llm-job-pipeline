@@ -1023,6 +1023,7 @@ export function renderScreen() {
     '<div class="scr-head"><h2 class="scr-title">' +
     escHtml(T("screen_review_title", "Review vacancies")) +
     "</h2></div>" +
+    '<p class="scr-empty">Use the Screener for verdicts: <a href="https://screener.nikitasolovev.com">screener.nikitasolovev.com</a>. This page no longer saves them.</p>' +
     tabsHtml(model.lists, T) +
     inboxFiltersHtml() +
     '<div class="scr-review-layout"><nav class="scr-batch-nav" aria-label="Job functions">' +

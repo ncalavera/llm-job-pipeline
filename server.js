@@ -481,6 +481,13 @@ export const APPLICATION_STATUSES = [
   "accepted",
 ];
 
+// Vacancy verdicts live in the Screener only (Nikita, 27.09.2026). The dashboard
+// refuses verdict writes; board moves (to_apply, applied, ...) still save.
+// Revert without a code change: DASHBOARD_VERDICTS=on in the unit's environment.
+const verdictsInScreener = () => process.env.DASHBOARD_VERDICTS !== "on";
+const useScreener = (res) =>
+  sendJson(res, 410, { error: "Vacancy verdicts moved to the Screener", screener: "https://screener.nikitasolovev.com" });
+
 async function handleSave(req, res) {
   if (wrappedPreamble(req, res, "POST", "save")) return;
   const { id, status } = await readJsonBody(req);
@@ -488,6 +495,7 @@ async function handleSave(req, res) {
     return sendJson(res, 400, { error: "Missing id or status" });
   if (!VALID_STATUSES.includes(status))
     return sendJson(res, 400, { error: "Invalid status" });
+  if (verdictsInScreener() && SCREENING_STATUSES.includes(status)) return useScreener(res);
 
   // status_updated_at moves with every stage, so it can never answer "when did
   // I send this" — on a declined row it holds the date of the rejection.
@@ -528,6 +536,7 @@ const FEEDBACK_UUID =
 const SCREENING_STATUSES = ["unseen", "liked", "passed", "skipped", "unsure", "expiring"];
 async function handleScreeningDecision(req, res) {
   if (piiPreamble(req, res, "screening-decision", "POST")) return;
+  if (verdictsInScreener()) return useScreener(res);
   if (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] || ""))
     return sendJson(res, 415, { error: "JSON required" });
   const { changes, operation_id } = await readJsonBody(req);

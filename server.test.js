@@ -28,6 +28,23 @@ import {
 } from "./server.js";
 
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
+process.env.DASHBOARD_VERDICTS = "on"; // the verdict-write tests below; the Screener-only default is tested on its own
+
+test("verdicts go to the Screener by default: a verdict save is refused, a board move saves", async () => {
+  delete process.env.DASHBOARD_VERDICTS;
+  try {
+    await withStubDb([["UPDATE vacancy", [{ id: "v1" }]]], async (seen) => {
+      const verdict = await call({ method: "POST", url: "/api/save", body: { id: "v1", status: "liked" } });
+      assert.equal(verdict.statusCode, 410);
+      assert.equal(JSON.parse(verdict.body).screener, "https://screener.nikitasolovev.com");
+      const move = await call({ method: "POST", url: "/api/save", body: { id: "v1", status: "to_apply" } });
+      assert.equal(move.statusCode, 200);
+      assert.equal(seen.length, 1);
+    });
+  } finally {
+    process.env.DASHBOARD_VERDICTS = "on";
+  }
+});
 
 test("computeETag wraps updated_at in quotes", () => {
   assert.equal(
