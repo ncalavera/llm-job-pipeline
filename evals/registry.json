@@ -1,0 +1,10 @@
+{
+ "jobsearch-mail-watch": {
+  "paths": [
+   "scripts/mail_watch.py"
+  ],
+  "cases": "evals/jobsearch-mail-watch/cases",
+  "run": "bash evals/jobsearch-mail-watch/run.sh",
+  "output": "result.txt"
+ }
+}

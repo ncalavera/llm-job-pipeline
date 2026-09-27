@@ -21,7 +21,12 @@ public/data.js
 private/
 
 # Personal labelled eval set — never publish
-evals/
+evals/golden_set*
+
+# eval-gate case fixtures (DHA-766) — may hold real mail/vacancy content, kept
+# machine-local like the rest of ~/jobsearch. evals/registry.json and each
+# evals/<workflow>/{run.sh,rubric.md,corrections.md,results/} stay tracked.
+evals/*/cases/
 
 # Internal dev docs — keep out of the public Pages repo. docs/ also serves the
 # GitHub Pages landing, so allow-list only the public assets + the committed
