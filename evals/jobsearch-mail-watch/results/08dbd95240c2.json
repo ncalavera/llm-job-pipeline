@@ -1,0 +1,33 @@
+{
+ "workflow": "jobsearch-mail-watch",
+ "version": "08dbd95240c2",
+ "commit": "7acfba9d860060296242711ba64bd2a71a88c295",
+ "date": "2026-09-27T14:25:26",
+ "machine": "forge2",
+ "judge": "opus via model-step",
+ "verdict": "same",
+ "pass": true,
+ "cases": [
+  {
+   "case": "noise-only-no-alert",
+   "verdict": "same",
+   "new_was": "B",
+   "regressions": [],
+   "reason": "Outputs A and B are identical. Both mark all 4 messages as \"no match\", which is correct. The Indeed, GitHub and Glassdoor senders are on exclude_domains, so m3 is excluded even though its subject contains \"interview\". m4 matches no rule. Both summaries read listed=4 matched=0 sent=0, which agrees with the per-message verdicts."
+  },
+  {
+   "case": "platform-and-org-match",
+   "verdict": "same",
+   "new_was": "A",
+   "regressions": [],
+   "reason": "A and B are identical. Summary is listed=4 matched=2 sent=2, which agrees with the per-message verdicts. m1 is platform_domain (greenhouse.io) and m2 is org_domain (acme-corp.example). m3 (linkedin.com, an excluded domain) and m4 (the user's own address) are no match in both. No alerts were lost, no false alerts were added and no counts disagree."
+  },
+  {
+   "case": "subject-phrase-match",
+   "verdict": "same",
+   "new_was": "A",
+   "regressions": [],
+   "reason": "A and B are identical. Both output summary listed=4, matched=3, sent=3 and give the same verdict for every message: m1 is matched by subject:your application, m2 by org_domain and m3 by platform_domain, while m4 has no match. The counts agree with the per-message verdicts, and all verdicts are correct under the rules."
+  }
+ ]
+}
