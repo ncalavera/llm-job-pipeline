@@ -2,8 +2,9 @@
 """Judge stage: KEEP/UNSURE/KILL open roles against a
 private brief, then audit a sample of the kills with a second model.
 
-Self-contained script stage in run_daily.py's STAGE_ORDER, right after
-``screening_prep``. It never emits a gate — the unattended night just runs it.
+Self-contained script stage in run_daily.py's STAGE_ORDER, right before
+``screening_prep`` — a role the judge kills is never scored. It never
+emits a gate — the unattended night just runs it.
 Judge model: codex exec or ``claude -p``, launched the same way as the eval
 prototype (~/jobsearch/chat-screen-2026-09-17/eval/run_batch_v4.sh): one batch
 of roles per model call, stdin from /dev/null, a scratch dir the child sees

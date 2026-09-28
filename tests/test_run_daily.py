@@ -49,8 +49,8 @@ def test_stage_order_is_the_documented_sequence(rd):
         "filter",
         "company_scoring",
         "vacancy_scoring",
-        "screening_prep",
         "judge",
+        "screening_prep",
         "audit",
         "verdicts",
         "digest",
@@ -61,6 +61,41 @@ def test_stage_order_is_the_documented_sequence(rd):
 def test_every_stage_has_exactly_one_handler(rd):
     assert set(rd.HANDLERS) == set(rd.STAGE_ORDER)
     assert len(rd.STAGE_ORDER) == len(set(rd.STAGE_ORDER)), "no duplicate stages"
+
+
+def test_judge_kill_is_never_offered_to_the_scorer(rd):
+    """The judge runs before screening_prep, so a role it kills this
+    same run never reaches the scorer. The fake judge/screening_prep handlers
+    below share one "database" (a plain dict of vacancy status); this fails
+    if STAGE_ORDER ever puts screening_prep back ahead of judge, because the
+    fake screening_prep would then run first, while v1 is still 'unseen'."""
+    vacancy_status = {"v1": "unseen", "v2": "unseen"}
+    scored_ids = []
+
+    def advancer(name):
+        def h(state, entry, opts):
+            return ("advance", "ok")
+
+        return h
+
+    def fake_judge(state, entry, opts):
+        vacancy_status["v1"] = "passed"  # judge KILL: leaves 'unseen'
+        return ("advance", "judged 2: 0 keep, 0 unsure, 1 killed")
+
+    def fake_screening_prep(state, entry, opts):
+        # Mirrors prepare_discovery.select_payloads: only 'unseen' rows are
+        # ever offered to the scorer.
+        scored_ids.extend(vid for vid, status in vacancy_status.items() if status == "unseen")
+        return ("advance", "scored")
+
+    rd.HANDLERS = {name: advancer(name) for name in rd.STAGE_ORDER}
+    rd.HANDLERS["judge"] = fake_judge
+    rd.HANDLERS["screening_prep"] = fake_screening_prep
+
+    state = rd._new_state(rd.Opts())
+    code = rd.drive(state, rd.Opts())
+    assert code == rd.EXIT_DONE
+    assert scored_ids == ["v2"], "a role the judge killed this run must never be scored"
 
 
 def test_driver_runs_stages_strictly_in_order(rd):

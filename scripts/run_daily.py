@@ -114,8 +114,10 @@ STAGE_ORDER = [
     "filter",  # AUTO  — quality report; never auto-deletes
     "company_scoring",  # SKIP — legacy scripts remain available
     "vacancy_scoring",  # SKIP — no numeric scores in the daily path
-    "screening_prep",  # GATE — combined cheap scoring + facts
-    "judge",  # AUTO — KEEP/UNSURE/KILL open roles against the judge brief
+    "judge",  # AUTO — KEEP/UNSURE/KILL open roles against the judge brief, before
+    #                  scoring: a KILL flips status off 'unseen', so
+    #                  screening_prep's own status='unseen' pool skips it for free.
+    "screening_prep",  # GATE — combined cheap scoring + facts (judge-killed roles excluded)
     "audit",  # AUTO — second-reviewer flag-only pass over a sample of tonight's kills
     "verdicts",  # SKIP — human review lives in the dashboard
     "digest",  # AUTO  — tiered morning Telegram message (before publish, KTD5:
