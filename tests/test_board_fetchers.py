@@ -1307,9 +1307,7 @@ def test_fetch_algolia_board_maps_closes_at_to_a_deadline(monkeypatch):
 # <div> to <h3>, breaking a tag-specific find())
 # ---------------------------------------------------------------------------
 
-IMPACTPOOL_FIXTURE = os.path.join(
-    os.path.dirname(__file__), "fixtures", "impactpool_search.html"
-)
+IMPACTPOOL_FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "impactpool_search.html")
 
 
 def test_fetch_impactpool_board_parses_real_page_markup(monkeypatch):

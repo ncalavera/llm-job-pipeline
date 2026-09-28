@@ -21,7 +21,10 @@ if str(SCRIPTS_DIR) not in sys.path:
 # instead of leaving a raw traceback.
 _VENV_PY = SCRIPTS_DIR.parent / ".venv" / "bin" / "python"
 sys.excepthook = lambda t, e, tb: (
-    print(f"ERROR: {e}. Run with the repo's venv instead: {_VENV_PY} {' '.join(sys.argv)}", file=sys.stderr)
+    print(
+        f"ERROR: {e}. Run with the repo's venv instead: {_VENV_PY} {' '.join(sys.argv)}",
+        file=sys.stderr,
+    )
     if t is ModuleNotFoundError
     else sys.__excepthook__(t, e, tb)
 )
