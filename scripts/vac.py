@@ -16,6 +16,16 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+# A bare ModuleNotFoundError (e.g. "no module named 'dateutil'") means this
+# ran under system python instead of the repo's .venv — point at the fix
+# instead of leaving a raw traceback.
+_VENV_PY = SCRIPTS_DIR.parent / ".venv" / "bin" / "python"
+sys.excepthook = lambda t, e, tb: (
+    print(f"ERROR: {e}. Run with the repo's venv instead: {_VENV_PY} {' '.join(sys.argv)}", file=sys.stderr)
+    if t is ModuleNotFoundError
+    else sys.__excepthook__(t, e, tb)
+)
+
 # Imported up here, above build_parser, because the parser itself needs the
 # channel list to generate one flag per channel — and `vac --help` builds the
 # parser BEFORE the heavy imports below, to print usage without touching the

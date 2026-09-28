@@ -57,6 +57,15 @@ def _parse_dotenv(path: Path) -> dict[str, str]:
     return values
 
 
+#: Server settings file documented in ``deploy/forge/README.md`` (the nightly
+#: systemd unit's ``EnvironmentFile``). An interactive shell run from the repo
+#: checkout has no reason to source it manually. Without this fallback, a
+#: script run from a checkout with no repo ``.env`` (only ``.env.example``)
+#: fell back to an empty local SQLite file instead, even though this file
+#: sits right there with the real ``SUPABASE_DB_URL``.
+_SERVER_ENV_FALLBACK = Path.home() / "jobsearch" / ".env"
+
+
 def load_dotenv(root: Path | None = None) -> dict[str, str]:
     """Load a repo-root ``.env`` into ``os.environ`` and return what it declared.
 
@@ -64,15 +73,16 @@ def load_dotenv(root: Path | None = None) -> dict[str, str]:
     Supabase credentials is enough — no manual ``export``. Already-set
     environment variables win (``setdefault``), matching python-dotenv's default
     and letting a shell export or CI secret override the file. A missing ``.env``
-    is silent: that is the local SQLite demo path.
+    with no server fallback either is silent: that is the local SQLite demo path.
 
     Two neutral escape hatches, both primarily for the test suite:
 
-    * ``LLM_PIPELINE_DISABLE_DOTENV`` — any non-empty value makes this a no-op.
-      The offline pytest run sets it in ``tests/conftest.py`` BEFORE pipeline
-      modules import, so the maintainer's real ``.env`` can never re-inject
-      ``SUPABASE_DB_URL`` after conftest scrubbed it (which would silently point
-      the whole suite at live Supabase).
+    * ``LLM_PIPELINE_DISABLE_DOTENV`` — any non-empty value makes this a no-op
+      (also skips the server-fallback below). The offline pytest run sets it
+      in ``tests/conftest.py`` BEFORE pipeline modules import, so the
+      maintainer's real ``.env`` (or the real machine's server settings) can
+      never re-inject ``SUPABASE_DB_URL`` after conftest scrubbed it (which
+      would silently point the whole suite at live Supabase).
     * ``LLM_PIPELINE_DOTENV_PATH`` — full path to an alternative ``.env`` file,
       used instead of ``<repo root>/.env`` when no explicit ``root`` argument is
       given. Lets tests exercise the real import-time load against a tmp file
@@ -85,6 +95,8 @@ def load_dotenv(root: Path | None = None) -> dict[str, str]:
     else:
         override = os.environ.get("LLM_PIPELINE_DOTENV_PATH")
         path = Path(override).expanduser() if override else PROJECT_ROOT / ".env"
+        if not override and not path.exists() and _SERVER_ENV_FALLBACK.exists():
+            path = _SERVER_ENV_FALLBACK
     if not path.exists():
         return {}
     values = _parse_dotenv(path)
@@ -795,9 +807,41 @@ class _GuardedConn:
 _conn = None
 
 
+def _refuse_empty_db_when_server_settings_expected(path: Path) -> None:
+    """Stop instead of silently creating a brand-new, empty local SQLite file.
+
+    Triggers only when this machine's settings home (``~/jobsearch/``, the
+    layout ``deploy/forge/README.md`` documents for a real self-hosted
+    install) exists but has no ``.env`` inside it — a machine deliberately
+    set up for real Postgres that, for some reason (deleted/misnamed file,
+    wrong permissions), lost its settings. That combination used to open an
+    empty SQLite file with nothing to show it was the wrong database — the
+    queue just looked empty. A machine with no ``~/jobsearch/`` directory at
+    all is the supported no-account local demo (``INSTALL-EASY.md``) and is
+    left untouched. Skipped during the offline test suite (which forces this
+    same env flag) so it never depends on the developer machine's home dir.
+    """
+    if os.environ.get("LLM_PIPELINE_DISABLE_DOTENV"):
+        return
+    server_dir = _SERVER_ENV_FALLBACK.parent
+    if not server_dir.is_dir() or _SERVER_ENV_FALLBACK.exists():
+        return
+    print(
+        f"ERROR: about to create a brand-new, empty local SQLite database at {path}, "
+        f"but {server_dir} exists with no .env inside it — the real database "
+        "settings look missing.\n"
+        f"  Fix: put SUPABASE_DB_URL in {_SERVER_ENV_FALLBACK} (see deploy/forge/README.md).",
+        file=sys.stderr,
+        flush=True,
+    )
+    raise SystemExit(1)
+
+
 def _connect_sqlite():
     path = sqlite_db_path()
     fresh = not path.exists() or path.stat().st_size == 0
+    if fresh:
+        _refuse_empty_db_when_server_settings_expected(path)
     raw = sqlite3.connect(str(path))
     raw.row_factory = sqlite3.Row
     raw.execute("PRAGMA foreign_keys = ON")

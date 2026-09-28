@@ -160,6 +160,127 @@ def test_dotenv_path_override_replaces_repo_root(tmp_path, monkeypatch):
     assert os.environ["SUPABASE_DB_URL"] == "postgresql://override/db"
 
 
+# --- server .env fallback ---------------------------------------------------
+#
+# `scripts/vac.py` (and `scripts/applications.py`, the screener's DAL) run from
+# a repo checkout with no `.env` (only `.env.example`, e.g. forge2) used to
+# fall silently to an empty local SQLite file — the queue looked empty even
+# though the real data sat in Postgres. The documented fix
+# (`deploy/forge/README.md`) already puts the real settings at
+# `~/jobsearch/.env` for the nightly systemd unit; these tests lock in that an
+# interactive run with no repo `.env` picks up the same file instead of
+# degrading silently.
+
+
+@pytest.mark.usefixtures("_reenable_dotenv")
+def test_falls_back_to_server_env_when_repo_has_none(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    server_env = tmp_path / "home" / "jobsearch" / ".env"
+    server_env.parent.mkdir(parents=True)
+    server_env.write_text("SUPABASE_DB_URL=postgresql://server/db\n")
+
+    monkeypatch.setattr(db_backend, "PROJECT_ROOT", repo_root)
+    monkeypatch.setattr(db_backend, "_SERVER_ENV_FALLBACK", server_env)
+    monkeypatch.delenv("LLM_PIPELINE_DOTENV_PATH", raising=False)
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+
+    declared = db_backend.load_dotenv()  # no root arg, no repo .env
+
+    assert declared == {"SUPABASE_DB_URL": "postgresql://server/db"}
+    assert os.environ["SUPABASE_DB_URL"] == "postgresql://server/db"
+
+
+def test_disable_flag_also_skips_server_fallback(tmp_path, monkeypatch):
+    """LLM_PIPELINE_DISABLE_DOTENV (set suite-wide by tests/conftest.py) must
+    fully no-op the loader, including the server fallback — otherwise the
+    offline suite could pick up whatever ~/jobsearch/.env exists on the
+    machine running it. Deliberately does NOT use _reenable_dotenv: this
+    checks the flag's real value from conftest, not a locally-cleared one."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    server_env = tmp_path / "home" / "jobsearch" / ".env"
+    server_env.parent.mkdir(parents=True)
+    server_env.write_text("SUPABASE_DB_URL=postgresql://server/db\n")
+
+    monkeypatch.setattr(db_backend, "PROJECT_ROOT", repo_root)
+    monkeypatch.setattr(db_backend, "_SERVER_ENV_FALLBACK", server_env)
+    monkeypatch.setenv("LLM_PIPELINE_DISABLE_DOTENV", "1")
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+
+    assert db_backend.load_dotenv() == {}
+    assert "SUPABASE_DB_URL" not in os.environ
+
+
+@pytest.mark.usefixtures("_reenable_dotenv")
+def test_repo_env_wins_over_server_fallback(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".env").write_text("SUPABASE_DB_URL=postgresql://repo/db\n")
+    server_env = tmp_path / "home" / "jobsearch" / ".env"
+    server_env.parent.mkdir(parents=True)
+    server_env.write_text("SUPABASE_DB_URL=postgresql://server/db\n")
+
+    monkeypatch.setattr(db_backend, "PROJECT_ROOT", repo_root)
+    monkeypatch.setattr(db_backend, "_SERVER_ENV_FALLBACK", server_env)
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+
+    declared = db_backend.load_dotenv()
+
+    assert declared == {"SUPABASE_DB_URL": "postgresql://repo/db"}
+
+
+# --- refusing a brand-new empty SQLite file when settings are expected -----
+#
+# The ticket's exact trap: a machine set up with a settings home
+# (~/jobsearch/, per deploy/forge/README.md) that somehow has no .env inside
+# it (deleted, renamed, wrong permissions) used to open a fresh empty SQLite
+# file with nothing to show it was the wrong database.
+
+
+@pytest.mark.usefixtures("_reenable_dotenv")
+def test_refuses_fresh_sqlite_when_server_dir_has_no_env(tmp_path, monkeypatch):
+    server_dir = tmp_path / "jobsearch"
+    server_dir.mkdir()  # dir exists, but no .env inside it
+    monkeypatch.setattr(db_backend, "_SERVER_ENV_FALLBACK", server_dir / ".env")
+    monkeypatch.delenv("LLM_PIPELINE_DISABLE_DOTENV", raising=False)
+
+    with pytest.raises(SystemExit):
+        db_backend._refuse_empty_db_when_server_settings_expected(tmp_path / "jobsearch.db")
+
+
+@pytest.mark.usefixtures("_reenable_dotenv")
+def test_allows_fresh_sqlite_when_no_server_dir_at_all(tmp_path, monkeypatch):
+    """The supported install-easy demo path: no settings home anywhere."""
+    monkeypatch.setattr(db_backend, "_SERVER_ENV_FALLBACK", tmp_path / "no-such-dir" / ".env")
+    monkeypatch.delenv("LLM_PIPELINE_DISABLE_DOTENV", raising=False)
+
+    db_backend._refuse_empty_db_when_server_settings_expected(tmp_path / "jobsearch.db")
+
+
+@pytest.mark.usefixtures("_reenable_dotenv")
+def test_allows_fresh_sqlite_when_server_env_present(tmp_path, monkeypatch):
+    server_dir = tmp_path / "jobsearch"
+    server_dir.mkdir()
+    (server_dir / ".env").write_text("SUPABASE_DB_URL=postgresql://server/db\n")
+    monkeypatch.setattr(db_backend, "_SERVER_ENV_FALLBACK", server_dir / ".env")
+    monkeypatch.delenv("LLM_PIPELINE_DISABLE_DOTENV", raising=False)
+
+    db_backend._refuse_empty_db_when_server_settings_expected(tmp_path / "jobsearch.db")
+
+
+def test_refuse_check_skipped_under_dotenv_disable_flag(tmp_path, monkeypatch):
+    """The offline test suite sets LLM_PIPELINE_DISABLE_DOTENV=1 for the whole
+    session (tests/conftest.py) — this check must not depend on whatever
+    ~/jobsearch/ happens to look like on the machine running the suite."""
+    server_dir = tmp_path / "jobsearch"
+    server_dir.mkdir()  # would trigger the refusal if the flag weren't set
+    monkeypatch.setattr(db_backend, "_SERVER_ENV_FALLBACK", server_dir / ".env")
+    monkeypatch.setenv("LLM_PIPELINE_DISABLE_DOTENV", "1")
+
+    db_backend._refuse_empty_db_when_server_settings_expected(tmp_path / "jobsearch.db")
+
+
 # --- first-import regression (fresh interpreter) ----------------------------
 #
 # The in-process tests above patch db_backend after it is already imported, so
