@@ -1204,6 +1204,15 @@ class TestEnrichBlindVacancies:
             ok, reason = ebv.looks_like_this_role(text, org, title)
             assert ok is expect_ok, f"{label}: got {ok} ({reason!r}), expected {expect_ok}"
 
+    def test_source_identity_uses_stored_alias_without_substring_matches(self):
+        import enrich_blind_vacancies as ebv
+
+        org, title = "Alliance for International Medical Action", "Learning Development Manager"
+        assert not ebv.looks_like_this_role("ALIMA France recrute un responsable.", org, title)[0]
+        assert ebv.looks_like_this_role("ALIMA France recrute un responsable.", org, title, ["ALIMA"])[0]
+        assert not ebv.looks_like_this_role("Kalima recrute un responsable.", org, title, ["ALIMA"])[0]
+        assert not ebv.looks_like_this_role("Une autre organisation recrute.", org, title, [""])[0]
+
     def test_EBV06_quality_functions_accessible(self):
         # enrich_blind_vacancies must use clean_description from quality
         from quality import clean_description

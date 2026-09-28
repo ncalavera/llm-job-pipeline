@@ -732,12 +732,12 @@ def _strip_chrome_lines(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(kept))
 
 
-def looks_like_this_role(text: str, org: str, title: str) -> tuple[bool, str]:
+def looks_like_this_role(text: str, org: str, title: str, aliases: list[str] | None = None) -> tuple[bool, str]:
     """True when ``text`` plausibly IS the posting for (org, title) — the
     general guard behind the Google-Doc bug: whatever a fetch returns, before
     it is trusted as THIS role's posting, it must actually mention this role.
 
-    Passes on either signal: the org's own name appears (legal suffix
+    Passes on either signal: the org's own name or a stored alias appears (legal suffix
     stripped, whole word, case-insensitive) OR at least
     TITLE_WORD_MATCH_THRESHOLD of the title's content words do. A title with
     no usable content words (all stopwords / short words) falls back to
@@ -748,9 +748,10 @@ def looks_like_this_role(text: str, org: str, title: str) -> tuple[bool, str]:
     if not text_lower:
         return False, "empty text"
 
-    org_norm = re.sub(r"\s+", " ", _LEGAL_SUFFIX_RE.sub("", org or "")).strip().lower()
-    if org_norm and _has_whole_word_phrase(text_lower, org_norm):
-        return True, "org name matched"
+    for name in [org, *(aliases or [])]:
+        org_norm = re.sub(r"\s+", " ", _LEGAL_SUFFIX_RE.sub("", name or "")).strip().lower()
+        if org_norm and _has_whole_word_phrase(text_lower, org_norm):
+            return True, "org name matched"
 
     title_words = _content_words(title)
     if not title_words:
@@ -816,7 +817,7 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
     if ids:
         cur.execute(
             "SELECT v.id, v.title, v.source_board, v.full_description, v.snippet, "
-            "v.locations, v.first_seen, v.scoring_excluded_reason, c.canonical_name AS org "
+            "v.locations, v.first_seen, v.scoring_excluded_reason, c.canonical_name AS org, c.aliases "
             "FROM vacancy v JOIN company c ON v.company_id = c.id "
             "WHERE v.id = ANY(%s::uuid[])",
             (list(ids),),
@@ -843,7 +844,7 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
         query = f"""
             SELECT v.id, v.title, v.source_board, v.full_description, v.snippet,
                    v.locations, v.first_seen, v.scoring_excluded_reason,
-                   c.canonical_name AS org
+                   c.canonical_name AS org, c.aliases
             FROM vacancy v JOIN company c ON v.company_id = c.id
             WHERE v.status = ANY(%s)
               AND (v.scoring_excluded_reason IS NULL
@@ -916,7 +917,7 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
             cleaned, verdict = clean_description(_strip_chrome_lines(text))
             length_ok = verdict == "ok" and len(cleaned or "") >= filters.MIN_JUDGEABLE_DESC_CHARS
             content_ok, content_reason = (
-                looks_like_this_role(cleaned, row.get("org", ""), row["title"])
+                looks_like_this_role(cleaned, row.get("org", ""), row["title"], row.get("aliases"))
                 if length_ok
                 else (False, "n/a (verdict/length gate failed)")
             )
