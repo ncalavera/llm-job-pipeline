@@ -5,6 +5,7 @@ opt-in selection and quality-gate junk rejection on the merge path.
 
 import importlib
 import json
+import os
 import sys
 
 import pytest
@@ -1299,3 +1300,39 @@ def test_fetch_algolia_board_maps_closes_at_to_a_deadline(monkeypatch):
     by_id = {j["external_id"]: j for j in out}
     assert by_id["closing"]["deadline"] == "2026-10-05"
     assert by_id["open"]["deadline"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Impactpool (server-rendered HTML; DHA-845 — title/location moved from
+# <div> to <h3>, breaking a tag-specific find())
+# ---------------------------------------------------------------------------
+
+IMPACTPOOL_FIXTURE = os.path.join(
+    os.path.dirname(__file__), "fixtures", "impactpool_search.html"
+)
+
+
+def test_fetch_impactpool_board_parses_real_page_markup(monkeypatch):
+    """Regression for DHA-845: fixture captured live from impactpool.org/search
+    on 2026-09-28, where the card title moved from <div type="cardTitle"> to
+    <h3 type="cardTitle">. The parser must key off the ``type`` attribute, not
+    the tag name, or every card yields an empty title/org and gets dropped.
+    """
+    from fetchers.boards import impactpool
+
+    with open(IMPACTPOOL_FIXTURE, encoding="utf-8") as f:
+        html = f.read()
+
+    monkeypatch.setattr(impactpool.http, "get", lambda *a, **kw: _Resp(text=html))
+    out = impactpool.fetch_impactpool_board(
+        {"name": "Impactpool", "url": "https://www.impactpool.org/search", "max_pages": 1}
+    )
+
+    assert len(out) == 3
+    by_id = {j["external_id"]: j for j in out}
+    job = by_id["1238556"]
+    assert job["title"] == "Digital Communications & Marketing Officer (maternity cover)"
+    assert job["org_override"] == "JRS - Jesuit Refugee Service"
+    assert job["location"] == "Rome"
+    assert job["url"] == "https://www.impactpool.org/jobs/1238556"
+    assert "Senior" in by_id["1238292"]["snippet"]

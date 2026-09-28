@@ -74,11 +74,11 @@ def fetch_impactpool_board(board_cfg: dict) -> list[dict]:
             total_seen += 1
             page_new_ids += 1
 
-            title_div = a.find("div", attrs={"type": "cardTitle"})
-            org_div = a.find("div", attrs={"type": "bodyEmphasis"})
+            title_div = a.find(attrs={"type": "cardTitle"})
+            org_div = a.find(attrs={"type": "bodyEmphasis"})
             title = title_div.get_text(strip=True) if title_div else ""
             org = org_div.get_text(strip=True) if org_div else ""
-            all_typo = a.find_all("div", class_="ip-typography")
+            all_typo = a.find_all(class_="ip-typography")
             texts = [d.get_text(strip=True) for d in all_typo]
             location = texts[2] if len(texts) > 2 else ""
             seniority = texts[3] if len(texts) > 3 else ""
