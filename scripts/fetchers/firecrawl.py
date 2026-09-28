@@ -109,16 +109,12 @@ def _firecrawl_credits_available() -> bool:
         return True
 
 
-# Errors from the Firecrawl SDK that signal quota exhaustion / rate limits.
+# Only exhausted credits disable paid requests for the rest of the run.
 _QUOTA_ERROR_MARKERS = (
     "402",
-    "429",
     "payment required",
     "insufficient credit",
     "out of credit",
-    "rate limit",
-    "quota",
-    "too many requests",
 )
 
 
@@ -402,7 +398,7 @@ def fetch_firecrawl_scrape(
             # Mark credits exhausted for the rest of the run, then go local.
             _pkg._firecrawl_credits_remaining = 0
             _pkg._last_scrape_status[org_name] = "credit_exhausted"  # U9 reason code
-            print(f"  [{org_name}] Quota/rate-limit error — switching to local scraper")
+            print(f"  [{org_name}] Credits exhausted — switching to local scraper")
         else:
             print(f"  [{org_name}] Falling back to local scraper")
         return _pkg._fetch_local_scrape(org_name, url, url_filter=url_filter)

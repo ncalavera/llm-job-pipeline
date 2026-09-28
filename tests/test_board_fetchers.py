@@ -6,6 +6,7 @@ opt-in selection and quality-gate junk rejection on the merge path.
 import importlib
 import json
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -23,6 +24,25 @@ from fetchers import (
 # ---------------------------------------------------------------------------
 # Fake requests plumbing
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("title_tag", ["div", "h3"])
+def test_impactpool_title_and_location_survive_heading_markup(monkeypatch, title_tag):
+    from fetchers.boards import impactpool
+
+    html = f"""<a data-turbo-frame="_top" href="/jobs/123">
+      <{title_tag} class="ip-typography" type="cardTitle">Operations Manager</{title_tag}>
+      <div class="ip-typography" type="bodyEmphasis">Example Foundation</div>
+      <div class="ip-typography" type="bodyEmphasis">London</div>
+      <div class="ip-typography" type="bodyEmphasis">Mid level</div></a>"""
+    monkeypatch.setattr(impactpool.http, "get", lambda *a, **kw: SimpleNamespace(text=html))
+    jobs = impactpool.fetch_impactpool_board(
+        {"name": "Impactpool", "url": "https://www.impactpool.org/search", "max_pages": 1}
+    )
+    assert len(jobs) == 1
+    assert jobs[0]["title"] == "Operations Manager"
+    assert jobs[0]["location"] == "London"
+    assert jobs[0]["snippet"] == "Example Foundation — London. Mid level"
 
 
 class FakeResponse:

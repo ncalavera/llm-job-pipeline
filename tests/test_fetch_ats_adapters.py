@@ -35,6 +35,28 @@ from fetchers import (
 from fetchers.http import FetchError
 from fetchers.ats.teamtailor import _teamtailor_hosts
 
+
+def test_lever_keeps_requirements_and_additional_sections(monkeypatch):
+    from fetchers.ats import lever
+    from types import SimpleNamespace
+
+    posting = {
+        "id": "role",
+        "text": "Finance Manager",
+        "descriptionPlain": "About the company.",
+        "lists": [
+            {"text": "Requirements", "content": "<li>Accounting qualification required.</li>"}
+        ],
+        "additionalPlain": "Salary: £60,000.",
+    }
+    monkeypatch.setattr(lever.http, "get", lambda *a, **kw: SimpleNamespace(json=lambda: [posting]))
+    text = lever.fetch_lever("Example", "example")[0]["full_description"]
+    assert "About the company." in text
+    assert "Requirements" in text
+    assert "Accounting qualification required." in text
+    assert "Salary: £60,000." in text
+
+
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
 
