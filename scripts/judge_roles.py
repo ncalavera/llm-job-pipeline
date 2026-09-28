@@ -66,6 +66,19 @@ def brief_version(path: str) -> str:
     return f"{Path(path).stem}:{hashlib.sha1(data).hexdigest()[:8]}"
 
 
+def audit_brief(cfg: dict) -> tuple[str, str]:
+    """Replace the review template's embedded rule block with the active brief."""
+    review = Path(cfg["review_brief_path"]).read_text(encoding="utf-8")
+    active = Path(cfg["brief_path"]).read_text(encoding="utf-8")
+    sections = review.split("\n---\n", 2)
+    if len(sections) == 3:
+        sections[1] = active
+    else:
+        sections = [review, active]
+    version = brief_version(cfg["review_brief_path"]) + "+" + brief_version(cfg["brief_path"])
+    return inject_today("\n---\n".join(sections)), version
+
+
 # ---------------------------------------------------------------------------
 # Column feature-detect (migration 0033 not applied yet — never crash)
 # ---------------------------------------------------------------------------
@@ -647,8 +660,7 @@ def run_audit_stage(
         return {"counts": {"audited": 0, "flagged": 0}, "decisions": []}
     sample = sample_for_audit(kills, cfg["audit_min_score"], cfg["audit_sample_pct"], seed)
     by_id = {k["id"]: k for k in kills}
-    review_brief = Path(cfg["review_brief_path"]).read_text(encoding="utf-8")
-    review_brief_ver = brief_version(cfg["review_brief_path"])
+    review_brief, review_brief_ver = audit_brief(cfg)
     scratch_root = Path(cfg.get("scratch_dir") or Path.cwd() / "audit_scratch")
     audited = flagged = 0
     decisions = []

@@ -40,6 +40,21 @@ def test_brief_version_is_stem_colon_hash(tmp_path):
     assert len(version.split(":", 1)[1]) == 8
 
 
+def test_audit_uses_current_rules_instead_of_embedded_stale_copy(tmp_path):
+    review = tmp_path / "review.md"
+    judge = tmp_path / "judge.md"
+    review.write_text("Review the removal.\n---\nOld rules allow HR.\n---\nReturn an audit verdict.")
+    judge.write_text("Current rules exclude HR; today is 2026-09-17.")
+    text, version = jr.audit_brief({"review_brief_path": str(review), "brief_path": str(judge)})
+    assert "Review the removal." in text and "Current rules exclude HR" in text
+    assert "Old rules" not in text and "2026-09-17" not in text
+    assert "Return an audit verdict." in text
+    assert jr.brief_version(str(judge)) in version
+    review.write_text("Standalone review instructions.")
+    text, _ = jr.audit_brief({"review_brief_path": str(review), "brief_path": str(judge)})
+    assert "Standalone review instructions." in text and "Current rules exclude HR" in text
+
+
 # ---------------------------------------------------------------------------
 # Role payload parity (judge batch payload vs audit user_msg)
 # ---------------------------------------------------------------------------
