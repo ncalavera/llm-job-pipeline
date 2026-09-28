@@ -3,6 +3,7 @@
 import hashlib
 
 from fetchers import http
+from fetchers.html_utils import _html_to_multiline
 from fetchers.registry import company_fetcher, register_company
 
 
@@ -18,7 +19,13 @@ def fetch_lever(org_name: str, slug: str) -> list[dict]:
     jobs = []
     for j in data:
         categories = j.get("categories", {})
-        raw_desc = j.get("descriptionPlain", "") or ""
+        parts = [j.get("descriptionPlain") or _html_to_multiline(j.get("description") or "")]
+        for section in j.get("lists") or []:
+            parts.extend(
+                [section.get("text") or "", _html_to_multiline(section.get("content") or "")]
+            )
+        parts.append(j.get("additionalPlain") or _html_to_multiline(j.get("additional") or ""))
+        raw_desc = "\n\n".join(part for part in parts if part)
         snippet = raw_desc[:400].rsplit(" ", 1)[0] + "…" if len(raw_desc) > 400 else raw_desc
         jobs.append(
             {

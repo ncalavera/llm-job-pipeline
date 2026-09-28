@@ -20,6 +20,7 @@ from fetchers import (
     _adp_job_url,
     _adp_snippet,
     _adp_cid,
+    fetch_lever,
     fetch_pinpoint,
     _pinpoint_location,
     fetch_smartrecruiters,
@@ -993,3 +994,58 @@ class TestFetchTeamtailorRss:
         jobs = fetch_teamtailor_rss("Acme", "acme", careers_url="https://careers.acme.example/jobs")
         assert jobs == []
         assert fake.calls == ["https://careers.acme.example/jobs.rss"]
+
+
+# ---------------------------------------------------------------------------
+# Lever public postings API (DHA-846).
+#
+# Fixture ``fixtures/lever_postings.json`` is a trimmed real posting captured
+# live from Apollo Research's Lever feed: descriptionPlain holds only the
+# intro paragraph, while responsibilities/requirements live in ``lists`` and
+# closing boilerplate lives in ``additionalPlain`` — the adapter used to keep
+# only descriptionPlain and silently drop the rest.
+# ---------------------------------------------------------------------------
+
+LEVER_POSTINGS = _load_json("lever_postings.json")
+
+
+class LeverFakeResponse:
+    def __init__(self, json_data):
+        self._json = json_data
+
+    def json(self):
+        return self._json
+
+    def raise_for_status(self):
+        pass
+
+
+class LeverFakeRequests:
+    def __init__(self, response):
+        self.response = response
+        self.calls = []
+
+    def get(self, url, headers=None, timeout=None, **kwargs):
+        self.calls.append(url)
+        return self.response
+
+
+class TestFetchLever:
+    def test_keeps_intro_responsibilities_and_additional_sections(self, monkeypatch):
+        fake = LeverFakeRequests(LeverFakeResponse(LEVER_POSTINGS))
+        monkeypatch.setattr(fetchers, "requests", fake)
+        jobs = fetch_lever("Apollo Research", "apolloresearch")
+        assert len(jobs) == 1
+        text = jobs[0]["full_description"]
+        assert "ABOUT APOLLO RESEARCH" in text  # descriptionPlain (intro)
+        assert "THE OPPORTUNITY" in text  # lists[].text (section heading)
+        assert "Finance team consists of" in text  # lists[].content (section body)
+        assert "RESPONSIBILITIES" in text
+        assert "Equality Statement" in text  # additionalPlain
+
+    def test_missing_optional_sections_do_not_crash(self, monkeypatch):
+        posting = {"id": "x", "text": "Role", "descriptionPlain": "Intro only."}
+        fake = LeverFakeRequests(LeverFakeResponse([posting]))
+        monkeypatch.setattr(fetchers, "requests", fake)
+        jobs = fetch_lever("Example", "example")
+        assert jobs[0]["full_description"] == "Intro only."
