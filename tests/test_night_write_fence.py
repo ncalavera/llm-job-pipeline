@@ -1,6 +1,10 @@
 """The night write fence (.claude/hooks/night-write-fence.py) refuses every
 Write/Edit outside <night_dir>/score_out/ while NIGHTLY_NIGHT_DIR is set, and
-stays silent for interactive sessions (variable unset)."""
+stays silent for interactive sessions (variable unset).
+
+Registration is not tested here: since 52f02ca the fence runs as a managed hook
+(~/.claude/settings.json, script hooks/repo/night-write-fence.py in claude-home);
+this repo keeps the script copy and tests its behaviour."""
 
 import json
 import os
@@ -24,13 +28,6 @@ def _run(tool_input, night_dir=None, tool="Write"):
         text=True,
         env=env,
     )
-
-
-def test_hook_is_registered_for_write_and_edit():
-    settings = json.loads((PROJECT_ROOT / ".claude" / "settings.json").read_text())
-    entries = settings["hooks"]["PreToolUse"]
-    assert any(e["matcher"] == ".*" for e in entries)
-    assert any("night-write-fence.py" in h["command"] for e in entries for h in e["hooks"])
 
 
 def test_no_op_when_not_a_night_run(tmp_path):

@@ -42,7 +42,12 @@ SENSITIVE = [
     re.compile(r"^config/user_profile\.md$"),
     re.compile(r"^public/data\.js$"),
     re.compile(r"^vacancies/"),
-    re.compile(r"^evals/"),  # personal golden set (labelled vacancies + reasons)
+    # personal golden set (labelled vacancies + reasons). Not the synthetic eval-gate
+    # files .gitignore tracks on purpose: evals/registry.json and, per workflow,
+    # run.sh, rubric.md, corrections.md and results/ (cases/ stays private).
+    re.compile(
+        r"^evals/(?!registry\.json$|[^/]+/(?:run\.sh|rubric\.md|corrections\.md)$|[^/]+/results/)"
+    ),
     re.compile(r"^\.firecrawl/"),
     re.compile(r"^architecture-notes/"),
     re.compile(r"^\.claude-session-acceptance\.md$"),
@@ -131,11 +136,18 @@ def test_patterns_allow_safe_files_and_block_unsafe():
     assert hit("public/data.js")
     assert hit("vacancies/jobs-archive/x.json")
     assert hit("evals/golden_set.jsonl")
+    assert hit("evals/jobsearch-mail-watch/cases/001.json")
+    assert hit("evals/jobsearch-mail-watch/notes.md")
     assert hit("architecture-notes/lesson.md")
     assert hit("data/jobsearch.db")
     assert hit("local.sqlite")
     # allowed (must NOT match)
     assert not hit(".env.example")
+    assert not hit("evals/registry.json")
+    assert not hit("evals/jobsearch-mail-watch/run.sh")
+    assert not hit("evals/jobsearch-mail-watch/rubric.md")
+    assert not hit("evals/jobsearch-mail-watch/corrections.md")
+    assert not hit("evals/jobsearch-mail-watch/results/08dbd95240c2.json")
     assert not hit("sql/schema.sqlite.sql")  # DDL, ends in .sql
     assert not hit("public/app.js")
     assert not hit("config/user_profile.example.md")

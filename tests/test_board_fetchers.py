@@ -1303,7 +1303,7 @@ def test_fetch_algolia_board_maps_closes_at_to_a_deadline(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Impactpool (server-rendered HTML; DHA-845 — title/location moved from
+# Impactpool (server-rendered HTML; title/location moved from
 # <div> to <h3>, breaking a tag-specific find())
 # ---------------------------------------------------------------------------
 
@@ -1311,7 +1311,7 @@ IMPACTPOOL_FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "impact
 
 
 def test_fetch_impactpool_board_parses_real_page_markup(monkeypatch):
-    """Regression for DHA-845: fixture captured live from impactpool.org/search
+    """Regression: fixture captured live from impactpool.org/search
     on 2026-09-28, where the card title moved from <div type="cardTitle"> to
     <h3 type="cardTitle">. The parser must key off the ``type`` attribute, not
     the tag name, or every card yields an empty title/org and gets dropped.

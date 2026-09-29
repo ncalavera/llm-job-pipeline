@@ -18,6 +18,8 @@ while IFS= read -r f; do
     config/user_profile.md)   blocked+="  $f  (private candidate profile)\n" ;;
     public/data.js)           blocked+="  $f  (dashboard data — contains PII)\n" ;;
     vacancies/*)              blocked+="  $f  (scraped vacancy data)\n" ;;
+    # synthetic eval-gate files tracked on purpose (see .gitignore): registry.json, run.sh, rubric.md, corrections.md, results/
+    evals/registry.json|evals/*/run.sh|evals/*/rubric.md|evals/*/corrections.md|evals/*/results/*) ;;
     evals/*)                  blocked+="  $f  (personal golden set — labelled vacancies)\n" ;;
     .firecrawl/*)             blocked+="  $f  (scrape cache)\n" ;;
     architecture-notes/*)     blocked+="  $f  (private notes — do not publish)\n" ;;

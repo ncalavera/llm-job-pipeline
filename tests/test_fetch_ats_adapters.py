@@ -997,7 +997,7 @@ class TestFetchTeamtailorRss:
 
 
 # ---------------------------------------------------------------------------
-# Lever public postings API (DHA-846).
+# Lever public postings API.
 #
 # Fixture ``fixtures/lever_postings.json`` is a trimmed real posting captured
 # live from Apollo Research's Lever feed: descriptionPlain holds only the
