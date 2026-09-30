@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test:js": "node --test"
+    "test:js": "node --test materials.test.js server.test.js \"public/**/*.test.js\""
   },
   "dependencies": {
     "pg": "^8"
