@@ -1,8 +1,8 @@
 [Unit]
-Description=Poll Gmail for recruiter mail every 10 minutes
+Description=Poll Gmail for recruiter mail every 30 minutes (10 until DHA-994)
 
 [Timer]
-OnCalendar=*:0/10
+OnCalendar=*:0/30
 # A missed tick is not worth catching up: the next one lists the same mail.
 Persistent=false
 RandomizedDelaySec=30
