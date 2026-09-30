@@ -90,3 +90,6 @@ _archive/
 
 # local scratch — screenshots and throwaway files from a working session
 .scratch/
+
+# Personal job-search profile (pay target, passport): stays on disk, never in the public repo
+config/junk_profile.json

@@ -1481,7 +1481,16 @@ function companyAboutLedeHtml(c, t) {
     );
   }
   if (c.notes) {
-    parts.push('<div class="cp-note">“' + escHtml(c.notes) + "”</div>");
+    // Long raw notes (ops text) collapse behind a native toggle.
+    parts.push(
+      c.notes.length > 400
+        ? '<details class="cp-note"><summary>' +
+            escHtml(t("cp_show_note", "Show full note")) +
+            "</summary>" +
+            escHtml(c.notes) +
+            "</details>"
+        : '<div class="cp-note">' + escHtml(c.notes) + "</div>",
+    );
   }
   if (c.recent_news && c.recent_news.length) {
     var newsRows = c.recent_news
