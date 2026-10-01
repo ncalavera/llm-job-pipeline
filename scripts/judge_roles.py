@@ -440,6 +440,8 @@ def apply_decision(role: dict, verdict_obj: dict, cfg: dict, model: str, brief_v
     }
     if verdict != "KILL":
         return verdict.lower(), None, judge_json, None
+    if verdict_obj.get("role_model") is True:
+        judge_json["role_model"] = True
 
     conf_ok = (
         isinstance(confidence, int)
