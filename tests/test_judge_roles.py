@@ -256,6 +256,41 @@ def test_apply_keep_and_unsure_map_directly():
     assert unsure_state == "unsure"
 
 
+def _role_model_kill(**extra):
+    verdict = {
+        "verdict": "KILL",
+        "kill_kind": "location",
+        "reason": "US work permit required",
+        "quote": "valid US work permit",
+        "confidence": 5,
+        **extra,
+    }
+    return jr.apply_decision(ROLE, verdict, CFG, "m", "b1")
+
+
+def test_apply_kill_role_model_true_is_stored():
+    state, _, judge_json, _ = _role_model_kill(role_model=True)
+    assert state == "killed"
+    assert judge_json["role_model"] is True
+
+
+def test_apply_kill_without_role_model_stores_no_key():
+    _, _, judge_json, _ = _role_model_kill()
+    assert "role_model" not in judge_json
+
+
+def test_apply_keep_with_role_model_stores_no_key():
+    _, _, judge_json, _ = jr.apply_decision(
+        ROLE, {"verdict": "KEEP", "reason": "fits", "role_model": True}, CFG, "m", "b1"
+    )
+    assert "role_model" not in judge_json
+
+
+def test_apply_kill_role_model_string_stores_no_key():
+    _, _, judge_json, _ = _role_model_kill(role_model="true")
+    assert "role_model" not in judge_json
+
+
 # ---------------------------------------------------------------------------
 # Seeded audit sample determinism
 # ---------------------------------------------------------------------------
