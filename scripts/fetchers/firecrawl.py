@@ -19,7 +19,7 @@ from config import FIRECRAWL_CACHE
 from fetchers import http
 from fetchers.http import FetchError, _LOCAL_UA
 from fetchers.html_utils import _absolutize_links, _html_to_markdown
-from fetchers.parsing import _parse_json_jobs, parse_markdown_jobs
+from fetchers.parsing import _parse_json_jobs, is_non_job_listing, parse_markdown_jobs
 from fetchers.registry import company_fetcher, record_fetch_error, register_company
 
 FIRECRAWL_JOBS_SCHEMA = {
@@ -406,6 +406,13 @@ def fetch_firecrawl_scrape(
         else:
             print(f"  [{org_name}] Falling back to local scraper")
         return _pkg._fetch_local_scrape(org_name, url, url_filter=url_filter)
+
+    # Reject homepage staff lists before JSON extraction can turn them into jobs.
+    markdown = getattr(result, "markdown", "") or ""
+    if is_non_job_listing(markdown):
+        _cache_markdown(org_name, markdown)
+        print(f"  [{org_name}] rejected non-posting source (marketing page)")
+        return []
 
     # --- Handle change tracking if present ---
     change_tracking = getattr(result, "changeTracking", None)

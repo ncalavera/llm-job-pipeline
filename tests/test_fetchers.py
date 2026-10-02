@@ -12,6 +12,45 @@ from fetchers import (
 )
 
 
+@pytest.mark.parametrize("structured", [False, True])
+@pytest.mark.parametrize("recruiting", [False, "description", "listing"])
+def test_marketing_source_cannot_invent_vacancies(monkeypatch, tmp_path, structured, recruiting):
+    """Homepage staff titles passed JSON and markdown extraction."""
+    from types import SimpleNamespace
+    import fetchers
+    from fetchers import firecrawl
+
+    title = "Fund Manager" if recruiting else "Fund managers: Jane Smith"
+    snippet = "Lead our grant programme and coordinate its external partners."
+    markdown = (
+        "[Careers](https://example.org/careers)\n# Apply for funding\nLatest news\n"
+        f"[{title}](https://example.org/role)\n{snippet}\n"
+    )
+    if recruiting == "description":
+        markdown += "\nResponsibilities\nQualifications\nApply now\n"
+    elif recruiting == "listing":
+        markdown = "# Careers\nSee our current vacancies\n" + markdown
+    if structured:
+        result = SimpleNamespace(
+            markdown=markdown,
+            json={
+                "jobs": [{"title": title, "url": "https://example.org/role", "snippet": snippet}]
+            },
+        )
+        monkeypatch.setattr(fetchers, "_firecrawl_credits_remaining", 100)
+        monkeypatch.setattr(
+            fetchers,
+            "get_firecrawl_client",
+            lambda: SimpleNamespace(scrape=lambda *a, **kw: result),
+        )
+        monkeypatch.setattr(firecrawl, "FIRECRAWL_CACHE", tmp_path)
+        monkeypatch.setattr(firecrawl, "_enrich_blind_jobs", lambda jobs, org: jobs)
+        jobs = fetchers.fetch_firecrawl_scrape("Example", "https://example.org/")
+    else:
+        jobs = parse_markdown_jobs(markdown, "Example")
+    assert [j["title"] for j in jobs] == ([title] if recruiting else [])
+
+
 # ---------------------------------------------------------------------------
 # _is_non_job_url — unit tests
 # ---------------------------------------------------------------------------
