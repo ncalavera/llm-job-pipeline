@@ -11,6 +11,7 @@ import urllib.parse
 from collections import Counter
 
 import settings
+from quality import is_marketing_page
 
 GENERIC_PIPELINE_TITLE_PATTERNS = [
     r"\bexpression of interest\b",
@@ -137,6 +138,19 @@ def _is_careers_boilerplate(text: str) -> bool:
     return any(p in lower for p in _CAREERS_BOILERPLATE_PATTERNS)
 
 
+def is_non_job_listing(markdown: str) -> bool:
+    """Homepage prose without recruitment context is not a vacancy list.
+
+    The description-quality gate alone also flags careers indexes (ODI/Nesta):
+    those have marketing copy and job links rather than full job descriptions.
+    """
+    return is_marketing_page(markdown) and not re.search(
+        r"^#{1,6}\s+(?:careers?|vacanc(?:y|ies)|jobs|open positions|current openings)\b",
+        markdown,
+        re.IGNORECASE | re.MULTILINE,
+    )
+
+
 def parse_markdown_jobs(markdown: str, org_name: str, *, url_filter: str = "") -> list[dict]:
     """Extract job listings from scraped markdown content.
 
@@ -144,6 +158,9 @@ def parse_markdown_jobs(markdown: str, org_name: str, *, url_filter: str = "") -
         url_filter: optional regex pattern — only URLs matching this pattern are accepted.
                     Used to prevent capturing external links (e.g. GovAI → governance.ai/post/).
     """
+    if is_non_job_listing(markdown):
+        print(f"  [{org_name}] rejected non-posting source (marketing page)")
+        return []
     jobs = []
     seen_titles = set()
     url_filter_re = re.compile(url_filter) if url_filter else None
