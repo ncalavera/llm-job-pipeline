@@ -70,6 +70,7 @@ from fetchers.parsing import (
     _blacklist_filter,
     _is_generic_pipeline_title,
 )
+from fetchers.browser import render_html  # patch surface: resolved at call time
 from fetchers.firecrawl import (
     fetch_firecrawl_scrape,
     get_firecrawl_change_statuses,

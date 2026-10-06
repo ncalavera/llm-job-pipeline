@@ -119,9 +119,11 @@ the dial you set to match your plan.
   the strong-model tier stays the main cost dial.
 - **Supabase** — only in full mode; free tier covers ~5,000 vacancies
   comfortably. Simple mode uses a local SQLite file: no account needed.
-- **Firecrawl** — optional and off by default. The local fetcher covers most
-  ATS for free; Firecrawl ($20+/mo, free tier 500 scrapes) only adds
-  enrichment for stubborn JS-heavy pages.
+- **Firecrawl** — optional and off by default. Vacancy collection is free:
+  ATS APIs, plain downloads and a local headless browser (Playwright) for
+  JS-heavy pages. Firecrawl ($20+/mo, free tier 500 scrapes) is still used to
+  research new candidate companies, and `VACANCY_FETCH_ENGINE=firecrawl` opts
+  vacancy collection back into it.
 - **GitHub** — free for a personal project. The dashboard is a Node process you
   host yourself; a small VPS is enough.
 

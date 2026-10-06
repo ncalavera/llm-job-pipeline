@@ -132,21 +132,65 @@ def _format_monthly(lo_str: str, hi_str: str | None) -> str:
     return f"{currency}{lo:,.0f}/mo"
 
 
-def _html_to_markdown(html: str) -> str:
-    """Convert raw HTML to markdown using html2text (links + structure kept)."""
-    try:
-        import html2text
-    except ImportError:
-        # Last-resort: crude tag strip so parse_markdown_jobs still sees links.
-        text = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
-        text = re.sub(r"<[^>]+>", " ", text)
-        return html_module.unescape(re.sub(r"\s+", " ", text))
-    h = html2text.HTML2Text()
-    h.body_width = 0  # no hard wrapping
-    h.ignore_images = True
-    h.ignore_emphasis = True
-    h.single_line_break = True
-    return h.handle(html)
+def _strip_site_chrome(soup) -> None:
+    """Drop nav, header, footer, aside and forms from a parsed page.
+
+    A chrome tag that holds a large share of the page's text is kept: some
+    sites wrap the whole page in ``<header>`` (found live on a Webflow site).
+    """
+    total = len(soup.get_text()) or 1
+    for tag in soup(["nav", "header", "footer", "aside", "form"]):
+        if not tag.decomposed and len(tag.get_text()) / total < 0.4:
+            tag.decompose()
+
+
+_BLOCK_TAGS = ("p", "div", "br", "tr", "section", "article", "ul", "ol", "table", "dt", "dd")
+
+
+def _html_to_markdown(html: str, base_url: str = "", *, main_only: bool = False) -> str:
+    """Convert raw HTML to markdown with bs4: links (made absolute against
+    ``base_url``), headings and list items are kept, everything else is text.
+    ``main_only`` drops the site chrome (nav, header, footer, aside) first,
+    like Firecrawl's ``only_main_content``.
+
+    This is the free stand-in for Firecrawl's markdown, so it must keep links:
+    ``parse_markdown_jobs`` finds vacancies by their ``[title](url)`` links.
+    """
+    from urllib.parse import urljoin
+
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html or "", "html.parser")
+    for tag in soup(["script", "style", "noscript", "svg", "template", "iframe"]):
+        tag.decompose()
+    if main_only:
+        _strip_site_chrome(soup)
+    for a in soup.find_all("a", href=True):
+        href = urljoin(base_url, a["href"].strip())
+        if not href.startswith("http"):
+            continue
+        # A job card is often one link wrapping a heading plus details: the
+        # heading is the title, the rest becomes the text after the link.
+        head = a.find(re.compile(r"^h[1-6]$"))
+        text = " ".join((head or a).get_text(" ").split())
+        rest = ""
+        if head is not None:
+            head.extract()
+            rest = " ".join(a.get_text(" ").split())
+        if text:
+            a.replace_with(f" [{text.replace(']', ')')}]({href.replace(' ', '%20')}) \n{rest}\n")
+    for h in soup.find_all(re.compile(r"^h[1-6]$")):
+        h.insert_before(f"\n\n{'#' * int(h.name[1])} ")
+        h.insert_after("\n\n")
+    for li in soup.find_all("li"):
+        li.insert_before("\n- ")
+    for tag in soup.find_all(_BLOCK_TAGS):
+        tag.insert_before("\n")
+        tag.insert_after("\n")
+    text = html_module.unescape(soup.get_text())
+    text = re.sub(r"[ \t\xa0]+", " ", text)
+    text = re.sub(r" ?\n ?", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def _absolutize_links(html: str, base_url: str) -> str:
