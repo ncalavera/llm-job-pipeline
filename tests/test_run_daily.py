@@ -2389,7 +2389,7 @@ def test_the_report_card_shows_what_did_not_happen(rd, monkeypatch, capsys):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
     state = rd._new_state(rd.Opts())
     rd._check_keys(state)
-    rd._stage(state, "enrich")["status"] = "done"
+    rd._stage(state, "company_scoring")["status"] = "done"
 
     rd._print_stage_board(state, verdict=True)
     out = capsys.readouterr().out

@@ -42,6 +42,11 @@ os.environ["LLM_PIPELINE_DISABLE_DOTENV"] = "1"
 # when it is absent; none in this suite do.
 os.environ.pop("SUPABASE_DB_URL", None)
 os.environ.pop("SUPABASE_DIRECT_URL", None)
+
+# No test opens the headless browser: with no browser at this path, the free
+# scraper's render step returns "" (page not rendered). A test that needs a
+# rendered page patches ``fetchers.render_html`` itself.
+os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "/nonexistent-browsers"
 os.environ.setdefault(
     "JOBSEARCH_DB_PATH",
     os.path.join(tempfile.mkdtemp(prefix="ljp_default_db_"), "jobsearch.db"),

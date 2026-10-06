@@ -138,9 +138,9 @@ STAGE_ORDER = [
 DEGRADED_WITHOUT_KEY = {
     "firecrawl": (
         "FIRECRAWL_API_KEY",
-        "enrich",
-        "Job pages could not be read, so roles that arrived without a description "
-        "stayed empty. Add the Firecrawl key on the server.",
+        "company_scoring",
+        "New candidate companies could not be researched, so they wait unscored. "
+        "Job pages need no key (free reader). Add the Firecrawl key on the server.",
     ),
 }
 # ANTHROPIC_API_KEY is deliberately NOT here. Nikita said twice on 2026-08-28
@@ -1495,10 +1495,9 @@ def _warn_failed_downloads(state, since: datetime) -> None:
 
 
 def _h_enrich(state, entry, opts):
-    # The source-text pass (summary-only boards -> real posting) runs
-    # whatever FIRECRAWL_API_KEY is: it fetches with plain requests+bs4 first
-    # and only falls back to Firecrawl for a JS-shell page, so it must not be
-    # gated behind the key the blind-vacancy pass below needs.
+    # The source-text pass (summary-only boards -> real posting)
+    # and the blind-vacancy pass below need no key: both read pages with plain
+    # requests+bs4 first, then the local headless browser for a JS-shell page.
     started = datetime.now(timezone.utc)
     rc_source = _run(
         [sys.executable, "-u", str(SCRIPTS_DIR / "enrich_blind_vacancies.py"), "--source-text"],
@@ -1508,12 +1507,6 @@ def _h_enrich(state, entry, opts):
         return "error", f"source-text enrich exited with code {rc_source}"
     _warn_failed_downloads(state, started)
 
-    if not os.environ.get("FIRECRAWL_API_KEY"):
-        return (
-            "advance",
-            "source-text pass ran; blind-vacancy enrich skipped — "
-            "FIRECRAWL_API_KEY unset (scoring tolerates blind rows; accuracy drops)",
-        )
     rc = _run([sys.executable, "-u", str(SCRIPTS_DIR / "enrich_blind_vacancies.py")], opts)
     if rc != 0:
         return "error", f"enrich exited with code {rc}"

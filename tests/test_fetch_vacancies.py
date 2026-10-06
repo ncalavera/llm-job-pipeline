@@ -420,6 +420,7 @@ class TestCreditExhaustedOverride:
         org = "British International Investment"
         # Force credits to 0 (short-circuits the balance check, no network) and
         # stub the local fallback so no real HTTP happens.
+        monkeypatch.setenv("VACANCY_FETCH_ENGINE", "firecrawl")
         monkeypatch.setattr(fetchers, "_firecrawl_credits_remaining", 0)
         monkeypatch.setitem(fetchers._last_scrape_status, org, None)
         monkeypatch.setattr(fetchers, "_fetch_local_scrape", lambda *a, **k: [])
@@ -435,6 +436,7 @@ class TestCreditExhaustedOverride:
     def test_quota_error_marks_credit_exhausted(self, monkeypatch):
         org = "CTG"
         # Credits look available, but the SDK raises a quota error mid-scrape.
+        monkeypatch.setenv("VACANCY_FETCH_ENGINE", "firecrawl")
         monkeypatch.setattr(fetchers, "_firecrawl_credits_remaining", 100)
         monkeypatch.setitem(fetchers._last_scrape_status, org, None)
 

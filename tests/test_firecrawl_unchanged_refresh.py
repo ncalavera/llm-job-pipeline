@@ -178,6 +178,7 @@ class TestUnchangedSentinel:
         import fetchers
 
         org = "Wikimedia Foundation"
+        monkeypatch.setenv("VACANCY_FETCH_ENGINE", "firecrawl")
         monkeypatch.setattr(fetchers, "_firecrawl_credits_remaining", 100)
 
         class _CT:

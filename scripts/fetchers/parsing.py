@@ -526,6 +526,135 @@ def _extract_snippet_near(text: str, end: int, max_chars: int = 200) -> str:
     return snippet
 
 
+# "<Org> is hiring for a <Role>" / "We're hiring: <Role>" → "<Role>".
+_HIRING_PREFIX_RE = re.compile(
+    r"^.{0,80}?\b(?:is|are|we(?:'|\u2019)re|we are)\s+(?:hiring|looking|recruiting)"
+    r"(?:\s+for){0,2}\s*[:\-\u2013]?\s*(?:an?\s+|the\s+)?",
+    re.IGNORECASE,
+)
+
+
+# Role words in the singular. The other words that pass ``_looks_like_job_title``
+# (program, project, partner, a plural like "managers") also name things that
+# are not jobs: "Partner Portal", "Project Archive", "Invited Researchers". A
+# title that rests on one of those alone must link to a careers-like address.
+_STRONG_TITLE_RE = re.compile(
+    r"\b(?:manager|director|head|lead|officer|coordinator|analyst|associate|specialist"
+    r"|engineer|developer|designer|advisor|consultant|researcher|assistant|vice president"
+    r"|vp|chief|senior|junior|intern|recruiter|administrator|strategist)\b",
+    re.IGNORECASE,
+)
+
+
+def _card_title_ok(title: str, url: str) -> bool:
+    """A job title for the free scraper: a role word, or a weaker word
+    (program, project, partner) on a link under a careers-like path."""
+    if not _looks_like_job_title(title) or re.match(r"\d+\.\s", title):
+        return False
+    if _STRONG_TITLE_RE.search(title):
+        return True
+    return bool(_CAREERS_PAGE_SEGMENTS.search(urllib.parse.urlparse(url).path))
+
+
+def extract_job_cards(html: str, base_url: str) -> dict:
+    """Read job cards out of a careers page's HTML: the free stand-in for
+    Firecrawl's JSON extraction, in the same ``{"jobs": [...]}`` shape, so the
+    result goes through ``_parse_json_jobs`` and its guards unchanged.
+
+    A card is a link outside the site chrome (nav, header, footer) whose title
+    looks like a job title, or a heading that does, with the first link of its
+    block ("Apply now"). The title is the heading inside the link, else the
+    link's first line; the rest of the card is the snippet.
+    """
+    from bs4 import BeautifulSoup
+
+    from fetchers.html_utils import _strip_site_chrome
+
+    soup = BeautifulSoup(html or "", "html.parser")
+    for tag in soup(["script", "style", "noscript", "template"]):
+        tag.decompose()
+    _strip_site_chrome(soup)
+    base_host = urllib.parse.urlparse(base_url).netloc
+    base_page = base_url.split("#")[0].rstrip("/")
+    heading_re = re.compile(r"^h[1-6]$")
+
+    def _abs(a) -> str:
+        url = urllib.parse.urljoin(base_url, a["href"].strip())
+        return url if url.startswith("http") else ""
+
+    def _text(node) -> str:
+        return " ".join(node.get_text(" ", strip=True).split())
+
+    # (title, url, card element): links first, then headings beside a link.
+    found = []
+    for a in soup.find_all("a", href=True):
+        url = _abs(a)
+        if not url or url.split("#")[0].rstrip("/") == base_page:
+            continue
+        head = a.find(heading_re)
+        parts = [_text(head)] if head else list(a.stripped_strings)
+        title = " ".join((parts[0] if parts else "").split())
+        title = _HIRING_PREFIX_RE.sub("", title, count=1).strip() or title
+        title = title.split(" | ")[0].strip()  # "Role | Organisation"
+        if len(title.split()) > 8:
+            # Two roles in one posting ("<Role A> & <Role B>, <team>"): keep the first.
+            title = re.split(r"\s+&\s+", title)[0].strip()
+        if title:
+            found.append((title, url, a))
+    url_counts = Counter(url for _, url, _ in found)
+    headings = [h for h in soup.find_all(heading_re) if not (h.find_parent("a") or h.find("a"))]
+    titled = {id(h) for h in headings if _looks_like_job_title(_text(h))}
+    for h in headings:
+        if id(h) not in titled:
+            continue
+        # The heading's block: the nearest ancestor that holds a link but no
+        # other job heading (so a card never takes its neighbour's link).
+        block, url = h, ""
+        for parent in h.parents:
+            if parent.name in ("body", "html", "[document]") or any(
+                id(x) in titled and x is not h for x in parent.find_all(heading_re)
+            ):
+                break
+            block = parent
+            link = next((x for x in parent.find_all("a", href=True) if _abs(x)), None)
+            if link is not None:
+                url = _abs(link)
+                break
+        found.append((_text(h), url, block))
+
+    job_urls = {url for title, url, _ in found if url and _card_title_ok(title, url)}
+    jobs, seen = [], set()
+    for title, url, node in found:
+        key = url or title
+        if key in seen or not _card_title_ok(title, url):
+            continue
+        # A link repeated across the page is a menu entry; a job card repeats
+        # its link at most twice (title + "apply").
+        if url_counts[url] >= 3 and urllib.parse.urlparse(url).netloc == base_host:
+            continue
+        seen.add(key)
+        # The card: the widest ancestor that still holds no other job's link.
+        card = node
+        for parent in node.parents:
+            if parent.name in ("body", "html", "[document]"):
+                break
+            if {_abs(x) for x in parent.find_all("a", href=True)} & (job_urls - {url}):
+                break
+            card = parent
+            if len(_text(card)) > 1500:
+                break
+        text = _text(card)
+        jobs.append(
+            {
+                "title": title,
+                "url": url,
+                "location": _extract_location_near(text, 0, 0, job_url=url),
+                "snippet": text.replace(title, "", 1).strip(" -\u2013|:")[:400],
+            }
+        )
+    return {"jobs": jobs}
+
+
 def _parse_json_jobs(
     json_data: dict, org_name: str, base_url: str, *, url_filter: str = ""
 ) -> list[dict]:
