@@ -229,7 +229,7 @@ def test_remotive_one_request_per_category_and_dedup(monkeypatch):
 def test_remotive_blacklist_applied(monkeypatch):
     monkeypatch.delenv("REMOTIVE_CATEGORIES", raising=False)
     # Universal junk = a non-job pipeline entry, NOT a real role of any kind.
-    junk = dict(REMOTIVE_JOB, id=2, title="Expression of Interest")
+    junk = dict(REMOTIVE_JOB, id=2, title="Talent Pool")
     fake = FakeRequests(
         lambda url, p: FakeResponse(json_data=_remotive_payload([REMOTIVE_JOB, junk]))
     )

@@ -14,7 +14,6 @@ import settings
 from quality import is_marketing_page
 
 GENERIC_PIPELINE_TITLE_PATTERNS = [
-    r"\bexpression of interest\b",
     r"\btalent pool\b",
     r"\bgeneral application(?:s)?\b",
 ]
@@ -633,7 +632,7 @@ def _blacklist_filter(
 
 
 def _is_generic_pipeline_title(title: str) -> bool:
-    """Return True for non-actionable posting shells (EOI/talent pool/general app)."""
+    """Return True for non-actionable posting shells (talent pool/general app)."""
     title_lower = (title or "").lower()
     return any(re.search(pattern, title_lower) for pattern in GENERIC_PIPELINE_TITLE_PATTERNS)
 

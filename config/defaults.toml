@@ -170,9 +170,10 @@ reject = 25
 # experience; a career-changer wants a bootcamp. Those are personal taste →
 # user_profile.md's exclude_title_keywords (empty by default). The test
 # "imagine a student, a career-changer, anyone — would someone want this?" must
-# be NO for every entry below.
+# be NO for every entry below. "Expression of interest" is NOT here: boards
+# post real named roles that way ("Expression of Interest, Research Director").
 words = [
-    "expression of interest", "expressions of interest", "talent pool",
+    "talent pool",
     "general application", "talent community", "speculative application",
     "future opportunities", "open application", "talent network",
     "join our talent", "talent connection", "general interest",
@@ -188,7 +189,7 @@ words = [
 # Science Bootcamp" instructor or a paid fellowship can be a real role. Whether
 # to drop them is personal taste → user_profile.md's exclude_title_keywords.
 # Universal junk (the `words` list above) holds ONLY markers meaning "no
-# concrete single role here at all" (talent pool, expression of interest,
+# concrete single role here at all" (talent pool,
 # general/open/speculative application, talent network/community, volunteer
 # call). Keep this list empty unless a future pattern is a non-job for everyone.
 substr = []
