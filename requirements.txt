@@ -4,7 +4,13 @@ beautifulsoup4>=4.12
 python-dateutil>=2.8
 pypdf>=4.0
 
-# Optional — only needed if you use the Firecrawl enrichment path.
+# Local headless browser for JavaScript career pages (free). After install:
+#   python -m playwright install chromium-headless-shell
+# Without it, a JavaScript page is marked js_required instead of being read.
+playwright>=1.49
+
+# Optional — company research, and vacancy collection only with
+# VACANCY_FETCH_ENGINE=firecrawl.
 firecrawl-py>=2.0
 
 # Optional — only needed for the direct-SDK scoring path

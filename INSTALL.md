@@ -29,7 +29,10 @@ Time: ~15 minutes of human attention, mostly setting up the server.
   VPS is enough. Everything runs on one box; there is no hosted service to
   sign up for
 - Optional: a [Firecrawl](https://firecrawl.dev) API key — only needed to
-  enrich descriptions from career pages without a parseable ATS
+  research new candidate companies (vacancy collection is free)
+- Optional: the local headless browser for JavaScript career pages —
+  `python -m playwright install chromium-headless-shell` after the
+  `pip install` step below
 - Optional: a Telegram bot token (via [@BotFather](https://t.me/BotFather)) —
   only for the daily digest
 

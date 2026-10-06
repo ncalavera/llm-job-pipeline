@@ -1,8 +1,12 @@
-"""Firecrawl scraper + zero-cost local fallbacks (PageUp XHR, Wagtail API).
+"""Careers-page scraper: free by default, Firecrawl opt-in.
 
-Strategy "firecrawl_scrape": scrape a careers page via the Firecrawl SDK
-(JSON extraction + markdown), falling back to a local requests+markdown
-scraper when credits run out or the SDK is unavailable. Records per-run
+Strategy "firecrawl_scrape" (the name is kept: it is stored on company rows):
+download the careers page with plain requests, render it in the local headless
+browser when the plain HTML holds no job (fetchers/browser.py), then parse the
+markdown. PageUp XHR and the Wagtail API keep their own zero-cost routes.
+``VACANCY_FETCH_ENGINE=firecrawl`` brings back the paid Firecrawl SDK path
+(JSON extraction + markdown), which still falls back to the free scraper when
+credits run out or the SDK is unavailable. Records per-run
 scrape outcomes (js_required / credit_exhausted) and change-tracking
 statuses on the package namespace so ``fetch_status`` stays honest.
 """
@@ -19,7 +23,13 @@ from config import FIRECRAWL_CACHE
 from fetchers import http
 from fetchers.http import FetchError, _LOCAL_UA
 from fetchers.html_utils import _absolutize_links, _html_to_markdown
-from fetchers.parsing import _parse_json_jobs, is_non_job_listing, parse_markdown_jobs
+from fetchers.parsing import (
+    _card_title_ok,
+    _parse_json_jobs,
+    extract_job_cards,
+    is_non_job_listing,
+    parse_markdown_jobs,
+)
 from fetchers.registry import company_fetcher, record_fetch_error, register_company
 
 FIRECRAWL_JOBS_SCHEMA = {
@@ -41,6 +51,8 @@ FIRECRAWL_JOBS_SCHEMA = {
     },
     "required": ["jobs"],
 }
+
+_HONEST_UA = "llm-job-pipeline/1.0 (+https://github.com/ncalavera/llm-job-pipeline)"
 
 # Per-run state (change statuses, scrape statuses, credit balance)
 # lives on the fetchers package namespace — see fetchers/__init__.py.
@@ -309,42 +321,85 @@ def _fetch_local_scrape(org_name: str, url: str, *, url_filter: str = "") -> lis
         return _fetch_pageup_xhr(org_name, url, url_filter=url_filter)
     if "/api/v2/pages/" in url:
         return _fetch_wagtail_jobs_api(org_name, url)
-    print(f"  [{org_name}] Local scrape (no Firecrawl credits): {url}")
+    print(f"  [{org_name}] Free scrape: {url}")
+    headers = {
+        "User-Agent": _LOCAL_UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    html, fetch_err = "", None
     try:
-        resp = http.get(
-            url,
-            headers={
-                "User-Agent": _LOCAL_UA,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-            timeout=15,
-        )
+        html = http.get(url, headers=headers, timeout=15).text
     except FetchError as e:
-        print(f"  [{org_name}] Local fetch error: {e}")
-        record_fetch_error(org_name, e.status)
-        return []
+        fetch_err = e
+        if e.reason == "http_403":
+            # Some bot walls refuse an ageing browser User-Agent and let an
+            # honest one through (found live on a WordPress site).
+            try:
+                html = http.get(url, headers={"User-Agent": _HONEST_UA}, timeout=15).text
+                fetch_err = None
+            except FetchError:
+                pass
+        if fetch_err is not None:
+            print(f"  [{org_name}] Plain fetch error: {e}")
 
-    markdown = _html_to_markdown(resp.text)
-    _cache_markdown(org_name, markdown, source="local")
-
-    # JS-shell detection: thin text or no links → can't scrape without a browser.
-    text_len = len(re.sub(r"\s+", " ", markdown).strip())
-    has_links = "](" in markdown
-    if text_len < 500 or not has_links:
-        print(
-            f"  [{org_name}] Page looks JS-rendered "
-            f"(text={text_len} chars, links={has_links}) → js_required"
-        )
-        _pkg._last_scrape_status[org_name] = "js_required"
-        return []
-
-    jobs = parse_markdown_jobs(markdown, org_name, url_filter=url_filter)
-    print(f"  [{org_name}] Local scraper parsed {len(jobs)} vacancies")
+    source = "local"
+    markdown, jobs = _jobs_from_html(html, org_name, url, url_filter)
+    rendered = ""
     if not jobs:
-        # HTML had links but parser found no job-like rows: likely JS-gated list.
+        # No job in the plain HTML: the list is drawn by JavaScript, or the
+        # page is genuinely empty. Only a real browser can tell the two apart.
+        rendered = _pkg.render_html(url)
+        if rendered:
+            source = "browser"
+            markdown, jobs = _jobs_from_html(rendered, org_name, url, url_filter)
+    _cache_markdown(org_name, markdown, source=source)
+    print(f"  [{org_name}] Free scraper ({source}) parsed {len(jobs)} vacancies")
+
+    if jobs:
+        _pkg._last_scrape_status.pop(org_name, None)
+        return _drop_content_empty(_enrich_blind_jobs(jobs, org_name), org_name)
+    if fetch_err is not None:
+        # The plain download was refused; a browser page with no job may be
+        # the same refusal drawn as a page, so the error stands.
+        record_fetch_error(org_name, fetch_err.status)
+    elif rendered:
+        # Rendered in a browser and still no job: an honest empty listing.
+        _pkg._last_scrape_status.pop(org_name, None)
+    else:
+        print(f"  [{org_name}] No browser to render the page → js_required")
         _pkg._last_scrape_status[org_name] = "js_required"
-    return jobs
+    return []
+
+
+def _jobs_from_html(html: str, org_name: str, url: str, url_filter: str) -> tuple[str, list]:
+    """(markdown, jobs) of one careers page: job cards first, the markdown
+    parser when there is no card. The same order as the Firecrawl path (JSON
+    extraction, then markdown), through the same guards."""
+    if not html:
+        return "", []
+    markdown = _html_to_markdown(html, url, main_only=True)
+    if is_non_job_listing(markdown):
+        print(f"  [{org_name}] rejected non-posting source (marketing page)")
+        return markdown, []
+    jobs = _parse_json_jobs(extract_job_cards(html, url), org_name, url, url_filter=url_filter)
+    if not jobs:
+        jobs = [
+            j
+            for j in parse_markdown_jobs(markdown, org_name, url_filter=url_filter)
+            if _card_title_ok(j["title"], j["url"])
+        ]
+    return markdown, jobs
+
+
+def _use_firecrawl() -> bool:
+    """Firecrawl is opt-in: ``VACANCY_FETCH_ENGINE=firecrawl``.
+
+    The default engine is free: a plain download, then the local browser.
+    """
+    import os
+
+    return os.environ.get("VACANCY_FETCH_ENGINE", "").strip().lower() == "firecrawl"
 
 
 @company_fetcher
@@ -364,7 +419,7 @@ def fetch_firecrawl_scrape(
     # PageUp facets (?optionsFacetsDD_*, /filter/?) apply only via XHR with
     # X-Requested-With — Firecrawl's plain render gets the unfiltered board,
     # so route these straight to the local PageUp scraper.
-    if "optionsFacetsDD" in url or "/filter/?" in url:
+    if "optionsFacetsDD" in url or "/filter/?" in url or not _use_firecrawl():
         return _pkg._fetch_local_scrape(org_name, url, url_filter=url_filter)
 
     # Quota guard: if credits are exhausted, skip Firecrawl entirely (saves
@@ -485,13 +540,14 @@ def _drop_content_empty(jobs: list[dict], org_name: str) -> list[dict]:
 
 
 def _enrich_blind_jobs(jobs: list[dict], org_name: str) -> list[dict]:
-    """Scrape individual job URLs via Firecrawl for jobs missing full_description.
+    """Read each job's own page for jobs missing full_description.
 
-    Modifies jobs in-place, adding full_description from scraped page content.
-    Skips blacklisted titles to avoid wasting Firecrawl credits.
+    Free by default: the posting reader of ``enrich_blind_vacancies`` (ATS
+    APIs, plain download, then the local browser). Firecrawl only when it is
+    opted in. Modifies jobs in-place. Skips blacklisted titles.
     """
-    client = _pkg.get_firecrawl_client()
-    if not client:
+    client = _pkg.get_firecrawl_client() if _use_firecrawl() else None
+    if _use_firecrawl() and not client:
         return jobs
 
     blind = [(i, j) for i, j in enumerate(jobs) if not j.get("full_description") and j.get("url")]
@@ -512,37 +568,19 @@ def _enrich_blind_jobs(jobs: list[dict], org_name: str) -> list[dict]:
         return jobs
 
     print(
-        f"  [{org_name}] Enriching {len(to_enrich)} blind jobs via Firecrawl"
+        f"  [{org_name}] Enriching {len(to_enrich)} blind jobs"
         + (f" ({skipped} blacklisted skipped)" if skipped else "")
     )
+    # Imported here: enrich_blind_vacancies imports this package at load.
+    import enrich_blind_vacancies as ebv
 
     enriched = 0
     for idx, (i, job) in enumerate(to_enrich):
-        url = job["url"]
         try:
-            result = client.scrape(
-                url,
-                formats=["markdown"],
-                only_main_content=True,
-                timeout=60000,
-            )
-            md = ""
-            if hasattr(result, "markdown"):
-                md = result.markdown or ""
-            elif isinstance(result, dict):
-                md = result.get("markdown", "")
-
-            if md:
-                # Clean markdown to plain text
-                text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", "", md)
-                text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-                text = re.sub(r"<[^>]{1,200}>", "", text)
-                text = re.sub(r"[*_`#\\]", "", text)
-                text = re.sub(r"\n{3,}", "\n\n", text).strip()
-
-                if len(text) >= 100:
-                    jobs[i]["full_description"] = text[:30000]
-                    enriched += 1
+            text = ebv._scrape_job_page(client, job["url"])
+            if len(text) >= 100:
+                jobs[i]["full_description"] = text[:30000]
+                enriched += 1
         except Exception as e:
             print(f"  [{org_name}] Enrich error for {job.get('title', '?')[:40]}: {e}")
 
