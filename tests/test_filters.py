@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 import filters
 from config import GLOBAL_BLACKLIST, GLOBAL_BLACKLIST_SUBSTR, GLOBAL_BLACKLIST_DESC_SUBSTR
+from fetchers.parsing import _is_generic_pipeline_title
 
 
 # ===========================================================================
@@ -211,8 +212,17 @@ def _is_blacklisted(title, description=""):
 
 
 class TestUniversalJunk:
-    def test_UJ01_expression_of_interest_blacklisted(self):
-        assert _is_blacklisted("Expression of Interest — Programmes") is True
+    def test_UJ01_expression_of_interest_not_blacklisted(self):
+        # Boards post real named roles as an EoI (UK AISI, 80k jobPk 21171).
+        for title in (
+            "Expression of Interest, Research Director",
+            "Expression of Interest — Programmes",
+            "Expressions of Interest: Operations Lead",
+            "EOI: Research Manager, Interpretability",
+            "General EoI",
+        ):
+            assert _is_blacklisted(title) is False, title
+            assert _is_generic_pipeline_title(title) is False, title
 
     def test_UJ02_talent_pool_blacklisted(self):
         assert _is_blacklisted("Talent Pool: Future Roles") is True
@@ -427,11 +437,12 @@ def frozen(title: str, description: str = "") -> bool:
 
 # --- POS: positive by GLOBAL_BLACKLIST whole-word ---
 # Words actually present in config at test-write time (verified via config dump):
-#   'expression of interest', 'talent pool', 'general application',
+#   'talent pool', 'general application',
 #   'talent community', 'speculative application', 'future opportunities',
 #   'open application', 'talent network', 'join our talent'
 _POS_CASES = [
-    ("POS-01", "Expression of Interest — Global Programmes", ""),
+    # EoI titles are no longer junk; kept in the corpus as agreement cases.
+    ("EOI-01", "Expression of Interest — Global Programmes", ""),
     ("POS-02", "Talent Pool: Future Engineering Roles", ""),
     ("POS-03", "General Application", ""),
     ("POS-04", "Open Application — Any Team", ""),
@@ -440,7 +451,7 @@ _POS_CASES = [
     ("POS-07", "Future Opportunities at OpenAI", ""),
     ("POS-08", "Talent Network Sign-up", ""),
     ("POS-09", "Join Our Talent Pipeline", ""),
-    ("POS-10", "expression of interest (lowercase entire title)", ""),
+    ("EOI-02", "expression of interest (lowercase entire title)", ""),
     ("POS-11", "TALENT POOL — ALL CAPS TITLE", ""),  # case insensitivity
     ("POS-12", "Talent Community Manager (title contains phrase)", ""),
     ("POS-13", "Interest in a Talent Pool Registration", ""),

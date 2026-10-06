@@ -10,7 +10,7 @@ For a public reusable pipeline:
 - Paths are derived from PROJECT_ROOT (the directory containing /scripts).
 - The only filtering that ships ON by default is UNIVERSAL_JUNK — postings that
   are not a specific open role for ANYONE (speculative / evergreen pipeline
-  entries: talent pools, expressions of interest, general/open applications).
+  entries: talent pools, general/open applications).
   Nothing tied to discipline, seniority, career stage, format, geography or
   sector ships on by default. Those are personal taste and activate only when
   the user opts in via their profile (config/user_profile.md, loaded by
@@ -318,7 +318,7 @@ CATALOG_MIN_SCORE = int(os.environ.get("CATALOG_MIN_SCORE", 40))
 # Universal junk — applied to ALL sources (companies + job boards).
 #
 # Catches postings that are not a specific open role for ANYONE: speculative /
-# evergreen pipeline entries (talent pools, expressions of interest,
+# evergreen pipeline entries (talent pools,
 # general/open applications). Contains NO geography and NO discipline, seniority,
 # career stage, format or sector — those are personal taste and live in the
 # profile's EXCLUDE_TITLE_KEYWORDS. The data ships in defaults.toml ([junk]).
