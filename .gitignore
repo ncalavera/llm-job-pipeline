@@ -93,3 +93,10 @@ _archive/
 
 # Personal job-search profile (pay target, passport): stays on disk, never in the public repo
 config/junk_profile.json
+
+# Codex mirrors of the Claude skills and hooks, made per machine
+.agents/
+.codex/
+# hand-labelled answer keys stay off the repo (principle 10)
+evals/truth-set/
+evals/model-tier-eval-*.md
