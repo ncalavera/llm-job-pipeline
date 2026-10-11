@@ -37,6 +37,7 @@ def test_marketing_source_cannot_invent_vacancies(monkeypatch, tmp_path, structu
                 "jobs": [{"title": title, "url": "https://example.org/role", "snippet": snippet}]
             },
         )
+        monkeypatch.setenv("VACANCY_FETCH_ENGINE", "firecrawl")
         monkeypatch.setattr(fetchers, "_firecrawl_credits_remaining", 100)
         monkeypatch.setattr(
             fetchers,

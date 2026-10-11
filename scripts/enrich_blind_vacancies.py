@@ -37,6 +37,7 @@ from config import get_firecrawl_client
 from fetchers import _fetch_unops_job_detail, _LOCAL_UA
 from fetchers.ats.adp import adp_posting_text
 from fetchers.ats.workable import workable_posting_text
+from fetchers.firecrawl import _use_firecrawl
 from fetchers.http import FetchError
 from fetchers.html_utils import _html_to_multiline, _html_to_text
 from quality import (
@@ -115,6 +116,29 @@ def _extract_text_from_markdown(md: str) -> str:
 
 
 def _scrape_job_page(client, url: str) -> str:
+    """One job page's description text, or "".
+
+    Free by default: the plain reader (ATS APIs, Workday, Google
+    Docs, PDF, HTML), then the local headless browser when the plain text is
+    a JS shell. A Firecrawl ``client`` is used only when one is handed in.
+    """
+    if client is not None:
+        return _firecrawl_job_page(client, url)
+    text, diag = _fetch_plain_page_text(url)
+    if len(text or "") >= _JS_SHELL_MAX_CHARS or diag.get("status") in (404, 410):
+        return text
+    return _render_job_page(url) or text
+
+
+def _render_job_page(url: str) -> str:
+    """Description text of a job page rendered in the local browser."""
+    from fetchers.browser import render_html
+
+    html = render_html(url)
+    return _posting_text_from_html(html) if html else ""
+
+
+def _firecrawl_job_page(client, url: str) -> str:
     """Scrape a single job page via Firecrawl. Returns description text or empty string."""
     delays = [5, 15, 45]
     for attempt, delay in enumerate([0] + delays):
@@ -617,11 +641,16 @@ def _fetch_plain_page_text(url: str) -> tuple[str, dict]:
         return _extract_pdf_text(resp.content), diag
 
     diag["body_head"] = resp.text[:300]
-    soup = BeautifulSoup(resp.text, "html.parser")
+    return _posting_text_from_html(resp.text), diag
+
+
+def _posting_text_from_html(html: str) -> str:
+    """The posting body of one job page's HTML (plain download or browser)."""
+    soup = BeautifulSoup(html, "html.parser")
 
     jsonld_text = _extract_jsonld_job_description(soup)
     if jsonld_text and len(jsonld_text) >= _CONTAINER_MIN_CHARS:
-        return jsonld_text, diag
+        return jsonld_text
 
     _strip_chrome_elements(soup)
     body = soup.find("body") or soup
@@ -633,9 +662,9 @@ def _fetch_plain_page_text(url: str) -> tuple[str, dict]:
         if len(container_text) >= _CONTAINER_MIN_CHARS and (
             not body_text or len(container_text) / len(body_text) >= _CONTAINER_MIN_BODY_SHARE
         ):
-            return container_text, diag
+            return container_text
 
-    return body_text, diag
+    return body_text
 
 
 #: Below this share of the title's content words found in the fetched text,
@@ -858,7 +887,7 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
     rows = rows[:limit] if limit else rows
 
     print(f"Source-text pass: {len(rows)} candidate row(s){' (dry-run)' if dry_run else ''}")
-    client = get_firecrawl_client()
+    client = get_firecrawl_client() if _use_firecrawl() else None
     upgraded = closed = 0
 
     # The one attempt failed: the judge takes the text as it is (a career-page
@@ -897,12 +926,12 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
             continue
 
         # The one attempt is a chain, first success wins: the company's ATS
-        # adapter, a plain download, then Firecrawl (only when the plain page
-        # looked like a JS shell or failed — a long mismatched page would
-        # come back the same and waste a credit). Every step's text is
+        # adapter, a plain download, then the local browser (only when the plain
+        # page looked like a JS shell or failed — a long mismatched page would
+        # come back the same). Every step's text is
         # content-checked (looks_like_this_role) before it is trusted.
         success, gone, cleaned, verdict, content_reason, method = False, None, "", "", "", ""
-        for method in ("ats", "plain", "firecrawl"):
+        for method in ("ats", "plain", "browser"):
             if method == "ats":
                 text, diag = _fetch_ats_posting_text(url)
                 if diag is None:
@@ -910,9 +939,10 @@ def fetch_source_text_for_summary_boards(ids=None, dry_run=False, limit=None):
             elif method == "plain":
                 text, diag = _fetch_plain_page_text(url)
             else:
-                if not client or (verdict == "ok" and len(cleaned or "") >= _JS_SHELL_MAX_CHARS):
+                if verdict == "ok" and len(cleaned or "") >= _JS_SHELL_MAX_CHARS:
                     break
-                text, diag = _scrape_job_page(client, url), {"url": url}
+                text = _firecrawl_job_page(client, url) if client else _render_job_page(url)
+                diag = {"url": url}
             cleaned, verdict = clean_description(_strip_chrome_lines(text))
             length_ok = verdict == "ok" and len(cleaned or "") >= filters.MIN_JUDGEABLE_DESC_CHARS
             content_ok, content_reason = (
@@ -1049,7 +1079,8 @@ def main():
         blind = blind[:limit]
 
     print(f"Found {len(blind)} blind vacancies with URLs to enrich")
-    print(f"Estimated Firecrawl credits: ~{len(blind)} (1 per page)")
+    if _use_firecrawl():
+        print(f"Estimated Firecrawl credits: ~{len(blind)} (1 per page)")
 
     if dry_run:
         for i, (vid, vac, url) in enumerate(blind[:20], 1):
@@ -1058,8 +1089,8 @@ def main():
             print(f"  ... and {len(blind) - 20} more")
         return
 
-    client = get_firecrawl_client()
-    if not client:
+    client = get_firecrawl_client() if _use_firecrawl() else None
+    if _use_firecrawl() and not client:
         print("ERROR: Firecrawl SDK not available")
         sys.exit(1)
 

@@ -77,7 +77,7 @@ browser-like `_LOCAL_UA` is sent where a site blank-pages bots.
 (`smartrecruiters`, `adp_json`, `impactpool_html`, `cfi_board_json`, listing-only
 `fastforward_board`, and `linkedin_guest` when detail is throttled). They return
 rows with an empty `full_description` on purpose. Two enrichment surfaces fill
-them later, both credit-guarded and both no-ops if `FIRECRAWL_API_KEY` is unset:
+them later, both free by default (no key; `VACANCY_FETCH_ENGINE=firecrawl` opts into the paid reader):
 
 - **Inline** — `fetchers.firecrawl._enrich_blind_jobs`, called at fetch time by
   `workable` and `firecrawl_scrape`; scrapes each blind job URL, skipping
@@ -231,13 +231,14 @@ recipes read the network but write nothing to any real DB.
 - **Failure signatures:** CSRF request fails → `error: network`. No token in the response → prints, `[]`. A search page failing with nothing fetched → re-raised as `error: network`.
 - **Debug:** `from fetchers.ats.apple import fetch_apple_jobs; print(len(fetch_apple_jobs("Example", {"query": "data"})))`
 
-### `firecrawl_scrape` — Firecrawl careers-page scrape (+ zero-cost fallbacks)
+### `firecrawl_scrape` — careers-page scrape, free by default (Firecrawl opt-in)
 <!-- ENGINE: firecrawl_scrape -->
-- **Surface / auth:** the company's careers `url`, scraped via the Firecrawl SDK (JSON extraction + markdown + changeTracking, ~5 credits). Fallback chain when credits/SDK are unavailable: local `requests`→markdown scraper; PageUp XHR for `optionsFacetsDD`/`/filter/?` URLs; Wagtail API for `/api/v2/pages/` URLs; legacy CLI. **Auth:** `FIRECRAWL_API_KEY` for the SDK; the local fallbacks need no key.
+- **Surface / auth:** the company's careers `url`. The strategy name is historical (it is stored on company rows); the default engine is free and needs no key: (1) a plain `requests` download; (2) when the plain HTML holds no job, the page rendered in the local headless browser (`fetchers/browser.py`, Playwright Chromium, one page at a time, embedded frames included); (3) job cards read from the HTML (`parsing.extract_job_cards`: a job-titled link outside the site chrome, or a job-titled heading with the first link of its block), passed through the same `_parse_json_jobs` guards as Firecrawl's JSON extraction, with `parse_markdown_jobs` as the fallback. PageUp XHR (`optionsFacetsDD` / `/filter/?` URLs) and the Wagtail API (`/api/v2/pages/` URLs) keep their own routes. `VACANCY_FETCH_ENGINE=firecrawl` brings back the paid SDK path (JSON extraction + markdown + changeTracking, ~5 credits, **auth:** `FIRECRAWL_API_KEY`), which falls back to the free scraper when credits or the SDK are unavailable.
+- **Browser setup:** `pip install playwright` and `python -m playwright install chromium-headless-shell`, once per machine. Without it the free engine still reads server-rendered pages and marks a JavaScript page `js_required`.
 - **Config keys:** `url` (req; defaults to `careers_url`). `url_filter` (opt regex, `ats_config`) to keep only matching job links.
-- **Pagination & caps:** a once-per-run credit check (`GET /v2/team/credit-usage`) short-circuits to the local scraper when exhausted; blind enrichment paced at 0.5 s/job; a `changeTracking: same` page returns `[]` (skipped, unchanged).
-- **Failure signatures:** these set a **scrape-status override** (`get_scrape_statuses()`), not a `FetchError` — an empty result stays honest: `credit_exhausted` (credits gone → local scraper) and `js_required` (a JS-shell: thin text / no links, or the parser finds no rows). A quota/rate error from the SDK (402/429) flips credits to 0 for the rest of the run.
-- **Debug:** `from fetchers.firecrawl import fetch_firecrawl_scrape; print(len(fetch_firecrawl_scrape("Example", "<careers-url>")))` (no `FIRECRAWL_API_KEY` → exercises the local scraper)
+- **Pagination & caps:** first page of the listing only. A refused download (HTTP 403) is retried once with the project's own User-Agent. Blind enrichment reads each job's own page with the free posting reader (ATS APIs, plain download, then the browser for a JS shell), paced at 0.5 s/job. Firecrawl mode only: a once-per-run credit check (`GET /v2/team/credit-usage`), and a `changeTracking: same` page returns `[]` (skipped, unchanged).
+- **Failure signatures:** these set a **scrape-status override** (`get_scrape_statuses()`): `js_required` (no job in the plain HTML and no browser to render it); a page rendered in the browser with no job is an honest empty listing (`render_ok_zero`); a refused or failed download stays `error: <reason>` even when the browser drew a page. Firecrawl mode only: `credit_exhausted` (credits gone → free scraper), and a quota/rate error from the SDK (402/429) flips credits to 0 for the rest of the run.
+- **Debug:** `from fetchers.firecrawl import fetch_firecrawl_scrape; print(len(fetch_firecrawl_scrape("Example", "<careers-url>")))` (free engine; needs no key)
 
 ---
 
@@ -424,9 +425,8 @@ Why this is safe: importing `fetchers` connects the backend (for the registry),
 but the fetch functions themselves only issue HTTP reads and **return a list** —
 they never write vacancies. The throwaway `JOBSEARCH_DB_PATH` guarantees that
 even the connect-on-import touches only a scratch file, never `data/jobsearch.db`
-or Supabase. Firecrawl-backed engines (`firecrawl_scrape`, `firecrawl_board`,
-`workable`) exercise the zero-credit local path when `FIRECRAWL_API_KEY` is
-unset.
+or Supabase. The scrape engines (`firecrawl_scrape`, `firecrawl_board`,
+`workable`) use the free path unless `VACANCY_FETCH_ENGINE=firecrawl` is set.
 
 To reproduce a failing source end-to-end (with the real config, TTL and status
 recording) instead of by hand, use the driver:
