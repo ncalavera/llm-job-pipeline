@@ -291,6 +291,18 @@ def test_apply_kill_role_model_string_stores_no_key():
     assert "role_model" not in judge_json
 
 
+def test_path_stored_and_never_changes_decision():
+    base = {"verdict": "KEEP", "reason": "fits"}
+    s0, _, j0, _ = jr.apply_decision(ROLE, base, CFG, "m", "b1")
+    s1, _, j1, _ = jr.apply_decision(ROLE, {**base, "path": 2}, CFG, "m", "b1")
+    assert s0 == s1 == "keep" and "path" not in j0 and j1["path"] == 2
+    for bad in (7, -1, "2", True, None):
+        _, _, jb, _ = jr.apply_decision(ROLE, {**base, "path": bad}, CFG, "m", "b1")
+        assert "path" not in jb
+    state, _, jk, _ = _role_model_kill(path=1)
+    assert state == "killed" and jk["path"] == 1
+
+
 # ---------------------------------------------------------------------------
 # Seeded audit sample determinism
 # ---------------------------------------------------------------------------

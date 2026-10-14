@@ -438,6 +438,10 @@ def apply_decision(role: dict, verdict_obj: dict, cfg: dict, model: str, brief_v
         "brief_version": brief_ver,
         "judged_at": datetime.now(timezone.utc).isoformat(),
     }
+    # DHA-1182: career path 1-6 (0 = none), stored for any verdict; never changes the decision.
+    path = verdict_obj.get("path")
+    if isinstance(path, int) and not isinstance(path, bool) and 0 <= path <= 6:
+        judge_json["path"] = path
     if verdict != "KILL":
         return verdict.lower(), None, judge_json, None
     if verdict_obj.get("role_model") is True:
