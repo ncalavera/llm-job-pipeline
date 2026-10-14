@@ -554,7 +554,7 @@ def run_judge_stage(cfg: dict, dry_run: bool = False, roles: list[dict] | None =
             counts[judge_state] += 1
             if counter:
                 counts[counter] += 1
-            if path is None and "path" in v:
+            if path is None:
                 counts["path_invalid"] += 1
             decisions.append(
                 {

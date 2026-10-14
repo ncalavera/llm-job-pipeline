@@ -321,7 +321,7 @@ def test_path_goes_to_screening_top_level_and_never_changes_decision(monkeypatch
     }
     result = jr.run_judge_stage(cfg, roles=[{**ROLE, "id": i} for i in verdicts])
     assert result["counts"]["killed"] == 3
-    assert result["counts"]["path_invalid"] == 1
+    assert result["counts"]["path_invalid"] == 2
     saved = [params[0].adapted for sql, params in conn.log if "SET screening" in sql]
     assert [s.get("path") for s in saved] == [2, None, None]
     decisions = [{k: v for k, v in s["judge"].items() if k != "judged_at"} for s in saved]
