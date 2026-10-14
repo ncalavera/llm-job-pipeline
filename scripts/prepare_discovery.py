@@ -282,7 +282,12 @@ def save_results(results, payloads, model=None):
                     values.append(model)
             facts = clean.get("screening")
             if facts is not None:
-                facts = {**facts, "model": model, "prompt_version": prep.prompt_fingerprint()}
+                facts = {
+                    **facts,
+                    "model": model,
+                    "prompt_version": prep.prompt_fingerprint(),
+                    **prep.kept_screening(conn, vid),
+                }
                 assignments += [
                     "screening=%s",
                     "screening_state='ready'",
