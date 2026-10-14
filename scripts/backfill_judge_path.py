@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""One-off (DHA-1182): set screening.judge.path on unseen keep/unsure roles.
+"""One-off (DHA-1182): set the career path on unseen keep/unsure roles.
 
 Re-asks the judge model (same codex call, same batches, same retries as the
 nightly stage) with ``--brief`` (the v7 brief that adds ``path``), then writes
-ONLY ``screening.judge.path``. The verdict, kill_kind, confidence and every
-other judge key stay as they are; the fresh verdict is only compared to the
+ONLY the path: ``screening.judge.path`` when the role has a judge record, else
+``screening.path`` (older keep/unsure roles carry no judge record, and an empty
+judge object would pollute the judge views). The verdict, kill_kind, confidence
+and every other key stay as they are; the fresh verdict is only compared to the
 stored one and the disagreements are printed.
 
     backfill_judge_path.py --brief /path/brief_judge_v7.md --backup /tmp/before.json [--limit N] [--dry-run]
@@ -39,7 +41,8 @@ def main() -> int:
     cur.execute(
         "SELECT id, judge_state, screening->'judge'->>'verdict' FROM vacancy "
         "WHERE status = 'unseen' AND judge_state IN ('keep', 'unsure') "
-        "AND NOT (screening->'judge' ? 'path') ORDER BY first_seen DESC"
+        "AND screening->'judge'->>'path' IS NULL AND screening->>'path' IS NULL "
+        "ORDER BY first_seen DESC"
     )
     rows = cur.fetchall()
     cur.close()
@@ -65,7 +68,7 @@ def main() -> int:
                 failed += 1
                 print(f"{rid}: no valid path in {json.dumps(v, ensure_ascii=False)[:300]}")
                 continue
-            if (v["verdict"] or "").lower() != (stored.get(rid) or "").lower():
+            if stored.get(rid) and v["verdict"].lower() != stored[rid].lower():
                 changed += 1
                 print(
                     f"{rid}: verdict now {v['verdict']} (stored {stored.get(rid)}) - kept as stored"
@@ -75,9 +78,10 @@ def main() -> int:
             backup[rid] = cur.fetchone()[0]
             if not args.dry_run:
                 cur.execute(
-                    "UPDATE vacancy SET screening = jsonb_set(screening, '{judge,path}', %s::jsonb) "
-                    "WHERE id = %s AND screening->'judge' IS NOT NULL",
-                    (str(path), rid),
+                    "UPDATE vacancy SET screening = CASE WHEN screening->'judge' IS NOT NULL "
+                    "THEN jsonb_set(screening, '{judge,path}', %s::jsonb) "
+                    "ELSE jsonb_set(screening, '{path}', %s::jsonb) END WHERE id = %s",
+                    (str(path), str(path), rid),
                 )
             cur.close()
             got += 1
