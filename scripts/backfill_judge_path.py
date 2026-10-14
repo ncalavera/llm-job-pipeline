@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-off (DHA-1182): set the career path on unseen keep/unsure roles.
+"""One-off: set the career path on unseen keep/unsure roles.
 
 Re-asks the judge model (same codex call, same batches, same retries as the
 nightly stage) with ``--brief`` (the v7 brief that adds ``path``), then writes
