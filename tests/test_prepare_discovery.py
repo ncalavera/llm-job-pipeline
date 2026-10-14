@@ -305,6 +305,49 @@ def test_discovery_roundtrip_mixed_selection_and_cas(env, monkeypatch):
     assert again["scored"] == 0 and again["prepared"] == 0
 
 
+def test_rescreen_keeps_judge_path_north_star_and_audit(env):
+    import json
+
+    db, ps = env
+    import prepare_discovery as d
+
+    d = importlib.reload(d)
+    vid = str(uuid.uuid4())
+    _seed(db, vid, score=5)
+    kept = {
+        "judge": {"verdict": "KEEP", "reason": "fits"},
+        "path": 3,
+        "north_star": True,
+        "audit": {"verdict": "UPHOLD"},
+    }
+    conn = db.get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE vacancy SET screening=%s WHERE id=%s",
+        (json.dumps({**kept, "posting_facts": {"old": True}}), vid),
+    )
+    conn.commit()
+
+    def screening():
+        cur.execute("SELECT screening FROM vacancy WHERE id=%s", (vid,))
+        return json.loads(cur.fetchone()[0])
+
+    ps.save_result(vid, {"failed": "quote not found"}, "failed", "fp", "opus")
+    conn.commit()
+    after_prepare = screening()
+    assert {k: after_prepare.get(k) for k in kept} == kept
+    assert after_prepare["failed"] == "quote not found" and "posting_facts" not in after_prepare
+
+    p = next(p for p in d.select_payloads(limit=20) if p["id"] == vid)
+    result = {"id": vid, "fingerprint": p["fingerprint"], "scoring": None}
+    result["screening"] = _good_result(vid)
+    assert d.save_results([result], [p], model="haiku")["prepared"] == 1
+    after_discovery = screening()
+    cur.close()
+    assert {k: after_discovery.get(k) for k in kept} == kept
+    assert "failed" not in after_discovery and after_discovery["model"] == "haiku"
+
+
 def test_discovery_rejects_duplicate_unknown_and_stale_without_writes(env):
     db, ps = env
     import prepare_discovery as d

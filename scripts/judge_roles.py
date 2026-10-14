@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import settings  # noqa: E402
 from llm_json import parse_llm_json  # noqa: E402
-from prepare_screening import _norm_ws, _quote_in  # noqa: E402
+from prepare_screening import _norm_ws, _quote_in, current_screening  # noqa: E402
 
 VERDICTS = {"KEEP", "UNSURE", "KILL"}
 
@@ -420,6 +420,13 @@ def judge_with_retries(
 # ---------------------------------------------------------------------------
 
 
+def career_path(verdict_obj: dict) -> int | None:
+    path = verdict_obj.get("path")
+    if isinstance(path, int) and not isinstance(path, bool) and 0 <= path <= 6:
+        return path
+    return None
+
+
 def apply_decision(role: dict, verdict_obj: dict, cfg: dict, model: str, brief_ver: str):
     """One validated verdict -> (judge_state, status_update|None, judge_json, counter|None)."""
     verdict = verdict_obj["verdict"]
@@ -438,10 +445,6 @@ def apply_decision(role: dict, verdict_obj: dict, cfg: dict, model: str, brief_v
         "brief_version": brief_ver,
         "judged_at": datetime.now(timezone.utc).isoformat(),
     }
-    # Career path 1-6 (0 = none), stored for any verdict; never changes the decision.
-    path = verdict_obj.get("path")
-    if isinstance(path, int) and not isinstance(path, bool) and 0 <= path <= 6:
-        judge_json["path"] = path
     if verdict != "KILL":
         return verdict.lower(), None, judge_json, None
     if verdict_obj.get("role_model") is True:
@@ -473,27 +476,15 @@ def apply_decision(role: dict, verdict_obj: dict, cfg: dict, model: str, brief_v
 # ---------------------------------------------------------------------------
 
 
-def _current_screening(conn, vac_id: str) -> dict:
-    cur = conn.cursor()
-    cur.execute("SELECT screening FROM vacancy WHERE id = %s", (vac_id,))
-    row = cur.fetchone()
-    cur.close()
-    if not row or row[0] is None:
-        return {}
-    val = row[0]
-    if isinstance(val, str):
-        try:
-            val = json.loads(val)
-        except (ValueError, TypeError):
-            return {}
-    return val if isinstance(val, dict) else {}
-
-
-def save_judge(conn, vac_id: str, judge_json: dict, judge_state: str, status_update) -> None:
+def save_judge(
+    conn, vac_id: str, judge_json: dict, judge_state: str, status_update, path: int | None = None
+) -> None:
     from db_backend import Json
 
-    screening = _current_screening(conn, vac_id)
+    screening = current_screening(conn, vac_id)
     screening["judge"] = judge_json
+    if path is not None:
+        screening["path"] = path
     # screening["north_star"] is set by hand from the dashboard only.
     cur = conn.cursor()
     cur.execute(
@@ -512,7 +503,7 @@ def save_judge(conn, vac_id: str, judge_json: dict, judge_state: str, status_upd
 def save_audit(conn, vac_id: str, audit_json: dict) -> None:
     from db_backend import Json
 
-    screening = _current_screening(conn, vac_id)
+    screening = current_screening(conn, vac_id)
     screening["audit"] = audit_json
     cur = conn.cursor()
     cur.execute("UPDATE vacancy SET screening = %s WHERE id = %s", (Json(screening), vac_id))
@@ -558,20 +549,24 @@ def run_judge_stage(cfg: dict, dry_run: bool = False, roles: list[dict] | None =
             judge_state, status_update, judge_json, counter = apply_decision(
                 role, v, cfg, model_label, brief_ver
             )
+            path = career_path(v)
             counts["judged"] += 1
             counts[judge_state] += 1
             if counter:
                 counts[counter] += 1
+            if path is None and "path" in v:
+                counts["path_invalid"] += 1
             decisions.append(
                 {
                     "id": role["id"],
                     "judge_state": judge_state,
                     "status_update": status_update,
                     "judge": judge_json,
+                    "path": path,
                 }
             )
             if not dry_run:
-                save_judge(conn, role["id"], judge_json, judge_state, status_update)
+                save_judge(conn, role["id"], judge_json, judge_state, status_update, path)
         if not dry_run:
             conn.commit()
     return {"counts": dict(counts), "decisions": decisions}

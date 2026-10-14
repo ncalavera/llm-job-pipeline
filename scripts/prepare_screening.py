@@ -400,14 +400,41 @@ def _load_postings(ids: list[str]) -> dict[str, str]:
     return out
 
 
+# The judge and the dashboard own these keys; a re-screen replaces the facts and keeps them.
+KEPT_SCREENING_KEYS = ("judge", "path", "north_star", "audit")
+
+
+def current_screening(conn, vac_id: str) -> dict:
+    cur = conn.cursor()
+    cur.execute("SELECT screening FROM vacancy WHERE id = %s", (vac_id,))
+    row = cur.fetchone()
+    cur.close()
+    if not row or row[0] is None:
+        return {}
+    val = row[0]
+    if isinstance(val, str):
+        try:
+            val = json.loads(val)
+        except (ValueError, TypeError):
+            return {}
+    return val if isinstance(val, dict) else {}
+
+
+def kept_screening(conn, vac_id: str) -> dict:
+    current = current_screening(conn, vac_id)
+    return {k: current[k] for k in KEPT_SCREENING_KEYS if k in current}
+
+
 def save_result(vac_id: str, payload: dict, state: str, fp: str, prepared_by: str | None):
     from database_supabase import get_conn
     from db_backend import Json
 
+    conn = get_conn()
     body = dict(payload)
     body["model"] = prepared_by
     body["prompt_version"] = prompt_fingerprint()
-    cur = get_conn().cursor()
+    body.update(kept_screening(conn, vac_id))
+    cur = conn.cursor()
     cur.execute(
         "UPDATE vacancy SET screening = %s, screening_state = %s, "
         "screening_prepared_at = %s, screening_fingerprint = %s WHERE id = %s",

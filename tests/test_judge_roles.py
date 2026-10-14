@@ -291,16 +291,44 @@ def test_apply_kill_role_model_string_stores_no_key():
     assert "role_model" not in judge_json
 
 
-def test_path_stored_and_never_changes_decision():
-    base = {"verdict": "KEEP", "reason": "fits"}
-    s0, _, j0, _ = jr.apply_decision(ROLE, base, CFG, "m", "b1")
-    s1, _, j1, _ = jr.apply_decision(ROLE, {**base, "path": 2}, CFG, "m", "b1")
-    assert s0 == s1 == "keep" and "path" not in j0 and j1["path"] == 2
-    for bad in (7, -1, "2", True, None):
-        _, _, jb, _ = jr.apply_decision(ROLE, {**base, "path": bad}, CFG, "m", "b1")
-        assert "path" not in jb
-    state, _, jk, _ = _role_model_kill(path=1)
-    assert state == "killed" and jk["path"] == 1
+def test_path_goes_to_screening_top_level_and_never_changes_decision(monkeypatch, tmp_path):
+    import db_conn
+
+    kill = {
+        "verdict": "KILL",
+        "kill_kind": "location",
+        "reason": "US work permit required",
+        "quote": "valid US work permit",
+        "confidence": 5,
+    }
+    verdicts = {"a": {**kill, "path": 2}, "b": kill, "c": {**kill, "path": 7}}
+    conn = _Conn()
+    monkeypatch.setattr(db_conn, "get_conn", lambda: conn)
+    monkeypatch.setattr(
+        jr,
+        "judge_with_retries",
+        lambda batch, *a, **k: ({r["id"]: verdicts[r["id"]] for r in batch}, [], None),
+    )
+    brief = tmp_path / "brief.md"
+    brief.write_text("rules")
+    cfg = {
+        **CFG,
+        "brief_path": str(brief),
+        "provider": "p",
+        "model": "m",
+        "batch_size": 10,
+        "scratch_dir": str(tmp_path),
+    }
+    result = jr.run_judge_stage(cfg, roles=[{**ROLE, "id": i} for i in verdicts])
+    assert result["counts"]["killed"] == 3
+    assert result["counts"]["path_invalid"] == 1
+    saved = [params[0].adapted for sql, params in conn.log if "SET screening" in sql]
+    assert [s.get("path") for s in saved] == [2, None, None]
+    decisions = [{k: v for k, v in s["judge"].items() if k != "judged_at"} for s in saved]
+    assert decisions[0] == decisions[1] == decisions[2]
+    assert "path" not in decisions[0]
+    paths = [jr.career_path({"path": p}) for p in (0, 6, 7, -1, "2", True, None)]
+    assert paths == [0, 6, None, None, None, None, None]
 
 
 # ---------------------------------------------------------------------------
@@ -370,31 +398,36 @@ def test_audit_due_only_for_fresh_unaudited_kills():
     assert not jr._audit_due({"judge": {}}, cutoff)
 
 
+class _Cur:
+    def __init__(self, log):
+        self.log = log
+
+    def execute(self, sql, params=()):
+        self.log.append((sql, params))
+
+    def fetchone(self):
+        return ({},)
+
+    def close(self):
+        pass
+
+
+class _Conn:
+    def __init__(self):
+        self.log = []
+
+    def cursor(self):
+        return _Cur(self.log)
+
+    def commit(self):
+        pass
+
+
 def test_save_judge_never_sets_north_star():
-    class Cur:
-        def __init__(self, log):
-            self.log = log
-
-        def execute(self, sql, params=()):
-            self.log.append(params)
-
-        def fetchone(self):
-            return ({},)
-
-        def close(self):
-            pass
-
-    class Conn:
-        def __init__(self):
-            self.log = []
-
-        def cursor(self):
-            return Cur(self.log)
-
     def saved(reason, kind="level"):
-        conn = Conn()
+        conn = _Conn()
         jr.save_judge(conn, "id", {"kill_kind": kind, "reason": reason}, "killed", None)
-        return conn.log[-1][0].adapted
+        return conn.log[-1][1][0].adapted
 
     assert "north_star" not in saved("Too senior: C-level post, 15+ years")
     assert "north_star" not in saved("Entry-level internship")
