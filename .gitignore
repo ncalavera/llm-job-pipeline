@@ -100,3 +100,5 @@ config/junk_profile.json
 # hand-labelled answer keys stay off the repo (principle 10)
 evals/truth-set/
 evals/model-tier-eval-*.md
+judge_scratch/
+.claude/worktrees/
