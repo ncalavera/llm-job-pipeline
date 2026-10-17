@@ -173,8 +173,8 @@ def mask_secrets(text: str) -> str:
 
 
 def _send(text: str) -> bool:
-    """One alert to the dashboard Runs list through the ``notify`` CLI (DHA-1265:
-    nothing goes to Telegram any more). False (never an exception) on any
+    """One alert to the dashboard Runs list through the ``notify`` CLI (nothing
+    goes to Telegram any more). False (never an exception) on any
     failure — the caller decides whether a lost message fails the night (it
     does: exit non-zero, so systemd shows it)."""
     raw = os.environ.get("NIGHTLY_NOTIFY_CMD") or str(Path.home() / ".local/bin/notify")
