@@ -19,7 +19,7 @@ Survival rules (R4, R12, R15):
     deadline, at most RATE_LIMIT_WAITS times) and retries the SAME gate
     without spending a gate trip;
   * any failure (driver abort/error, gate-loop overrun, SIGTERM, a wrapper
-    crash) sends one short Telegram alert naming the failed stage, the
+    crash) sends one short dashboard alert (the ``notify`` CLI) naming the failed stage, the
     exception class and the first 200 masked characters of the message; a
     dead Claude session gets a plain sentence instead (the reason, the reset
     clock on a rate limit, and the night log to open) — never a raw
@@ -32,8 +32,8 @@ child gets only PATH, HOME and its Claude token. Database and provider
 credentials remain in the deterministic wrapper. The model has file-only
 tools and cannot run a shell, load MCP tools or read outside the night inputs.
 
-Test seams: ``NIGHTLY_DRIVER_CMD`` / ``NIGHTLY_CLAUDE_BIN`` (shlex-split)
-replace the real driver / ``claude`` binary with fakes.
+Test seams: ``NIGHTLY_DRIVER_CMD`` / ``NIGHTLY_CLAUDE_BIN`` / ``NIGHTLY_NOTIFY_CMD``
+(shlex-split) replace the real driver / ``claude`` binary / ``notify`` CLI with fakes.
 """
 
 from __future__ import annotations
@@ -59,8 +59,6 @@ if str(SCRIPTS_DIR) not in sys.path:
 PROJECT_ROOT = SCRIPTS_DIR.parent
 # Tests monkeypatch this one attribute; every runtime path derives from it.
 VACANCIES_DIR = PROJECT_ROOT / "vacancies"
-
-from telegram_digest import tg_call  # noqa: E402 — the one Telegram entry point
 
 # run_daily.py exit codes (kept as literals so a fake driver needs no import).
 EXIT_DONE = 0
@@ -136,7 +134,7 @@ _CHILD_ENV_ALLOWLIST = (
     "CLAUDE_CODE_OAUTH_TOKEN",
 )
 
-# Env values that must never reach Telegram or a log line, masked by value.
+# Env values that must never reach an alert or a log line, masked by value.
 _SECRET_ENV_KEYS = (
     "TELEGRAM_BOT_TOKEN",
     "SUPABASE_DB_URL",
@@ -160,7 +158,7 @@ _CHILD: "subprocess.Popen | None" = None
 
 
 def mask_secrets(text: str) -> str:
-    """Mask secrets before anything reaches Telegram, stdout or wrapper.log:
+    """Mask secrets before anything reaches an alert, stdout or wrapper.log:
     known secret env values, ``scheme://user:password@`` URL credentials, and
     Telegram ``bot<id>:<token>`` fragments. The same masker serves --dry-run
     and the R12 alerts (KTD5)."""
@@ -175,16 +173,19 @@ def mask_secrets(text: str) -> str:
 
 
 def _send(text: str) -> bool:
-    """One Telegram message to the user. False (never an exception) on any
-    failure, including missing TELEGRAM_* config — the caller decides whether a
-    lost message fails the night (it does: exit non-zero, so systemd shows it)."""
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat = os.environ.get("TELEGRAM_CHAT_ID")
-    if not token or not chat:
-        return False
+    """One alert to the dashboard Runs list through the ``notify`` CLI (DHA-1265:
+    nothing goes to Telegram any more). False (never an exception) on any
+    failure — the caller decides whether a lost message fails the night (it
+    does: exit non-zero, so systemd shows it)."""
+    raw = os.environ.get("NIGHTLY_NOTIFY_CMD") or str(Path.home() / ".local/bin/notify")
     try:
-        tg_call(token, "sendMessage", {"chat_id": chat, "text": mask_secrets(str(text))})
-        return True
+        done = subprocess.run(
+            shlex.split(raw) + [mask_secrets(str(text))],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=30,
+        )
+        return done.returncode == 0
     except Exception:
         return False
 
@@ -319,7 +320,7 @@ class _Ctx:
         ok = _send(text)
         if not ok:
             self.alert_failed = True
-            self.log(f"TELEGRAM SEND FAILED for: {text}")
+            self.log(f"ALERT SEND FAILED for: {text}")
         return ok
 
     def alert(self, stage: str, message: str) -> None:

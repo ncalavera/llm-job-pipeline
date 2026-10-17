@@ -1,10 +1,10 @@
 """Tests for the nightly wrapper (scripts/nightly_run.py) — U4.
 
 The driver and the ``claude`` binary are BOTH replaced by generated fake
-scripts (via the NIGHTLY_DRIVER_CMD / NIGHTLY_CLAUDE_BIN seams); Telegram is a
-captured in-process fake. No network, no Postgres, no real model. The one
-end-to-end slice (the malformed score_out file) runs the real save script
-against a migrated temp SQLite DB.
+scripts (via the NIGHTLY_DRIVER_CMD / NIGHTLY_CLAUDE_BIN / NIGHTLY_NOTIFY_CMD
+seams); the alert transport (the ``notify`` CLI) writes each text to a file.
+No network, no Postgres, no real model. The one end-to-end slice (the malformed
+score_out file) runs the real save script against a migrated temp SQLite DB.
 """
 
 import importlib
@@ -185,9 +185,18 @@ FAKE_CLAUDE = textwrap.dedent(
 )
 
 
+# The notify CLI: appends its one argument (the alert text) as a JSON line.
+FAKE_NOTIFY = """\
+import json, sys
+with open(sys.argv[1], "a", encoding="utf-8") as f:
+    f.write(json.dumps(sys.argv[2]) + "\\n")
+print("sent")
+"""
+
+
 @pytest.fixture()
 def nr(monkeypatch, tmp_path):
-    """Fresh nightly_run with paths, driver, claude and Telegram all faked."""
+    """Fresh nightly_run with paths, driver, claude and the notify CLI all faked."""
     sys.modules.pop("nightly_run", None)
     import nightly_run
 
@@ -197,15 +206,11 @@ def nr(monkeypatch, tmp_path):
     vac.mkdir()
     monkeypatch.setattr(nightly_run, "VACANCIES_DIR", vac)
 
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok-123456-secret")
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
-    calls = []
-
-    def fake_tg(token, method, payload, timeout=15, retries=2):
-        calls.append((method, payload))
-        return {}
-
-    monkeypatch.setattr(nightly_run, "tg_call", fake_tg)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok-123456-secret")  # still masked in alerts
+    alerts = tmp_path / "alerts.jsonl"
+    notify = tmp_path / "fake_notify.py"
+    notify.write_text(FAKE_NOTIFY, encoding="utf-8")
+    monkeypatch.setenv("NIGHTLY_NOTIFY_CMD", f"{sys.executable} {notify} {alerts}")
 
     steps_path = tmp_path / "driver_steps.json"
     driver = tmp_path / "fake_driver.py"
@@ -252,7 +257,9 @@ def nr(monkeypatch, tmp_path):
         return json.loads(steps_path.read_text(encoding="utf-8")).get("calls", [])
 
     def texts():
-        return [p["text"] for m, p in calls if m == "sendMessage"]
+        if not alerts.exists():
+            return []
+        return [json.loads(line) for line in alerts.read_text(encoding="utf-8").splitlines()]
 
     def night_dir():
         return vac / "nightly" / date.today().isoformat()
@@ -267,7 +274,6 @@ def nr(monkeypatch, tmp_path):
         mod=nightly_run,
         vac=vac,
         tmp=tmp_path,
-        calls=calls,
         set_steps=set_steps,
         set_mode=set_mode,
         set_reset=set_reset,
@@ -811,15 +817,12 @@ def test_digest_stage_error_alerts_even_though_the_run_finished(nr):
     assert any("digest" in t and "exited with code 1" in t for t in texts)
 
 
-def test_failed_alert_send_exits_nonzero(nr):
+def test_failed_alert_send_exits_nonzero(nr, monkeypatch):
     nr.set_steps(
         [{"exit": 20, "stage": "fetch", "note": "fetch exited with code 2: connection refused"}]
     )
 
-    def boom(token, method, payload, timeout=15, retries=2):
-        raise RuntimeError("chat not found")
-
-    nr.mod.tg_call = boom
+    monkeypatch.setenv("NIGHTLY_NOTIFY_CMD", "false")  # notify exits non-zero
     assert nr.mod.run_night() == 1
 
 
@@ -918,16 +921,13 @@ def test_wrapper_startup_crash_sends_the_alert_and_exits_zero(nr, monkeypatch):
     assert nr.driver_calls() == []  # nothing ran
 
 
-def test_wrapper_startup_crash_with_dead_telegram_exits_nonzero(nr, monkeypatch):
+def test_wrapper_startup_crash_with_dead_notify_exits_nonzero(nr, monkeypatch):
     def boom():
         raise OSError("read-only file system")
 
     monkeypatch.setattr(nr.mod, "_make_night_dir", boom)
 
-    def dead(token, method, payload, timeout=15, retries=2):
-        raise RuntimeError("chat not found")
-
-    nr.mod.tg_call = dead
+    monkeypatch.setenv("NIGHTLY_NOTIFY_CMD", str(nr.tmp / "no-such-notify"))  # binary missing
     assert nr.mod.run_night() == 1
 
 
