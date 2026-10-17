@@ -34,6 +34,9 @@ ReadWritePaths=/home/jobsearch/jobsearch
 ReadWritePaths=/home/jobsearch/.claude
 ReadWritePaths=/home/jobsearch/.claude.json
 ReadWritePaths=-/home/jobsearch/.codex
+# notify (night-run alerts to the dashboard): its Runs log and the session-note queue
+ReadWritePaths=-/home/jobsearch/jobs/log
+ReadWritePaths=-/home/jobsearch/.local/state
 NoNewPrivileges=yes
 PrivateTmp=yes
 # The wrapper logs one-line summaries only; transcripts stay in the private
