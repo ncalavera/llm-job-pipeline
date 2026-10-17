@@ -1,3 +1,4 @@
+# OFF since 17.10.2026 (DHA-1265): timer disabled; hiring mail comes through Nikita's ChatGPT assistant.
 [Unit]
 Description=Poll Gmail for recruiter mail every 30 minutes (10 until DHA-994)
 
