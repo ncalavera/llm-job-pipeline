@@ -58,7 +58,15 @@ expired token shows up as the "login failure" alert in the morning message.
 The Telegram bot token rotates the same way via BotFather (`/revoke`), landing
 in `.env`.
 
-## Mail watcher (recruiter mail → Telegram)
+**Telegram is off (17.10.2026, DHA-1265).** Night-run alerts go to the dashboard
+Runs list through `~/.local/bin/notify`; `TELEGRAM_BOT_TOKEN` and
+`TELEGRAM_CHAT_ID` are no longer needed in `.env`, and the nightly digest skips
+when they are unset.
+
+## Mail watcher (recruiter mail → Telegram) — OFF since 17.10.2026
+
+Off since 17.10.2026 (DHA-1265): the timer is disabled, and the hiring mail now
+comes through Nikita's ChatGPT assistant. The script stays for reference.
 
 `scripts/mail_watch.py` polls Gmail every 10 minutes (all incoming mail of
 the last two days, not only the inbox — filters archive most mail on arrival) and sends one Telegram

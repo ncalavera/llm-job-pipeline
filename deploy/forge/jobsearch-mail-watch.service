@@ -1,3 +1,4 @@
+# OFF since 17.10.2026 (DHA-1265): timer disabled; hiring mail comes through Nikita's ChatGPT assistant.
 [Unit]
 Description=Gmail watcher: one Telegram alert per incoming recruiter email
 Documentation=file:///home/jobsearch/Projects/personal/llm-job-pipeline/deploy/forge/README.md
