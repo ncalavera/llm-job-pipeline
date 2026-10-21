@@ -184,6 +184,10 @@ The file feeds the scoring prompts via placeholders (`{{USER_PROFILE}}`,
 
 ### 5. Add companies to monitor
 
+Need help finding employers or their careers pages? The optional
+[Parallel Search MCP guide](docs/company-research-mcp.md) adds web research
+to an interactive Claude Code session, with no Parallel API key.
+
 In your agent: `/jobs-add CompanyName` (non-Claude agents: follow `.claude/commands/jobs-add.md`) — auto-detects the ATS, adds the
 company, runs a test fetch. Or bulk-import `examples/companies.example.csv`
 via the Supabase SQL Editor.
