@@ -22,15 +22,15 @@ from statuses import VALID_REPORT_KINDS
 
 #: Directories whose reports have an obvious kind, most specific first — the
 #: first match wins, so "research/sectors" beats the bare "research" that
-#: contains it, and "docs/cv" (research written FOR one company's application)
+#: contains it, and "applications" (research written FOR one company's application)
 #: beats a file inside it merely named "research-notes.md".
 #:
 #: Matched against the DIRECTORIES only, never the filename. Matching the whole
-#: path let "docs/cv/givedirectly/research-notes.md" answer 'research', because
+#: path let "applications/givedirectly/research-notes.md" answer 'research', because
 #: the word appears in the file's own name — the file is about a company, and
 #: its folder is the only part of the path that says so.
 _KIND_BY_DIRECTORY = (
-    ("docs/cv", "company"),
+    ("applications", "company"),
     ("research/sectors", "sector"),
     ("research/companies", "company"),
     ("companies", "company"),

@@ -90,7 +90,7 @@ def test_a_deeper_heading_is_not_mistaken_for_the_title(mod):
         ("research/companies/givewell.md", "company"),
         ("research/ai-safety-landscape.md", "research"),
         ("reports/ea-landing-strategy.md", "research"),
-        ("docs/cv/givedirectly/research-notes.md", "company"),
+        ("applications/givedirectly/research-notes.md", "company"),
         ("grants/eaif-2026.md", "grant"),
         ("notes/random-thought.md", "other"),
     ],

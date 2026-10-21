@@ -44,7 +44,7 @@ console errors and no horizontal page scroll at 390px or 1280px.
 
 `llm-job-pipeline` is public. The importer is here; the people are not, and
 must not be committed here. The three source files live in
-`~/Projects/personal/job-search-2026/profiles/`:
+`~/Projects/personal/job-search-2026/network/`:
 
 | file | rows | group | status |
 | --- | --- | --- | --- |
@@ -53,8 +53,8 @@ must not be committed here. The three source files live in
 | `network-wave-2026-07.csv` | 5 | network-2026-07 | contacted (1 replied) |
 
 The last two were written by hand from
-`profiles/ea-forum-open-contacts-2026-08.md` and
-`docs/network-drafts-2026-07.md`; each row's `source_path` points back at the
+`network/ea-forum-open-contacts-2026-08.md` and
+`network/network-drafts-2026-07.md`; each row's `source_path` points back at the
 markdown it was read from. The July file is mostly message drafts rather than a
 people list, so a parser would have been guesswork — five people were lifted
 out of it by hand.
@@ -63,13 +63,13 @@ Import them with:
 
 ```bash
 cd ~/Projects/personal/llm-job-pipeline
-P=~/Projects/personal/job-search-2026/profiles
+P=~/Projects/personal/job-search-2026/network
 python3 scripts/vac.py contact import $P/ea-network-people-2026-08-27.csv \
-    --group ea-russian --derive-region --source profiles/ea-network-people-2026-08-27.csv
+    --group ea-russian --derive-region --source network/ea-network-people-2026-08-27.csv
 python3 scripts/vac.py contact import $P/ea-forum-open-contacts-2026-08.csv \
-    --group ea-forum-open --source profiles/ea-forum-open-contacts-2026-08.md
+    --group ea-forum-open --source network/ea-forum-open-contacts-2026-08.md
 python3 scripts/vac.py contact import $P/network-wave-2026-07.csv \
-    --group network-2026-07 --source docs/network-drafts-2026-07.md
+    --group network-2026-07 --source network/network-drafts-2026-07.md
 ```
 
 Re-running any of them updates those rows rather than forking the list, and a
