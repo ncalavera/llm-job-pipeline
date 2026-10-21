@@ -44,7 +44,7 @@ console errors and no horizontal page scroll at 390px or 1280px.
 
 `llm-job-pipeline` is public. The importer is here; the people are not, and
 must not be committed here. The three source files live in
-`~/Projects/personal/job-search-2026/network/`:
+`~/Projects/personal/career/network/`:
 
 | file | rows | group | status |
 | --- | --- | --- | --- |
@@ -63,7 +63,7 @@ Import them with:
 
 ```bash
 cd ~/Projects/personal/llm-job-pipeline
-P=~/Projects/personal/job-search-2026/network
+P=~/Projects/personal/career/network
 python3 scripts/vac.py contact import $P/ea-network-people-2026-08-27.csv \
     --group ea-russian --derive-region --source network/ea-network-people-2026-08-27.csv
 python3 scripts/vac.py contact import $P/ea-forum-open-contacts-2026-08.csv \
@@ -146,7 +146,7 @@ export SUPABASE_DB_URL="postgresql://shotuser@127.0.0.1:15499/jobsearch_shots"
 psql -q "$SUPABASE_DB_URL" -f sql/schema.sql
 python3 scripts/migrate.py --allow-destructive   # fresh DB only; see note below
 
-python3 scripts/vac.py report add ~/Projects/personal/job-search-2026/research/grants/eaif-close-grants-2026-08-27.md
+python3 scripts/vac.py report add ~/Projects/personal/career/research/grants/eaif-close-grants-2026-08-27.md
 DATABASE_URL="$SUPABASE_DB_URL" PORT=8799 node server.js
 ```
 
