@@ -31,39 +31,46 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
         "Content-Type": "application/json",
     }
 
-    # Fetch all hits from the index (paginate through everything)
+    # Algolia stops paging at 1000 hits per query. A board that outgrows that
+    # names `algolia_partitions`: filters that split the index into disjoint
+    # parts under the cap. Each part is walked on its own and hits merge by objectID.
+    partitions = board_cfg.get("algolia_partitions") or [""]
     all_hits = []
-    page = 0
+    seen_ids = set()
     per_page = 200
     last_error = None
     reported_total = None
 
-    while True:
-        payload = json.dumps(
-            {
-                "query": "",
-                "hitsPerPage": per_page,
-                "page": page,
-            }
-        )
-        try:
-            resp = http.post(url, data=payload, headers=headers, timeout=15)
-            data = resp.json()
-        except Exception as e:
-            print(f"  [{board_name}] Algolia ERROR page {page}: {e}")
-            last_error = e
-            break
+    for partition in partitions:
+        page = 0
+        while True:
+            body = {"query": "", "hitsPerPage": per_page, "page": page}
+            if partition:
+                body["filters"] = partition
+            try:
+                resp = http.post(url, data=json.dumps(body), headers=headers, timeout=15)
+                data = resp.json()
+            except Exception as e:
+                print(f"  [{board_name}] Algolia ERROR {partition or 'all'} page {page}: {e}")
+                last_error = e
+                break
 
-        hits = data.get("hits", [])
-        if reported_total is None and data.get("nbHits") is not None:
-            reported_total = int(data["nbHits"])
-        if not hits:
-            break
-        all_hits.extend(hits)
+            if page == 0 and data.get("nbHits") is not None:
+                reported_total = (reported_total or 0) + int(data["nbHits"])
+            hits = data.get("hits", [])
+            if not hits:
+                break
+            for hit in hits:
+                key = hit.get("objectID")
+                if key and key in seen_ids:
+                    continue
+                if key:
+                    seen_ids.add(key)
+                all_hits.append(hit)
 
-        if page >= data.get("nbPages", 1) - 1:
-            break
-        page += 1
+            if page >= data.get("nbPages", 1) - 1:
+                break
+            page += 1
 
     if last_error is None and reported_total is not None and len(all_hits) < reported_total:
         last_error = RuntimeError(

@@ -735,6 +735,9 @@ url = "https://jobs.80000hours.org"
 algolia_app_id = "W6KM1UDIB3"
 algolia_api_key = "d1d7f2c8696e7b36837d5ed337c4a319"
 algolia_index = "jobs_prod_super_ranked"
+# The index passed Algolia's 1000-hit paging cap in Oct 2026 (1006 hits).
+# salary_algolia splits it exactly: 627 true + 370 false = 997 on 2026-11-10.
+algolia_partitions = ["salary_algolia:true", "salary_algolia:false"]
 board_blacklist = []
 ttl_days = 1
 tier = "B"
