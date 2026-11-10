@@ -20,6 +20,7 @@ _OPPORTUNITIES_KEY = '"opportunities":'
 # React moves a text of 1024+ chars to its own payload row `<id>:T<hex byte length>,<text>`
 # and leaves the reference "$<id>" in its place.
 _TEXT_REF = re.compile(r"\$([0-9a-f]+)")
+_TEXT_ROW_HEAD = re.compile(rb"([0-9a-f]+):T([0-9a-f]+),")
 
 # The board lists more than employment — it also carries grant calls, reading
 # groups, conferences and career-advising slots. Those are dropped here because
@@ -125,17 +126,17 @@ def _opportunities(page: str) -> list[dict] | None:
     rows, _ = json.JSONDecoder().raw_decode(text, start + len(_OPPORTUNITIES_KEY))
     if not isinstance(rows, list):
         return None
-    payload = text.encode()
-    return [_unescape(r, payload) for r in rows]
+    text_rows = _text_rows(text.encode())
+    return [_unescape(r, text_rows) for r in rows]
 
 
-def _unescape(value, payload: bytes):
+def _unescape(value, text_rows: dict[str, str]):
     """Undo React's payload encoding: "$$…" is a text starting with "$",
     "$undefined" is a missing value, and "$<hex id>" points at a long text row."""
     if isinstance(value, list):
-        return [_unescape(v, payload) for v in value]
+        return [_unescape(v, text_rows) for v in value]
     if isinstance(value, dict):
-        return {k: _unescape(v, payload) for k, v in value.items()}
+        return {k: _unescape(v, text_rows) for k, v in value.items()}
     if not isinstance(value, str) or not value.startswith("$"):
         return value
     if value.startswith("$$"):
@@ -144,16 +145,32 @@ def _unescape(value, payload: bytes):
         return None
     ref = _TEXT_REF.fullmatch(value)
     if ref:
-        return _text_row(payload, ref.group(1))
+        if ref.group(1) not in text_rows:
+            raise ValueError(f"React payload text row {value} is missing")
+        return text_rows[ref.group(1)]
     raise ValueError(f"unknown React payload value {value[:20]!r} in an opportunity")
 
 
-def _text_row(payload: bytes, row_id: str) -> str:
-    """The text of row `<row_id>:T<hex byte length>,…`; its length counts UTF-8 bytes."""
-    head = re.search(rb"(?:^|\n)" + row_id.encode() + rb":T([0-9a-f]+),", payload)
-    if not head:
-        raise ValueError(f"React payload text row ${row_id} is missing")
-    return payload[head.end() : head.end() + int(head.group(1), 16)].decode()
+def _text_rows(payload: bytes) -> dict[str, str]:
+    """Every `<id>:T<hex byte length>,<text>` row, walked row by row.
+
+    A text row has no newline after it, so the next row's header can follow
+    its last byte directly; only its byte length says where it ends. Other
+    rows are one JSON line each.
+    """
+    rows: dict[str, str] = {}
+    pos = 0
+    while pos < len(payload):
+        head = _TEXT_ROW_HEAD.match(payload, pos)
+        if head:
+            pos = head.end() + int(head.group(2), 16)
+            rows[head.group(1).decode()] = payload[head.end() : pos].decode()
+            continue
+        newline = payload.find(b"\n", pos)
+        if newline < 0:
+            break
+        pos = newline + 1
+    return rows
 
 
 def _is_vacancy(row: dict) -> bool:

@@ -976,24 +976,32 @@ def test_fetch_ea_opportunities_prefers_the_written_salary(monkeypatch):
 
 def test_fetch_ea_opportunities_reads_a_long_description_from_its_text_row(monkeypatch):
     """React moves a 1024+ char text to its own row and leaves "$<id>" in the
-    prop (seen live on 2026-11-10). The row's length counts UTF-8 bytes."""
-    long_text = "Café coordination in São Paulo — " * 40
-    size = format(len(long_text.encode()), "x")
-    row = {
-        "id": "recLong",
-        "title": "Programme Coordinator",
-        "organizations": [{"name": "Some Org", "link": ""}],
-        "opportunityTypes": ["Full-time"],
-        "applicationLink": "https://example.test/long",
-        "description": _RscRef("$4a"),
+    prop (seen live on 2026-11-10). The row's length counts UTF-8 bytes, and
+    the next row's header follows its last byte with no newline in between."""
+    texts = {
+        "4a": "Café coordination in São Paulo. " * 40,
+        "4b": "Research on malaria vector control. " * 40,
     }
+    text_rows = "".join(f"{k}:T{len(v.encode()):x},{v}" for k, v in texts.items())
+    rows = [
+        {
+            "id": f"rec{ref}",
+            "title": f"Programme Coordinator {ref}",
+            "organizations": [{"name": "Some Org", "link": ""}],
+            "opportunityTypes": ["Full-time"],
+            "applicationLink": f"https://example.test/{ref}",
+            "description": _RscRef(f"${ref}"),
+        }
+        for ref in texts
+    ]
 
     def router(verb, url, json=None, params=None):
-        return _Resp(text=_ea_page(row, text_rows=f"4a:T{size},{long_text}"))
+        return _Resp(text=_ea_page(*rows, text_rows=text_rows))
 
     monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
     out = fetchers.fetch_ea_opportunities_board(EA_BOARD_CFG)
-    assert out[0]["full_description"].startswith(long_text.strip())
+    for job, text in zip(out, texts.values()):
+        assert job["full_description"].startswith(text.strip())
 
 
 def test_fetch_ea_opportunities_refuses_an_empty_board(monkeypatch):
@@ -1314,7 +1322,7 @@ def test_hn_skips_job_seeker_advertisements():
     )
 
 
-@pytest.mark.parametrize("index_total, complete", [(6, True), (7, False)])
+@pytest.mark.parametrize("index_total, complete", [(6, True), (7, False), (None, False)])
 def test_fetch_algolia_board_walks_each_partition_past_the_1000_cap(
     monkeypatch, index_total, complete
 ):
@@ -1343,6 +1351,8 @@ def test_fetch_algolia_board_walks_each_partition_past_the_1000_cap(
         body = _json.loads(data)
         if body["hitsPerPage"] == 0:
             assert "filters" not in body
+            if index_total is None:  # the count request itself fails
+                raise fetchers.FetchError("http_503", "count query refused")
             return _Resp(json_data={"hits": [], "nbHits": index_total})
         seen.append(body["filters"])
         return _Resp(json_data=pages[(body["filters"], body["page"])])
@@ -1368,6 +1378,9 @@ def test_fetch_algolia_board_walks_each_partition_past_the_1000_cap(
     errors = fetchers.get_fetch_errors()
     if complete:
         assert "80,000 Hours" not in errors
+    elif index_total is None:
+        # The rows survive; the run is marked unhealthy rather than lost.
+        assert errors["80,000 Hours"].startswith("error: incomplete pagination:")
     else:
         assert errors["80,000 Hours"] == (
             "error: incomplete pagination: observed 6 of advertised 7 hits"
