@@ -44,7 +44,9 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
         # The whole index's own count, so a hit outside every partition reads as missing.
         try:
             count = json.dumps({"query": "", "hitsPerPage": 0})
-            reported_total = http.post(url, data=count, headers=headers, timeout=15).json().get("nbHits")
+            reported_total = (
+                http.post(url, data=count, headers=headers, timeout=15).json().get("nbHits")
+            )
         except Exception as e:
             print(f"  [{board_name}] Algolia ERROR index count: {e}")
             last_error = e

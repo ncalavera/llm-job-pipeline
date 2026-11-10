@@ -842,10 +842,8 @@ def _ea_page(*opportunities, text_rows=""):
     )
     half = len(flight) // 2
     chunks = [[0], [1, flight[:half]], [1, flight[half:]]]
-    scripts = "".join(
-        f"<script>self.__next_f.push({json.dumps(c)})</script>" for c in chunks
-    )
-    return '<html><body><main>rendered cards</main>' + scripts + "</body></html>"
+    scripts = "".join(f"<script>self.__next_f.push({json.dumps(c)})</script>" for c in chunks)
+    return "<html><body><main>rendered cards</main>" + scripts + "</body></html>"
 
 
 def test_fetch_ea_opportunities_board(monkeypatch):
@@ -1373,7 +1371,12 @@ def test_fetch_algolia_board_walks_each_partition_past_the_1000_cap(
 
     assert seen == ["salary_algolia:true", "salary_algolia:true", "salary_algolia:false"]
     assert sorted(j["external_id"] for j in out) == [
-        "paid0", "paid1", "paid2", "unpaid0", "unpaid1", "unpaid2"
+        "paid0",
+        "paid1",
+        "paid2",
+        "unpaid0",
+        "unpaid1",
+        "unpaid2",
     ]
     errors = fetchers.get_fetch_errors()
     if complete:
