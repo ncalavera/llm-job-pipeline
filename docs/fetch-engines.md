@@ -253,8 +253,9 @@ here.
 ### `algolia_api` — generic Algolia index (backs 80,000 Hours)
 <!-- ENGINE: algolia_api -->
 - **Surface / auth:** `POST https://{app_id}-dsn.algolia.net/1/indexes/{index}/query` with the board's public search key in headers. No Firecrawl.
-- **Config keys:** `algolia_app_id`, `algolia_api_key`, `algolia_index` (all req), plus `name`/`url`. `board_blacklist` opt.
-- **Pagination & caps:** `hitsPerPage=200`, pages through `nbPages`. **No cap, no keyword/location filter.**
+- **Config keys:** `algolia_app_id`, `algolia_api_key`, `algolia_index` (all req), plus `name`/`url`. `board_blacklist` opt. `algolia_partitions` (opt) — a list of Algolia `filters` that split the index into disjoint parts; 80,000 Hours ships `["salary_algolia:true", "salary_algolia:false"]`.
+- **Pagination & caps:** `hitsPerPage=200`, pages through `nbPages`. Algolia stops paging at 1000 hits per query, so a larger index needs `algolia_partitions`: each part is walked on its own and hits merge by `objectID`. No keyword/location filter.
+- **Incomplete runs:** with partitions, one unfiltered `hitsPerPage: 0` query takes the whole index's `nbHits` as the target. Fewer merged hits records `error: incomplete pagination` while keeping the rows — a part outgrew the cap, or hits fall outside every partition.
 - **Failure signatures:** a per-page error breaks the loop; if nothing was fetched → re-raised (`error: …`).
 - **Debug:** `from fetchers.boards.algolia import fetch_algolia_board; print(len(fetch_algolia_board({"name":"80,000 Hours","url":"https://jobs.80000hours.org","algolia_app_id":"W6KM1UDIB3","algolia_api_key":"d1d7f2c8696e7b36837d5ed337c4a319","algolia_index":"jobs_prod_super_ranked"})))`
 
@@ -284,11 +285,11 @@ here.
 
 ### `ea_opportunities_next_data` — EA Opportunities Board embedded in its page
 <!-- ENGINE: ea_opportunities_next_data -->
-- **Surface / auth:** `GET https://www.effectivealtruism.org/opportunities`. The EA Opportunities Board is server-rendered Next.js over Airtable: the whole board (~1000 rows, ~700 KB gzipped) arrives inside the page's `__NEXT_DATA__` script tag. No key, no login. The lighter JSON twin at `/_next/data/<buildId>/opportunities.json` is deliberately **not** used — the buildId changes on every deploy of their site and a stale one answers 404, while the page address never changes.
+- **Surface / auth:** `GET https://www.effectivealtruism.org/opportunities`. The EA Opportunities Board is server-rendered Next.js over Airtable: since Oct 2026 the page uses the App Router, so the whole board (~735 rows on 2026-11-10) arrives in the React payload streamed by `self.__next_f.push([1, "…"])` scripts, as one `"opportunities":[…]` prop. The fetcher joins the chunks, decodes that list and undoes React's escaping (`"$$…"` → `"$…"`, `"$undefined"` → empty). No key, no login. The strategy id keeps its historical `next_data` name because it is stored in config.
 - **Config keys:** `page_url` (opt, default the board URL), `board_blacklist`.
-- **Pagination & caps:** none — one request is the complete board. Uncapped on purpose: rows arrive newest-first with no relevance ranking, so a cap would trade completeness for nothing. If the payload ever carries fewer rows than its own `totalCount`, the shortfall is printed.
+- **Pagination & caps:** none — one request is the complete board. Uncapped on purpose: rows arrive newest-first with no relevance ranking, so a cap would trade completeness for nothing.
 - **Filtering:** the board lists more than employment, so rows whose every `opportunityTypes` entry is Funding / Course / Event / Contest / Advising / Independent project are dropped as **not vacancies**. Unpaid and junior work (Volunteer, Internship, Fellowship, Part-time) stays and goes to scoring like any other row (STRATEGY guardrail 1).
-- **Failure signatures:** a page without `__NEXT_DATA__` raises rather than returning `[]` — a board that changed shape must never read as a board with no jobs. Cloudflare answers 403 to a nameless agent, so the request sends a browser User-Agent.
+- **Failure signatures:** a page with no `"opportunities"` list in its payload raises rather than returning `[]` — a board that changed shape must never read as a board with no jobs. Cloudflare answers 403 to a nameless agent, so the request sends a browser User-Agent.
 - **Debug:** `from fetchers.boards.ea_opportunities import fetch_ea_opportunities_board; print(len(fetch_ea_opportunities_board({"name":"EA Opportunities Board","url":"https://www.effectivealtruism.org/opportunities","board_blacklist":[]})))`
 
 ### `fastforward_board` — Fast Forward on Getro
