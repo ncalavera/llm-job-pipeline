@@ -34,14 +34,18 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
     # Algolia stops paging at 1000 hits per query. A board that outgrows that
     # names `algolia_partitions`: filters that split the index into disjoint
     # parts under the cap. Each part is walked on its own and hits merge by objectID.
-    partitions = board_cfg.get("algolia_partitions") or [""]
+    partitions = board_cfg.get("algolia_partitions")
     all_hits = []
     seen_ids = set()
     per_page = 200
     last_error = None
     reported_total = None
+    if partitions:
+        # The whole index's own count, so a hit outside every partition reads as missing.
+        count = json.dumps({"query": "", "hitsPerPage": 0})
+        reported_total = http.post(url, data=count, headers=headers, timeout=15).json().get("nbHits")
 
-    for partition in partitions:
+    for partition in partitions or [""]:
         page = 0
         while True:
             body = {"query": "", "hitsPerPage": per_page, "page": page}
@@ -55,8 +59,8 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
                 last_error = e
                 break
 
-            if page == 0 and data.get("nbHits") is not None:
-                reported_total = (reported_total or 0) + int(data["nbHits"])
+            if not partitions and page == 0 and data.get("nbHits") is not None:
+                reported_total = int(data["nbHits"])
             hits = data.get("hits", [])
             if not hits:
                 break
@@ -73,9 +77,7 @@ def fetch_algolia_board(board_cfg: dict) -> list[dict]:
             page += 1
 
     if last_error is None and reported_total is not None and len(all_hits) < reported_total:
-        last_error = RuntimeError(
-            f"incomplete pagination: observed {len(all_hits)} of advertised {reported_total} hits"
-        )
+        last_error = RuntimeError(f"observed {len(all_hits)} of advertised {reported_total} hits")
 
     if not all_hits and last_error is not None:
         raise last_error  # total failure — let the boundary record the reason

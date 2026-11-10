@@ -255,7 +255,7 @@ here.
 - **Surface / auth:** `POST https://{app_id}-dsn.algolia.net/1/indexes/{index}/query` with the board's public search key in headers. No Firecrawl.
 - **Config keys:** `algolia_app_id`, `algolia_api_key`, `algolia_index` (all req), plus `name`/`url`. `board_blacklist` opt. `algolia_partitions` (opt) — a list of Algolia `filters` that split the index into disjoint parts; 80,000 Hours ships `["salary_algolia:true", "salary_algolia:false"]`.
 - **Pagination & caps:** `hitsPerPage=200`, pages through `nbPages`. Algolia stops paging at 1000 hits per query, so a larger index needs `algolia_partitions`: each part is walked on its own and hits merge by `objectID`. No keyword/location filter.
-- **Incomplete runs:** fewer hits than the parts advertise (summed `nbHits`) records `error: incomplete pagination` while keeping the rows — the sign that a part outgrew the cap and needs a finer split.
+- **Incomplete runs:** with partitions, one unfiltered `hitsPerPage: 0` query takes the whole index's `nbHits` as the target. Fewer merged hits records `error: incomplete pagination` while keeping the rows — a part outgrew the cap, or hits fall outside every partition.
 - **Failure signatures:** a per-page error breaks the loop; if nothing was fetched → re-raised (`error: …`).
 - **Debug:** `from fetchers.boards.algolia import fetch_algolia_board; print(len(fetch_algolia_board({"name":"80,000 Hours","url":"https://jobs.80000hours.org","algolia_app_id":"W6KM1UDIB3","algolia_api_key":"d1d7f2c8696e7b36837d5ed337c4a319","algolia_index":"jobs_prod_super_ranked"})))`
 

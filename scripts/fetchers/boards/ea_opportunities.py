@@ -17,6 +17,9 @@ _DEFAULT_PAGE_URL = "https://www.effectivealtruism.org/opportunities"
 # pagination, no cap to work around.
 _FLIGHT_CHUNK = re.compile(r"self\.__next_f\.push\((\[.*?\])\)</script>", re.S)
 _OPPORTUNITIES_KEY = '"opportunities":'
+# React moves a text of 1024+ chars to its own payload row `<id>:T<hex byte length>,<text>`
+# and leaves the reference "$<id>" in its place.
+_TEXT_REF = re.compile(r"\$([0-9a-f]+)")
 
 # The board lists more than employment — it also carries grant calls, reading
 # groups, conferences and career-advising slots. Those are dropped here because
@@ -50,10 +53,10 @@ def fetch_ea_opportunities_board(board_cfg: dict) -> list[dict]:
     print(f"  [{board_name}] EA Opportunities: fetching {page_url}...")
     resp = http.get(page_url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
     raw = _opportunities(resp.text)
-    if raw is None:
+    if not raw:
         # Refusal ≠ empty: a board that changed shape must not read as "no jobs".
         raise ValueError(
-            f"{board_name}: no opportunities list in the Next.js payload of "
+            f"{board_name}: no opportunities list (or an empty one) in the Next.js payload of "
             f"{len(resp.text)} chars of page ({page_url}) — the board changed shape"
         )
 
@@ -120,20 +123,37 @@ def _opportunities(page: str) -> list[dict] | None:
     if start < 0:
         return None
     rows, _ = json.JSONDecoder().raw_decode(text, start + len(_OPPORTUNITIES_KEY))
-    return [_unescape(r) for r in rows] if isinstance(rows, list) else None
+    if not isinstance(rows, list):
+        return None
+    payload = text.encode()
+    return [_unescape(r, payload) for r in rows]
 
 
-def _unescape(value):
-    """Undo React's payload escaping: a text starting with "$" arrives as "$$…"."""
-    if isinstance(value, str):
-        if value == "$undefined":
-            return None
-        return value[1:] if value.startswith("$$") else value
+def _unescape(value, payload: bytes):
+    """Undo React's payload encoding: "$$…" is a text starting with "$",
+    "$undefined" is a missing value, and "$<hex id>" points at a long text row."""
     if isinstance(value, list):
-        return [_unescape(v) for v in value]
+        return [_unescape(v, payload) for v in value]
     if isinstance(value, dict):
-        return {k: _unescape(v) for k, v in value.items()}
-    return value
+        return {k: _unescape(v, payload) for k, v in value.items()}
+    if not isinstance(value, str) or not value.startswith("$"):
+        return value
+    if value.startswith("$$"):
+        return value[1:]
+    if value == "$undefined":
+        return None
+    ref = _TEXT_REF.fullmatch(value)
+    if ref:
+        return _text_row(payload, ref.group(1))
+    raise ValueError(f"unknown React payload value {value[:20]!r} in an opportunity")
+
+
+def _text_row(payload: bytes, row_id: str) -> str:
+    """The text of row `<row_id>:T<hex byte length>,…`; its length counts UTF-8 bytes."""
+    head = re.search(rb"(?:^|\n)" + row_id.encode() + rb":T([0-9a-f]+),", payload)
+    if not head:
+        raise ValueError(f"React payload text row ${row_id} is missing")
+    return payload[head.end() : head.end() + int(head.group(1), 16)].decode()
 
 
 def _is_vacancy(row: dict) -> bool:

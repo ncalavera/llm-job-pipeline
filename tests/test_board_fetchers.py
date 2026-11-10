@@ -814,12 +814,19 @@ EA_BOARD_CFG = {
 }
 
 
-def _ea_page(*opportunities):
+class _RscRef(str):
+    """A React payload reference such as "$4a": written raw, never "$"-escaped."""
+
+
+def _ea_page(*opportunities, text_rows=""):
     """The board's page as the live site serves it since Oct 2026: a Next.js
     App Router payload streamed in `self.__next_f.push` chunks, with React's
-    "$" escaping, the row list split across two chunks."""
+    "$" escaping, the row list split across two chunks. `text_rows` are extra
+    `<id>:T<hex bytes>,<text>` rows that long descriptions point at."""
 
     def escape(value):
+        if isinstance(value, _RscRef):
+            return str(value)
         if isinstance(value, str):
             return "$" + value if value.startswith("$") else value
         if isinstance(value, list):
@@ -828,7 +835,7 @@ def _ea_page(*opportunities):
             return {k: escape(v) for k, v in value.items()}
         return value
 
-    flight = (
+    flight = text_rows + (
         '5e:["$","$L5e",null,{"opportunities":'
         + json.dumps(escape(list(opportunities)))
         + ',"filters":"$undefined"}]\n'
@@ -965,6 +972,40 @@ def test_fetch_ea_opportunities_prefers_the_written_salary(monkeypatch):
     monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
     out = fetchers.fetch_ea_opportunities_board(EA_BOARD_CFG)
     assert [r["compensation"] for r in out] == ["$90,000 – $150,000", "180000"]
+
+
+def test_fetch_ea_opportunities_reads_a_long_description_from_its_text_row(monkeypatch):
+    """React moves a 1024+ char text to its own row and leaves "$<id>" in the
+    prop (seen live on 2026-11-10). The row's length counts UTF-8 bytes."""
+    long_text = "Café coordination in São Paulo — " * 40
+    size = format(len(long_text.encode()), "x")
+    row = {
+        "id": "recLong",
+        "title": "Programme Coordinator",
+        "organizations": [{"name": "Some Org", "link": ""}],
+        "opportunityTypes": ["Full-time"],
+        "applicationLink": "https://example.test/long",
+        "description": _RscRef("$4a"),
+    }
+
+    def router(verb, url, json=None, params=None):
+        return _Resp(text=_ea_page(row, text_rows=f"4a:T{size},{long_text}"))
+
+    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
+    out = fetchers.fetch_ea_opportunities_board(EA_BOARD_CFG)
+    assert out[0]["full_description"].startswith(long_text.strip())
+
+
+def test_fetch_ea_opportunities_refuses_an_empty_board(monkeypatch):
+    """An empty list means the site failed to render the board, not zero jobs."""
+
+    def router(verb, url, json=None, params=None):
+        return _Resp(text=_ea_page())
+
+    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
+    fetchers._last_fetch_errors.pop("EA Opportunities Board", None)
+    assert fetchers.fetch_ea_opportunities_board(EA_BOARD_CFG) == []
+    assert "empty" in fetchers.get_fetch_errors()["EA Opportunities Board"]
 
 
 def test_fetch_ea_opportunities_refuses_a_page_it_cannot_read(monkeypatch):
@@ -1124,7 +1165,8 @@ def test_fetch_algolia_board_keeps_full_description(monkeypatch):
         assert verb == "POST" and "algolia.net" in url
         return _Resp(json_data={"hits": [hit], "nbHits": 1, "nbPages": 1})
 
-    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
+    fake = _FakeHTTP(router)
+    monkeypatch.setattr(fetchers, "requests", fake)
     out = fetchers.fetch_algolia_board(
         {
             "name": "80,000 Hours",
@@ -1142,6 +1184,10 @@ def test_fetch_algolia_board_keeps_full_description(monkeypatch):
     assert "…" not in job["full_description"]
     # snippet is still a capped preview.
     assert len(job["snippet"]) <= 401 and job["snippet"].endswith("…")
+    # No partitions configured: one plain walk, no count query, no filters.
+    assert [json.loads(c["data"]) for c in fake.calls] == [
+        {"query": "", "hitsPerPage": 200, "page": 0}
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1268,10 +1314,14 @@ def test_hn_skips_job_seeker_advertisements():
     )
 
 
-def test_fetch_algolia_board_walks_each_partition_past_the_1000_cap(monkeypatch):
+@pytest.mark.parametrize("index_total, complete", [(6, True), (7, False)])
+def test_fetch_algolia_board_walks_each_partition_past_the_1000_cap(
+    monkeypatch, index_total, complete
+):
     """80,000 Hours outgrew Algolia's 1000-hit paging cap (1006 hits, Oct 2026).
-    Configured partitions are walked separately, merged by objectID, and the
-    run counts as complete only when every advertised hit arrived."""
+    Configured partitions are walked separately and merged by objectID. The
+    run is complete only when it holds the whole index's own count, so a hit
+    that falls outside every partition (index_total 7) is reported missing."""
 
     def _hits(prefix, n):
         return [
@@ -1291,8 +1341,11 @@ def test_fetch_algolia_board_walks_each_partition_past_the_1000_cap(monkeypatch)
         import json as _json
 
         body = _json.loads(data)
-        seen.append(body.get("filters"))
-        return _Resp(json_data=pages[(body.get("filters"), body["page"])])
+        if body["hitsPerPage"] == 0:
+            assert "filters" not in body
+            return _Resp(json_data={"hits": [], "nbHits": index_total})
+        seen.append(body["filters"])
+        return _Resp(json_data=pages[(body["filters"], body["page"])])
 
     fake.post = post
     monkeypatch.setattr(fetchers, "requests", fake)
@@ -1312,7 +1365,13 @@ def test_fetch_algolia_board_walks_each_partition_past_the_1000_cap(monkeypatch)
     assert sorted(j["external_id"] for j in out) == [
         "paid0", "paid1", "paid2", "unpaid0", "unpaid1", "unpaid2"
     ]
-    assert "80,000 Hours" not in fetchers.get_fetch_errors()
+    errors = fetchers.get_fetch_errors()
+    if complete:
+        assert "80,000 Hours" not in errors
+    else:
+        assert errors["80,000 Hours"] == (
+            "error: incomplete pagination: observed 6 of advertised 7 hits"
+        )
 
 
 def test_fetch_algolia_board_maps_closes_at_to_a_deadline(monkeypatch):
