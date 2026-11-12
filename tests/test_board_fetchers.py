@@ -804,7 +804,7 @@ def test_fetch_probablygood_board_no_external_url_falls_back_to_site(monkeypatch
 
 
 # ---------------------------------------------------------------------------
-# EA Opportunities Board (whole board embedded in the page as __NEXT_DATA__)
+# EA Opportunities Board (the /api/opportunities JSON its page loads)
 # ---------------------------------------------------------------------------
 
 EA_BOARD_CFG = {
@@ -814,36 +814,7 @@ EA_BOARD_CFG = {
 }
 
 
-class _RscRef(str):
-    """A React payload reference such as "$4a": written raw, never "$"-escaped."""
-
-
-def _ea_page(*opportunities, text_rows=""):
-    """The board's page as the live site serves it since Oct 2026: a Next.js
-    App Router payload streamed in `self.__next_f.push` chunks, with React's
-    "$" escaping, the row list split across two chunks. `text_rows` are extra
-    `<id>:T<hex bytes>,<text>` rows that long descriptions point at."""
-
-    def escape(value):
-        if isinstance(value, _RscRef):
-            return str(value)
-        if isinstance(value, str):
-            return "$" + value if value.startswith("$") else value
-        if isinstance(value, list):
-            return [escape(v) for v in value]
-        if isinstance(value, dict):
-            return {k: escape(v) for k, v in value.items()}
-        return value
-
-    flight = text_rows + (
-        '5e:["$","$L5e",null,{"opportunities":'
-        + json.dumps(escape(list(opportunities)))
-        + ',"filters":"$undefined"}]\n'
-    )
-    half = len(flight) // 2
-    chunks = [[0], [1, flight[:half]], [1, flight[half:]]]
-    scripts = "".join(f"<script>self.__next_f.push({json.dumps(c)})</script>" for c in chunks)
-    return "<html><body><main>rendered cards</main>" + scripts + "</body></html>"
+EA_API_URL = "https://www.effectivealtruism.org/api/opportunities"
 
 
 def test_fetch_ea_opportunities_board(monkeypatch):
@@ -892,8 +863,8 @@ def test_fetch_ea_opportunities_board(monkeypatch):
     }
 
     def router(verb, url, json=None, params=None):
-        assert verb == "GET" and url == "https://www.effectivealtruism.org/opportunities"
-        return _Resp(text=_ea_page(job, grant, directory))
+        assert verb == "GET" and url == EA_API_URL
+        return _Resp(json_data=[job, grant, directory])
 
     monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
     out = fetchers.fetch_ea_opportunities_board(EA_BOARD_CFG)
@@ -933,7 +904,7 @@ def test_fetch_ea_opportunities_keeps_unpaid_and_junior_work(monkeypatch):
     ]
 
     def router(verb, url, json=None, params=None):
-        return _Resp(text=_ea_page(*rows))
+        return _Resp(json_data=rows)
 
     monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
     out = fetchers.fetch_ea_opportunities_board(EA_BOARD_CFG)
@@ -965,65 +936,50 @@ def test_fetch_ea_opportunities_prefers_the_written_salary(monkeypatch):
     del number_only["salaryOriginal"]
 
     def router(verb, url, json=None, params=None):
-        return _Resp(text=_ea_page(written, number_only))
+        return _Resp(json_data=[written, number_only])
 
     monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
     out = fetchers.fetch_ea_opportunities_board(EA_BOARD_CFG)
     assert [r["compensation"] for r in out] == ["$90,000 – $150,000", "180000"]
 
 
-def test_fetch_ea_opportunities_reads_a_long_description_from_its_text_row(monkeypatch):
-    """React moves a 1024+ char text to its own row and leaves "$<id>" in the
-    prop (seen live on 2026-11-10). The row's length counts UTF-8 bytes, and
-    the next row's header follows its last byte with no newline in between."""
-    texts = {
-        "4a": "Café coordination in São Paulo. " * 40,
-        "4b": "Research on malaria vector control. " * 40,
-    }
-    text_rows = "".join(f"{k}:T{len(v.encode()):x},{v}" for k, v in texts.items())
-    rows = [
-        {
-            "id": f"rec{ref}",
-            "title": f"Programme Coordinator {ref}",
-            "organizations": [{"name": "Some Org", "link": ""}],
-            "opportunityTypes": ["Full-time"],
-            "applicationLink": f"https://example.test/{ref}",
-            "description": _RscRef(f"${ref}"),
-        }
-        for ref in texts
-    ]
-
-    def router(verb, url, json=None, params=None):
-        return _Resp(text=_ea_page(*rows, text_rows=text_rows))
-
-    monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
-    out = fetchers.fetch_ea_opportunities_board(EA_BOARD_CFG)
-    for job, text in zip(out, texts.values()):
-        assert job["full_description"].startswith(text.strip())
-
-
 def test_fetch_ea_opportunities_refuses_an_empty_board(monkeypatch):
     """An empty list means the site failed to render the board, not zero jobs."""
 
     def router(verb, url, json=None, params=None):
-        return _Resp(text=_ea_page())
+        return _Resp(json_data=[])
 
     monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
     fetchers._last_fetch_errors.pop("EA Opportunities Board", None)
     assert fetchers.fetch_ea_opportunities_board(EA_BOARD_CFG) == []
-    assert "empty" in fetchers.get_fetch_errors()["EA Opportunities Board"]
+    assert "0 items" in fetchers.get_fetch_errors()["EA Opportunities Board"]
 
 
-def test_fetch_ea_opportunities_refuses_a_page_it_cannot_read(monkeypatch):
-    """A board that changed shape is a failure, never a board with no jobs."""
+@pytest.mark.parametrize(
+    "response, error",
+    [
+        (_Resp(json_data={"error": "moved"}), "no list of opportunities"),
+        (_Resp(status=403, text="<html>Just a moment...</html>"), "http_403"),
+        (
+            _Resp(
+                json_data=[
+                    {"name": "Renamed", "link": "https://example.test", "kind": ["Full-time"]}
+                ]
+            ),
+            "expected fields",
+        ),
+    ],
+)
+def test_fetch_ea_opportunities_refuses_a_response_it_cannot_read(monkeypatch, response, error):
+    """A changed shape, a block or renamed fields is a failure, never a board with no jobs."""
 
     def router(verb, url, json=None, params=None):
-        return _Resp(text="<html><body>We have moved!</body></html>")
+        return response
 
     monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
     fetchers._last_fetch_errors.pop("EA Opportunities Board", None)
     assert fetchers.fetch_ea_opportunities_board(EA_BOARD_CFG) == []
-    assert "no opportunities list" in fetchers.get_fetch_errors()["EA Opportunities Board"]
+    assert error in fetchers.get_fetch_errors()["EA Opportunities Board"]
 
 
 def test_fetch_fastforward_board(monkeypatch):

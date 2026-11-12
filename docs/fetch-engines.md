@@ -283,13 +283,13 @@ here.
 - **Failure signatures:** a listing-page error breaks; nothing fetched + error → re-raised. (Needs `beautifulsoup4`.)
 - **Debug:** `from fetchers.boards.datadotorg import fetch_datadotorg_board; print(len(fetch_datadotorg_board({"name":"data.org","url":"https://data.org/jobs/","max_jobs":5})))`
 
-### `ea_opportunities_next_data` — EA Opportunities Board embedded in its page
+### `ea_opportunities_next_data` — EA Opportunities Board via the JSON its page loads
 <!-- ENGINE: ea_opportunities_next_data -->
-- **Surface / auth:** `GET https://www.effectivealtruism.org/opportunities`. The EA Opportunities Board is server-rendered Next.js over Airtable: since Oct 2026 the page uses the App Router, so the whole board (~735 rows on 2026-11-10) arrives in the React payload streamed by `self.__next_f.push([1, "…"])` scripts, as one `"opportunities":[…]` prop. The fetcher joins the chunks, decodes that list and undoes React's escaping (`"$$…"` → `"$…"`, `"$undefined"` → empty). No key, no login. The strategy id keeps its historical `next_data` name because it is stored in config.
-- **Config keys:** `page_url` (opt, default the board URL), `board_blacklist`.
+- **Surface / auth:** `GET https://www.effectivealtruism.org/api/opportunities` — the whole board (Airtable behind it, ~750 rows on 2026-11-12) as one JSON list. Since 11 Nov 2026 the `/opportunities` page carries no rows and loads them from this endpoint in the browser. No key, no login. The strategy id keeps its historical `next_data` name because it is stored in config.
+- **Config keys:** `api_url` (opt, default the endpoint above), `board_blacklist`.
 - **Pagination & caps:** none — one request is the complete board. Uncapped on purpose: rows arrive newest-first with no relevance ranking, so a cap would trade completeness for nothing.
 - **Filtering:** the board lists more than employment, so rows whose every `opportunityTypes` entry is Funding / Course / Event / Contest / Advising / Independent project are dropped as **not vacancies**. Unpaid and junior work (Volunteer, Internship, Fellowship, Part-time) stays and goes to scoring like any other row (STRATEGY guardrail 1).
-- **Failure signatures:** a page with no `"opportunities"` list in its payload raises rather than returning `[]` — a board that changed shape must never read as a board with no jobs. Cloudflare answers 403 to a nameless agent, so the request sends a browser User-Agent.
+- **Failure signatures:** a response that is not a non-empty JSON list of rows raises rather than returning `[]` — a board that changed shape must never read as a board with no jobs. Cloudflare answers 403 to a nameless agent, so the request sends a browser User-Agent.
 - **Debug:** `from fetchers.boards.ea_opportunities import fetch_ea_opportunities_board; print(len(fetch_ea_opportunities_board({"name":"EA Opportunities Board","url":"https://www.effectivealtruism.org/opportunities","board_blacklist":[]})))`
 
 ### `fastforward_board` — Fast Forward on Getro

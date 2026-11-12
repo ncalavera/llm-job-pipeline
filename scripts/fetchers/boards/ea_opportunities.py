@@ -1,7 +1,4 @@
-"""EA Opportunities Board (whole board embedded in the page it serves — free, no auth)."""
-
-import json
-import re
+"""EA Opportunities Board (the JSON its own page loads — free, no auth)."""
 
 from config import GLOBAL_BLACKLIST, GLOBAL_BLACKLIST_SUBSTR
 from fetchers import http
@@ -9,18 +6,9 @@ from fetchers.html_utils import _html_to_snippet
 from fetchers.parsing import _blacklist_filter, _is_generic_pipeline_title
 from fetchers.registry import board_fetcher
 
-_DEFAULT_PAGE_URL = "https://www.effectivealtruism.org/opportunities"
-
-# The page is server-rendered Next.js (App Router since Oct 2026): the React
-# payload streams in as `self.__next_f.push([1, "<text>"])` script calls, and
-# every opportunity sits in it as one `"opportunities":[...]` prop. No
-# pagination, no cap to work around.
-_FLIGHT_CHUNK = re.compile(r"self\.__next_f\.push\((\[.*?\])\)</script>", re.S)
-_OPPORTUNITIES_KEY = '"opportunities":'
-# React moves a text of 1024+ chars to its own payload row `<id>:T<hex byte length>,<text>`
-# and leaves the reference "$<id>" in its place.
-_TEXT_REF = re.compile(r"\$([0-9a-f]+)")
-_TEXT_ROW_HEAD = re.compile(rb"([0-9a-f]+):T([0-9a-f]+),")
+# Since 11 Nov 2026 the board page fetches its rows in the browser from this
+# endpoint: one GET, the whole board as a JSON list, no pagination or cap.
+_DEFAULT_API_URL = "https://www.effectivealtruism.org/api/opportunities"
 
 # The board lists more than employment — it also carries grant calls, reading
 # groups, conferences and career-advising slots. Those are dropped here because
@@ -36,29 +24,30 @@ _NON_VACANCY_TYPES = {"funding", "course", "event", "contest", "advising", "inde
 def fetch_ea_opportunities_board(board_cfg: dict) -> list[dict]:
     """Fetch opportunities from the EA Opportunities Board.
 
-    Airtable behind it and no public API. The page address never changes, and
-    it carries the whole board (~735 rows on 2026-11-10), so one request is the
-    complete source.
+    Airtable behind it. The page itself carries no rows: it loads them from
+    ``/api/opportunities``, which returns the whole board (~750 rows on
+    2026-11-12), so one request is the complete source.
 
     Uncapped on purpose. The board is smaller than Probably Good, which is also
     uncapped, and its rows arrive newest-first with no relevance ranking, so a
     cap would only trade completeness for nothing. Repeat rows cost nothing —
     the board is deduplicated against what the database already holds.
 
-    board_cfg knobs: ``page_url`` (overridable if the board moves).
+    board_cfg knobs: ``api_url`` (overridable if the board moves).
     """
     board_name = board_cfg["name"]
-    page_url = board_cfg.get("page_url", _DEFAULT_PAGE_URL)
+    api_url = board_cfg.get("api_url", _DEFAULT_API_URL)
     board_blacklist = board_cfg.get("board_blacklist", [])
 
-    print(f"  [{board_name}] EA Opportunities: fetching {page_url}...")
-    resp = http.get(page_url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
-    raw = _opportunities(resp.text)
-    if not raw:
+    print(f"  [{board_name}] EA Opportunities: fetching {api_url}...")
+    resp = http.get(api_url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+    raw = resp.json()
+    if not isinstance(raw, list) or not raw or not all(isinstance(r, dict) for r in raw):
         # Refusal ≠ empty: a board that changed shape must not read as "no jobs".
         raise ValueError(
-            f"{board_name}: no opportunities list (or an empty one) in the Next.js payload of "
-            f"{len(resp.text)} chars of page ({page_url}) — the board changed shape"
+            f"{board_name}: {api_url} returned no list of opportunities "
+            f"({type(raw).__name__}, {len(raw) if isinstance(raw, list) else '-'} items) "
+            "— the board changed shape"
         )
 
     total_seen = len(raw)
@@ -110,67 +99,13 @@ def fetch_ea_opportunities_board(board_cfg: dict) -> list[dict]:
         f"  [{board_name}] EA Opportunities: {len(jobs)} relevant from {total_seen} total "
         f"({total_seen - len(vacancies)} not vacancies)"
     )
+    if vacancies and not jobs:
+        # Every row skipped means renamed fields (title, applicationLink, id), not an empty board.
+        raise ValueError(
+            f"{board_name}: none of {len(vacancies)} vacancies had the expected fields "
+            "— the board changed shape"
+        )
     return jobs
-
-
-def _opportunities(page: str) -> list[dict] | None:
-    """The board's rows from the page's React payload, or None if absent."""
-    text = ""
-    for chunk in _FLIGHT_CHUNK.findall(page):
-        kind, *rest = json.loads(chunk)
-        if kind == 1 and rest:
-            text += rest[0]
-    start = text.find(_OPPORTUNITIES_KEY)
-    if start < 0:
-        return None
-    rows, _ = json.JSONDecoder().raw_decode(text, start + len(_OPPORTUNITIES_KEY))
-    if not isinstance(rows, list):
-        return None
-    text_rows = _text_rows(text.encode())
-    return [_unescape(r, text_rows) for r in rows]
-
-
-def _unescape(value, text_rows: dict[str, str]):
-    """Undo React's payload encoding: "$$…" is a text starting with "$",
-    "$undefined" is a missing value, and "$<hex id>" points at a long text row."""
-    if isinstance(value, list):
-        return [_unescape(v, text_rows) for v in value]
-    if isinstance(value, dict):
-        return {k: _unescape(v, text_rows) for k, v in value.items()}
-    if not isinstance(value, str) or not value.startswith("$"):
-        return value
-    if value.startswith("$$"):
-        return value[1:]
-    if value == "$undefined":
-        return None
-    ref = _TEXT_REF.fullmatch(value)
-    if ref:
-        if ref.group(1) not in text_rows:
-            raise ValueError(f"React payload text row {value} is missing")
-        return text_rows[ref.group(1)]
-    raise ValueError(f"unknown React payload value {value[:20]!r} in an opportunity")
-
-
-def _text_rows(payload: bytes) -> dict[str, str]:
-    """Every `<id>:T<hex byte length>,<text>` row, walked row by row.
-
-    A text row has no newline after it, so the next row's header can follow
-    its last byte directly; only its byte length says where it ends. Other
-    rows are one JSON line each.
-    """
-    rows: dict[str, str] = {}
-    pos = 0
-    while pos < len(payload):
-        head = _TEXT_ROW_HEAD.match(payload, pos)
-        if head:
-            pos = head.end() + int(head.group(2), 16)
-            rows[head.group(1).decode()] = payload[head.end() : pos].decode()
-            continue
-        newline = payload.find(b"\n", pos)
-        if newline < 0:
-            break
-        pos = newline + 1
-    return rows
 
 
 def _is_vacancy(row: dict) -> bool:
