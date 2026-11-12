@@ -955,16 +955,31 @@ def test_fetch_ea_opportunities_refuses_an_empty_board(monkeypatch):
     assert "0 items" in fetchers.get_fetch_errors()["EA Opportunities Board"]
 
 
-def test_fetch_ea_opportunities_refuses_a_page_it_cannot_read(monkeypatch):
-    """A board that changed shape is a failure, never a board with no jobs."""
+@pytest.mark.parametrize(
+    "response, error",
+    [
+        (_Resp(json_data={"error": "moved"}), "no list of opportunities"),
+        (_Resp(status=403, text="<html>Just a moment...</html>"), "http_403"),
+        (
+            _Resp(
+                json_data=[
+                    {"name": "Renamed", "link": "https://example.test", "kind": ["Full-time"]}
+                ]
+            ),
+            "expected fields",
+        ),
+    ],
+)
+def test_fetch_ea_opportunities_refuses_a_response_it_cannot_read(monkeypatch, response, error):
+    """A changed shape, a block or renamed fields is a failure, never a board with no jobs."""
 
     def router(verb, url, json=None, params=None):
-        return _Resp(json_data={"error": "moved"})
+        return response
 
     monkeypatch.setattr(fetchers, "requests", _FakeHTTP(router))
     fetchers._last_fetch_errors.pop("EA Opportunities Board", None)
     assert fetchers.fetch_ea_opportunities_board(EA_BOARD_CFG) == []
-    assert "no list of opportunities" in fetchers.get_fetch_errors()["EA Opportunities Board"]
+    assert error in fetchers.get_fetch_errors()["EA Opportunities Board"]
 
 
 def test_fetch_fastforward_board(monkeypatch):

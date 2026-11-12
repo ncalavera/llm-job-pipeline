@@ -99,6 +99,12 @@ def fetch_ea_opportunities_board(board_cfg: dict) -> list[dict]:
         f"  [{board_name}] EA Opportunities: {len(jobs)} relevant from {total_seen} total "
         f"({total_seen - len(vacancies)} not vacancies)"
     )
+    if vacancies and not jobs:
+        # Every row skipped means renamed fields (title, applicationLink, id), not an empty board.
+        raise ValueError(
+            f"{board_name}: none of {len(vacancies)} vacancies had the expected fields "
+            "— the board changed shape"
+        )
     return jobs
 
 
