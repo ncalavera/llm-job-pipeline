@@ -122,6 +122,15 @@ def test_quote_matching_ignores_whitespace_and_case(ps):
     assert reason is None
 
 
+def test_quote_matching_folds_pdf_ligatures(ps):
+    # a PDF posting holds the one-character ligature "ﬁ"; the model quotes it as "fi"
+    posting = POSTING.replace("for this role", "for this signiﬁcant role")
+    ok = _good_result("x")
+    ok["posting_facts"]["requirements"][0]["quote"] = "Fluent Spanish is required for this significant role."
+    clean, reason = ps.validate_result(ok, posting)
+    assert reason is None
+
+
 def test_bad_enum_and_missing_facts_fail(ps):
     bad = _good_result("x")
     bad["posting_facts"]["work_mode"] = "office"
