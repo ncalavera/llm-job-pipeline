@@ -30,6 +30,7 @@ import hashlib
 import json
 import re
 import sys
+import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -265,7 +266,9 @@ def cmd_local(args) -> None:
 
 def _quote_in(quote: str, text: str) -> bool:
     q = _norm_ws(quote)
-    return bool(q) and len(q) <= MAX_QUOTE and q.lower() in text.lower()
+    # NFKC: PDF postings carry ligatures ("ﬁ") that a model quotes as plain letters ("fi")
+    fold = lambda t: unicodedata.normalize("NFKC", t).lower()
+    return bool(q) and len(q) <= MAX_QUOTE and fold(q) in fold(text)
 
 
 def validate_result(result: dict, posting_text: str) -> tuple[dict | None, str | None]:
